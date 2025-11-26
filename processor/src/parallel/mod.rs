@@ -30,16 +30,15 @@ use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 use crate::{
     ChipletsLengths, ColMatrix, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
     ProcessState, TraceLenSummary,
-    chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    chiplets::{Chiplets, CircuitEvaluation},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
     decoder::{
         AuxTraceBuilder as DecoderAuxTraceBuilder, BasicBlockContext,
         block_stack::ExecutionContextInfo,
     },
-    errors::AceError,
     fast::{
-        ExecutionOutput, NoopTracer, Tracer,
+        ExecutionOutput, NoopTracer, Tracer, eval_circuit_fast_,
         execution_tracer::TraceGenerationContext,
         trace_state::{
             AceReplay, AdviceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext,
@@ -49,9 +48,7 @@ use crate::{
         },
     },
     host::default::NoopHost,
-    processor::{
-        MemoryInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
-    },
+    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::{AuxTraceBuilders, NUM_RAND_ROWS},
@@ -313,20 +310,17 @@ fn fixup_stack_and_system_rows(
     }
 
     // Initialize subsequent fragments with their corresponding rows from the previous fragment
-    // TODO(plafer): use zip
-    for (i, fragment) in fragments.iter_mut().enumerate().skip(1) {
-        if fragment.row_count() > 0 && i - 1 < stack_rows.len() && i - 1 < system_rows.len() {
-            // Copy the system_row to the first row of this fragment
-            let system_row = &system_rows[i - 1];
-            for (col_idx, &value) in system_row.iter().enumerate() {
-                fragment.columns[col_idx][0] = value;
-            }
+    for (fragment, (system_row, stack_row)) in
+        fragments.iter_mut().skip(1).zip(system_rows.iter().zip(stack_rows.iter()))
+    {
+        // Copy the system_row to the first row of this fragment
+        for (col_idx, &value) in system_row.iter().enumerate() {
+            fragment.columns[col_idx][0] = value;
+        }
 
-            // Copy the stack_row to the first row of this fragment
-            let stack_row = &stack_rows[i - 1];
-            for (col_idx, &value) in stack_row.iter().enumerate() {
-                fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
-            }
+        // Copy the stack_row to the first row of this fragment
+        for (col_idx, &value) in stack_row.iter().enumerate() {
+            fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
         }
     }
 }
@@ -920,33 +914,7 @@ impl CoreTraceFragmentGenerator {
                 self.add_span_end_trace_row(basic_block_node)?;
             },
             NodeExecutionState::LoopRepeat(node_id) => {
-                // TODO(plafer): merge with the `Continuation::FinishLoop` case
-                let loop_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_loop();
-
-                let mut condition = self.get(0);
-                self.decrement_size(&mut NoopTracer);
-
-                while condition == ONE {
-                    self.add_loop_repeat_trace_row(
-                        loop_node,
-                        &initial_mast_forest,
-                        self.context.state.decoder.current_addr,
-                    )?;
-
-                    self.execute_mast_node(loop_node.body(), &initial_mast_forest)?;
-
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-                }
-
-                // 3. Add "end LOOP" row
-                //
-                // Note that we don't confirm that the condition is properly ZERO here, as
-                // the FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())?;
+                finish_loop_node(self, node_id, &initial_mast_forest, None)?;
             },
             // TODO(plafer): there's a big overlap between `NodeExecutionPhase::End` and
             // `Continuation::Finish*`. We can probably reconcile.
@@ -1015,32 +983,7 @@ impl CoreTraceFragmentGenerator {
                     self.add_end_trace_row(mast_node.digest())?;
                 },
                 Continuation::FinishLoop(node_id) => {
-                    let loop_node = current_forest
-                        .get_node_by_id(node_id)
-                        .expect("node should exist")
-                        .unwrap_loop();
-
-                    let mut condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-
-                    while condition == ONE {
-                        self.add_loop_repeat_trace_row(
-                            loop_node,
-                            &current_forest,
-                            self.context.state.decoder.current_addr,
-                        )?;
-
-                        self.execute_mast_node(loop_node.body(), &current_forest)?;
-
-                        condition = self.get(0);
-                        self.decrement_size(&mut NoopTracer);
-                    }
-
-                    // 3. Add "end LOOP" row
-                    //
-                    // Note that we don't confirm that the condition is properly ZERO here, as
-                    // the FastProcessor already ran that check.
-                    self.add_end_trace_row(loop_node.digest())?;
+                    finish_loop_node(self, node_id, &current_forest, None)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let mast_node =
@@ -1100,12 +1043,7 @@ impl CoreTraceFragmentGenerator {
                     .expect("Basic block should have at least one op batch");
 
                 // 1. Add SPAN start trace row
-                self.add_span_start_trace_row(
-                    first_op_batch,
-                    num_groups_left_in_block,
-                    // TODO(plafer): remove as parameter? (and same for all other start methods)
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_span_start_trace_row(first_op_batch, num_groups_left_in_block)?;
 
                 // Initialize the span context for the current basic block. After SPAN operation is
                 // executed, we decrement the number of remaining groups by 1 because executing
@@ -1144,11 +1082,7 @@ impl CoreTraceFragmentGenerator {
                 self.update_decoder_state_on_node_start();
 
                 // 1. Add "start JOIN" row
-                self.add_join_start_trace_row(
-                    join_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_join_start_trace_row(join_node, current_forest)?;
 
                 // 2. Execute first child
                 self.execute_mast_node(join_node.first(), current_forest)?;
@@ -1166,11 +1100,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start SPLIT" row
-                self.add_split_start_trace_row(
-                    split_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_split_start_trace_row(split_node, current_forest)?;
 
                 // 2. Execute the appropriate branch based on the stack top value
                 if condition == ONE {
@@ -1191,11 +1121,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
-                self.add_loop_start_trace_row(
-                    loop_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_loop_start_trace_row(loop_node, current_forest)?;
 
                 // 2. Loop while condition is true
                 //
@@ -1208,24 +1134,7 @@ impl CoreTraceFragmentGenerator {
                     self.decrement_size(&mut NoopTracer);
                 }
 
-                while condition == ONE {
-                    self.add_loop_repeat_trace_row(
-                        loop_node,
-                        current_forest,
-                        self.context.state.decoder.current_addr,
-                    )?;
-
-                    self.execute_mast_node(loop_node.body(), current_forest)?;
-
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-                }
-
-                // 3. Add "end LOOP" row
-                //
-                // Note that we don't confirm that the condition is properly ZERO here, as the
-                // FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())
+                finish_loop_node(self, node_id, current_forest, Some(condition))
             },
             MastNode::Call(call_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1242,11 +1151,7 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // Add "start CALL/SYSCALL" row
-                self.add_call_start_trace_row(
-                    call_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_call_start_trace_row(call_node, current_forest)?;
 
                 // Execute the callee
                 self.execute_mast_node(call_node.callee(), current_forest)?;
@@ -1283,18 +1188,11 @@ impl CoreTraceFragmentGenerator {
                         ContextId::from(self.context.state.system.clk + 1); // New context ID
                     self.context.state.system.fn_hash = callee_hash;
 
-                    self.add_dyncall_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                        ctx_info,
-                    )?;
+                    self.add_dyncall_start_trace_row(callee_hash, ctx_info)?;
                 } else {
                     // Pop the memory address off the stack, and write the DYN trace row
                     self.decrement_size(&mut NoopTracer);
-                    self.add_dyn_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                    )?;
+                    self.add_dyn_start_trace_row(callee_hash)?;
                 };
 
                 // 2. Execute the callee
@@ -1774,7 +1672,7 @@ impl Processor for CoreTraceFragmentGenerator {
         let ptr = self.stack().get(0);
         let ctx = self.system().ctx();
 
-        let _circuit_evaluation = eval_circuit_fast_(
+        let _circuit_evaluation = eval_circuit_parallel_(
             ctx,
             ptr,
             self.system().clk(),
@@ -1977,12 +1875,58 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 // HELPERS
 // ================================================================================================
 
-// TODO(plafer): If we want to keep this strategy, then move the `op_eval_circuit()` method
-// implementation to the `Processor` trait, and have `FastProcessor` and
-// `CoreTraceFragmentGenerator` both use it.
-/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
+/// Executes a loop node by processing its body repeatedly while the condition is true.
+///
+/// This function is shared between `NodeExecutionState::LoopRepeat` and `Continuation::FinishLoop`
+/// to eliminate code duplication. Both cases have identical logic for handling loop execution.
+#[inline(always)]
+fn finish_loop_node(
+    processor: &mut CoreTraceFragmentGenerator,
+    node_id: MastNodeId,
+    mast_forest: &MastForest,
+    condition: Option<Felt>,
+) -> ControlFlow<()> {
+    let loop_node = mast_forest.get_node_by_id(node_id).expect("node should exist").unwrap_loop();
+
+    // If no condition is provided, read it from the stack
+    let mut condition = if let Some(cond) = condition {
+        cond
+    } else {
+        let cond = processor.get(0);
+        processor.decrement_size(&mut NoopTracer);
+        cond
+    };
+
+    while condition == ONE {
+        if let ControlFlow::Break(_) = processor.add_loop_repeat_trace_row(
+            loop_node,
+            mast_forest,
+            processor.context.state.decoder.current_addr,
+        ) {
+            return ControlFlow::Break(());
+        }
+
+        if let ControlFlow::Break(_) = processor.execute_mast_node(loop_node.body(), mast_forest) {
+            return ControlFlow::Break(());
+        }
+
+        condition = processor.get(0);
+        processor.decrement_size(&mut NoopTracer);
+    }
+
+    // 3. Add "end LOOP" row
+    //
+    // Note that we don't confirm that the condition is properly ZERO here, as
+    // the FastProcessor already ran that check.
+    processor.add_end_trace_row(loop_node.digest())?;
+
+    ControlFlow::Continue(())
+}
+
+/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
+/// `[CoreTraceFragmentGenerator]`.
 #[allow(clippy::too_many_arguments)]
-fn eval_circuit_fast_(
+fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
@@ -1992,70 +1936,7 @@ fn eval_circuit_fast_(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
-
-    let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
-    }
-
-    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
-    // quadratic extension field elements while instructions are encoded as base field elements.
-    // Hence we can pack 2 variables and 4 instructions per word.
-    if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
-    }
-    if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
-    }
-
-    // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
-    let num_eval_rows = num_eval as u32;
-
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
-
-    let mut ptr = ptr;
-    // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
-    for _ in 0..num_read_rows {
-        let word = processor
-            .memory()
-            .read_word(ctx, ptr, clk, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word)?;
-        ptr += PTR_OFFSET_WORD;
-    }
-    // perform EVAL operations
-    for _ in 0..num_eval_rows {
-        let instruction = processor
-            .memory()
-            .read_element(ctx, ptr, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
-        ptr += PTR_OFFSET_ELEM;
-    }
-
-    // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
-    }
-
-    Ok(evaluation_context)
+    // Delegate to the fast implementation with the processor's memory interface.
+    // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), err_ctx, tracer)
 }

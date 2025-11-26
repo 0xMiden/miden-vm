@@ -251,7 +251,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error(
-        "re-exporting a procedure identified by digest requires giving it a name, e.g. `export.DIGEST->foo`"
+        "re-exporting a procedure identified by digest requires giving it a name, e.g. `pub use DIGEST->foo`"
     )]
     UnnamedReexportOfMastRoot {
         #[label]
@@ -331,6 +331,13 @@ pub enum ParsingError {
         span: SourceSpan,
         instruction: String,
         replacement: String,
+    },
+    #[error("invalid procedure @locals attribute")]
+    #[diagnostic()]
+    InvalidLocalsAttr {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
     },
 }
 

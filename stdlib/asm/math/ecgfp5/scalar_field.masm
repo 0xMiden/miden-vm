@@ -13,7 +13,7 @@
 #!       else c == 0, no overflow occurred during subtraction.
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/e7038e45865a7032a0629346921a77010e82862d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L56-L74
-proc.sub_inner
+proc sub_inner
     push.0
 
     movup.11
@@ -145,7 +145,7 @@ end
 #! [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, ...]
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/e7038e45865a7032a0629346921a77010e82862d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L76-L87
-proc.select
+proc select
     dup
     movup.12
     dup.3
@@ -251,7 +251,8 @@ end
 #! [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, ...]
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/6a611e693601577864da3e43e745525b83c0030d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L92-L132
-export.mont_mul.32
+@locals(32)
+pub proc mont_mul
     dup
     loc_store.0
     loc_storew_be.4
@@ -3749,7 +3750,7 @@ end
 #! [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, ...]
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/6a611e693601577864da3e43e745525b83c0030d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L134-L139
-export.to_mont
+pub proc to_mont
     push.1254757298.2359448053.2866806621.359973336.3520566988.2446296357.1815226579.1063431375.2685403612.3812476729
     exec.mont_mul
 end
@@ -3766,7 +3767,7 @@ end
 #! [r0, r1, r2, r3, r4, r5, r6, r7, r8, r9, ...]
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/6a611e693601577864da3e43e745525b83c0030d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L141-L146
-export.from_mont
+pub proc from_mont
     push.0.0.0.0.0.0.0.0.0.1
     exec.mont_mul
 end
@@ -3781,7 +3782,7 @@ end
 #! Final stack state
 #!
 #! [b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, ...] | b = a * a ( mod N ) when N = scalar field prime
-proc.sqr
+proc sqr
     repeat.10
         dup.9
     end
@@ -3803,7 +3804,8 @@ end
 #! Note, if input operand is 0, then multiplicative inverse can't be computed, which is why output result is also 0.
 #!
 #! Adapted from equivalent Rust implementation https://github.com/itzmeanjan/miden/blob/6a611e693601577864da3e43e745525b83c0030d/miden/tests/integration/stdlib/math/ext5_scalar.rs#L162-L176
-export.inv.24
+@locals(24)
+pub proc inv
     # cache result initial value 1 ( in Montgomery form )
     push.0.0.4.4294967281.29.4294967251.50.1620046732.787433356.1370930886.803228882.3605528638
     loc_storew_be.0

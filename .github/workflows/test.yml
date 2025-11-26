@@ -15,12 +15,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@main
-      - uses: taiki-e/install-action@nextest 
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
-        run: rustup update --no-self-update 
+        run: rustup update --no-self-update
       - name: Build tests
         run: make test-build
       - name: test
@@ -68,3 +68,18 @@ jobs:
           else
             echo "No uncommitted changes in stdlib/docs/ - OK"
           fi
+
+  check-features:
+    name: check all feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - name: Check all feature combinations
+        run: make check-features

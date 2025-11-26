@@ -12,21 +12,15 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::ast::{AttributeSet, QualifiedProcedureName};
+use crate::ast::{AttributeSet, Ident, Path, PathBuf, ProcedureName};
 
 mod error;
 mod module;
-mod namespace;
-mod path;
 
-pub use module::{ModuleInfo, ProcedureInfo};
+pub use module::{ConstantInfo, ItemInfo, ModuleInfo, ProcedureInfo, TypeInfo};
 pub use semver::{Error as VersionError, Version};
 
-pub use self::{
-    error::LibraryError,
-    namespace::{LibraryNamespace, LibraryNamespaceError},
-    path::{LibraryPath, LibraryPathComponent, PathError},
-};
+pub use self::error::LibraryError;
 
 // LIBRARY EXPORT
 // ================================================================================================
@@ -35,11 +29,81 @@ pub use self::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
-pub struct LibraryExport {
+pub enum LibraryExport {
+    Procedure(ProcedureExport),
+    Constant(ConstantExport),
+    Type(TypeExport),
+}
+
+impl LibraryExport {
+    pub fn path(&self) -> Arc<Path> {
+        match self {
+            Self::Procedure(export) => export.path.clone(),
+            Self::Constant(export) => export.path.clone(),
+            Self::Type(export) => export.path.clone(),
+        }
+    }
+
+    pub fn as_procedure(&self) -> Option<&ProcedureExport> {
+        match self {
+            Self::Procedure(proc) => Some(proc),
+            Self::Constant(_) | Self::Type(_) => None,
+        }
+    }
+
+    pub fn unwrap_procedure(&self) -> &ProcedureExport {
+        match self {
+            Self::Procedure(proc) => proc,
+            Self::Constant(_) | Self::Type(_) => panic!("expected export to be a procedure"),
+        }
+    }
+}
+
+impl From<ProcedureExport> for LibraryExport {
+    fn from(value: ProcedureExport) -> Self {
+        Self::Procedure(value)
+    }
+}
+
+impl From<ConstantExport> for LibraryExport {
+    fn from(value: ConstantExport) -> Self {
+        Self::Constant(value)
+    }
+}
+
+impl From<TypeExport> for LibraryExport {
+    fn from(value: TypeExport) -> Self {
+        Self::Type(value)
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for LibraryExport {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
+
+        prop_oneof![
+            any::<ProcedureExport>().prop_map(Self::Procedure),
+            any::<ConstantExport>().prop_map(Self::Constant),
+            any::<TypeExport>().prop_map(Self::Type),
+        ]
+        .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub struct ProcedureExport {
     /// The id of the MAST root node of the exported procedure
     pub node: MastNodeId,
-    /// The fully-qualified name of the exported procedure
-    pub name: QualifiedProcedureName,
+    /// The fully-qualified path of the exported procedure
+    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
+    pub path: Arc<Path>,
     /// The type signature of the exported procedure, if known
     #[cfg_attr(feature = "serde", serde(default))]
     pub signature: Option<FunctionType>,
@@ -47,12 +111,12 @@ pub struct LibraryExport {
     pub attributes: AttributeSet,
 }
 
-impl LibraryExport {
-    /// Create a new [LibraryExport] representing the export of `node` with `name`
-    pub fn new(node: MastNodeId, name: QualifiedProcedureName) -> Self {
+impl ProcedureExport {
+    /// Create a new [ProcedureExport] representing the export of `node` with `path`
+    pub fn new(node: MastNodeId, path: Arc<Path>) -> Self {
         Self {
             node,
-            name,
+            path,
             signature: None,
             attributes: Default::default(),
         }
@@ -72,7 +136,7 @@ impl LibraryExport {
 }
 
 #[cfg(feature = "arbitrary")]
-impl Arbitrary for LibraryExport {
+impl Arbitrary for ProcedureExport {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -97,15 +161,57 @@ impl Arbitrary for LibraryExport {
             }));
 
         let nid = any::<MastNodeId>();
-        let name = any::<QualifiedProcedureName>();
+        let name = any::<crate::ast::QualifiedProcedureName>();
         (nid, name, signature)
-            .prop_map(|(nodeid, procname, signature)| LibraryExport {
+            .prop_map(|(nodeid, procname, signature)| Self {
                 node: nodeid,
-                name: procname,
+                path: procname.to_path_buf().into(),
                 signature,
                 attributes: Default::default(),
             })
             .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub struct ConstantExport {
+    /// The fully-qualified path of the exported constant
+    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
+    #[cfg_attr(
+        feature = "arbitrary",
+        proptest(strategy = "crate::arbitrary::path::constant_path_random_length(1)")
+    )]
+    pub path: Arc<Path>,
+    /// The constant-folded AST representing the value of this constant
+    pub value: crate::ast::ConstantValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
+pub struct TypeExport {
+    /// The fully-qualified path of the exported type declaration
+    #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
+    pub path: Arc<Path>,
+    /// The type bound to `name`
+    pub ty: crate::ast::types::Type,
+}
+
+#[cfg(feature = "arbitrary")]
+impl Arbitrary for TypeExport {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::strategy::{Just, Strategy};
+        let path = crate::arbitrary::path::user_defined_type_path_random_length(1);
+        let ty = Just(crate::ast::types::Type::Felt);
+
+        (path, ty).prop_map(|(path, ty)| Self { path, ty }).boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
@@ -133,7 +239,7 @@ pub struct Library {
     /// contain. However, note that `MastNodeId` is also not a unique identifier for procedures; if
     /// the procedures have the same MAST root and decorators, they will have the same
     /// `MastNodeId`.
-    exports: BTreeMap<QualifiedProcedureName, LibraryExport>,
+    exports: BTreeMap<Arc<Path>, LibraryExport>,
     /// The MAST forest underlying this library.
     mast_forest: Arc<MastForest>,
 }
@@ -156,21 +262,29 @@ impl Library {
     /// in the provided MAST forest.
     pub fn new(
         mast_forest: Arc<MastForest>,
-        exports: BTreeMap<QualifiedProcedureName, LibraryExport>,
+        exports: BTreeMap<Arc<Path>, LibraryExport>,
     ) -> Result<Self, LibraryError> {
         if exports.is_empty() {
             return Err(LibraryError::NoExport);
         }
-        for LibraryExport { name, node, .. } in exports.values() {
-            if !mast_forest.is_procedure_root(*node) {
+
+        for export in exports.values() {
+            if let LibraryExport::Procedure(ProcedureExport { node, path, .. }) = export
+                && !mast_forest.is_procedure_root(*node)
+            {
                 return Err(LibraryError::NoProcedureRootForExport {
-                    procedure_path: name.clone(),
+                    procedure_path: path.clone(),
                 });
             }
         }
 
         let digest =
-            mast_forest.compute_nodes_commitment(exports.values().map(|export| &export.node));
+            mast_forest.compute_nodes_commitment(exports.values().filter_map(
+                |export| match export {
+                    LibraryExport::Procedure(export) => Some(&export.node),
+                    LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
+                },
+            ));
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -209,17 +323,21 @@ impl Library {
     ///
     /// # Panics
     /// Panics if the specified procedure is not exported from this library.
-    pub fn get_export_node_id(&self, proc_name: &QualifiedProcedureName) -> MastNodeId {
+    pub fn get_export_node_id(&self, path: impl AsRef<Path>) -> MastNodeId {
+        let path = path.as_ref().to_absolute();
         self.exports
-            .get(proc_name)
+            .get(path.as_ref())
             .expect("procedure not exported from the library")
+            .unwrap_procedure()
             .node
     }
 
     /// Returns true if the specified exported procedure is re-exported from a dependency.
-    pub fn is_reexport(&self, proc_name: &QualifiedProcedureName) -> bool {
+    pub fn is_reexport(&self, path: impl AsRef<Path>) -> bool {
+        let path = path.as_ref().to_absolute();
         self.exports
-            .get(proc_name)
+            .get(path.as_ref())
+            .and_then(LibraryExport::as_procedure)
             .map(|export| self.mast_forest[export.node].is_external())
             .unwrap_or(false)
     }
@@ -231,16 +349,10 @@ impl Library {
 
     /// Returns the digest of the procedure with the specified name, or `None` if it was not found
     /// in the library or its library path is malformed.
-    pub fn get_procedure_root_by_name(
-        &self,
-        proc_name: impl TryInto<QualifiedProcedureName>,
-    ) -> Option<Word> {
-        if let Ok(qualified_proc_name) = proc_name.try_into() {
-            let export = self.exports.get(&qualified_proc_name);
-            export.map(|e| self.mast_forest()[e.node].digest())
-        } else {
-            None
-        }
+    pub fn get_procedure_root_by_path(&self, path: impl AsRef<Path>) -> Option<Word> {
+        let path = path.as_ref().to_absolute();
+        let export = self.exports.get(path.as_ref()).and_then(LibraryExport::as_procedure);
+        export.map(|e| self.mast_forest()[e.node].digest())
     }
 }
 
@@ -248,33 +360,34 @@ impl Library {
 impl Library {
     /// Returns an iterator over the module infos of the library.
     pub fn module_infos(&self) -> impl Iterator<Item = ModuleInfo> {
-        let mut modules_by_path: BTreeMap<LibraryPath, ModuleInfo> = BTreeMap::new();
+        let mut modules_by_path: BTreeMap<Arc<Path>, ModuleInfo> = BTreeMap::new();
 
-        for LibraryExport { node, name, signature, attributes } in self.exports.values() {
-            modules_by_path
-                .entry(name.module.clone())
-                .and_modify(|compiled_module| {
+        for export in self.exports.values() {
+            let module_name =
+                Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
+            let module = modules_by_path
+                .entry(Arc::clone(&module_name))
+                .or_insert_with(|| ModuleInfo::new(module_name));
+            match export {
+                LibraryExport::Procedure(ProcedureExport { node, path, signature, attributes }) => {
                     let proc_digest = self.mast_forest[*node].digest();
-                    compiled_module.add_procedure(
-                        name.name.clone(),
+                    let name = path.last().unwrap();
+                    module.add_procedure(
+                        ProcedureName::new(name).expect("valid procedure name"),
                         proc_digest,
                         signature.clone().map(Arc::new),
                         attributes.clone(),
                     );
-                })
-                .or_insert_with(|| {
-                    let mut module_info = ModuleInfo::new(name.module.clone());
-
-                    let proc_digest = self.mast_forest[*node].digest();
-                    module_info.add_procedure(
-                        name.name.clone(),
-                        proc_digest,
-                        signature.clone().map(Arc::new),
-                        attributes.clone(),
-                    );
-
-                    module_info
-                });
+                },
+                LibraryExport::Constant(ConstantExport { path, value }) => {
+                    let name = Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_constant(name, value.clone());
+                },
+                LibraryExport::Type(TypeExport { path, ty }) => {
+                    let name = Ident::new(path.last().unwrap()).expect("valid identifier");
+                    module.add_type(name, ty.clone());
+                },
+            }
         }
 
         modules_by_path.into_values()
@@ -391,27 +504,48 @@ impl TryFrom<Library> for KernelLibrary {
     type Error = LibraryError;
 
     fn try_from(library: Library) -> Result<Self, Self::Error> {
-        let kernel_path = LibraryPath::from(LibraryNamespace::Kernel);
+        let kernel_path = Arc::from(Path::kernel_path().to_path_buf().into_boxed_path());
         let mut proc_digests = Vec::with_capacity(library.exports.len());
 
-        let mut kernel_module = ModuleInfo::new(kernel_path.clone());
+        let mut kernel_module = ModuleInfo::new(Arc::clone(&kernel_path));
 
         for export in library.exports.values() {
-            // make sure all procedures are exported only from the kernel root
-            if export.name.module != kernel_path {
-                return Err(LibraryError::InvalidKernelExport {
-                    procedure_path: export.name.clone(),
-                });
-            }
+            match export {
+                LibraryExport::Procedure(export) => {
+                    // make sure all procedures are exported only from the kernel root
+                    if !export.path.is_in_kernel() {
+                        return Err(LibraryError::InvalidKernelExport {
+                            procedure_path: export.path.clone(),
+                        });
+                    }
 
-            let proc_digest = library.mast_forest[export.node].digest();
-            proc_digests.push(proc_digest);
-            kernel_module.add_procedure(
-                export.name.name.clone(),
-                proc_digest,
-                export.signature.clone().map(Arc::new),
-                export.attributes.clone(),
-            );
+                    let proc_digest = library.mast_forest[export.node].digest();
+                    proc_digests.push(proc_digest);
+                    kernel_module.add_procedure(
+                        ProcedureName::new(export.path.last().unwrap())
+                            .expect("valid procedure name"),
+                        proc_digest,
+                        export.signature.clone().map(Arc::new),
+                        export.attributes.clone(),
+                    );
+                },
+                LibraryExport::Constant(export) => {
+                    // Only export constants from the kernel root
+                    if export.path.is_in_kernel() {
+                        let name =
+                            Ident::new(export.path.last().unwrap()).expect("valid identifier");
+                        kernel_module.add_constant(name, export.value.clone());
+                    }
+                },
+                LibraryExport::Type(export) => {
+                    // Only export types from the kernel root
+                    if export.path.is_in_kernel() {
+                        let name =
+                            Ident::new(export.path.last().unwrap()).expect("valid identifier");
+                        kernel_module.add_type(name, export.ty.clone());
+                    }
+                },
+            }
         }
 
         let kernel = Kernel::new(&proc_digests).map_err(LibraryError::KernelConversion)?;
@@ -443,16 +577,8 @@ impl Serializable for Library {
         mast_forest.write_into(target);
 
         target.write_usize(exports.len());
-        for LibraryExport { node, name, signature, attributes: _ } in exports.values() {
-            name.module.write_into(target);
-            name.name.write_into(target);
-            target.write_u32(u32::from(*node));
-            if let Some(sig) = signature {
-                target.write_bool(true);
-                FunctionTypeSerializer(sig).write_into(target);
-            } else {
-                target.write_bool(false);
-            }
+        for export in exports.values() {
+            export.write_into(target);
         }
     }
 }
@@ -468,26 +594,46 @@ impl Deserializable for Library {
         };
         let mut exports = BTreeMap::new();
         for _ in 0..num_exports {
-            let proc_module = source.read()?;
-            let proc_name = source.read()?;
-            let proc_name = QualifiedProcedureName::new(proc_module, proc_name);
-            let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
-            let signature = if source.read_bool()? {
-                Some(FunctionTypeDeserializer::read_from(source)?.0)
-            } else {
-                None
+            let tag = source.read_u8()?;
+            let path: PathBuf = source.read()?;
+            let path = Arc::<Path>::from(path.into_boxed_path());
+            let export = match tag {
+                0 => {
+                    let node = MastNodeId::from_u32_safe(source.read_u32()?, &mast_forest)?;
+                    let signature = if source.read_bool()? {
+                        Some(FunctionTypeDeserializer::read_from(source)?.0)
+                    } else {
+                        None
+                    };
+                    LibraryExport::Procedure(ProcedureExport {
+                        node,
+                        path: path.clone(),
+                        signature,
+                        attributes: Default::default(),
+                    })
+                },
+                1 => {
+                    let value = crate::ast::ConstantValue::read_from(source)?;
+                    LibraryExport::Constant(ConstantExport { path: path.clone(), value })
+                },
+                2 => {
+                    let ty = TypeDeserializer::read_from(source)?.0;
+                    LibraryExport::Type(TypeExport { path: path.clone(), ty })
+                },
+                invalid => {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "unknown LibraryExport tag: '{invalid}'"
+                    )));
+                },
             };
-            let export = LibraryExport {
-                node,
-                name: proc_name.clone(),
-                signature,
-                attributes: Default::default(),
-            };
-
-            exports.insert(proc_name, export);
+            exports.insert(path, export);
         }
 
-        let digest = mast_forest.compute_nodes_commitment(exports.values().map(|e| &e.node));
+        let digest =
+            mast_forest.compute_nodes_commitment(exports.values().filter_map(|e| match e {
+                LibraryExport::Procedure(e) => Some(&e.node),
+                LibraryExport::Constant(_) | LibraryExport::Type(_) => None,
+            }));
 
         Ok(Self { digest, exports, mast_forest })
     }
@@ -501,7 +647,7 @@ impl serde::Serialize for Library {
     {
         use serde::ser::SerializeStruct;
 
-        struct LibraryExports<'a>(&'a BTreeMap<QualifiedProcedureName, LibraryExport>);
+        struct LibraryExports<'a>(&'a BTreeMap<Arc<Path>, LibraryExport>);
         impl serde::Serialize for LibraryExports<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
@@ -559,8 +705,7 @@ impl<'de> serde::Deserialize<'de> for Library {
                 let exports: Vec<LibraryExport> = seq
                     .next_element()?
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
-                let exports =
-                    exports.into_iter().map(|export| (export.name.clone(), export)).collect();
+                let exports = exports.into_iter().map(|export| (export.path(), export)).collect();
                 Library::new(mast_forest, exports).map_err(serde::de::Error::custom)
             }
 
@@ -584,10 +729,7 @@ impl<'de> serde::Deserialize<'de> for Library {
                             }
                             let items: Vec<LibraryExport> = map.next_value()?;
                             exports = Some(
-                                items
-                                    .into_iter()
-                                    .map(|export| (export.name.clone(), export))
-                                    .collect(),
+                                items.into_iter().map(|export| (export.path(), export)).collect(),
                             );
                         },
                     }
@@ -622,6 +764,40 @@ impl Deserializable for KernelLibrary {
                 "Failed to deserialize kernel library: {err}"
             ))
         })
+    }
+}
+
+/// NOTE: Deserialization is handled in the implementation for [Library]
+impl Serializable for LibraryExport {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        match self {
+            LibraryExport::Procedure(ProcedureExport {
+                node,
+                path: name,
+                signature,
+                attributes: _,
+            }) => {
+                target.write_u8(0);
+                name.write_into(target);
+                target.write_u32(u32::from(*node));
+                if let Some(sig) = signature {
+                    target.write_bool(true);
+                    FunctionTypeSerializer(sig).write_into(target);
+                } else {
+                    target.write_bool(false);
+                }
+            },
+            LibraryExport::Constant(ConstantExport { path: name, value }) => {
+                target.write_u8(1);
+                name.write_into(target);
+                value.write_into(target);
+            },
+            LibraryExport::Type(TypeExport { path: name, ty }) => {
+                target.write_u8(2);
+                name.write_into(target);
+                TypeSerializer(ty).write_into(target);
+            },
+        }
     }
 }
 
@@ -859,75 +1035,79 @@ impl Deserializable for TypeDeserializer {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
+#[cfg(feature = "arbitrary")]
 impl proptest::prelude::Arbitrary for Library {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use miden_core::{
+            Operation,
+            mast::{BasicBlockNodeBuilder, MastForestContributor},
+        };
         use proptest::prelude::*;
-        prop::collection::btree_map(any::<QualifiedProcedureName>(), any::<LibraryExport>(), 1..5)
-            .prop_flat_map(|mut exports| {
+
+        prop::collection::vec(any::<LibraryExport>(), 1..5)
+            .prop_map(|exports| {
+                let mut exports =
+                    BTreeMap::from_iter(exports.into_iter().map(|export| (export.path(), export)));
                 // Create a MastForest with actual nodes for the exports
                 let mut mast_forest = MastForest::new();
                 let mut nodes = Vec::new();
 
-                // Create a simple node for each export
-                for (export_name, export) in exports.iter_mut() {
-                    use miden_core::Operation;
-
-                    // Ensure the export name matches the exported procedure, as the Arbitrary
-                    // impl will generate different paths for each
-                    export.name = export_name.clone();
-
-                    let node_id = mast_forest
-                        .add_block(vec![Operation::Add, Operation::Mul], Vec::new())
+                for export in exports.values() {
+                    if let LibraryExport::Procedure(export) = export {
+                        let node_id = BasicBlockNodeBuilder::new(
+                            vec![Operation::Add, Operation::Mul],
+                            Vec::new(),
+                        )
+                        .add_to_forest(&mut mast_forest)
                         .unwrap();
-                    nodes.push((export.node, node_id));
-                }
-
-                (Just(mast_forest), Just(nodes), Just(exports))
-            })
-            .prop_map(|(mut mast_forest, nodes, exports)| {
-                // Replace the export node IDs with the actual node IDs we created
-                let mut adjusted_exports = BTreeMap::new();
-
-                for (proc_name, mut export) in exports {
-                    // Find the corresponding node we created
-                    if let Some(&(_, actual_node_id)) =
-                        nodes.iter().find(|(original_id, _)| *original_id == export.node)
-                    {
-                        export.node = actual_node_id;
-                    } else {
-                        // If we can't find the node (shouldn't happen), use the first node we
-                        // created
-                        if let Some(&(_, first_node_id)) = nodes.first() {
-                            export.node = first_node_id;
-                        } else {
-                            // This should never happen since we create nodes for each export
-                            panic!("No nodes created for exports");
-                        }
+                        nodes.push((export.node, node_id));
                     }
-
-                    adjusted_exports.insert(proc_name, export);
                 }
 
-                let mut node_ids = Vec::with_capacity(adjusted_exports.len());
-                for export in adjusted_exports.values() {
-                    // Add the node to the forest roots if it's not already there
-                    mast_forest.make_root(export.node);
-                    // Collect the node id for recomputing the digest
-                    node_ids.push(export.node);
+                // Replace the export node IDs with the actual node IDs we created
+                let mut procedure_exports = 0;
+                for export in exports.values_mut() {
+                    match export {
+                        LibraryExport::Procedure(export) => {
+                            procedure_exports += 1;
+                            // Find the corresponding node we created
+                            if let Some(&(_, actual_node_id)) =
+                                nodes.iter().find(|(original_id, _)| *original_id == export.node)
+                            {
+                                export.node = actual_node_id;
+                            } else {
+                                // If we can't find the node (shouldn't happen), use the first node
+                                // we created
+                                if let Some(&(_, first_node_id)) = nodes.first() {
+                                    export.node = first_node_id;
+                                } else {
+                                    // This should never happen since we create nodes for each
+                                    // export
+                                    panic!("No nodes created for exports");
+                                }
+                            }
+                        },
+                        LibraryExport::Constant(_) | LibraryExport::Type(_) => (),
+                    }
+                }
+
+                let mut node_ids = Vec::with_capacity(procedure_exports);
+                for export in exports.values() {
+                    if let LibraryExport::Procedure(export) = export {
+                        // Add the node to the forest roots if it's not already there
+                        mast_forest.make_root(export.node);
+                        // Collect the node id for recomputing the digest
+                        node_ids.push(export.node);
+                    }
                 }
 
                 // Recompute the digest
                 let digest = mast_forest.compute_nodes_commitment(&node_ids);
 
                 let mast_forest = Arc::new(mast_forest);
-                Library {
-                    digest,
-                    exports: adjusted_exports,
-                    mast_forest,
-                }
+                Library { digest, exports, mast_forest }
             })
             .boxed()
     }

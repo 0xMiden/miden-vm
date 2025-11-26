@@ -21,7 +21,7 @@ use miden_core::{
     Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-    mast::MastForest,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
 };
 
@@ -56,7 +56,9 @@ pub fn b_chip_span() {
         let mut mast_forest = MastForest::new();
 
         let basic_block_id =
-            mast_forest.add_block(vec![Operation::Add, Operation::Mul], Vec::new()).unwrap();
+            BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+                .add_to_forest(&mut mast_forest)
+                .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -129,7 +131,9 @@ pub fn b_chip_span_with_respan() {
         let mut mast_forest = MastForest::new();
 
         let (ops, _) = build_span_with_respan_ops();
-        let basic_block_id = mast_forest.add_block(ops, Vec::new()).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(ops, Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -221,9 +225,15 @@ pub fn b_chip_merge() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let t_branch_id = mast_forest.add_block(vec![Operation::Add], Vec::new()).unwrap();
-        let f_branch_id = mast_forest.add_block(vec![Operation::Mul], Vec::new()).unwrap();
-        let split_id = mast_forest.add_split(t_branch_id, f_branch_id).unwrap();
+        let t_branch_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        let f_branch_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
+        let split_id = SplitNodeBuilder::new([t_branch_id, f_branch_id])
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(split_id);
 
         Program::new(mast_forest.into(), split_id)
@@ -336,7 +346,9 @@ pub fn b_chip_permutation() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id = mast_forest.add_block(vec![Operation::HPerm], Vec::new()).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::HPerm], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)
@@ -447,8 +459,9 @@ pub fn b_chip_log_precompile() {
     let program = {
         let mut mast_forest = MastForest::new();
 
-        let basic_block_id =
-            mast_forest.add_block(vec![Operation::LogPrecompile], Vec::new()).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::LogPrecompile], Vec::new())
+            .add_to_forest(&mut mast_forest)
+            .unwrap();
         mast_forest.make_root(basic_block_id);
 
         Program::new(mast_forest.into(), basic_block_id)

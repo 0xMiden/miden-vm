@@ -5,7 +5,7 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{AdviceError, ExecutionError, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -20,6 +20,7 @@ pub fn handle_system_event(
         SystemEvent::MerkleNodeMerge => merge_merkle_nodes(process, err_ctx),
         SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx),
         SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx),
+        SystemEvent::MapValueCountToStack => copy_map_value_length_to_adv_stack(process, err_ctx),
         SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true, err_ctx),
         SystemEvent::HasMapKey => push_key_presence_flag(process),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
@@ -291,6 +292,43 @@ fn copy_map_value_to_adv_stack(
         .advice_provider_mut()
         .push_from_map(key, include_len)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+
+    Ok(())
+}
+
+/// Pushes a number of elements in a list of field elements onto the advice stack. The list is
+/// looked up in the advice map using the specified word from the operand stack as the key.
+///
+/// Inputs:
+///   Operand stack: [event_id, KEY, ...]
+///   Advice stack: [...]
+///   Advice map: {KEY: values}
+///
+/// Outputs:
+///   Advice stack: [values.len(), ...]
+///   Advice map: {KEY: values}
+///
+///
+/// # Errors
+/// Returns an error if the required key was not found in the key-value map.
+fn copy_map_value_length_to_adv_stack(
+    process: &mut ProcessState,
+    err_ctx: &impl ErrorContext,
+) -> Result<(), ExecutionError> {
+    let key = process.get_stack_word_be(1);
+    let process_clk = process.clk();
+    let advice_provider = process.advice_provider_mut();
+
+    let values_len = advice_provider
+        .get_mapped_values(&key)
+        .ok_or(ExecutionError::advice_error(
+            AdviceError::MapKeyNotFound { key },
+            process_clk,
+            err_ctx,
+        ))?
+        .len();
+
+    advice_provider.push_stack(Felt::try_from(values_len as u64).expect("value length too big"));
 
     Ok(())
 }

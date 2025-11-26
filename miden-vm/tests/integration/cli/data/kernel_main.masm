@@ -1,9 +1,9 @@
-proc.internal_proc
+proc internal_proc
     caller
     drop
     exec.::$kernel::lib::lib_proc
 end
 
-export.kernel_proc
+pub proc kernel_proc
     exec.internal_proc
 end

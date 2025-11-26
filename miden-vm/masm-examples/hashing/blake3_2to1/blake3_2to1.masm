@@ -1,11 +1,11 @@
-use.std::crypto::hashes::blake3
+use std::crypto::hashes::blake3
 
 begin
-    # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the 
+    # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the
     # resulting 8 elements (32 bytes) back to the stack.
     exec.blake3::hash_2to1
 
-    # Check the correctness of the hashing result by comparing it with precomputed correct values. 
+    # Check the correctness of the hashing result by comparing it with precomputed correct values.
     # This hash is a result of applying a blake3 hashing function to the binary value consisting of
     # only ones.
     push.0xD9696D27.0xF209D66E.0xD0DFDEB9.0x7D5992E2.0x44DDA9CB.0xD6FFB5E5.0x8CD0CAA6.0xF0270FA9

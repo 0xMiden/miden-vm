@@ -1,3 +1,5 @@
+use alloc::vec::Vec;
+
 use miden_assembly_syntax::{
     Word,
     ast::{InvocationTarget, InvokeKind},
@@ -10,7 +12,7 @@ use miden_core::{
 use smallvec::SmallVec;
 
 use crate::{
-    Assembler, GlobalProcedureIndex, basic_block_builder::BasicBlockBuilder,
+    Assembler, GlobalItemIndex, basic_block_builder::BasicBlockBuilder,
     mast_forest_builder::MastForestBuilder,
 };
 
@@ -25,15 +27,22 @@ impl Assembler {
         &self,
         kind: InvokeKind,
         callee: &InvocationTarget,
-        caller: GlobalProcedureIndex,
+        caller: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<MastNodeId, Report> {
-        let resolved = self.resolve_target(kind, callee, caller, mast_forest_builder)?;
+        let resolved = self
+            .resolve_target(kind, callee, caller, mast_forest_builder)?
+            .expect("invocation target is not a procedure");
 
         match kind {
             InvokeKind::ProcRef | InvokeKind::Exec => Ok(resolved.node),
-            InvokeKind::Call => mast_forest_builder.ensure_call(resolved.node),
-            InvokeKind::SysCall => mast_forest_builder.ensure_syscall(resolved.node),
+            InvokeKind::Call => {
+                mast_forest_builder.ensure_call(resolved.node, before_enter, vec![])
+            },
+            InvokeKind::SysCall => {
+                mast_forest_builder.ensure_syscall(resolved.node, before_enter, vec![])
+            },
         }
     }
 
@@ -41,8 +50,9 @@ impl Assembler {
     pub(super) fn dynexec(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_node_id = mast_forest_builder.ensure_dyn()?;
+        let dyn_node_id = mast_forest_builder.ensure_dyn(before_enter, vec![])?;
 
         Ok(Some(dyn_node_id))
     }
@@ -51,8 +61,9 @@ impl Assembler {
     pub(super) fn dyncall(
         &self,
         mast_forest_builder: &mut MastForestBuilder,
+        before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
-        let dyn_call_node_id = mast_forest_builder.ensure_dyncall()?;
+        let dyn_call_node_id = mast_forest_builder.ensure_dyncall(before_enter, vec![])?;
 
         Ok(Some(dyn_call_node_id))
     }
@@ -60,16 +71,18 @@ impl Assembler {
     pub(super) fn procref(
         &self,
         callee: &InvocationTarget,
-        caller: GlobalProcedureIndex,
+        caller: GlobalItemIndex,
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
         let mast_root = {
-            let resolved = self.resolve_target(
-                InvokeKind::ProcRef,
-                callee,
-                caller,
-                block_builder.mast_forest_builder_mut(),
-            )?;
+            let resolved = self
+                .resolve_target(
+                    InvokeKind::ProcRef,
+                    callee,
+                    caller,
+                    block_builder.mast_forest_builder_mut(),
+                )?
+                .expect("invocation target is not a procedure");
             // Note: it's ok to `unwrap()` here since `proc_body_id` was returned from
             // `mast_forest_builder`
             block_builder

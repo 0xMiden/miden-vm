@@ -15,7 +15,7 @@ use alloc::{
 
 use miden_assembly::{KernelLibrary, Library, Parse, diagnostics::reporting::PrintDiagnostic};
 pub use miden_assembly::{
-    LibraryPath,
+    Path,
     debuginfo::{DefaultSourceManager, SourceFile, SourceLanguage, SourceManager},
     diagnostics::Report,
 };
@@ -74,8 +74,9 @@ pub const U32_BOUND: u64 = u32::MAX as u64 + 1;
 
 /// A source code of the `truncate_stack` procedure.
 pub const TRUNCATE_STACK_PROC: &str = "
-proc.truncate_stack.4
-    loc_storew_be.0 dropw movupw.3
+@locals(4)
+proc truncate_stack
+     loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
         dropw movupw.3
@@ -179,7 +180,7 @@ pub struct Test {
     pub in_debug_mode: bool,
     pub libraries: Vec<Library>,
     pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
-    pub add_modules: Vec<(LibraryPath, String)>,
+    pub add_modules: Vec<(Arc<Path>, String)>,
 }
 
 // BUFFER WRITER FOR TESTING
@@ -220,8 +221,8 @@ impl Test {
     }
 
     /// Add an extra module to link in during assembly
-    pub fn add_module(&mut self, path: miden_assembly::LibraryPath, source: impl ToString) {
-        self.add_modules.push((path, source.to_string()));
+    pub fn add_module(&mut self, path: impl AsRef<Path>, source: impl ToString) {
+        self.add_modules.push((path.as_ref().into(), source.to_string()));
     }
 
     /// Add a handler for a specific event when running the `Host`.
@@ -327,6 +328,12 @@ impl Test {
     pub fn compile(&self) -> Result<(Program, Option<KernelLibrary>), Report> {
         use miden_assembly::{Assembler, ParseOptions, ast::ModuleKind};
 
+        // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let _ = env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).try_init();
+        }
+
         let (assembler, kernel_lib) = if let Some(kernel) = self.kernel_source.clone() {
             let kernel_lib =
                 Assembler::new(self.source_manager.clone()).assemble_kernel(kernel).unwrap();
@@ -346,7 +353,7 @@ impl Test {
                 let module = source
                     .parse_with_options(
                         &self.source_manager,
-                        ParseOptions::new(ModuleKind::Library, path.clone()).unwrap(),
+                        ParseOptions::new(ModuleKind::Library, path.clone()),
                     )
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");

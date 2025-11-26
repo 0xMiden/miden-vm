@@ -3,15 +3,15 @@ use alloc::{
     vec::Vec,
 };
 
-use crate::GlobalProcedureIndex;
+use crate::GlobalItemIndex;
 
 /// Represents the inability to construct a topological ordering of the nodes in a [CallGraph]
 /// due to a cycle in the graph, which can happen due to recursion.
 #[derive(Debug)]
-pub struct CycleError(BTreeSet<GlobalProcedureIndex>);
+pub struct CycleError(BTreeSet<GlobalItemIndex>);
 
 impl CycleError {
-    pub fn into_node_ids(self) -> impl ExactSizeIterator<Item = GlobalProcedureIndex> {
+    pub fn into_node_ids(self) -> impl ExactSizeIterator<Item = GlobalItemIndex> {
         self.0.into_iter()
     }
 }
@@ -36,23 +36,20 @@ impl CycleError {
 #[derive(Default, Clone)]
 pub struct CallGraph {
     /// The adjacency matrix for procedures in the call graph
-    nodes: BTreeMap<GlobalProcedureIndex, Vec<GlobalProcedureIndex>>,
+    nodes: BTreeMap<GlobalItemIndex, Vec<GlobalItemIndex>>,
 }
 
 impl CallGraph {
     /// Gets the set of edges from the given caller to its callees in the graph.
-    pub fn out_edges(&self, gid: GlobalProcedureIndex) -> &[GlobalProcedureIndex] {
+    pub fn out_edges(&self, gid: GlobalItemIndex) -> &[GlobalItemIndex] {
         self.nodes.get(&gid).map(|out_edges| out_edges.as_slice()).unwrap_or(&[])
     }
 
     /// Inserts a node in the graph for `id`, if not already present.
     ///
-    /// Returns the set of [GlobalProcedureIndex] which are the outbound neighbors of `id` in the
+    /// Returns the set of [GlobalItemIndex] which are the outbound neighbors of `id` in the
     /// graph, i.e. the callees of a call-like instruction.
-    pub fn get_or_insert_node(
-        &mut self,
-        id: GlobalProcedureIndex,
-    ) -> &mut Vec<GlobalProcedureIndex> {
+    pub fn get_or_insert_node(&mut self, id: GlobalItemIndex) -> &mut Vec<GlobalItemIndex> {
         self.nodes.entry(id).or_default()
     }
 
@@ -66,7 +63,7 @@ impl CallGraph {
     /// NOTE: This function will panic if you attempt to add an edge from a function to itself,
     /// which trivially introduces a cycle. All other cycle-inducing edges must be caught by a
     /// call to [Self::toposort].
-    pub fn add_edge(&mut self, caller: GlobalProcedureIndex, callee: GlobalProcedureIndex) {
+    pub fn add_edge(&mut self, caller: GlobalItemIndex, callee: GlobalItemIndex) {
         assert_ne!(caller, callee, "a procedure cannot call itself");
 
         // Make sure the callee is in the graph
@@ -82,7 +79,7 @@ impl CallGraph {
     }
 
     /// Removes the edge between `caller` and `callee` from the graph
-    pub fn remove_edge(&mut self, caller: GlobalProcedureIndex, callee: GlobalProcedureIndex) {
+    pub fn remove_edge(&mut self, caller: GlobalItemIndex, callee: GlobalItemIndex) {
         if let Some(out_edges) = self.nodes.get_mut(&caller) {
             out_edges.retain(|n| *n != callee);
         }
@@ -90,14 +87,14 @@ impl CallGraph {
 
     /// Returns the number of predecessors of `id` in the graph, i.e.
     /// the number of procedures which call `id`.
-    pub fn num_predecessors(&self, id: GlobalProcedureIndex) -> usize {
+    pub fn num_predecessors(&self, id: GlobalItemIndex) -> usize {
         self.nodes.iter().filter(|(_, out_edges)| out_edges.contains(&id)).count()
     }
 
     /// Construct the topological ordering of all nodes in the call graph.
     ///
     /// Returns `Err` if a cycle is detected in the graph
-    pub fn toposort(&self) -> Result<Vec<GlobalProcedureIndex>, CycleError> {
+    pub fn toposort(&self) -> Result<Vec<GlobalItemIndex>, CycleError> {
         if self.nodes.is_empty() {
             return Ok(vec![]);
         }
@@ -160,7 +157,7 @@ impl CallGraph {
 
     /// Gets a new graph which is a subgraph of `self` containing all of the nodes reachable from
     /// `root`, and nothing else.
-    pub fn subgraph(&self, root: GlobalProcedureIndex) -> Self {
+    pub fn subgraph(&self, root: GlobalItemIndex) -> Self {
         let mut worklist = VecDeque::from_iter([root]);
         let mut graph = Self::default();
         let mut visited = BTreeSet::default();
@@ -186,8 +183,8 @@ impl CallGraph {
     /// Returns an error if a cycle is detected in the graph.
     pub fn toposort_caller(
         &self,
-        caller: GlobalProcedureIndex,
-    ) -> Result<Vec<GlobalProcedureIndex>, CycleError> {
+        caller: GlobalItemIndex,
+    ) -> Result<Vec<GlobalItemIndex>, CycleError> {
         let mut output = Vec::with_capacity(self.nodes.len());
 
         // Build a subgraph of `self` containing only those nodes reachable from `caller`
@@ -235,19 +232,19 @@ impl CallGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{GlobalProcedureIndex, ModuleIndex, ast::ProcedureIndex};
+    use crate::{GlobalItemIndex, ModuleIndex, ast::ItemIndex};
 
     const A: ModuleIndex = ModuleIndex::const_new(1);
     const B: ModuleIndex = ModuleIndex::const_new(2);
-    const P1: ProcedureIndex = ProcedureIndex::const_new(1);
-    const P2: ProcedureIndex = ProcedureIndex::const_new(2);
-    const P3: ProcedureIndex = ProcedureIndex::const_new(3);
-    const A1: GlobalProcedureIndex = GlobalProcedureIndex { module: A, index: P1 };
-    const A2: GlobalProcedureIndex = GlobalProcedureIndex { module: A, index: P2 };
-    const A3: GlobalProcedureIndex = GlobalProcedureIndex { module: A, index: P3 };
-    const B1: GlobalProcedureIndex = GlobalProcedureIndex { module: B, index: P1 };
-    const B2: GlobalProcedureIndex = GlobalProcedureIndex { module: B, index: P2 };
-    const B3: GlobalProcedureIndex = GlobalProcedureIndex { module: B, index: P3 };
+    const P1: ItemIndex = ItemIndex::const_new(1);
+    const P2: ItemIndex = ItemIndex::const_new(2);
+    const P3: ItemIndex = ItemIndex::const_new(3);
+    const A1: GlobalItemIndex = GlobalItemIndex { module: A, index: P1 };
+    const A2: GlobalItemIndex = GlobalItemIndex { module: A, index: P2 };
+    const A3: GlobalItemIndex = GlobalItemIndex { module: A, index: P3 };
+    const B1: GlobalItemIndex = GlobalItemIndex { module: B, index: P1 };
+    const B2: GlobalItemIndex = GlobalItemIndex { module: B, index: P2 };
+    const B3: GlobalItemIndex = GlobalItemIndex { module: B, index: P3 };
 
     #[test]
     fn callgraph_add_edge() {

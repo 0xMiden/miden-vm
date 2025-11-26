@@ -23,6 +23,10 @@ permissions:
 
 jobs:
   gate:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.fork == true)
     runs-on: ubuntu-latest
     env:
       DISPATCH_PR_NUMBER: ${{ inputs.pr_number }}

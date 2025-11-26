@@ -6,8 +6,10 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    Assembler, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions, ast::ModuleKind,
+    self as masm, Assembler, Library, Parse, ParseOptions, Report,
+    ast::{self, ModuleKind},
     debuginfo::DefaultSourceManager,
+    diagnostics::IntoDiagnostic,
 };
 
 // CONSTANTS
@@ -152,14 +154,14 @@ type DocPayload = (Option<String>, Vec<(String, Option<String>)>);
 
 /// Parse MASM source using AST-parsing
 fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload> {
-    let path = LibraryPath::new(label).map_err(|e| io::Error::other(e.to_string()))?;
+    let path = masm::Path::new(label);
     let module = file_path
         .parse_with_options(
             &DefaultSourceManager::default(),
             ParseOptions {
                 kind: ModuleKind::Library,
                 warnings_as_errors: false,
-                path: Some(path),
+                path: Some(path.into()),
             },
         )
         .map_err(|e| io::Error::other(e.to_string()))?;
@@ -169,12 +171,20 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
 
     // Extract procedures and their documentation
     let mut procedures = Vec::new();
-    for export in module.procedures() {
-        // Only include exported procedures (skip private procedures)
-        if export.visibility().is_exported() {
-            let name = export.name().to_string();
-            let docs = export.docs().map(|d| d.to_string());
-            procedures.push((name, docs));
+    for (index, name) in module.exported() {
+        match &module[index] {
+            ast::Export::Procedure(proc) => {
+                let docs = proc.docs().map(|d| d.to_string());
+                procedures.push((name.name().to_string(), docs));
+            },
+            ast::Export::Alias(alias) => {
+                // Ignore undocumented aliases, as they may not be procedure items
+                if let Some(docs) = alias.docs() {
+                    procedures.push((name.name().to_string(), Some(docs.to_string())));
+                }
+            },
+            // TODO: Update doc format to allow for other item types
+            ast::Export::Constant(_) | ast::Export::Type(_) => continue,
         }
     }
 
@@ -186,12 +196,20 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
 
 /// Read and parse the contents from `./asm` into a `LibraryContents` struct, serializing it into
 /// `assets` folder under `std` namespace.
-fn main() -> io::Result<()> {
+fn main() -> Result<(), Report> {
+    use miden_assembly::diagnostics::reporting::ReportHandlerOpts;
+
     // re-build the `[OUT_DIR]/assets/std.masl` file iff something in the `./asm` directory
     // or its builder changed:
     println!("cargo:rerun-if-changed=asm");
     println!("cargo:rerun-if-env-changed=MIDEN_BUILD_STDLIB_DOCS");
     println!("cargo:rerun-if-changed=../assembly/src");
+
+    miden_assembly::diagnostics::reporting::set_hook(Box::new(|_| {
+        Box::new(ReportHandlerOpts::new().build())
+    }))
+    .unwrap();
+    miden_assembly::diagnostics::reporting::set_panic_hook();
 
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();
@@ -201,10 +219,8 @@ fn main() -> io::Result<()> {
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
     let assembler = Assembler::default().with_debug_mode(cfg!(feature = "with-debug-info"));
-    let namespace = "std".parse::<LibraryNamespace>().expect("invalid base namespace");
-    let stdlib = assembler
-        .assemble_library_from_dir(&asm_dir, namespace)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let namespace = "::std".parse::<masm::PathBuf>().expect("invalid base namespace");
+    let stdlib = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
 
     // write the masl output
     let build_dir = env::var("OUT_DIR").unwrap();
@@ -213,11 +229,14 @@ fn main() -> io::Result<()> {
         .join(ASL_DIR_PATH)
         .join("std")
         .with_extension(Library::LIBRARY_EXTENSION);
-    stdlib.write_to_file(output_file).map_err(|e| io::Error::other(e.to_string()))?;
+    stdlib
+        .write_to_file(output_file)
+        .map_err(|e| io::Error::other(e.to_string()))
+        .into_diagnostic()?;
 
     // Generate documentation
     if std::env::var("MIDEN_BUILD_STDLIB_DOCS").is_ok() {
-        build_stdlib_docs(&asm_dir, DOC_DIR_PATH)?;
+        build_stdlib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
     }
 
     Ok(())
