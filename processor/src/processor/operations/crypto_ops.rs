@@ -16,6 +16,14 @@ use crate::{
     },
 };
 
+// Stack indices for Horner evaluation operations (used in MTREE_MERGE and MTREE_VERIFY)
+/// Stack index where alpha address is stored for polynomial evaluation
+const HORNER_ALPHA_ADDR_INDEX: usize = 13;
+/// Stack index for accumulator high element in Horner evaluation
+const HORNER_ACC_HIGH_INDEX: usize = 14;
+/// Stack index for accumulator low element in Horner evaluation
+const HORNER_ACC_LOW_INDEX: usize = 15;
+
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
@@ -152,11 +160,6 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants from the original implementation
-    const ALPHA_ADDR_INDEX: usize = 13;
-    const ACC_HIGH_INDEX: usize = 14;
-    const ACC_LOW_INDEX: usize = 15;
-
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
 
@@ -165,7 +168,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
+        let addr = processor.stack().get(HORNER_ALPHA_ADDR_INDEX);
         let word = processor
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
@@ -182,7 +185,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Read the current accumulator
     let acc_old =
-        QuadFelt::new(processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX));
+        QuadFelt::new(processor.stack().get(HORNER_ACC_LOW_INDEX), processor.stack().get(HORNER_ACC_HIGH_INDEX));
 
     // Compute the temporary accumulator (first 4 coefficients)
     let acc_tmp = coef
@@ -200,8 +203,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Update the accumulator values on the stack
     let acc_new_base_elements = acc_new.to_base_elements();
-    processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
-    processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
+    processor.stack().set(HORNER_ACC_HIGH_INDEX, acc_new_base_elements[1]);
+    processor.stack().set(HORNER_ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
@@ -278,11 +281,6 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants from the original implementation
-    const ALPHA_ADDR_INDEX: usize = 13;
-    const ACC_HIGH_INDEX: usize = 14;
-    const ACC_LOW_INDEX: usize = 15;
-
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
 
@@ -297,7 +295,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
-        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
+        let addr = processor.stack().get(HORNER_ALPHA_ADDR_INDEX);
         let word = processor
             .memory()
             .read_word(ctx, addr, clk, err_ctx)
@@ -314,8 +312,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Read the current accumulator
     let acc_old = QuadFelt::new(
-        processor.stack().get(ACC_LOW_INDEX),  // acc0
-        processor.stack().get(ACC_HIGH_INDEX), // acc1
+        processor.stack().get(HORNER_ACC_LOW_INDEX),  // acc0
+        processor.stack().get(HORNER_ACC_HIGH_INDEX), // acc1
     );
 
     // Compute the temporary accumulator (first 2 coefficients: c0, c1)
@@ -326,8 +324,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Update the accumulator values on the stack
     let acc_new_base_elements = acc_new.to_base_elements();
-    processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
-    processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
+    processor.stack().set(HORNER_ACC_HIGH_INDEX, acc_new_base_elements[1]);
+    processor.stack().set(HORNER_ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_registers(alpha, k0, k1, acc_tmp))
