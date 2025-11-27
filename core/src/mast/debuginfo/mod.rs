@@ -181,6 +181,15 @@ impl DebugInfo {
         self.decorators.push(decorator).map_err(|_| MastForestError::TooManyDecorators)
     }
 
+    /// Returns a mutable reference the decorator with the given ID, if it exists.
+    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
+        if decorator_id.to_usize() < self.decorators.len() {
+            Some(&mut self.decorators[decorator_id])
+        } else {
+            None
+        }
+    }
+
     /// Adds node-level decorators (before_enter and after_exit) for the given node.
     pub fn add_node_decorators(
         &mut self,
@@ -199,15 +208,6 @@ impl DebugInfo {
         decorators_info: Vec<(usize, DecoratorId)>,
     ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
-    }
-
-    /// Returns the decorator with the given ID, if it exists (mutable).
-    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
-        if decorator_id.to_usize() < self.decorators.len() {
-            Some(&mut self.decorators[decorator_id])
-        } else {
-            None
-        }
     }
 
     /// Clears all decorator information while preserving error codes.
