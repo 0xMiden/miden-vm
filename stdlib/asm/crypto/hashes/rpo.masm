@@ -180,6 +180,7 @@ end
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
 #! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
 #!
 #! Cycles:
 #! - If number of elements divides by 8: 52 cycles + 3 * words
@@ -213,6 +214,7 @@ end
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
 #! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
 #!
 #! Cycles:
 #! - If number of elements divides by 8: 52 cycles + 3 * words

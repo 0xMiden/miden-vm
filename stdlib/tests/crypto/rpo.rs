@@ -393,7 +393,7 @@ fn test_copy_digest() {
 }
 
 #[test]
-fn test_hash_elements() {
+fn test_hash_elements_without_padding() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
     use std::crypto::hashes::rpo
@@ -479,7 +479,7 @@ fn test_hash_elements() {
 }
 
 #[test]
-fn test_hash_elements_empty() {
+fn test_hash_elements_without_padding_empty() {
     // absorb_double_words_from_memory
     let source = "
     use std::sys
