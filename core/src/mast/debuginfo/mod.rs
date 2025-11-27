@@ -80,7 +80,7 @@ pub struct DebugInfo {
 
 impl DebugInfo {
     // CONSTRUCTORS
-    // ================================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Creates a new empty DebugInfo.
     pub fn new() -> Self {
@@ -112,7 +112,7 @@ impl DebugInfo {
     }
 
     // PUBLIC ACCESSORS
-    // ================================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Returns all decorators as a slice.
     pub fn decorators(&self) -> &[Decorator] {
@@ -159,7 +159,7 @@ impl DebugInfo {
     }
 
     // DECORATOR METHODS
-    // ================================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Adds a decorator and returns its ID.
     pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
@@ -221,7 +221,7 @@ impl DebugInfo {
     }
 
     // ERROR CODE METHODS
-    // ================================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Inserts an error code with its message.
     pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
@@ -243,8 +243,8 @@ impl DebugInfo {
         &mut self.error_codes
     }
 
-    // PRIVATE METHODS
-    // ================================================================================================
+    // TEST HELPERS
+    // --------------------------------------------------------------------------------------------
 
     /// Returns the operation decorator storage.
     #[cfg(test)]
