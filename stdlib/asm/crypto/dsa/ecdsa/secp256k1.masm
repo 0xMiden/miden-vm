@@ -54,7 +54,7 @@ pub proc verify_ecdsa_k256_keccak
     adv_push.1 loc_store.8
 
     # Compute the expected commitment and ensure it matches the provided PK_COMM
-    push.PK_LEN_FELTS locaddr.0 exec.rpo::hash_elements
+    push.PK_LEN_FELTS locaddr.0 exec.rpo::hash_elements_wo_padding
     assert_eqw.err="invalid public key commitment"
     # => [MSG, ...]
 
@@ -149,11 +149,11 @@ pub proc verify_impl
 
     # Compute commitment: COMM = Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))
     # Compute COMM_PK = Rpo256(pk)
-    push.PK_LEN_FELTS movup.2 exec.rpo::hash_elements
+    push.PK_LEN_FELTS movup.2 exec.rpo::hash_elements_wo_padding
     # => [COMM_PK, result, digest_ptr, sig_ptr]
 
     # Compute COMM_DIGEST = Rpo256(digest_bytes)
-    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_elements
+    push.DIGEST_LEN_FELTS movup.6 exec.rpo::hash_elements_wo_padding
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
@@ -161,7 +161,7 @@ pub proc verify_impl
     # => [COMM_PK_DIGEST, result, sig_ptr]
 
     # Compute COMM_SIG = Rpo256(sig_bytes)
-    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_elements
+    push.SIG_LEN_FELTS movup.6 exec.rpo::hash_elements_wo_padding
     # => [COMM_SIG, COMM_PK_DIGEST, result]
 
     # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
