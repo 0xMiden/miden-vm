@@ -1313,7 +1313,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // Add decorator info to the forest storage
         forest
             .debug_info
-            .add_decorator_info_for_node(future_node_id, decorators_info)
+            .register_op_indexed_decorators(future_node_id, decorators_info)
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access

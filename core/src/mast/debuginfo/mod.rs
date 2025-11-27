@@ -205,8 +205,10 @@ impl DebugInfo {
             .add_node_decorators(node_id, before_enter, after_exit);
     }
 
-    /// Adds decorator info for operations within a node.
-    pub fn add_decorator_info_for_node(
+    /// Registers operation-indexed decorators for a node.
+    ///
+    /// This associates already-added decorators with specific operations within a node.
+    pub fn register_op_indexed_decorators(
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
