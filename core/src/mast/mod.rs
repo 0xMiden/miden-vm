@@ -217,7 +217,7 @@ impl MastForest {
             nodes_to_add.into_iter().map(|node| node.to_builder(self)).collect::<Vec<_>>();
 
         // Clear decorator storage after extracting builders (builders contain decorator data)
-        self.debug_info.clear_decorators();
+        self.debug_info.clear_mappings();
 
         // Add each node to the new MAST forest, making sure to rewrite any outdated internal
         // `MastNodeId`s

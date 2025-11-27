@@ -198,10 +198,9 @@ impl MastForestMerger {
     }
 
     fn merge_error_codes(&mut self, other_forest: &MastForest) -> Result<(), MastForestError> {
-        self.mast_forest
-            .debug_info
-            .error_codes_mut()
-            .extend(other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())));
+        self.mast_forest.debug_info.extend_error_codes(
+            other_forest.debug_info.error_codes().map(|(k, v)| (*k, v.clone())),
+        );
         Ok(())
     }
 

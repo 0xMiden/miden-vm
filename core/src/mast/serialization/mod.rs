@@ -298,11 +298,10 @@ impl Deserializable for MastForest {
             mast_forest
         };
 
-        mast_forest.debug_info.error_codes_mut().clear();
+        mast_forest.debug_info.clear_error_codes();
         mast_forest
             .debug_info
-            .error_codes_mut()
-            .extend(error_codes.iter().map(|(k, v)| (*k, v.clone())));
+            .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
 
         Ok(mast_forest)
     }

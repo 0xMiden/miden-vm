@@ -121,7 +121,7 @@ impl DebugInfo {
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn strip(&mut self) {
-        self.clear_decorators();
+        self.clear_mappings();
         self.decorators = IndexVec::new();
         self.error_codes.clear();
     }
@@ -218,7 +218,7 @@ impl DebugInfo {
     /// Clears all decorator information while preserving error codes.
     ///
     /// This is used when rebuilding decorator information from nodes.
-    pub fn clear_decorators(&mut self) {
+    pub fn clear_mappings(&mut self) {
         self.op_decorator_storage = OpToDecoratorIds::new();
         self.node_decorator_storage.clear();
     }
@@ -241,9 +241,21 @@ impl DebugInfo {
         self.error_codes.iter()
     }
 
-    /// Returns a mutable reference to the error codes map.
-    pub fn error_codes_mut(&mut self) -> &mut BTreeMap<u64, Arc<str>> {
-        &mut self.error_codes
+    /// Clears all error codes.
+    ///
+    /// This is used when error code information needs to be reset.
+    pub fn clear_error_codes(&mut self) {
+        self.error_codes.clear();
+    }
+
+    /// Inserts multiple error codes at once.
+    ///
+    /// This is used when bulk error code insertion is needed.
+    pub fn extend_error_codes<I>(&mut self, error_codes: I)
+    where
+        I: IntoIterator<Item = (u64, Arc<str>)>,
+    {
+        self.error_codes.extend(error_codes);
     }
 
     // TEST HELPERS
