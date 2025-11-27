@@ -60,8 +60,6 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 // ================================================================================================
 
 /// Debug information for a MAST forest, containing decorators and error messages.
-/// This is always present in a MastForest (as per issue #1821), but may be "stripped"
-/// in the future for release builds.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
@@ -82,7 +80,7 @@ impl DebugInfo {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new empty DebugInfo.
+    /// Creates a new empty [DebugInfo].
     pub fn new() -> Self {
         Self {
             decorators: IndexVec::new(),
@@ -92,7 +90,7 @@ impl DebugInfo {
         }
     }
 
-    /// Creates an empty DebugInfo with specified capacities.
+    /// Creates an empty [DebugInfo] with specified capacities.
     pub fn with_capacity(
         decorators_capacity: usize,
         nodes_capacity: usize,
@@ -114,12 +112,13 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this DebugInfo has no decorators or error codes.
+    /// Returns true if this [DebugInfo] has no decorators or error codes.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty() && self.error_codes.is_empty()
     }
 
     /// Strips all debug information, removing decorators and error codes.
+    ///
     /// This is used for release builds where debug info is not needed.
     pub fn strip(&mut self) {
         self.clear_decorators();
@@ -212,6 +211,7 @@ impl DebugInfo {
     }
 
     /// Clears all decorator information while preserving error codes.
+    ///
     /// This is used when rebuilding decorator information from nodes.
     pub fn clear_decorators(&mut self) {
         self.op_decorator_storage = OpToDecoratorIds::new();
