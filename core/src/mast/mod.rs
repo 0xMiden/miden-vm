@@ -140,7 +140,7 @@ impl MastForest {
     /// Removes all decorators from this MAST forest.
     pub fn strip_decorators(&mut self) {
         // Clear all debug info (decorators and error codes)
-        self.debug_info.strip();
+        self.debug_info.clear();
     }
 
     /// Merges all `forests` into a new [`MastForest`].

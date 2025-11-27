@@ -36,7 +36,7 @@
 //!
 //! # Production Builds
 //!
-//! The `DebugInfo` can be stripped for production builds using the [`strip()`](Self::strip)
+//! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear)
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
@@ -120,7 +120,7 @@ impl DebugInfo {
     /// Strips all debug information, removing decorators and error codes.
     ///
     /// This is used for release builds where debug info is not needed.
-    pub fn strip(&mut self) {
+    pub fn clear(&mut self) {
         self.clear_mappings();
         self.decorators = IndexVec::new();
         self.error_codes.clear();
@@ -182,7 +182,7 @@ impl DebugInfo {
     }
 
     /// Returns a mutable reference the decorator with the given ID, if it exists.
-    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
+    pub(super) fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
         if decorator_id.to_usize() < self.decorators.len() {
             Some(&mut self.decorators[decorator_id])
         } else {
@@ -195,8 +195,7 @@ impl DebugInfo {
     /// # Note
     /// This method does not validate decorator IDs immediately. Validation occurs during
     /// operations that need to access the actual decorator data (e.g., merging, serialization).
-    /// This design allows for deferred validation while maintaining API compatibility.
-    pub fn add_node_decorators(
+    pub(super) fn add_node_decorators(
         &mut self,
         node_id: MastNodeId,
         before_enter: &[DecoratorId],
