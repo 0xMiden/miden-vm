@@ -20,6 +20,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo docker builder prune -a --force || true
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y jq
       - uses: dtolnay/rust-toolchain@stable

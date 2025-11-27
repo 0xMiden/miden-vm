@@ -28,7 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-            - name: Clippy
+      - name: Cleanup large tools for build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo docker builder prune -a --force || true
+      - name: Clippy
         run: |
           rustup update --no-self-update nightly
           rustup +nightly component add clippy
@@ -39,7 +44,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-            - name: Rustfmt
+      - name: Cleanup large tools for build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo docker builder prune -a --force || true
+      - name: Rustfmt
         run: |
           rustup update --no-self-update nightly
           rustup +nightly component add rustfmt
@@ -50,7 +60,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-            - name: Build docs
+      - name: Cleanup large tools for build space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          sudo docker builder prune -a --force || true
+      - name: Build docs
         run: |
           rustup +stable update --no-self-update
           rustup default stable
