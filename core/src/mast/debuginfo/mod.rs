@@ -114,6 +114,27 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
+    /// Returns true if this DebugInfo has no decorators or error codes.
+    pub fn is_empty(&self) -> bool {
+        self.decorators.is_empty() && self.error_codes.is_empty()
+    }
+
+    /// Strips all debug information, removing decorators and error codes.
+    /// This is used for release builds where debug info is not needed.
+    pub fn strip(&mut self) {
+        self.clear_decorators();
+        self.decorators = IndexVec::new();
+        self.error_codes.clear();
+    }
+
+    // DECORATOR ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the number of decorators.
+    pub fn num_decorators(&self) -> usize {
+        self.decorators.len()
+    }
+
     /// Returns all decorators as a slice.
     pub fn decorators(&self) -> &[Decorator] {
         self.decorators.as_slice()
@@ -122,15 +143,6 @@ impl DebugInfo {
     /// Returns the decorator with the given ID, if it exists.
     pub fn decorator(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
         self.decorators.get(decorator_id)
-    }
-
-    /// Returns the decorator with the given ID, if it exists (mutable).
-    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
-        if decorator_id.to_usize() < self.decorators.len() {
-            Some(&mut self.decorators[decorator_id])
-        } else {
-            None
-        }
     }
 
     /// Returns the before-enter decorators for the given node.
@@ -143,17 +155,26 @@ impl DebugInfo {
         self.node_decorator_storage.get_after_decorators(node_id)
     }
 
-    /// Returns the number of decorators.
-    pub fn num_decorators(&self) -> usize {
-        self.decorators.len()
+    /// Returns decorators for a specific operation within a node.
+    pub fn decorators_for_operation(
+        &self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DecoratorId] {
+        self.op_decorator_storage
+            .decorator_ids_for_operation(node_id, local_op_idx)
+            .unwrap_or(&[])
     }
 
-    /// Returns true if this DebugInfo has no decorators or error codes.
-    pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty() && self.error_codes.is_empty()
+    /// Returns decorator links for a node, including operation indices.
+    pub fn decorator_links_for_node(
+        &self,
+        node_id: MastNodeId,
+    ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
+        self.op_decorator_storage.decorator_links_for_node(node_id)
     }
 
-    // DECORATOR METHODS
+    // DECORATOR MUTATORS
     // --------------------------------------------------------------------------------------------
 
     /// Adds a decorator and returns its ID.
@@ -181,23 +202,13 @@ impl DebugInfo {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 
-    /// Returns decorators for a specific operation within a node.
-    pub fn decorators_for_operation(
-        &self,
-        node_id: MastNodeId,
-        local_op_idx: usize,
-    ) -> &[DecoratorId] {
-        self.op_decorator_storage
-            .decorator_ids_for_operation(node_id, local_op_idx)
-            .unwrap_or(&[])
-    }
-
-    /// Returns decorator links for a node, including operation indices.
-    pub fn decorator_links_for_node(
-        &self,
-        node_id: MastNodeId,
-    ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
-        self.op_decorator_storage.decorator_links_for_node(node_id)
+    /// Returns the decorator with the given ID, if it exists (mutable).
+    pub fn decorator_mut(&mut self, decorator_id: DecoratorId) -> Option<&mut Decorator> {
+        if decorator_id.to_usize() < self.decorators.len() {
+            Some(&mut self.decorators[decorator_id])
+        } else {
+            None
+        }
     }
 
     /// Clears all decorator information while preserving error codes.
@@ -205,14 +216,6 @@ impl DebugInfo {
     pub fn clear_decorators(&mut self) {
         self.op_decorator_storage = OpToDecoratorIds::new();
         self.node_decorator_storage.clear();
-    }
-
-    /// Strips all debug information, removing decorators and error codes.
-    /// This is used for release builds where debug info is not needed.
-    pub fn strip(&mut self) {
-        self.clear_decorators();
-        self.decorators = IndexVec::new();
-        self.error_codes.clear();
     }
 
     // ERROR CODE METHODS
