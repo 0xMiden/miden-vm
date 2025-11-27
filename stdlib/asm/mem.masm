@@ -124,7 +124,7 @@ pub proc pipe_double_words_to_memory
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, C, B, A, write_ptr, end_ptr, ...]
   while.true
-    adv_pipe hperm # (2 cycles)
+    adv_pipe exec.rpo::permute # (2 cycles)
     # => [C', B', A', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq # (4 cycles)
@@ -210,7 +210,7 @@ pub proc pipe_words_to_memory
     # => [C, B', A, write_ptr+1, ...]
 
     # Run RPO permutation (1 cycles)
-    hperm
+    exec.rpo::permute
     # => [C', B', A', write_ptr+1, ...]
   end
 end

@@ -155,14 +155,14 @@ pub proc unpack
 
   # hash the first 16 words (28 cycles)
   padw padw padw
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
-  adv_pipe hperm
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
+  adv_pipe exec.rpo::permute
   # => [C, B, A, mmr_ptr+68, mmt_ptr_end, HASH, ...]
 
   # handle MMR with more than 16 elements (10 + 9 * words cycles)

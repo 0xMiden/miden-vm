@@ -85,7 +85,7 @@ proc load_ace_circuit_description
     padw padw padw
     repeat.14
         adv_pipe
-        hperm
+        exec.rpo::permute
     end
     exec.rpo::squeeze_digest
     movup.4 drop
