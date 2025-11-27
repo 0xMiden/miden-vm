@@ -148,11 +148,6 @@ impl DebugInfo {
         self.decorators.len()
     }
 
-    /// Returns the node decorator storage.
-    pub fn node_decorator_storage(&self) -> &NodeToDecoratorIds {
-        &self.node_decorator_storage
-    }
-
     /// Returns true if this DebugInfo has no decorators or error codes.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty() && self.error_codes.is_empty()
