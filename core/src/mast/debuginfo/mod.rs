@@ -191,6 +191,11 @@ impl DebugInfo {
     }
 
     /// Adds node-level decorators (before_enter and after_exit) for the given node.
+    ///
+    /// # Note
+    /// This method does not validate decorator IDs immediately. Validation occurs during
+    /// operations that need to access the actual decorator data (e.g., merging, serialization).
+    /// This design allows for deferred validation while maintaining API compatibility.
     pub fn add_node_decorators(
         &mut self,
         node_id: MastNodeId,

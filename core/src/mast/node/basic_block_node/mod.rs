@@ -604,7 +604,11 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                 .iter(self.mast_forest)
                 .map(|op_or_dec| match op_or_dec {
                     OperationOrDecorator::Operation(op) => op.render(),
-                    OperationOrDecorator::Decorator(decorator_id) => self.mast_forest[decorator_id].render(),
+                    OperationOrDecorator::Decorator(decorator_id) => {
+                        self.mast_forest.decorator_by_id(decorator_id)
+                            .map(|decorator| decorator.render())
+                            .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
+                    },
                 })
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
                 .unwrap_or_default()
@@ -628,7 +632,11 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                     .iter(self.mast_forest)
                     .map(|op_or_dec| match op_or_dec {
                         OperationOrDecorator::Operation(op) => op.render(),
-                        OperationOrDecorator::Decorator(decorator_id) => self.mast_forest[decorator_id].render(),
+                        OperationOrDecorator::Decorator(decorator_id) => {
+                            self.mast_forest.decorator_by_id(decorator_id)
+                                .map(|decorator| decorator.render())
+                                .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
+                        },
                     })
                     .reduce(|acc, doc| acc + nl() + doc)
                     .unwrap_or_default(),
