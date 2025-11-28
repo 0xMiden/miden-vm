@@ -86,9 +86,7 @@ pub struct Assembler {
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
-    /// Whether the assembler enables extra debugging information.
-    in_debug_mode: bool,
-}
+  }
 
 impl Default for Assembler {
     fn default() -> Self {
@@ -98,7 +96,6 @@ impl Default for Assembler {
             source_manager,
             linker,
             warnings_as_errors: false,
-            in_debug_mode: false,
         }
     }
 }
@@ -113,7 +110,6 @@ impl Assembler {
             source_manager,
             linker,
             warnings_as_errors: false,
-            in_debug_mode: false,
         }
     }
 
