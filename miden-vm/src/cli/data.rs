@@ -20,29 +20,6 @@ use tracing::instrument;
 // HELPERS
 // ================================================================================================
 
-/// Indicates whether debug mode is on or off.
-pub enum Debug {
-    On,
-    Off,
-}
-
-impl Debug {
-    /// Returns true if debug mode is on.
-    #[allow(dead_code)]
-    fn is_on(&self) -> bool {
-        matches!(self, Self::On)
-    }
-}
-
-impl From<bool> for Debug {
-    fn from(value: bool) -> Self {
-        match value {
-            true => Debug::On,
-            false => Debug::Off,
-        }
-    }
-}
-
 // OUTPUT FILE
 // ================================================================================================
 
@@ -147,7 +124,7 @@ where
 
     /// Compiles this program file into a [Program].
     #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<'a, I>(&self, _debug: Debug, libraries: I) -> Result<Program, Report>
+    pub fn compile<'a, I>(&self, libraries: I) -> Result<Program, Report>
     where
         I: IntoIterator<Item = &'a Library>,
     {
@@ -291,19 +268,3 @@ impl Libraries {
 
 // TESTS
 // ================================================================================================
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_debug_from_true() {
-        let debug_mode: Debug = true.into(); // true.into() will also test Debug.from(true)
-        assert!(matches!(debug_mode, Debug::On));
-    }
-
-    #[test]
-    fn test_debug_from_false() {
-        let debug_mode: Debug = false.into(); // false.into() will also test Debug.from(false)
-        assert!(matches!(debug_mode, Debug::Off));
-    }
-}
