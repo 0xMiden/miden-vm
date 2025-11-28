@@ -166,7 +166,7 @@ impl DebugInfo {
     }
 
     /// Returns decorator links for a node, including operation indices.
-    pub fn decorator_links_for_node(
+    pub(super) fn decorator_links_for_node(
         &self,
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
@@ -195,7 +195,7 @@ impl DebugInfo {
     /// # Note
     /// This method does not validate decorator IDs immediately. Validation occurs during
     /// operations that need to access the actual decorator data (e.g., merging, serialization).
-    pub(super) fn add_node_decorators(
+    pub(super) fn register_node_decorators(
         &mut self,
         node_id: MastNodeId,
         before_enter: &[DecoratorId],
@@ -208,7 +208,7 @@ impl DebugInfo {
     /// Registers operation-indexed decorators for a node.
     ///
     /// This associates already-added decorators with specific operations within a node.
-    pub fn register_op_indexed_decorators(
+    pub(crate) fn register_op_indexed_decorators(
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
@@ -227,11 +227,6 @@ impl DebugInfo {
     // ERROR CODE METHODS
     // --------------------------------------------------------------------------------------------
 
-    /// Inserts an error code with its message.
-    pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
-        self.error_codes.insert(code, msg);
-    }
-
     /// Returns an error message by code.
     pub fn error_message(&self, code: u64) -> Option<Arc<str>> {
         self.error_codes.get(&code).cloned()
@@ -242,11 +237,9 @@ impl DebugInfo {
         self.error_codes.iter()
     }
 
-    /// Clears all error codes.
-    ///
-    /// This is used when error code information needs to be reset.
-    pub fn clear_error_codes(&mut self) {
-        self.error_codes.clear();
+    /// Inserts an error code with its message.
+    pub fn insert_error_code(&mut self, code: u64, msg: Arc<str>) {
+        self.error_codes.insert(code, msg);
     }
 
     /// Inserts multiple error codes at once.
@@ -257,6 +250,13 @@ impl DebugInfo {
         I: IntoIterator<Item = (u64, Arc<str>)>,
     {
         self.error_codes.extend(error_codes);
+    }
+
+    /// Clears all error codes.
+    ///
+    /// This is used when error code information needs to be reset.
+    pub fn clear_error_codes(&mut self) {
+        self.error_codes.clear();
     }
 
     // TEST HELPERS

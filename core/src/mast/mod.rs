@@ -93,11 +93,6 @@ impl MastForest {
     /// The maximum number of nodes that can be stored in a single MAST forest.
     const MAX_NODES: usize = (1 << 30) - 1;
 
-    /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
-    pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
-        self.debug_info.add_decorator(decorator)
-    }
-
     /// Marks the given [`MastNodeId`] as being the root of a procedure.
     ///
     /// If the specified node is already marked as a root, this will have no effect.
@@ -199,6 +194,7 @@ impl MastForest {
     }
 }
 
+// ------------------------------------------------------------------------------------------------
 /// Helpers
 impl MastForest {
     /// Adds all provided nodes to the internal set of nodes, remapping all [`MastNodeId`]
@@ -271,18 +267,8 @@ fn remove_nodes(
 }
 
 // ------------------------------------------------------------------------------------------------
-
 /// Public accessors
 impl MastForest {
-    /// Returns the [`Decorator`] associated with the provided [`DecoratorId`] if valid, or else
-    /// `None`.
-    ///
-    /// This is the fallible version of indexing (e.g. `mast_forest[decorator_id]`).
-    #[inline]
-    pub fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
-        self.debug_info.decorator(decorator_id)
-    }
-
     /// Returns the [`MastNode`] associated with the provided [`MastNodeId`] if valid, or else
     /// `None`.
     ///
@@ -354,8 +340,30 @@ impl MastForest {
         self.nodes.as_slice()
     }
 
+    pub fn advice_map(&self) -> &AdviceMap {
+        &self.advice_map
+    }
+
+    pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
+        &mut self.advice_map
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Decorator methods
+impl MastForest {
+    /// Returns a list of all decorators contained in this [MastForest].
     pub fn decorators(&self) -> &[Decorator] {
         self.debug_info.decorators()
+    }
+
+    /// Returns the [`Decorator`] associated with the provided [`DecoratorId`] if valid, or else
+    /// `None`.
+    ///
+    /// This is the fallible version of indexing (e.g. `mast_forest[decorator_id]`).
+    #[inline]
+    pub fn decorator_by_id(&self, decorator_id: DecoratorId) -> Option<&Decorator> {
+        self.debug_info.decorator(decorator_id)
     }
 
     /// Returns decorator indices for a specific operation within a node.
@@ -363,7 +371,7 @@ impl MastForest {
     /// This is the primary accessor for reading decorators from the centralized storage.
     /// Returns a slice of decorator IDs for the given operation.
     #[inline]
-    pub fn decorator_indices_for_op(
+    pub(crate) fn decorator_indices_for_op(
         &self,
         node_id: MastNodeId,
         local_op_idx: usize,
@@ -386,17 +394,6 @@ impl MastForest {
             .map(move |&decorator_id| &self[decorator_id])
     }
 
-    /// Returns decorator links for a node, including operation indices.
-    ///
-    /// This provides a flattened view of all decorators for a node with their operation indices.
-    #[inline]
-    pub fn decorator_links_for_node<'a>(
-        &'a self,
-        node_id: MastNodeId,
-    ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
-        self.debug_info.decorator_links_for_node(node_id)
-    }
-
     /// Returns the decorators to be executed before this node is executed.
     #[inline]
     pub fn before_enter_decorators(&self, node_id: MastNodeId) -> &[DecoratorId] {
@@ -409,24 +406,47 @@ impl MastForest {
         self.debug_info.after_exit_decorators(node_id)
     }
 
-    /// Adds decorator IDs for a node to the storage.
-    /// Used when building nodes for efficient decorator access during execution.
+    /// Returns decorator links for a node, including operation indices.
+    ///
+    /// This provides a flattened view of all decorators for a node with their operation indices.
     #[inline]
-    pub(crate) fn add_node_decorators(
+    pub(crate) fn decorator_links_for_node<'a>(
+        &'a self,
+        node_id: MastNodeId,
+    ) -> Result<DecoratedLinks<'a>, DecoratorIndexError> {
+        self.debug_info.decorator_links_for_node(node_id)
+    }
+
+    /// Adds a decorator to the forest, and returns the associated [`DecoratorId`].
+    pub fn add_decorator(&mut self, decorator: Decorator) -> Result<DecoratorId, MastForestError> {
+        self.debug_info.add_decorator(decorator)
+    }
+
+    /// Adds decorator IDs for a node to the storage.
+    ///
+    /// Used when building nodes for efficient decorator access during execution.
+    ///
+    /// # Note
+    /// This method does not validate decorator IDs immediately. Validation occurs during
+    /// operations that need to access the actual decorator data (e.g., merging, serialization).
+    #[inline]
+    pub(crate) fn register_node_decorators(
         &mut self,
         node_id: MastNodeId,
         before_enter: &[DecoratorId],
         after_exit: &[DecoratorId],
     ) {
-        self.debug_info.add_node_decorators(node_id, before_enter, after_exit);
+        self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
+}
 
-    pub fn advice_map(&self) -> &AdviceMap {
-        &self.advice_map
-    }
-
-    pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
-        &mut self.advice_map
+// ------------------------------------------------------------------------------------------------
+/// Error message methods
+impl MastForest {
+    /// Given an error code as a Felt, resolves it to its corresponding error message.
+    pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
+        let key = u64::from(code);
+        self.debug_info.error_message(key)
     }
 
     /// Registers an error message in the MAST Forest and returns the corresponding error code as a
@@ -437,13 +457,10 @@ impl MastForest {
         self.debug_info.insert_error_code(code.as_int(), msg);
         code
     }
-
-    /// Given an error code as a Felt, resolves it to its corresponding error message.
-    pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        let key = u64::from(code);
-        self.debug_info.error_message(key)
-    }
 }
+
+// MAST FOREST INDEXING
+// ------------------------------------------------------------------------------------------------
 
 impl Index<MastNodeId> for MastForest {
     type Output = MastNode;
