@@ -19,9 +19,11 @@ pub fn handle_system_event(
     match system_event {
         SystemEvent::MerkleNodeMerge => merge_merkle_nodes(process, err_ctx),
         SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx),
-        SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx),
+        SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, err_ctx, 0),
         SystemEvent::MapValueCountToStack => copy_map_value_length_to_adv_stack(process, err_ctx),
-        SystemEvent::MapValueToStackN => copy_map_value_to_adv_stack(process, true, err_ctx),
+        SystemEvent::MapValueToStackN0 => copy_map_value_to_adv_stack(process, true, err_ctx, 0),
+        SystemEvent::MapValueToStackN4 => copy_map_value_to_adv_stack(process, true, err_ctx, 4),
+        SystemEvent::MapValueToStackN8 => copy_map_value_to_adv_stack(process, true, err_ctx, 8),
         SystemEvent::HasMapKey => push_key_presence_flag(process),
         SystemEvent::Ext2Inv => push_ext2_inv_result(process, err_ctx),
         SystemEvent::U32Clz => push_leading_zeros(process, err_ctx),
@@ -286,12 +288,39 @@ fn copy_map_value_to_adv_stack(
     process: &mut ProcessState,
     include_len: bool,
     err_ctx: &impl ErrorContext,
+    pad_value: u8,
 ) -> Result<(), ExecutionError> {
     let key = process.get_stack_word_be(1);
-    process
-        .advice_provider_mut()
-        .push_from_map(key, include_len)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+
+    // get the advice map value and its length
+    let map_value =
+        process
+            .advice_provider()
+            .get_mapped_values(&key)
+            .ok_or(ExecutionError::advice_error(
+                AdviceError::MapKeyNotFound { key },
+                process.clk(),
+                err_ctx,
+            ))?;
+    let map_value_len = map_value.len();
+
+    // if pad_value was provided, resize the map_value vector to the next multiple of pad_value
+    let mut map_value_vec = map_value.to_vec();
+    if pad_value != 0 {
+        map_value_vec
+            .resize_with(map_value.len().next_multiple_of(pad_value as usize), Felt::default);
+    }
+
+    // reverse the map_value to preserve the stack order
+    map_value_vec.reverse();
+
+    // push the padded and reversed map_value and its initial length to the advice stack
+    let advice_provider_mut = process.advice_provider_mut();
+    advice_provider_mut.extend_stack(map_value_vec);
+    if include_len {
+        advice_provider_mut
+            .push_stack(Felt::try_from(map_value_len as u64).expect("value length too big"));
+    }
 
     Ok(())
 }
