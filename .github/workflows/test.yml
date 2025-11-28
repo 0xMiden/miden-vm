@@ -65,14 +65,20 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Build stdlib (generates docs)
-        run: cargo build -p miden-stdlib
-      - name: Check for uncommitted changes in stdlib/docs
+      - name: Build stdlib and generate documentation
+        run: |
+          # Build stdlib with documentation generation enabled
+          MIDEN_BUILD_STDLIB_DOCS=1 cargo build -p miden-stdlib
+      - name: Check for documentation changes in stdlib/docs
         run: |
           if [ -n "$(git status --porcelain stdlib/docs)" ]; then
             echo "ERROR: Found uncommitted changes in stdlib/docs/"
-            echo "This indicates that documentation was regenerated during the build but not committed."
+            echo "This indicates that the assembly source code has changed but the documentation was not updated."
             echo "Please commit the generated documentation changes before merging."
+            echo ""
+            echo "To fix this:"
+            echo "1. Run: MIDEN_BUILD_STDLIB_DOCS=1 cargo build -p miden-stdlib"
+            echo "2. Commit the changes in stdlib/docs/"
             echo ""
             echo "Uncommitted changes:"
             git status stdlib/docs
@@ -81,7 +87,7 @@ jobs:
             git diff stdlib/docs
             exit 1
           else
-            echo "No uncommitted changes in stdlib/docs/ - OK"
+            echo "No documentation changes in stdlib/docs/ - OK"
           fi
 
   check-features:
@@ -94,7 +100,7 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
           sudo docker image prune --all --force || true
           sudo docker builder prune -a --force || true
-            - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
