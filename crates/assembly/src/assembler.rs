@@ -311,7 +311,6 @@ impl Assembler {
         self.warnings_as_errors
     }
 
-  
     /// Returns a reference to the kernel for this assembler.
     ///
     /// If the assembler was instantiated without a kernel, the internal kernel will be empty.
@@ -956,8 +955,7 @@ impl Assembler {
                     let num_cycles = 0;
                     let op = "if.true".to_string();
                     let should_break = false;
-                    let op =
-                        AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let op = AssemblyOp::new(location, context_name, num_cycles, op, should_break);
                     let decorator_id = block_builder
                         .mast_forest_builder_mut()
                         .ensure_decorator(Decorator::AsmOp(op))?;
@@ -1025,8 +1023,7 @@ impl Assembler {
                     let num_cycles = 0;
                     let op = "while.true".to_string();
                     let should_break = false;
-                    let op =
-                        AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let op = AssemblyOp::new(location, context_name, num_cycles, op, should_break);
                     let decorator_id = block_builder
                         .mast_forest_builder_mut()
                         .ensure_decorator(Decorator::AsmOp(op))?;

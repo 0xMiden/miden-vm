@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2788
 expression: program
 ---
 begin
@@ -8,15 +9,18 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(push.[3846236276142386450,5034591595140902852,4565868838168209231,6740431856120851931], 4)
         push(3846236276142386450)
         push(5034591595140902852)
         push(4565868838168209231)
         push(6740431856120851931)
         noop
         noop
+        asmOp(adv.push_mapval, 3)
         push(17843484659000820118)
         emit
         drop
+        asmOp(assert, 1)
         assert(0)
     end
 end

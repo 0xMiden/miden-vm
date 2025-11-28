@@ -28,6 +28,7 @@ pub enum Debug {
 
 impl Debug {
     /// Returns true if debug mode is on.
+    #[allow(dead_code)]
     fn is_on(&self) -> bool {
         matches!(self, Self::On)
     }
@@ -146,13 +147,12 @@ where
 
     /// Compiles this program file into a [Program].
     #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<'a, I>(&self, debug: Debug, libraries: I) -> Result<Program, Report>
+    pub fn compile<'a, I>(&self, _debug: Debug, libraries: I) -> Result<Program, Report>
     where
         I: IntoIterator<Item = &'a Library>,
     {
         // compile program
-        let mut assembler =
-            Assembler::new(self.source_manager.clone());
+        let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
             .link_dynamic_library(CoreLibrary::default())
             .wrap_err("Failed to load libcore")?;

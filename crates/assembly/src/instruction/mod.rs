@@ -46,7 +46,8 @@ impl Assembler {
         let mut decorators = Vec::new();
 
         // Start tracking the instruction about to be executed; this will allow us to map the
-        // instruction to the sequence of operations which were executed as a part of this instruction.
+        // instruction to the sequence of operations which were executed as a part of this
+        // instruction.
         block_builder.track_instruction(instruction, proc_ctx)?;
 
         // New node is being created, so we are done building the current block. We then want to
@@ -582,9 +583,8 @@ impl Assembler {
             },
 
             Instruction::Debug(options) => {
-                block_builder.push_decorator(Decorator::Debug(debug::compile_options(
-                    options, proc_ctx,
-                )?))?;
+                block_builder
+                    .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;
             },
 
             // ----- emit instruction -------------------------------------------------------------

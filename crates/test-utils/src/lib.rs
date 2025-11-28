@@ -346,10 +346,8 @@ impl Test {
             (Assembler::new(self.source_manager.clone()), None)
         };
 
-        let mut assembler = self
-            .add_modules
-            .iter()
-            .fold(assembler, |mut assembler, (path, source)| {
+        let mut assembler =
+            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
                 let module = source
                     .parse_with_options(
                         &self.source_manager,
