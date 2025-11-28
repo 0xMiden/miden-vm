@@ -2190,7 +2190,7 @@ fn program_with_phantom_mast_call() -> TestResult {
     );
     let ast = context.parse_program(source)?;
 
-    let assembler = Assembler::new(context.source_manager()).with_debug_mode(true);
+    let assembler = Assembler::new(context.source_manager());
     assembler.assemble_program(ast)?;
     Ok(())
 }
@@ -3329,7 +3329,7 @@ fn test_program_serde_with_decorators() {
     end
     ";
 
-    let assembler = Assembler::default().with_debug_mode(true);
+    let assembler = Assembler::default();
     let original_program = assembler.assemble_program(source).unwrap();
 
     let mut target = Vec::new();
@@ -4215,7 +4215,7 @@ fn test_assembler_debug_info_conditional() {
     );
 
     // Test 2: Assembler in debug mode should include debug info
-    let assembler = Assembler::default().with_debug_mode(true);
+    let assembler = Assembler::default();
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 

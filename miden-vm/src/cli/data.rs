@@ -152,7 +152,7 @@ where
     {
         // compile program
         let mut assembler =
-            Assembler::new(self.source_manager.clone()).with_debug_mode(debug.is_on());
+            Assembler::new(self.source_manager.clone());
         assembler
             .link_dynamic_library(CoreLibrary::default())
             .wrap_err("Failed to load libcore")?;

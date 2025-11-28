@@ -68,8 +68,8 @@ impl TestContext {
         Self { source_manager, assembler }
     }
 
-    pub fn with_debug_info(mut self, yes: bool) -> Self {
-        self.assembler.set_debug_mode(yes);
+    pub fn with_debug_info(self, _yes: bool) -> Self {
+        // Debug mode is now always enabled, so this method is a no-op
         self
     }
 

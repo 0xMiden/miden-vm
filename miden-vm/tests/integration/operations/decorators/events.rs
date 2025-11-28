@@ -86,7 +86,7 @@ fn test_debug_with_debugging() {
 
     // compile and execute program
     let program: Program =
-        Assembler::default().with_debug_mode(true).assemble_program(source).unwrap();
+        Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
     miden_processor::execute(
         &program,
@@ -142,7 +142,7 @@ fn test_parsing_debug_advice_stack() {
 
     // compile and execute program
     let program: Program =
-        Assembler::default().with_debug_mode(true).assemble_program(source).unwrap();
+        Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
     miden_processor::execute(
         &program,

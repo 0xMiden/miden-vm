@@ -358,8 +358,8 @@ impl Test {
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler
-            })
-            .with_debug_mode(self.in_debug_mode);
+            });
+        // Debug mode is now always enabled
         for library in &self.libraries {
             assembler.link_dynamic_library(library).unwrap();
         }

@@ -950,20 +950,18 @@ impl Assembler {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the if node in debug mode.
-                    if self.in_debug_mode() {
-                        let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.path().to_string();
-                        let num_cycles = 0;
-                        let op = "if.true".to_string();
-                        let should_break = false;
-                        let op =
-                            AssemblyOp::new(location, context_name, num_cycles, op, should_break);
-                        let decorator_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_decorator(Decorator::AsmOp(op))?;
-                        split_builder.append_before_enter([decorator_id]);
-                    }
+                    // Add an assembly operation decorator to the if node.
+                    let location = proc_ctx.source_manager().location(*span).ok();
+                    let context_name = proc_ctx.path().to_string();
+                    let num_cycles = 0;
+                    let op = "if.true".to_string();
+                    let should_break = false;
+                    let op =
+                        AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let decorator_id = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_decorator(Decorator::AsmOp(op))?;
+                    split_builder.append_before_enter([decorator_id]);
 
                     let split_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
@@ -1021,20 +1019,18 @@ impl Assembler {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the loop node in debug mode.
-                    if self.in_debug_mode() {
-                        let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.path().to_string();
-                        let num_cycles = 0;
-                        let op = "while.true".to_string();
-                        let should_break = false;
-                        let op =
-                            AssemblyOp::new(location, context_name, num_cycles, op, should_break);
-                        let decorator_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_decorator(Decorator::AsmOp(op))?;
-                        loop_builder.append_before_enter([decorator_id]);
-                    }
+                    // Add an assembly operation decorator to the loop node.
+                    let location = proc_ctx.source_manager().location(*span).ok();
+                    let context_name = proc_ctx.path().to_string();
+                    let num_cycles = 0;
+                    let op = "while.true".to_string();
+                    let should_break = false;
+                    let op =
+                        AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let decorator_id = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_decorator(Decorator::AsmOp(op))?;
+                    loop_builder.append_before_enter([decorator_id]);
 
                     let loop_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;

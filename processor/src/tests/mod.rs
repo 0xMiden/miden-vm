@@ -737,13 +737,11 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     ";
 
     let library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_library([lib_module])
+                .assemble_library([lib_module])
         .unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .with_dynamic_library(&library)
+                .with_dynamic_library(&library)
         .unwrap()
         .assemble_program(program_source)
         .unwrap();
@@ -963,13 +961,11 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     ";
 
     let kernel_library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_kernel(kernel_source)
+                .assemble_kernel(kernel_source)
         .unwrap();
 
     let program = Assembler::with_kernel(source_manager.clone(), kernel_library)
-        .with_debug_mode(true)
-        .assemble_program(program_source)
+                .assemble_program(program_source)
         .unwrap();
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
