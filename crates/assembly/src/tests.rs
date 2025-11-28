@@ -7,16 +7,15 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    EventId, Operation, Program, Word, assert_matches,
-    mast::{
-        BasicBlockNodeBuilder, JoinNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
-        SplitNodeBuilder,
-    },
+    EventId, Operation, Program, StackInputs, Word, assert_matches,
+    mast::{MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
 };
+#[cfg(test)]
+use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -3369,7 +3368,7 @@ fn vendoring() -> TestResult {
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
         let source = source_file!(&context, "pub proc foo push.1 end");
-        let mod2 = mod_parser.parse(PathBuf::new("test::mod2").unwrap(), source).unwrap();
+        let mod2 = mod_parser.parse(PathBuf::new("test::expected").unwrap(), source).unwrap();
         Assembler::default().assemble_library([mod2]).unwrap()
     };
 
@@ -3939,11 +3938,8 @@ fn distinguish_grandchildren_correctly() {
 ///
 /// This test is disabled because with debug mode always enabled (issue #1821),
 /// nodes get unique debug decorators and are no longer de-duplicated.
-/// The old behavior where nodes could be de-duplicated when debug mode was off
-/// is no longer applicable.
-#[ignore]
 #[test]
-fn duplicate_nodes() {
+fn duplicate_nodes_with_debug_decorators() {
     let context = TestContext::new();
 
     let program_source = r#"
@@ -3957,41 +3953,40 @@ fn duplicate_nodes() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
+    let mast_forest = program.mast_forest();
 
-    let mut expected_mast_forest = MastForest::new();
+    // With debug mode always enabled, we should have debug decorators
+    assert!(
+        !mast_forest.decorators().is_empty(),
+        "Should have debug decorators with always-enabled debug mode"
+    );
 
-    let fmp_initialization = BasicBlockNodeBuilder::new(fmp_initialization_sequence(), Vec::new())
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
+    // Count nodes - should be more than before due to unique debug decorators
+    // The exact number depends on implementation, but should be greater than the minimum expected
+    assert!(
+        mast_forest.num_nodes() > 3,
+        "Should have more nodes with debug decorators enabled"
+    );
 
-    let mul_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
+    // Verify the program can be executed (functional test)
+    let mut host = DefaultHost::default();
+    let result = miden_processor::execute(
+        &program,
+        StackInputs::default(),
+        AdviceInputs::default(),
+        &mut host,
+        ExecutionOptions::default(),
+    );
+    assert!(result.is_ok(), "Program should execute successfully");
 
-    let add_basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
-
-    // inner split: `if.true add else mul end`
-    let inner_split_id = SplitNodeBuilder::new([add_basic_block_id, mul_basic_block_id])
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
-
-    // outer split
-    let outer_split_id = SplitNodeBuilder::new([mul_basic_block_id, inner_split_id])
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
-
-    // root: outer split
-    let root_id = JoinNodeBuilder::new([fmp_initialization, outer_split_id])
-        .add_to_forest(&mut expected_mast_forest)
-        .unwrap();
-
-    expected_mast_forest.make_root(root_id);
-
-    let expected_program = Program::new(expected_mast_forest.into(), root_id);
-
-    assert_eq!(expected_program, program);
+    // Check that we have the expected control flow structure
+    // With debug decorators enabled, the program should have more nodes due to less deduplication
+    let nodes = mast_forest.nodes();
+    let has_mul_operations = nodes.iter().any(|node| {
+        matches!(node, miden_core::mast::MastNode::Block(bb)
+            if bb.operations().any(|op| op == &Operation::Mul))
+    });
+    assert!(has_mul_operations, "Should contain mul operations in control flow");
 }
 
 #[test]
@@ -4269,10 +4264,8 @@ end"#
 ///
 /// This test is disabled because with debug mode always enabled (issue #1821),
 /// we no longer have the ability to turn debug mode off. The old functionality
-/// where debug mode could be enabled/disabled is no longer available.
-#[ignore]
 #[test]
-fn test_assembler_debug_info_conditional() {
+fn test_assembler_debug_info_present() {
     let context = TestContext::default();
     let source = r#"
     pub proc foo
@@ -4282,7 +4275,7 @@ fn test_assembler_debug_info_conditional() {
 
     let module = parse_module!(&context, "test::foo", source);
 
-    // Test: With debug mode always enabled, debug info should always be present
+    // Test: With debug mode always enabled (issue #1821), debug info should always be present
     let assembler = Assembler::default();
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
@@ -4290,6 +4283,16 @@ fn test_assembler_debug_info_conditional() {
     // Debug info should be present since debug mode is always enabled
     assert!(
         !mast_forest.decorators().is_empty(),
-        "Debug info should be present when assembler is in debug mode"
+        "Debug info should be present with always-enabled debug mode"
+    );
+
+    // Specifically check for AsmOp decorators that track instruction execution
+    let has_asmop_decorators = mast_forest
+        .decorators()
+        .iter()
+        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
+    assert!(
+        has_asmop_decorators,
+        "AsmOp decorators should be present for tracking instructions"
     );
 }

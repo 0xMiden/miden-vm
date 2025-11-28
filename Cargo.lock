@@ -1272,9 +1272,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.28"
+version = "0.4.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
+checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "loom"
@@ -1354,6 +1354,7 @@ dependencies = [
  "miden-core",
  "miden-libcore",
  "miden-mast-package",
+ "miden-processor",
  "proptest",
  "smallvec",
  "thiserror",
@@ -1414,9 +1415,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1162f8648a13e262c6d454ace2357fc1a301c404ca3111a5d2314e0ca286de0c"
+checksum = "4f62f2b93c03e5d1280e145e252176a41c8cfbd47991d6053dee7765d4d0071b"
 dependencies = [
  "blake3",
  "cc",
@@ -1447,9 +1448,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.19.0"
+version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64f681563cf529e22114890c531d6ca40583e7235733dec4d265c8ecb48d1f2c"
+checksum = "5516ae48db94e71b4eea46a294076f8bc7f2de3de8ebd14c0a821559f3e40b2e"
 dependencies = [
  "quote",
  "syn 2.0.111",

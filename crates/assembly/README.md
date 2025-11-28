@@ -179,7 +179,7 @@ shown below:
 # use std::sync::Arc;
 #
 // Instantiate the assembler in debug mode
-let assembler = Assembler::new(Arc::new(DefaultSourceManager::default())).with_debug_mode(true);
+let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()));
 ```
 
 ## Putting it all together
@@ -206,8 +206,8 @@ let kernel_lib = Assembler::new(source_manager.clone())
 
 // Instantiate the assembler with multiple options at once
 let assembler = Assembler::with_kernel(source_manager, kernel_lib)
-    .with_debug_mode(true)
-    .with_dynamic_library(&CoreLibrary::default())
+    .with_dynamic_library(&CoreLibrary::default())    .with_dynamic_library(&StdLibrary::default())
+>>>>>>> 1d3ff0866 (Improve tests for always-enabled debug mode after issue #1821)
     .unwrap();
 
 // Assemble our program
