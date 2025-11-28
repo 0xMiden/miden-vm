@@ -86,7 +86,7 @@ pub struct Assembler {
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
-  }
+}
 
 impl Default for Assembler {
     fn default() -> Self {
@@ -130,17 +130,6 @@ impl Assembler {
     pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
         self.warnings_as_errors = yes;
         self
-    }
-
-    /// Puts the assembler into the debug mode.
-    pub fn with_debug_mode(mut self, yes: bool) -> Self {
-        self.in_debug_mode = yes;
-        self
-    }
-
-    /// Sets the debug mode flag of the assembler
-    pub fn set_debug_mode(&mut self, yes: bool) {
-        self.in_debug_mode = yes;
     }
 }
 
@@ -322,11 +311,7 @@ impl Assembler {
         self.warnings_as_errors
     }
 
-    /// Returns true if this assembler was instantiated in debug mode.
-    pub fn in_debug_mode(&self) -> bool {
-        self.in_debug_mode
-    }
-
+  
     /// Returns a reference to the kernel for this assembler.
     ///
     /// If the assembler was instantiated without a kernel, the internal kernel will be empty.
