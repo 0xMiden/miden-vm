@@ -103,8 +103,8 @@ pub enum SystemEvent {
     /// elements in that list. The list is looked up in the advice map using the word at the top of
     /// the operand stack as the key.
     ///
-    /// Notice that the resulting elements list is padded with zeros, increasing its length to the
-    /// next multiple of 4.
+    /// Notice that the elements list obtained from the advice map will be padded with zeros,
+    /// increasing its length to the next multiple of 4.
     ///
     /// Inputs:
     ///   Operand stack: [KEY, ...]
@@ -121,8 +121,8 @@ pub enum SystemEvent {
     /// elements in that list. The list is looked up in the advice map using the word at the top of
     /// the operand stack as the key.
     ///
-    /// Notice that the resulting elements list is padded with zeros, increasing its length to the
-    /// next multiple of 8.
+    /// Notice that the elements list obtained from the advice map will be padded with zeros,
+    /// increasing its length to the next multiple of 8.
     ///
     /// Inputs:
     ///   Operand stack: [KEY, ...]
