@@ -7,7 +7,7 @@
 - Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
 - Added new `memcopy_elements` procedure for the `std::mem` module ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
-- Add padding option for the `adv.push_mapvaln` instruction ([]()).
+- Add padding option for the `adv.push_mapvaln` instruction ([#2398](https://github.com/0xMiden/miden-vm/pull/2398)).
 
 #### Changes
 

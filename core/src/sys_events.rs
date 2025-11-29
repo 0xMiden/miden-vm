@@ -85,7 +85,7 @@ pub enum SystemEvent {
     /// Pushes a list of field elements onto the advice stack, along with the number of elements in
     /// that list. The list is looked up in the advice map using the word at the top of the operand
     /// stack as the key.
-    /// 
+    ///
     /// Notice that the resulting elements list is not padded.
     ///
     /// Inputs:
@@ -99,10 +99,10 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     MapValueToStackN0,
 
-    /// Pushes a padded list of field elements onto the advice stack, along with the number of 
+    /// Pushes a padded list of field elements onto the advice stack, along with the number of
     /// elements in that list. The list is looked up in the advice map using the word at the top of
     /// the operand stack as the key.
-    /// 
+    ///
     /// Notice that the resulting elements list is padded with zeros, increasing its length to the
     /// next multiple of 4.
     ///
@@ -117,10 +117,10 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     MapValueToStackN4,
 
-    /// Pushes a padded list of field elements onto the advice stack, along with the number of 
+    /// Pushes a padded list of field elements onto the advice stack, along with the number of
     /// elements in that list. The list is looked up in the advice map using the word at the top of
     /// the operand stack as the key.
-    /// 
+    ///
     /// Notice that the resulting elements list is padded with zeros, increasing its length to the
     /// next multiple of 8.
     ///
