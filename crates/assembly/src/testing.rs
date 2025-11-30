@@ -62,15 +62,8 @@ impl TestContext {
             let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
-        // Note: we do not set debug mode by default because we do not want AsmOp decorators to be
-        // inserted in our programs
         let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
         Self { source_manager, assembler }
-    }
-
-    pub fn with_debug_info(self, _yes: bool) -> Self {
-        // Debug mode is now always enabled, so this method is a no-op
-        self
     }
 
     #[inline(always)]

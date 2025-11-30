@@ -892,6 +892,20 @@ impl Assembler {
         Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_id))
     }
 
+    /// Creates an assembly operation decorator for control flow nodes.
+    fn create_asmop_decorator(
+        &self,
+        span: &SourceSpan,
+        op_name: &str,
+        proc_ctx: &ProcedureContext,
+    ) -> AssemblyOp {
+        let location = proc_ctx.source_manager().location(*span).ok();
+        let context_name = proc_ctx.path().to_string();
+        let num_cycles = 0;
+        let should_break = false;
+        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string(), should_break)
+    }
+
     fn compile_body<'a, I>(
         &self,
         body: I,
@@ -950,12 +964,7 @@ impl Assembler {
                     }
 
                     // Add an assembly operation decorator to the if node.
-                    let location = proc_ctx.source_manager().location(*span).ok();
-                    let context_name = proc_ctx.path().to_string();
-                    let num_cycles = 0;
-                    let op = "if.true".to_string();
-                    let should_break = false;
-                    let op = AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let op = self.create_asmop_decorator(span, "if.true", proc_ctx);
                     let decorator_id = block_builder
                         .mast_forest_builder_mut()
                         .ensure_decorator(Decorator::AsmOp(op))?;
@@ -1018,12 +1027,7 @@ impl Assembler {
                     }
 
                     // Add an assembly operation decorator to the loop node.
-                    let location = proc_ctx.source_manager().location(*span).ok();
-                    let context_name = proc_ctx.path().to_string();
-                    let num_cycles = 0;
-                    let op = "while.true".to_string();
-                    let should_break = false;
-                    let op = AssemblyOp::new(location, context_name, num_cycles, op, should_break);
+                    let op = self.create_asmop_decorator(span, "while.true", proc_ctx);
                     let decorator_id = block_builder
                         .mast_forest_builder_mut()
                         .ensure_decorator(Decorator::AsmOp(op))?;

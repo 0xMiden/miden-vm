@@ -4232,7 +4232,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
 
 #[test]
 fn test_issue_2181_locaddr_bug_assembly() -> TestResult {
-    let context = TestContext::default().with_debug_info(true);
+    let context = TestContext::default();
     let source = source_file!(
         &context,
         r#"
