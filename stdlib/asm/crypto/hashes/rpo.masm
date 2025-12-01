@@ -68,7 +68,7 @@ end
 pub proc absorb_double_words_from_memory
     dup.13 dup.13 neq  # (4 cycles )
     while.true
-        mem_stream hperm # (2 cycles)
+        mem_stream exec.permute # (2 cycles)
         dup.13 dup.13 neq  # (4 cycles )
     end
 end
@@ -154,7 +154,7 @@ pub proc hash_memory_words
         # => [D, A', end_addr, end_addr, ...]
 
         # set the padding and compute the permutation (5 cycles)
-        padw hperm
+        padw exec.permute
     end
 
     exec.squeeze_digest
@@ -257,6 +257,20 @@ pub proc merge
     hmerge
 end
 
+#! Performs RPO permutation on the hasher state.
+#!
+#! Input: [C, B, A, ...]
+#! Output: [C', B', A', ...]
+#!
+#! Where:
+#! - A, B, C are the three words of the hasher state
+#! - A', B', C' are the permuted state words
+#!
+#! Cycles: 1
+pub proc permute
+    hperm
+end
+
 # HELPER PROCEDURES
 # =================================================================================================
 
@@ -314,8 +328,8 @@ end
 #! state.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
 #!
 #! Inputs:  [C, B, A, ptr, end_pairs_addr, num_elements%8]
 #! Outputs: [HASH]
@@ -441,7 +455,7 @@ proc hash_memory_with_state
         # we have number of elements not divisible by 8, so we will have at least one element to
         # hash here (which turns out to be d_0)
 
-        hperm
+        exec.permute
         # => [F, E, D]
 
         exec.squeeze_digest

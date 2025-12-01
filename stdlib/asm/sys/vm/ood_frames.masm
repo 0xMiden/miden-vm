@@ -1,3 +1,5 @@
+use std::crypto::hashes::rpo
+
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
 #! Takes as input an RPO hasher state and a pointer, and loads from the advice provider the OOD
@@ -14,6 +16,6 @@ pub proc process_row_ood_evaluations
     repeat.24
         adv_pipe
         horner_eval_ext
-        hperm
+        exec.rpo::permute
     end
 end

@@ -1,3 +1,4 @@
+use std::crypto::hashes::rpo
 use std::stark::random_coin
 use std::stark::constants
 
@@ -33,14 +34,14 @@ end
 #! Loads FRI remainder polynomial of degree strictly less than `(max_degree + 1) / 2`.
 proc load_fri_remainder_poly_max_degree_plus_1_half
     repeat.16
-        adv_pipe hperm
+        adv_pipe exec.rpo::permute
     end
 end
 
 #! Loads FRI remainder polynomial of degree strictly less than `max_degree + 1`.
 proc load_fri_remainder_poly_max_degree_plus_1
     repeat.32
-        adv_pipe hperm
+        adv_pipe exec.rpo::permute
     end
 end
 

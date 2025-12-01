@@ -266,14 +266,14 @@ impl OverflowTable {
     /// and `restore_context` functions.
     fn save_stack_to_history(&mut self) {
         let clk = self.clk;
-        if self.history.is_some() {
-            let stack_after_op: Vec<Felt> = self
-                .get_current_overflow_stack()
-                .iter()
-                .map(OverflowStackEntry::value)
-                .collect();
+        let stack_after_op: Vec<Felt> = self
+            .get_current_overflow_stack()
+            .iter()
+            .map(OverflowStackEntry::value)
+            .collect();
 
-            self.history.as_mut().unwrap().save_stack_to_history(clk, stack_after_op);
+        if let Some(history) = &mut self.history {
+            history.save_stack_to_history(clk, stack_after_op);
         }
     }
 }

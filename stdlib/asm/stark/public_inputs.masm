@@ -147,7 +147,7 @@ proc load_base_store_extension_double_word
     # => [0, a7, 0, a6, 0, a5, 0, a4, C, ptr, ...]
 
     # 7) Save the third 2 extension field elements
-    #    We also load the first 4 base elements as a word for use by `hperm`
+    #    We also load the first 4 base elements as a word for use by `rpo::permute`
     swapw
     dup.12
     add.8
@@ -156,7 +156,7 @@ proc load_base_store_extension_double_word
     swapw
 
     # 8) Save the fourth 2 extension field elements
-    #    We also load the second 4 base elements as a word for use by `hperm` and update the pointer
+    #    We also load the second 4 base elements as a word for use by `rpo::permute` and update the pointer
     dup.12
     add.16 swap.13
     add.12
