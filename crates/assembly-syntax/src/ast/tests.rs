@@ -932,7 +932,7 @@ fn test_invalid_mapvaln_pad() {
         "1 | begin adv.push_mapvaln.3 end",
         "  :                        ^",
         "  `----",
-        " help: valid padding values are limited to 0, 4, and 8"
+        " help: valid padding values are 0, 4, and 8"
     );
 }
 

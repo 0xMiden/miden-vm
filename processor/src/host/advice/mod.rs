@@ -168,16 +168,16 @@ impl AdviceProvider {
         // get the advice map value
         let map_value = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
 
-        // if pad_to was provided (not equal 0), resize the map_value vector to the next multiple of
-        // pad_to
-        let mut map_value_vec = map_value.to_vec();
+        // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
+        // final (padded) elements list length will be the next multiple of pad_to
         if pad_to != 0 {
-            map_value_vec
-                .resize_with(map_value.len().next_multiple_of(pad_to as usize), Felt::default);
+            let num_pad_elements =
+                map_value.len().next_multiple_of(pad_to as usize) - map_value.len();
+            self.stack.extend(core::iter::repeat_n(Felt::default(), num_pad_elements));
         }
 
-        // push the padded and reversed map_value and its initial length to the advice stack
-        self.stack.extend(map_value_vec.iter().rev());
+        // push the reversed map_value list and its initial length to the advice stack
+        self.stack.extend(map_value.iter().rev());
         if include_len {
             self.stack
                 .push(Felt::try_from(map_value.len() as u64).expect("value length too big"));
