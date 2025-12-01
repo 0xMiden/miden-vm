@@ -548,6 +548,47 @@ fn test_smt_set_remove_in_multi() {
     expect_remove(&smt, K2);
 }
 
+/// Tests `peek` on every key present in the SMT, as well as an empty leaf
+#[test]
+fn test_smt_peek() {
+    fn expect_value_from_peek(key: Word, value: Word, smt: &Smt) {
+        let source = "
+            use std::collections::smt
+
+            begin
+                # get the value
+                exec.smt::peek adv_push.4
+                # => [VALUE]
+
+                # truncate the stack
+                swapw dropw
+                # => [VALUE]
+            end
+        ";
+        let mut initial_stack = Vec::new();
+        append_word_to_vec(&mut initial_stack, smt.root());
+        append_word_to_vec(&mut initial_stack, key);
+        let expected_output = build_expected_stack(value, smt.root());
+
+        let (store, advice_map) = build_advice_inputs(smt);
+        build_test!(source, &initial_stack, &[], store, advice_map).expect_stack(&expected_output);
+    }
+
+    let smt = Smt::with_entries(LEAVES).unwrap();
+
+    // Peek all leaves present in tree
+    for (key, value) in LEAVES {
+        expect_value_from_peek(key, value, &smt);
+    }
+
+    // Peek an empty leaf
+    expect_value_from_peek(
+        Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
+        EMPTY_WORD,
+        &smt,
+    );
+}
+
 // HELPER FUNCTIONS
 // ================================================================================================
 

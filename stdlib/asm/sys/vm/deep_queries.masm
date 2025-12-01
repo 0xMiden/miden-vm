@@ -1,3 +1,4 @@
+use std::crypto::hashes::rpo
 use std::stark::constants
 use std::stark::deep_queries
 
@@ -146,7 +147,7 @@ proc load_main_segment_execution_trace
     repeat.10
         adv_pipe
         horner_eval_base
-        hperm
+        exec.rpo::permute
     end
 end
 
@@ -196,7 +197,7 @@ proc load_aux_segment_execution_trace
     repeat.2
         adv_pipe
         horner_eval_ext
-        hperm
+        exec.rpo::permute
     end
 end
 
@@ -247,6 +248,6 @@ proc load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
         horner_eval_ext
-        hperm
+        exec.rpo::permute
     end
 end

@@ -66,7 +66,7 @@ end
 pub proc absorb_double_words_from_memory
   dup.13 dup.13 neq  # (4 cycles )
   while.true
-    mem_stream hperm # (2 cycles)
+    mem_stream exec.permute # (2 cycles)
     dup.13 dup.13 neq  # (4 cycles )
   end
 end
@@ -152,7 +152,7 @@ pub proc hash_memory_words
     # => [D, A', end_addr, end_addr, ...]
 
     # set the padding and compute the permutation (5 cycles)
-    padw hperm
+    padw exec.permute
   end
 
   exec.squeeze_digest
@@ -217,8 +217,8 @@ end
 #! state.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
 #!
 #! Inputs:  [C, B, A, ptr, end_pairs_addr, num_elements%8]
 #! Outputs: [HASH]
@@ -344,7 +344,7 @@ pub proc hash_memory_with_state
         # we have number of elements not divisible by 8, so we will have at least one element to
         # hash here (which turns out to be d_0)
 
-        hperm
+        exec.permute
         # => [F, E, D]
 
         exec.squeeze_digest
@@ -355,8 +355,8 @@ end
 #! Computes hash of Felt values starting at the specified memory address.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
 #!
 #! Inputs:  [ptr, num_elements]
 #! Outputs: [HASH]
@@ -370,7 +370,7 @@ end
 #! - If number of elements divides by 8: 52 cycles + 3 * words
 #! - Else: 185 cycles + 3 * words
 #! where `words` is the number of quads of input values.
-pub proc hash_memory
+pub proc hash_elements
     # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
     push.0 movdn.2
     # => [ptr, num_elements, pad_inputs_flag]
@@ -380,4 +380,43 @@ pub proc hash_memory
 
     exec.hash_memory_with_state
     # => [HASH]
+end
+
+#! Computes RPO hash of a single 256-bit input (1 word = 4 field elements).
+#!
+#! Input: [A, ...]
+#! Output: [B, ...]
+#!
+#! Where:
+#! - A = [a_0, a_1, a_2, a_3] represents 4 field elements (1 word)
+#! - B = [b_0, b_1, b_2, b_3] = RPO256(A)
+pub proc hash
+    hash
+end
+
+#! Merges two 256-bit digests (2 words = 8 field elements) via RPO hash.
+#!
+#! Input: [B, A, ...]
+#! Output: [C, ...]
+#!
+#! Where:
+#! - A = [a_0, a_1, a_2, a_3] represents first digest (1 word)
+#! - B = [b_0, b_1, b_2, b_3] represents second digest (1 word)
+#! - C = [c_0, c_1, c_2, c_3] = RPO256(A || B)
+pub proc merge
+    hmerge
+end
+
+#! Performs RPO permutation on the hasher state.
+#!
+#! Input: [C, B, A, ...]
+#! Output: [C', B', A', ...]
+#!
+#! Where:
+#! - A, B, C are the three words of the hasher state
+#! - A', B', C' are the permuted state words
+#!
+#! Cycles: 1
+pub proc permute
+    hperm
 end

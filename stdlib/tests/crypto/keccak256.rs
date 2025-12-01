@@ -13,7 +13,7 @@ use miden_core::{
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_stdlib::handlers::keccak256::{
-    KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
+    KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile, KeccakPreimage,
 };
 
 use crate::helpers::{masm_push_felts, masm_store_felts};
@@ -29,7 +29,7 @@ const INPUT_MEMORY_ADDR: u32 = 128;
 #[test]
 fn test_keccak_handlers() {
     // Test various input sizes including edge cases
-    let hash_memory_inputs: Vec<Vec<u8>> = vec![
+    let hash_bytes_inputs: Vec<Vec<u8>> = vec![
         // empty
         vec![],
         // representative small sizes and alignments
@@ -41,10 +41,10 @@ fn test_keccak_handlers() {
         (0..33).collect(),
     ];
 
-    for input in &hash_memory_inputs {
+    for input in &hash_bytes_inputs {
         test_keccak_handler(input);
-        test_keccak_hash_memory_impl(input);
-        test_keccak_hash_memory(input);
+        test_keccak_hash_bytes_impl(input);
+        test_keccak_hash_bytes(input);
     }
 }
 
@@ -65,7 +65,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes, ...]
 
-                emit.event("{KECCAK_HASH_MEMORY_EVENT_NAME}")
+                emit.event("{KECCAK_HASH_BYTES_EVENT_NAME}")
                 drop drop
             end
             "#,
@@ -90,7 +90,7 @@ fn test_keccak_handler(input_u8: &[u8]) {
     );
 }
 
-fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
+fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
     let preimage = KeccakPreimage::new(input_u8.to_vec());
 
@@ -110,7 +110,7 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
-                exec.keccak256::hash_memory_impl
+                exec.keccak256::hash_bytes_impl
                 # => [COMM, TAG, DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
@@ -135,15 +135,15 @@ fn test_keccak_hash_memory_impl(input_u8: &[u8]) {
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected a single deferred request");
-    assert_eq!(deferred[0].event_id(), KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id());
+    assert_eq!(deferred[0].event_id(), KECCAK_HASH_BYTES_EVENT_NAME.to_event_id());
     assert_eq!(deferred[0].calldata(), preimage.as_ref());
     assert_eq!(deferred[0], preimage.into());
 
     let advice_stack = output.advice_provider().stack();
-    assert!(advice_stack.is_empty(), "advice stack should be empty after hash_memory_impl");
+    assert!(advice_stack.is_empty(), "advice stack should be empty after hash_bytes_impl");
 }
 
-fn test_keccak_hash_memory(input_u8: &[u8]) {
+fn test_keccak_hash_bytes(input_u8: &[u8]) {
     let len_bytes = input_u8.len();
     let preimage = KeccakPreimage::new(input_u8.to_vec());
 
@@ -163,7 +163,7 @@ fn test_keccak_hash_memory(input_u8: &[u8]) {
                 push.{len_bytes}.{INPUT_MEMORY_ADDR}
                 # => [ptr, len_bytes]
 
-                exec.keccak256::hash_memory
+                exec.keccak256::hash_bytes
                 # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
@@ -194,7 +194,7 @@ fn test_keccak_hash_1to1() {
                 {stack_stores_source}
                 # => [INPUT_LO, INPUT_HI]
 
-                exec.keccak256::hash_1to1
+                exec.keccak256::hash
                 # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack
@@ -225,7 +225,7 @@ fn test_keccak_hash_2to1() {
                 {stack_stores_source}
                 # => [INPUT_L_U32[8], INPUT_R_U32[8]]
 
-                exec.keccak256::hash_2to1
+                exec.keccak256::merge
                 # => [DIGEST_U32[8]]
 
                 exec.sys::truncate_stack

@@ -18,7 +18,7 @@ use crate::handlers::{
     bytes_to_packed_u32_felts,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
-    keccak256::{KECCAK_HASH_MEMORY_EVENT_NAME, KeccakPrecompile},
+    keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -73,7 +73,7 @@ impl StdLibrary {
     /// List of all `EventHandlers` required to run all of the standard library.
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
-            (KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
@@ -87,7 +87,7 @@ impl StdLibrary {
     /// standard library precompile requests.
     pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
         PrecompileVerifierRegistry::new()
-            .with_verifier(&KECCAK_HASH_MEMORY_EVENT_NAME, Arc::new(KeccakPrecompile))
+            .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
             .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
     }
 }

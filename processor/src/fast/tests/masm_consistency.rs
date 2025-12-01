@@ -182,10 +182,20 @@ use super::*;
 )]
 // ---- horner ops --------------------------------
 #[case(None,
-    "begin
+    "begin 
         push.1.2.3.4 mem_storew_be.40 dropw
         horner_eval_base
     end",
+    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
+    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
+        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
+        14_u32.into(), 15_u32.into(), 16_u32.into()]
+)]
+#[case(None,
+    "begin 
+        push.1.2.3.4 mem_storew_be.40 dropw
+        horner_eval_ext
+        end",
     // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
     vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
         8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
@@ -198,16 +208,6 @@ use super::*;
     end",
     vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
          5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
-)]
-#[case(None,
-    "begin
-        push.1.2.3.4 mem_storew_be.40 dropw
-        horner_eval_ext
-    end",
-    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
-    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
-        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
-        14_u32.into(), 15_u32.into(), 16_u32.into()]
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected

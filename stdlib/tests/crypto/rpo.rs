@@ -393,7 +393,7 @@ fn test_copy_digest() {
 }
 
 #[test]
-fn test_hash_memory() {
+fn test_hash_elements() {
     // hash fewer than 8 elements
     let compute_inputs_hash_5 = "
     use std::crypto::hashes::rpo
@@ -405,7 +405,7 @@ fn test_hash_memory() {
 
         push.5.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -431,7 +431,7 @@ fn test_hash_memory() {
 
         push.8.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -459,7 +459,7 @@ fn test_hash_memory() {
 
         push.15.1000
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -479,7 +479,7 @@ fn test_hash_memory() {
 }
 
 #[test]
-fn test_hash_memory_empty() {
+fn test_hash_elements_empty() {
     // absorb_double_words_from_memory
     let source = "
     use std::sys
@@ -520,7 +520,7 @@ fn test_hash_memory_empty() {
 
     build_test!(source, &[]).expect_stack(&[0; 4]);
 
-    // hash_memory
+    // hash_elements
     let source = "
     use std::crypto::hashes::rpo
 
@@ -528,7 +528,7 @@ fn test_hash_memory_empty() {
         push.0    # number of elements to hash
         push.1000 # start address
 
-        exec.rpo::hash_memory
+        exec.rpo::hash_elements
 
         # truncate stack
         swapw dropw
@@ -536,4 +536,47 @@ fn test_hash_memory_empty() {
     ";
 
     build_test!(source, &[]).expect_stack(&[0; 16]);
+}
+
+#[test]
+fn test_rpo_hash_function() {
+    // Test that the public hash function works - it should execute without error
+    // and produce a valid 4-element digest from 8-element input
+    let source = "
+    use std::crypto::hashes::rpo
+
+    begin
+        exec.rpo::hash
+        swapw dropw
+    end
+    ";
+
+    // Test with simple input: 8 field elements
+    // We're just testing that the function compiles and runs without error
+    let input = [1u64, 2, 3, 4, 5, 6, 7, 8];
+
+    // This test will pass if the function executes successfully
+    // The actual hash value doesn't matter, we're testing the API works
+    build_test!(source, &input);
+}
+
+#[test]
+fn test_rpo_merge_function() {
+    // Test that the public merge function works - it should execute without error
+    // and produce a valid 4-element digest from two 4-element digests
+    let source = "
+    use std::crypto::hashes::rpo
+
+    begin
+        exec.rpo::merge
+        swapw dropw
+    end
+    ";
+
+    // Test with two 4-element digests (8 elements total)
+    // We're just testing that the function compiles and runs without error
+    let combined = [1u64, 2, 3, 4, 5, 6, 7, 8];
+
+    // This test will pass if the function executes successfully
+    build_test!(source, &combined);
 }

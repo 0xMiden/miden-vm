@@ -6,7 +6,7 @@ fn blake3_hash_64_bytes() {
     use std::crypto::hashes::blake3
 
     begin
-        exec.blake3::hash_2to1
+        exec.blake3::merge
         swapdw dropw dropw
     end
     ";
@@ -41,7 +41,7 @@ fn blake3_hash_32_bytes() {
     use std::crypto::hashes::blake3
 
     begin
-        exec.blake3::hash_1to1
+        exec.blake3::hash
         swapdw dropw dropw
     end
     ";

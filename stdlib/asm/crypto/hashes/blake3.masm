@@ -748,21 +748,21 @@ proc compress
     exec.round
 end
 
-#! Blake3 2-to-1 hash function, which takes 64 -bytes input and produces 32 -bytes output digest
+#! Blake3 2-to-1 hash function (merge), which takes 64-bytes input and produces 32-bytes output digest
 #!
 #! Expected stack state:
 #!
 #! [msg0, msg1, msg2, msg3, msg4, msg5, msg6, msg7, msg8, msg9, msg10, msg11, msg12, msg13, msg14, msg15, ...]
 #!
-#! msg`i` -> 32 -bit message word | i ∈ [0, 16)
+#! msg`i` -> 32-bit message word | i ∈ [0, 16)
 #!
 #! Final stack state:
 #!
 #! [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 #!
-#! dig`i` -> 32 -bit digest word | i ∈ [0, 8)
+#! dig`i` -> 32-bit digest word | i ∈ [0, 8)
 @locals(16)
-pub proc hash_2to1
+pub proc merge
     locaddr.12
     locaddr.8
     locaddr.4
@@ -793,21 +793,21 @@ pub proc hash_2to1
     exec.finalize
 end
 
-#! Blake3 1-to-1 hash function, which takes 32 -bytes input and produces 32 -bytes output digest
+#! Blake3 1-to-1 hash function (hash), which takes 32-bytes input and produces 32-bytes output digest
 #!
 #! Expected stack state:
 #!
 #! [msg0, msg1, msg2, msg3, msg4, msg5, msg6, msg7, ...]
 #!
-#! msg`i` -> 32 -bit message word | i ∈ [0, 8)
+#! msg`i` -> 32-bit message word | i ∈ [0, 8)
 #!
 #! Final stack state:
 #!
 #! [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 #!
-#! dig`i` -> 32 -bit digest word | i ∈ [0, 8)
+#! dig`i` -> 32-bit digest word | i ∈ [0, 8)
 @locals(16)
-pub proc hash_1to1
+pub proc hash
     # Pad 32 -bytes input message with zero bytes to make
     # 64 -bytes, which is processed same as 2-to-1 hashing
     push.0.0.0.0.0.0.0.0

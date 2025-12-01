@@ -1511,7 +1511,7 @@ proc consume_padding_message_schedule
     movdn.7
 end
 
-#! Given 64 -bytes input, this routine computes 32 -bytes SHA256 digest
+#! SHA256 2-to-1 hash (merge): Given 64 -bytes input, computes 32 -bytes SHA256 digest
 #!
 #! Input: [m0, m1, m2, m3, m4, m5, m6, m7, m8, m9, m10, m11, m12, m13, m14, m15, ...]
 #! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
@@ -1523,7 +1523,7 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-pub proc hash_2to1
+pub proc merge
     push.0x5be0cd19.0x1f83d9ab.0x9b05688c.0x510e527f
     push.0xa54ff53a.0x3c6ef372.0xbb67ae85.0x6a09e667
 
@@ -1531,7 +1531,7 @@ pub proc hash_2to1
     exec.consume_padding_message_schedule
 end
 
-#! Given 32 -bytes input, this routine computes 32 -bytes SHA256 digest
+#! SHA256 1-to-1 hash: Given 32 -bytes input, computes 32 -bytes SHA256 digest
 #!
 #! Expected stack state:
 #!
@@ -1545,7 +1545,7 @@ end
 #! maintaining big endian byte order.
 #!
 #! SHA256 digest is represented in terms of eight 32 -bit words ( big endian byte order ).
-pub proc hash_1to1
+pub proc hash
     # apply padding, see padding rule in section 5.1.1 of
     # https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
     push.256.0.0.0.0.0.0.2147483648
@@ -1565,7 +1565,7 @@ end
 #! Input:  [addr, len, ...]
 #! Output: [dig0, dig1, dig2, dig3, dig4, dig5, dig6, dig7, ...]
 @locals(48)
-pub proc hash_memory
+pub proc hash_bytes
     # loc.0 (input address)
     loc_store.0
 

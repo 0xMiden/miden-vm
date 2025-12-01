@@ -1035,7 +1035,7 @@ impl Deserializable for TypeDeserializer {
     }
 }
 
-#[cfg(any(test, feature = "arbitrary"))]
+#[cfg(feature = "arbitrary")]
 impl proptest::prelude::Arbitrary for Library {
     type Parameters = ();
 

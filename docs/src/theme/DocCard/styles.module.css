@@ -1,0 +1,36 @@
+/* Custom DocCard styling - fix underlines and internal spacing */
+
+.customCard {
+  display: block;
+  margin-top: 0 !important;
+  margin-bottom: 1rem;
+  padding-top: 0 !important;
+}
+
+/* Fix internal card padding */
+.customCard :global(.card__header) {
+  padding: 1rem 1rem 0.5rem 1rem !important;
+}
+
+.customCard :global(.card__body) {
+  padding: 0.5rem 1rem 1rem 1rem !important;
+}
+
+/* Remove any top margin/padding from card title */
+.customCard :global(.card__title),
+.customCard :global(.card__header h2),
+.customCard :global(.card__header h3) {
+  margin-top: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* Remove underlines from all card links */
+.customCard :global(a),
+.customCard :global(.card__header a),
+.customCard :global(.card__body a),
+.customCard :global(h2 a),
+.customCard :global(h3 a),
+.customCard :global(p a) {
+  text-decoration: none !important;
+}
+

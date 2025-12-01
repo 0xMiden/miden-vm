@@ -5,7 +5,7 @@ use miden_utils_testing::{
 use sha2::{Digest, Sha256};
 
 #[test]
-fn sha256_hash_memory() {
+fn sha256_hash_bytes() {
     let length_in_bytes = rand_value::<u64>() & 1023; // length: 0-1023
     let ibytes: Vec<u8> = rand_vector(length_in_bytes as usize);
     let ipadding: Vec<u8> = vec![0; (4 - (length_in_bytes as usize % 4)) % 4];
@@ -48,7 +48,7 @@ fn sha256_hash_memory() {
         # Compute hash of memory address 10000, 10004, ...
         mem_load.1
         push.10000
-        exec.sha256::hash_memory
+        exec.sha256::hash_bytes
 
         # truncate the stack
         swapdw dropw dropw
@@ -75,7 +75,7 @@ fn sha256_2_to_1_hash() {
     use std::crypto::hashes::sha256
 
     begin
-        exec.sha256::hash_2to1
+        exec.sha256::merge
     end";
 
     let input0 = rand_array::<Felt, 4>().into_bytes();
@@ -110,7 +110,7 @@ fn sha256_1_to_1_hash() {
     use std::crypto::hashes::sha256
 
     begin
-        exec.sha256::hash_1to1
+        exec.sha256::hash
     end";
 
     let ibytes = rand_array::<Felt, 4>().into_bytes();

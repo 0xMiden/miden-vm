@@ -1,5 +1,6 @@
 #! Disclaimer: most of the procedures in this file assume that the input pointers are word-aligned.
 
+use std::crypto::hashes::rpo
 use std::stark::constants
 use std::stark::utils
 
@@ -123,7 +124,7 @@ end
 #! the trace length, number of queries, the number of bits of grinding.
 #! Currently, this part, as well as the rest of the STARK verifier assumes a blowup factor
 #! equal to 8.
-#! The ouput of this procedure is the capacity portion of the state after applying `hperm`.
+#! The ouput of this procedure is the capacity portion of the state after applying `rpo::permute`.
 #!
 #! Input: [log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 #! Output: [C, ...]
@@ -135,7 +136,7 @@ pub proc init_seed
     dup.1 exec.constants::set_number_queries
     dup.2 exec.constants::set_grinding_factor
 
-    # Pre-load constants used by hperm into memory and initialize the state of the random coin to zeros.
+    # Pre-load constants used by rpo::permute into memory and initialize the state of the random coin to zeros.
     # Since memory beyond 3 * 2^30 does not have any special meaning, we can use the memory region
     # starting from address 2^32 - 1 in decreasing order to hold constants that are used throughout
     # the `verify` procedure.
@@ -222,7 +223,7 @@ pub proc init_seed
     movdnw.2
     # => [B, A, 0, 0, 0, c, ...]
 
-    hperm
+    exec.rpo::permute
     dropw
     dropw
     # => [C, ...]
@@ -277,7 +278,7 @@ pub proc reseed
     exec.get_rate_2
     # => [R2, R1, C, ...] (13 cycles)
 
-    hperm
+    exec.rpo::permute
     # => [R2', R1', C`, ...] (1 cycles)
 
     # Save the new state to memory
@@ -570,7 +571,7 @@ pub proc generate_list_indices
     exec.constants::c_ptr mem_loadw_be
     exec.get_rate_1
     exec.get_rate_2
-    hperm
+    exec.rpo::permute
     #=> [R2', R1, C, query_ptr+26, mask, depth, num_queries, ...]
 
     # Save the new state
@@ -619,7 +620,7 @@ pub proc generate_list_indices
         exec.constants::c_ptr mem_loadw_be
         exec.get_rate_1
         exec.get_rate_2
-        hperm
+        exec.rpo::permute
         #=> [R2, R1, C, query_ptr'+32, mask, depth, num_remaining_iterations, remainder, ...]
 
         # Save the new state
@@ -713,7 +714,7 @@ pub proc check_pow
     # Load the second half of rate portion and apply the permutation
     padw
     exec.constants::r2_ptr mem_loadw_be
-    hperm
+    exec.rpo::permute
     #=> [R2, R1, C, mask, ...]
 
     # Save the new random coin state

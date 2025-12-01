@@ -1,3 +1,4 @@
+use std::crypto::hashes::rpo
 use std::stark::constants
 use std::pcs::fri::helper
 
@@ -139,7 +140,7 @@ pub proc verify_query_layer
     swapw
     padw
     adv_pipe
-    hperm
+    exec.rpo::permute
     # => [T2, T1, T0, ptr, V, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ..]
 
     # assert T1 == V (16 cycles)

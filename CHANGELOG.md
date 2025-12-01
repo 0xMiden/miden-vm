@@ -6,7 +6,8 @@
 
 - Added new `memcopy` procedure for the `std::mem` module. ([#2361](https://github.com/0xMiden/miden-vm/pull/2361)).
 - Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
-- Added new `memcopy_elements` procedure for the `std::mem` module. ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+- Added new `memcopy_elements` procedure for the `std::mem` module ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+- Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
 
 #### Changes
 
@@ -20,6 +21,9 @@
 - [BREAKING] Make argument order of `Assembler::compile_and_statically_link_from_dir` consistent with `Assembler::assemble_library_from_dir`
 - [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
 - Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
+- [BREAKING] Standardized hash function naming: renamed `hash_2to1` → `merge` and `hash_1to1` → `hash` across all hash modules (blake3, sha256, keccak256, rpo) ([#2381](https://github.com/0xMiden/miden-vm/pull/2381)).
+- Consolidate debug information into `DebugInfo` struct ([#2366](https://github.com/0xMiden/miden-vm/issues/2366)).
+- Wrapped `hperm` instruction in `rpo::permute` procedure ([#2392](https://github.com/0xMiden/miden-vm/pull/2392)).
 
 ## 0.19.1 (2025-11-6)
 
@@ -33,6 +37,9 @@
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2248](https://github.com/0xMiden/miden-vm/pull/2248)).
 - Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
+- Allow `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296))
+- Remove operations `FmpUpdate` and `FmpAdd`, as well as columns `fmp` and `in_syscall` ([#2308](https://github.com/0xMiden/miden-vm/pull/2308))
+- Reduce the constraints degree of `HORNERBASE` ([#2328](https://github.com/0xMiden/miden-vm/pull/2328))
 - [BREAKING] Implement ECDSA precompile ([#2277](https://github.com/0xMiden/miden-vm/pull/2277)).
 - Allowed `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296)).
 - Implemented `AdviceProvider::has_merkle_path()` method.

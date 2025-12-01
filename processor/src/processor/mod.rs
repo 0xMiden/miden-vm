@@ -55,16 +55,36 @@ pub trait Processor: Sized {
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
-
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
+
+    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
+    ///
+    /// The inputs are composed of:
+    ///
+    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
+    ///    itself is arranged as:
+    ///
+    ///    a. `Read` section:
+    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
+    ///       2. Constants of the circuit which are elements in the quadratic extension field,
+    ///
+    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
+    ///    where each gate is encoded as a single base field element.
+    /// 2. the number of quadratic extension field elements read in the `READ` section,
+    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
+    ///
+    /// Stack transition:
+    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
+    ///
+    /// # Note
+    /// All processors need to support this operation.
+    fn op_eval_circuit(
+        &mut self,
+        _err_ctx: &impl ErrorContext,
+        _tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError>;
 
     /// Executes the provided synchronous operation.
     ///
@@ -406,8 +426,15 @@ pub trait OperationHelperRegisters {
     /// The helper registers for the MPVerify and MrUpdate operation.
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
-    /// The helper registers for the HornerEvalBase and HornerEvalExt operations.
-    fn op_horner_eval_registers(
+    /// The helper registers for HornerEvalBase operations.
+    fn op_horner_eval_base_registers(
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS];
+
+    /// The helper registers for HornerEvalExt operations.
+    fn op_horner_eval_ext_registers(
         alpha: QuadFelt,
         k0: Felt,
         k1: Felt,

@@ -1156,8 +1156,8 @@ mod tests {
         ];
 
         // Build COO representation as a HashMap for easy lookup during verification
-        let mut coo_map: std::collections::HashMap<(MastNodeId, usize), Vec<DecoratorId>> =
-            std::collections::HashMap::new();
+        let mut coo_map: alloc::collections::BTreeMap<(MastNodeId, usize), Vec<DecoratorId>> =
+            alloc::collections::BTreeMap::new();
         for (node, op_idx, decorator_id) in &coo_data {
             coo_map.entry((*node, *op_idx)).or_default().push(*decorator_id);
         }
