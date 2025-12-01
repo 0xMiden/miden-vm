@@ -165,115 +165,6 @@ pub proc hash_memory_words
     # => [HASH]
 end
 
-#! Computes hash of Felt values starting at the specified memory address.
-#!
-#! Notice that this procedure does not pad the elements to hash to the next multiple of 8.
-#!
-#! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
-#!
-#! Inputs:  [ptr, num_elements]
-#! Outputs: [HASH]
-#!
-#! Where:
-#! - ptr is the  memory address of the first element to be hashed. This address must be
-#!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed.
-#! - HASH is the resulting hash of the provided memory values.
-#!
-#! Cycles:
-#! - If number of elements divides by 8: 52 cycles + 3 * words
-#! - Else: 185 cycles + 3 * words
-#! where `words` is the number of quads of input values.
-pub proc hash_elements_wo_padding
-    # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
-    push.0 movdn.2
-    # => [ptr, num_elements, pad_inputs_flag = 0]
-
-    exec.prepare_hasher_state
-    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
-
-    exec.hash_memory_with_state
-    # => [HASH]
-end
-
-#! Computes hash of Felt values starting at the specified memory address.
-#!
-#! Notice that this procedure essentially pads the elements to be hashed to the next multiple of 8
-#! by setting the capacity element to 0.
-#!
-#! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
-#!
-#! Inputs:  [ptr, num_elements]
-#! Outputs: [HASH]
-#!
-#! Where:
-#! - ptr is the  memory address of the first element to be hashed. This address must be
-#!   word-aligned - i.e., divisible by 4.
-#! - num_elements is the number of elements to be hashed.
-#! - HASH is the resulting hash of the provided memory values.
-#!
-#! Cycles:
-#! - If number of elements divides by 8: 52 cycles + 3 * words
-#! - Else: 185 cycles + 3 * words
-#! where `words` is the number of quads of input values.
-pub proc hash_elements_w_padding
-    # push the 1 as the pad_inputs flag: this procedure should pad its inputs
-    push.1 movdn.2
-    # => [ptr, num_elements, pad_inputs_flag = 1]
-
-    exec.prepare_hasher_state
-    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
-
-    exec.hash_memory_with_state
-    # => [HASH]
-end
-
-#! Computes RPO hash of a single 256-bit input (1 word = 4 field elements).
-#!
-#! Input: [A, ...]
-#! Output: [B, ...]
-#!
-#! Where:
-#! - A = [a_0, a_1, a_2, a_3] represents 4 field elements (1 word)
-#! - B = [b_0, b_1, b_2, b_3] = RPO256(A)
-pub proc hash
-    hash
-end
-
-#! Merges two 256-bit digests (2 words = 8 field elements) via RPO hash.
-#!
-#! Input: [B, A, ...]
-#! Output: [C, ...]
-#!
-#! Where:
-#! - A = [a_0, a_1, a_2, a_3] represents first digest (1 word)
-#! - B = [b_0, b_1, b_2, b_3] represents second digest (1 word)
-#! - C = [c_0, c_1, c_2, c_3] = RPO256(A || B)
-pub proc merge
-    hmerge
-end
-
-#! Performs RPO permutation on the hasher state.
-#!
-#! Input: [C, B, A, ...]
-#! Output: [C', B', A', ...]
-#!
-#! Where:
-#! - A, B, C are the three words of the hasher state
-#! - A', B', C' are the permuted state words
-#!
-#! Cycles: 1
-pub proc permute
-    hperm
-end
-
-# HELPER PROCEDURES
-# =================================================================================================
-
 #! Initializes the hasher state required for the `hash_memory_with_state` procedure.
 #!
 #! Depending on the provided pad_inputs_flag, this procedure initializes the hasher state using
@@ -296,7 +187,7 @@ end
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
-proc prepare_hasher_state
+pub proc prepare_hasher_state
     # move number of inputs to the top of the stack
     swap
     # => [num_elements, ptr, pad_inputs_flag]
@@ -342,7 +233,7 @@ end
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
 #! - HASH is the resulting hash of the provided memory values.
-proc hash_memory_with_state
+pub proc hash_memory_with_state
     # hash every pair of words
     exec.absorb_double_words_from_memory
     # => [C', B', A', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
@@ -461,4 +352,113 @@ proc hash_memory_with_state
         exec.squeeze_digest
         # => [E]
     end
+end
+
+#! Computes hash of Felt values starting at the specified memory address.
+#!
+#! Notice that this procedure does not pad the elements to hash to the next multiple of 8.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
+#! instruction.
+#!
+#! Inputs:  [ptr, num_elements]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
+#!
+#! Cycles:
+#! - If number of elements divides by 8: 52 cycles + 3 * words
+#! - Else: 185 cycles + 3 * words
+#! where `words` is the number of quads of input values.
+pub proc hash_elements
+    # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
+    push.0 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag = 0]
+
+    exec.prepare_hasher_state
+    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+
+    exec.hash_memory_with_state
+    # => [HASH]
+end
+
+#! Computes hash of Felt values starting at the specified memory address.
+#!
+#! Notice that this procedure essentially pads the elements to be hashed to the next multiple of 8
+#! by setting the capacity element to 0.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
+#! instruction.
+#!
+#! Inputs:  [ptr, num_elements]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
+#!
+#! Cycles:
+#! - If number of elements divides by 8: 52 cycles + 3 * words
+#! - Else: 185 cycles + 3 * words
+#! where `words` is the number of quads of input values.
+pub proc pad_and_hash_elements
+    # push the 1 as the pad_inputs flag: this procedure should pad its inputs
+    push.1 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag = 1]
+
+    exec.prepare_hasher_state
+    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+
+    exec.hash_memory_with_state
+    # => [HASH]
+end
+
+#! Computes RPO hash of a single word (256-bit input).
+#!
+#! Inputs:  [A]
+#! Outputs: [B]
+#!
+#! Where:
+#! - A is the word to be hashed.
+#! - B is the resulting hash, computed as `RPO256(A)`.
+#!
+#! Cycles: 20
+pub proc hash
+    hash
+end
+
+#! Merges two words (256-bit digests) via RPO hash.
+#!
+#! Inputs:  [B, A]
+#! Outputs: [C]
+#!
+#! Where:
+#! - A and B are the words to be merged.
+#! - C is the resulting hash, computed as `RPO256(A || B)`.
+#!
+#! Cycles: 16
+pub proc merge
+    hmerge
+end
+
+#! Performs RPO permutation on the hasher state.
+#!
+#! Inputs:  [C, B, A]
+#! Outputs: [C', B', A']
+#!
+#! Where:
+#! - C, B, A are three words representing the hasher state.
+#! - C', B', A' are the permuted state words.
+#!
+#! Cycles: 1
+pub proc permute
+    hperm
 end

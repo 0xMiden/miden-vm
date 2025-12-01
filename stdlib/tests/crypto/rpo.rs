@@ -405,7 +405,7 @@ fn test_hash_elements_without_padding() {
 
         push.5.1000
 
-        exec.rpo::hash_elements_wo_padding
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -431,7 +431,7 @@ fn test_hash_elements_without_padding() {
 
         push.8.1000
 
-        exec.rpo::hash_elements_wo_padding
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -459,7 +459,7 @@ fn test_hash_elements_without_padding() {
 
         push.15.1000
 
-        exec.rpo::hash_elements_wo_padding
+        exec.rpo::hash_elements
 
         # truncate stack
         swapdw dropw dropw
@@ -528,7 +528,7 @@ fn test_hash_elements_without_padding_empty() {
         push.0    # number of elements to hash
         push.1000 # start address
 
-        exec.rpo::hash_elements_wo_padding
+        exec.rpo::hash_elements
 
         # truncate stack
         swapw dropw

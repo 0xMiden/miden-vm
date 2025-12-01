@@ -107,7 +107,7 @@ pub proc hash_bytes_impl
     dup.1 add.3 u32shr.2 swap
     # => [ptr, len_u32, len_bytes, ...]
 
-    exec.rpo::hash_elements_wo_padding
+    exec.rpo::hash_elements
     # => [COMM_INPUT, len_bytes, ...]
 
     # Prepare TAG = [0, 0, len_bytes, KECCAK_HASH_BYTES_EVENT]
