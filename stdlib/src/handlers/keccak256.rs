@@ -35,9 +35,9 @@ use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
 use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
 
-/// Event name for the keccak256 hash_memory operation.
-pub const KECCAK_HASH_MEMORY_EVENT_NAME: EventName =
-    EventName::new("stdlib::hash::keccak256::hash_memory");
+/// Event name for the keccak256 hash_bytes operation.
+pub const KECCAK_HASH_BYTES_EVENT_NAME: EventName =
+    EventName::new("stdlib::hash::keccak256::hash_bytes");
 
 pub struct KeccakPrecompile;
 
@@ -192,7 +192,7 @@ impl KeccakPreimage {
     /// `[event_id, preimage_u8.len(), 0, 0]` where event_id is computed from the event name.
     fn precompile_tag(&self) -> Word {
         [
-            KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id().as_felt(),
+            KECCAK_HASH_BYTES_EVENT_NAME.to_event_id().as_felt(),
             Felt::new(self.as_ref().len() as u64),
             ZERO,
             ZERO,
@@ -203,7 +203,7 @@ impl KeccakPreimage {
 
 impl From<KeccakPreimage> for PrecompileRequest {
     fn from(preimage: KeccakPreimage) -> Self {
-        let event_id = KECCAK_HASH_MEMORY_EVENT_NAME.to_event_id();
+        let event_id = KECCAK_HASH_BYTES_EVENT_NAME.to_event_id();
         PrecompileRequest::new(event_id, preimage.into_inner())
     }
 }

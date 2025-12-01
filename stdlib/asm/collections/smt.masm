@@ -5,6 +5,11 @@ use std::mem
 use std::sys
 use std::word
 
+# CONSTANTS
+# ================================================================================================
+
+const SMT_PEEK_EVENT = event("stdlib::collections::smt::smt_peek")
+
 # Constant value for the depth at which leaves sit
 const LEAF_DEPTH = 64
 
@@ -199,6 +204,28 @@ pub proc set
             exec.set_multi_leaf
         end
     end
+end
+
+#! Emits the "stdlib::collections::smt::smt_peek" event, which pushes onto the advice stack the
+#! value associated with the specified key in a Sparse Merkle Tree defined by the specified root.
+#!
+#! If no value was previously associated with the specified key, [ZERO; 4] is pushed onto the advice
+#! stack.
+#!
+#! Inputs:
+#!   Operand stack: [KEY, ROOT]
+#!   Advice stack:  []
+#!
+#! Outputs:
+#!   Operand stack: [KEY, ROOT]
+#!   Advice stack:  [VALUE]
+#!
+#! Panics if:
+#! - the tree with the specified root does not exits in the VM's advice provider.
+#!
+#! Cycles: 3 cycles
+pub proc peek
+    emit.SMT_PEEK_EVENT
 end
 
 # GET MULTI-LEAF HELPER

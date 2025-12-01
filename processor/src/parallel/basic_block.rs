@@ -27,7 +27,6 @@ impl CoreTraceFragmentGenerator {
         &mut self,
         first_op_batch: &OpBatch,
         num_groups: Felt,
-        parent_addr: Felt,
     ) -> ControlFlow<()> {
         let row_idx = self.num_rows_built();
 
@@ -36,7 +35,8 @@ impl CoreTraceFragmentGenerator {
 
         // Populate decoder trace columns
         // Set the address to the parent address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = parent_addr;
+        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
+            self.context.state.decoder.parent_addr;
 
         self.append_opcode(Operation::Span.op_code(), row_idx);
 

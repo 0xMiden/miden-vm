@@ -68,6 +68,20 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     MapValueToStack,
 
+    /// Pushes the number of elements in a list of field elements onto the advice stack. The list is
+    /// looked up in the advice map using the specified word from the operand stack as the key.
+    ///
+    /// Inputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [...]
+    ///   Advice map: {KEY: values}
+    ///
+    /// Outputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [values.len(), ...]
+    ///   Advice map: {KEY: values}
+    MapValueCountToStack,
+
     /// Pushes a list of field elements onto the advice stack, and then the number of elements
     /// pushed. The list is looked up in the advice map using the specified word from the operand
     /// stack as the key.
@@ -297,6 +311,7 @@ impl SystemEvent {
             Self::MerkleNodeMerge,
             Self::MerkleNodeToStack,
             Self::MapValueToStack,
+            Self::MapValueCountToStack,
             Self::MapValueToStackN,
             Self::HasMapKey,
             Self::Ext2Inv,
@@ -351,7 +366,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 17;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -372,6 +387,11 @@ impl SystemEvent {
             id: EventId::from_u64(17843484659000820118),
             event: SystemEvent::MapValueToStack,
             name: "sys::map_value_to_stack",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(3470274154276391308),
+            event: SystemEvent::MapValueCountToStack,
+            name: "sys::map_value_count_to_stack",
         },
         SystemEventEntry {
             id: EventId::from_u64(7354377147644073171),
@@ -530,6 +550,7 @@ mod test {
                 SystemEvent::MerkleNodeMerge
                 | SystemEvent::MerkleNodeToStack
                 | SystemEvent::MapValueToStack
+                | SystemEvent::MapValueCountToStack
                 | SystemEvent::MapValueToStackN
                 | SystemEvent::HasMapKey
                 | SystemEvent::Ext2Inv

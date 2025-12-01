@@ -454,7 +454,7 @@ fn is_valid_unquoted_identifier_char(c: char) -> bool {
 // ARBITRARY IMPLEMENTATION
 // ================================================================================================
 
-#[cfg(any(test, feature = "arbitrary"))]
+#[cfg(feature = "arbitrary")]
 impl proptest::prelude::Arbitrary for ProcedureName {
     type Parameters = ();
 

@@ -104,10 +104,10 @@ pub proc hash_to_point
 
     # Absorb the nonce
     padw movdnw.2
-    hperm
+    exec.rpo::permute
 
     # Absorb the message
-    swapw loc_loadw_be.4 swapw hperm
+    swapw loc_loadw_be.4 swapw exec.rpo::permute
 
     # Squeeze the coefficients and save them
     repeat.63
@@ -115,7 +115,7 @@ pub proc hash_to_point
         mem_storew_be
         swapw dup.12 add.8 swap.13 add.4
         mem_storew_be
-        hperm
+        exec.rpo::permute
     end
 
     # Save the last remaining coefficients
@@ -215,7 +215,7 @@ pub proc load_h_s2_and_product
 
         horner_eval_base
 
-        hperm
+        exec.rpo::permute
     end
     # => [Y, D, C, ptr, tau_inv_ptr, acc1, acc0, ...] where D is the digest expected to be PK
 
@@ -254,7 +254,7 @@ pub proc load_h_s2_and_product
         u32overflowing_sub.M assert drop
 
         horner_eval_base
-        hperm
+        exec.rpo::permute
     end
     # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
 
@@ -269,7 +269,7 @@ pub proc load_h_s2_and_product
     repeat.128
         adv_pipe
         horner_eval_base
-        hperm
+        exec.rpo::permute
     end
     # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
 

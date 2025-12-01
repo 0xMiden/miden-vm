@@ -1573,7 +1573,7 @@ use std::math::u64
 
 type Int64 = struct { hi: u32, lo: u32 }
 
-pub proc add(a: Int64, b: Int64) -> Int64
+pub proc mul(a: Int64, b: Int64) -> Int64
     exec.u64::wrapping_mul
 end
 
@@ -1592,7 +1592,7 @@ end
         import!("std::math::u64"),
         type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
         typed_export!(
-            add,
+            mul,
             0,
             function_ty!(type_ref!(Int64), type_ref!(Int64) => type_ref!(Int64)),
             block!(exec!(u64::wrapping_mul))

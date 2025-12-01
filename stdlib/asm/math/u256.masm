@@ -243,7 +243,7 @@ proc mulstep4
     movdn.6
 end
 
-#! Performs addition of two unsigned 256 bit integers discarding the overflow.
+#! Performs multiplication of two unsigned 256 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...] -> [c7, c6, c5, c4, c3, c2, c1, c0, ...]

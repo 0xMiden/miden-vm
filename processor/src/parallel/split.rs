@@ -1,7 +1,6 @@
 use core::ops::ControlFlow;
 
 use miden_core::{
-    Felt,
     Operation::Split,
     Word,
     mast::{MastNodeExt, SplitNode},
@@ -17,7 +16,6 @@ impl CoreTraceFragmentGenerator {
         &mut self,
         split_node: &SplitNode,
         program: &miden_core::mast::MastForest,
-        parent_addr: Felt,
     ) -> ControlFlow<()> {
         // Get the child hashes for the hasher state
         let on_true_hash: Word = program
@@ -32,7 +30,7 @@ impl CoreTraceFragmentGenerator {
         let config = OperationTraceConfig {
             opcode: Split.op_code(),
             hasher_state: (on_true_hash, on_false_hash),
-            addr: parent_addr,
+            addr: self.context.state.decoder.parent_addr,
         };
 
         self.add_control_flow_trace_row(config)

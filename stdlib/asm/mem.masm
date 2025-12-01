@@ -4,11 +4,17 @@ use std::crypto::hashes::rpo
 
 #! Copies `n` words from `read_ptr` to `write_ptr`.
 #!
-#! `read_ptr` and `write_ptr` *must be* word-aligned.
+#! `read_ptr` and `write_ptr` pointers *must be* word-aligned.
 #!
-#! Stack transition looks as follows:
-#! [n, read_ptr, write_ptr, ...] -> [...]
-#! cycles: 15 + 16n
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: []
+#!
+#! Where:
+#! - n is the number of words which should be copied.
+#! - read_ptr is the memory pointer where the words to copy are stored.
+#! - write_ptr is the memory pointer where the words will be copied.
+#!
+#! Total cycles: 15 + 16 * num_words
 pub proc memcopy_words
   # The loop variable is changed with an add instead of sub because the former
   # uses one fewer cycle. So here the counter is negated. (1 cycles)
@@ -30,7 +36,7 @@ pub proc memcopy_words
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
     dup.5 mem_loadw_be
 
-    # peform write (2 cycles)
+    # perform write (2 cycles)
     # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
     dup.6 mem_storew_be
 
@@ -54,25 +60,71 @@ pub proc memcopy_words
   dropw drop drop drop
 end
 
-#! Copies an even number of words from the advice_stack to memory.
+#! Copies `n` elements from `read_ptr` to `write_ptr`.
 #!
-#! Input: [C, B, A, write_ptr, end_ptr, ...]
-#! Output: [C, B, A, write_ptr, ...]
+#! Inputs:  [n, read_ptr, write_ptr]
+#! Outputs: []
 #!
 #! Where:
-#! - The words C, B, and A are the RPO hasher state
-#!     - A is the capacity
-#!     - C,B are the rate portion of the state
-#! - The value `words = end_ptr - write_ptr` must be positive and a multiple of 8
+#! - n is the number of elements which should be copied.
+#! - read_ptr is the memory pointer where the elements to copy are stored.
+#! - write_ptr is the memory pointer where the elements will be copied.
 #!
-#! Cycles: 9 + 6 * word_pairs
+#! Total cycles: 7 + 14 * num_elements
+pub proc memcopy_elements
+    # The loop variable is changed with an `add` instead of `sub` because the former uses one fewer 
+    # cycle. So here the counter is negated. (1 cycle)
+    neg
+    # => [-n, read_ptr, write_ptr]
+
+    # check the loop condition (3 cycles)
+    dup neq.0
+    # => [loop_flag, -n, read_ptr, write_ptr]
+
+    while.true
+        # perform read (2 cycles)
+        dup.1 mem_load
+        # => [value_to_store, -n, read_ptr, write_ptr]
+
+        # perform write (3 cycles)
+        dup.3 mem_store
+        # => [-n, read_ptr, write_ptr]
+
+        # update the pointers and the counter (6 cycles)
+        add.1 movup.2 add.1 movup.2 add.1 movup.2
+        # => [-n+1, read_ptr+1, write_ptr+1]
+
+        # check the loop condition (3 cycles)
+        dup neq.0
+        # => [loop_flag, -n+1, read_ptr+1, write_ptr+1]
+    end
+    # => [n = 0, read_ptr + n, write_ptr + n]
+
+    # clean stack (3 cycles)
+    drop drop drop
+end
+
+#! Copies an even number of words from the advice_stack to memory, computing their permutation.
+#!
+#! Inputs:  [C, B, A, write_ptr, end_ptr]
+#! Outputs: [C, B, A, write_ptr]
+#!
+#! Where:
+#! - A is the capacity of the RPO hasher state
+#! - C and B are the rate portion of the RPO hasher state
+#! - write_ptr is the memory pointer where the words will be copied.
+#! - end_ptr is the memory pointer where the copying should end.
+#!
+#! Notice that the `end_ptr - write_ptr` value must be positive and a multiple of 8.
+#!
+#! Total cycles: 9 + 6 * num_word_pairs
 pub proc pipe_double_words_to_memory
   dup.13 dup.13 neq # (4 cycles)
 
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, C, B, A, write_ptr, end_ptr, ...]
   while.true
-    adv_pipe hperm # (2 cycles)
+    adv_pipe exec.rpo::permute # (2 cycles)
     # => [C', B', A', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq # (4 cycles)
@@ -83,13 +135,21 @@ pub proc pipe_double_words_to_memory
   # [C', B', A', write_ptr', ...]
 end
 
-#! Copies an arbitrary number of words from the advice stack to memory
+#! Copies an arbitrary number of words from the advice stack to memory, computing their permutation.
 #!
-#! Input: [num_words, write_ptr, ...]
-#! Output: [C, B, A, write_ptr', ...]
-#! Cycles:
-#!  even num_words: 43 + 9 * num_words / 2
-#!  odd num_words: 60 + 9 * round_down(num_words / 2)
+#! Inputs:  [num_words, write_ptr]
+#! Outputs: [C, B, A, write_ptr']
+#!
+#! Where:
+#! - num_words is the number of words which will be copied to the memory.
+#! - write_ptr is the memory pointer where the words will be copied.
+#! - write_ptr' is the memory pointer to the end of the copied words.
+#! - A is the capacity of the RPO hasher state
+#! - C and B are the rate portion of the RPO hasher state
+#!
+#! Total cycles:
+#!  - Even `num_words`: 43 + 9 * num_words / 2
+#!  - Odd `num_words`: 60 + 9 * round_down(num_words / 2)
 pub proc pipe_words_to_memory
   # check if there is an odd number of words (6 cycles)
   dup is_odd
@@ -150,70 +210,86 @@ pub proc pipe_words_to_memory
     # => [C, B', A, write_ptr+1, ...]
 
     # Run RPO permutation (1 cycles)
-    hperm
+    exec.rpo::permute
     # => [C', B', A', write_ptr+1, ...]
   end
 end
 
-#! Moves an arbitrary number of words from the advice stack to memory and asserts it matches the commitment.
+#! Moves an arbitrary number of words from the advice stack to memory and asserts it matches the
+#! commitment.
 #!
-#! Input: [num_words, write_ptr, COM, ...]
-#! Output: [write_ptr', ...]
-#! Cycles:
-#!  even num_words: 62 + 9 * num_words / 2
-#!  odd num_words: 79 + 9 * round_down(num_words / 2)
+#! Inputs:  [num_words, write_ptr, COMMITMENT]
+#! Outputs: [write_ptr']
+#!
+#! Where:
+#! - num_words is the number of words which will be copied to the memory.
+#! - write_ptr is the memory pointer where the words will be copied.
+#! - write_ptr' is the memory pointer to the end of the copied words.
+#! - COMMITMENT is the commitment that the one calculated during this procedure will be compared
+#!   with.
+#!
+#! Total cycles:
+#!  - Even `num_words`: 62 + 9 * num_words / 2
+#!  - Odd `num_words`: 79 + 9 * round_down(num_words / 2)
 pub proc pipe_preimage_to_memory
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
-  # => [C, B, A, write_ptr', COM, ...]
+  # => [C, B, A, write_ptr', COMMITMENT, ...]
 
   # Leave only the digest on the stack
   exec.rpo::squeeze_digest
-  # => [B, write_ptr', COM, ...]
+  # => [B, write_ptr', COMMITMENT, ...]
 
   # Save the write_ptr (2 cycles)
   movup.4 movdn.8
-  # => [HASH, COM, write_ptr', ...]
+  # => [HASH, COMMITMENT, write_ptr', ...]
 
-  # Check the COM (10 cycles)
+  # Check the COMMITMENT (10 cycles)
   assert_eqw
   # => [write_ptr', ...]
 end
 
-#! Moves an even number of words from the advice stack to memory and asserts
-#! that their sequential hash matches a given commitment.
+#! Moves an even number of words from the advice stack to memory and asserts that their sequential
+#! hash matches a given commitment.
 #!
-#! Input: [num_words, write_ptr, COM, ...]
-#! Output: [write_ptr', ...]
+#! Inputs:  [num_words, write_ptr, COMMITMENT]
+#! Outputs: [write_ptr']
 #!
-#! Cycles: 56 + 3 * num_words / 2
+#! Where:
+#! - num_words is the number of words which will be copied to the memory.
+#! - write_ptr is the memory pointer where the words will be copied.
+#! - write_ptr' is the memory pointer to the end of the copied words.
+#! - COMMITMENT is the commitment that the one calculated during this procedure will be compared
+#!   with.
+#!
+#! Total cycles: 56 + 3 * num_words / 2
 pub proc pipe_double_words_preimage_to_memory
   # Assert precondition (8 cycles).
   dup is_odd assertz.err="pipe_double_words_preimage_to_memory: num_words must be even"
-  # => [num_words, write_ptr, COM, ...]
+  # => [num_words, write_ptr, COMMITMENT, ...]
 
   # Compute and move end_ptr (5 cycles)
   mul.4 dup.1 add swap
-  # => [write_ptr, end_ptr, COM, ...]
+  # => [write_ptr, end_ptr, COMMITMENT, ...]
 
   # Setup the initial hasher state, which starts with a capacity word `A`.
   # For us, the capacity word is entirely empty.
   # (12 cycles).
   exec.rpo::init_no_padding
-  # => [C, B, A, write_ptr, end_ptr, COM, ...]
+  # => [C, B, A, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
   # (e.g., 25 cycles for 4 words)
   exec.pipe_double_words_to_memory
-  # => [C, B, A, write_ptr', COM, ...]
+  # => [C, B, A, write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack (9 cycles).
   exec.rpo::squeeze_digest
-  # => [B, write_ptr', COM, ...]
+  # => [B, write_ptr', COMMITMENT, ...]
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).
   movup.4 movdn.8
 
   # Assert the commitment (11 cycles).
-  assert_eqw.err="pipe_double_words_preimage_to_memory: COM does not match"
+  assert_eqw.err="pipe_double_words_preimage_to_memory: COMMITMENT does not match"
 end

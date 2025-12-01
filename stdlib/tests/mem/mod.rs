@@ -1,8 +1,8 @@
 use miden_core::{Word, assert_matches};
 use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, Program};
 use miden_utils_testing::{
-    ExecutionOptions, ONE, Process, StackInputs, ZERO, build_expected_hash, build_expected_perm,
-    felt_slice_to_ints,
+    ExecutionOptions, Felt, ONE, Process, StackInputs, ZERO, build_expected_hash,
+    build_expected_perm, felt_slice_to_ints,
 };
 
 #[test]
@@ -92,6 +92,52 @@ fn test_memcopy_words() {
         Some(Word::new([ZERO, ONE, ZERO, ONE])),
         "Address 2016"
     );
+}
+
+#[test]
+fn test_memcopy_elements() {
+    use miden_stdlib::StdLibrary;
+
+    let source = "
+    use std::mem
+
+    begin
+        push.1.2.3.4.1000 mem_storew_be dropw
+        push.5.6.7.8.1004 mem_storew_be dropw
+        push.9.10.11.12.1008 mem_storew_be dropw
+        push.13.14.15.16.1012 mem_storew_be dropw
+        push.17.18.19.20.1016 mem_storew_be dropw
+
+        push.2002.1001.18 exec.mem::memcopy_elements
+    end
+    ";
+
+    let stdlib = StdLibrary::default();
+    let assembler = miden_assembly::Assembler::default()
+        .with_dynamic_library(&stdlib)
+        .expect("failed to load stdlib");
+
+    let program: Program =
+        assembler.assemble_program(source).expect("Failed to compile test source.");
+
+    let mut host = DefaultHost::default().with_library(&stdlib).unwrap();
+
+    let mut process = Process::new(
+        program.kernel().clone(),
+        StackInputs::default(),
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    );
+    process.execute(&program, &mut host).unwrap();
+
+    for addr in 2002..2020 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 2000),
+            "Address {}",
+            addr
+        );
+    }
 }
 
 #[test]

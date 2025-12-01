@@ -191,11 +191,12 @@ Instructions for moving data between the stack and other sources like program co
 
 _Push to Advice Stack:_
 
-| Instruction        | Stack Input       | Stack Output      | Notes                                                                                           |
-| ------------------ | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
-| `adv.push_mapval`  | `[K, ... ]`       | `[K, ... ]`       | Pushes values from `advice_map[K]` to advice stack.                                             |
-| `adv.push_mapvaln` | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
-| `adv.push_mtnode`  | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
+| Instruction             | Stack Input       | Stack Output      | Notes                                                                                           |
+| ----------------------- | ----------------- | ----------------- | ----------------------------------------------------------------------------------------------- |
+| `adv.push_mapval`       | `[K, ... ]`       | `[K, ... ]`       | Pushes values from `advice_map[K]` to advice stack.                                             |
+| `adv.push_mapval_count` | `[K, ... ]`       | `[K, ... ]`       | Pushes number of elements in `advice_map[K]` to advice stack.                                   |
+| `adv.push_mapvaln`      | `[K, ... ]`       | `[K, ... ]`       | Pushes `[n, ele1, ele2, ...]` from `advice_map[K]` to advice stack, where `n` is element count. |
+| `adv.push_mtnode`       | `[d, i, R, ... ]` | `[d, i, R, ... ]` | Pushes Merkle tree node (root `R`, depth `d`, index `i`) from Merkle store to advice stack.     |
 
 _Insert into Advice Map:_
 

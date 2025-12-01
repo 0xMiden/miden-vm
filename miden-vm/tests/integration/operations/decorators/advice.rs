@@ -65,7 +65,7 @@ fn advice_insert_mem() {
 
 #[test]
 fn advice_push_mapval() {
-    // --- test simple adv.mapval ---------------------------------------------
+    // --- test simple adv.push_mapval ---------------------------------------------
     let source: &str = "
     begin
         # stack: [4, 3, 2, 1, ...]
@@ -88,7 +88,30 @@ fn advice_push_mapval() {
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
     test.expect_stack(&[5, 6, 7, 8]);
 
-    // --- test simple adv.mapvaln --------------------------------------------
+    // --- test simple adv.push_mapval_count ---------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval_count
+        dropw
+
+        # move the number of values from the advice stack to the operand stack
+        adv_push.1
+        swap drop
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[5]);
+
+    // --- test simple adv.push_mapvaln --------------------------------------------
     let source: &str = "
     begin
         # stack: [4, 3, 2, 1, ...]

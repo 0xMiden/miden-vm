@@ -12,10 +12,10 @@ use std::crypto::hashes::rpo
 # - Fixed-size examples: DIGEST_U32[8] = [d_0, ..., d_7], INPUT_U8[32] = [b_0, ..., b_31]
 # - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[..])
 
-# Constants
+# CONSTANTS
 # ================================================================================================
 
-const KECCAK_HASH_MEMORY_EVENT = event("stdlib::hash::keccak256::hash_memory")
+const KECCAK_HASH_BYTES_EVENT = event("stdlib::hash::keccak256::hash_bytes")
 
 # PROCEDURES
 # ================================================================================================
@@ -30,8 +30,8 @@ const KECCAK_HASH_MEMORY_EVENT = event("stdlib::hash::keccak256::hash_memory")
 #! - len_bytes: number of bytes to hash
 #! - INPUT_U32[len_u32] ~ INPUT_U8[len_bytes] with u32 packing (unused bytes in final u32 must be 0)
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-pub proc hash_memory
-    exec.hash_memory_impl
+pub proc hash_bytes
+    exec.hash_bytes_impl
     # => [COMM, TAG, DIGEST_U32[8], ...]
 
     # Log the precompile request for deferred verification
@@ -48,7 +48,7 @@ end
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[32])
 #! - INPUT_U32[8] = [i_0, ..., i_7] = [INPUT_LO, INPUT_HI] ~ INPUT_U8[32] with u32 packing
 @locals(8)
-pub proc hash_1to1
+pub proc hash
     # Store [INPUT_LO, INPUT_HI] in local memory
     exec.word::reverse loc_storew_be.0 dropw
     exec.word::reverse loc_storew_be.4 dropw
@@ -56,7 +56,7 @@ pub proc hash_1to1
     push.32 locaddr.0
     # => [ptr, 32]
 
-    exec.hash_memory
+    exec.hash_bytes
 end
 
 #! Merges two 256-bit digests via Keccak256 hash.
@@ -69,7 +69,7 @@ end
 #! - INPUT_R_U32[8] = [r_0, ..., r_7] = [INPUT_R_LO, INPUT_R_HI] ~ INPUT_R_U8[32]
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_L_U8[32] || INPUT_R_U8[32])
 @locals(16)
-pub proc hash_2to1
+pub proc merge
     # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
     exec.word::reverse loc_storew_be.0 dropw
     exec.word::reverse loc_storew_be.4 dropw
@@ -79,7 +79,7 @@ pub proc hash_2to1
     push.64 locaddr.0
     # => [ptr, 64]
 
-    exec.hash_memory
+    exec.hash_bytes
 end
 
 # INTERNAL PROCEDURES
@@ -97,21 +97,21 @@ end
 #! - ptr: word-aligned memory address containing INPUT_U32[len_u32] where len_u32=⌈len_bytes/4⌉
 #! - len_bytes: number of bytes to hash
 #! - COMM: the calldata commitment `Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..]))` consumed by `log_precompile`
-#! - TAG = [KECCAK_HASH_MEMORY_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
+#! - TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
-pub proc hash_memory_impl
-    emit.KECCAK_HASH_MEMORY_EVENT
+pub proc hash_bytes_impl
+    emit.KECCAK_HASH_BYTES_EVENT
     # => [ptr, len_bytes, ...]
 
     # Compute len_u32 = ceil(len_bytes / 4)
     dup.1 add.3 u32shr.2 swap
     # => [ptr, len_u32, len_bytes, ...]
 
-    exec.rpo::hash_memory
+    exec.rpo::hash_elements
     # => [COMM_INPUT, len_bytes, ...]
 
-    # Prepare TAG = [0, 0, len_bytes, KECCAK_HASH_MEMORY_EVENT]
-    push.KECCAK_HASH_MEMORY_EVENT movup.5 push.0.0 swapw
+    # Prepare TAG = [0, 0, len_bytes, KECCAK_HASH_BYTES_EVENT]
+    push.KECCAK_HASH_BYTES_EVENT movup.5 push.0.0 swapw
     # => [COMM_INPUT, TAG, ...]
 
     # Load digest from advice stack
