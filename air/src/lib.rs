@@ -58,7 +58,14 @@ const IS_FULL_CONSTRAINT_SET: bool = false;
 // PROCESSOR AIR
 // ================================================================================================
 
-/// TODO: add docs
+/// Algebraic Intermediate Representation (AIR) for Miden VM.
+///
+/// Defines execution constraints for Miden programs. Contains the public inputs (program hash,
+/// stack state, kernel procedures) and enforces transition and boundary constraints across all VM
+/// components: system, stack, range checker, and chiplets (hasher, bitwise, memory, kernel ROM).
+///
+/// `IS_FULL_CONSTRAINT_SET` controls which constraints are active - when true, all constraints are
+/// enforced; when false, only those needed for recursive verification are included.
 pub struct ProcessorAir {
     context: AirContext<Felt>,
     stack_inputs: StackInputs,
