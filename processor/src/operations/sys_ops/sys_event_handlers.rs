@@ -45,14 +45,16 @@ pub fn handle_system_event(
 /// Reads elements from memory at the specified range and inserts them into the advice map under
 /// the key `KEY` located at the top of the stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, KEY, start_addr, end_addr, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
 ///   Advice map: {KEY: values}
+/// ```
 ///
-/// Where `values` are the elements located in memory[start_addr..end_addr].
+/// Where `values` are the elements located in `memory[start_addr..end_addr]`.
 ///
 /// # Errors
 /// Returns an error:
@@ -82,14 +84,16 @@ fn insert_mem_values_into_adv_map(
 /// Reads two words from the operand stack and inserts them into the advice map under the key
 /// defined by the hash of these words.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, B, A, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
 ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
+/// ```
 ///
-/// Where KEY is computed as hash(A || B, domain), where domain is provided via the immediate
+/// Where `KEY` is computed as `hash(A || B, domain)`, where `domain` is provided via the immediate
 /// value.
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
@@ -116,17 +120,19 @@ fn insert_hdword_into_adv_map(
 /// Reads four words from the operand stack and inserts them into the advice map under the key
 /// defined by the hash of these words.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, D, C, B, A, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
 ///   Advice map: {KEY: [A', B', C', D'])}
+/// ```
 ///
 /// Where:
-/// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
-/// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2, a1,
-///   a0], A' = [a0, a1, a2, a3].
+/// - `KEY` is the hash computed as `hash(hash(hash(A || B) || C) || D)` with `domain = 0`.
+/// - `A'` (and other words with `'`) is the `A` word with the reversed element order: `A = [a3, a2,
+///   a1, a0]`, `A' = [a0, a1, a2, a3]`.
 fn insert_hqword_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -155,15 +161,17 @@ fn insert_hqword_into_adv_map(
 /// Reads three words from the operand stack and inserts the top two words into the advice map
 /// under the key defined by applying an RPO permutation to all three words.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, B, A, C, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
 ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
+/// ```
 ///
-/// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,
-/// if C is [0, d, 0, 0], KEY will be set as hash(A || B, d).
+/// Where `KEY` is computed by extracting the digest elements from `hperm([C, A, B])`. For example,
+/// if `C` is `[0, d, 0, 0]`, `KEY` will be set as `hash(A || B, d)`.
 fn insert_hperm_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -204,17 +212,19 @@ fn insert_hperm_into_adv_map(
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
 /// specified roots. The root of the new tree is defined as `Hash(LEFT_ROOT, RIGHT_ROOT)`.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, RIGHT_ROOT, LEFT_ROOT, ...]
 ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT}
 ///
 /// Outputs:
 ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
+/// ```
 ///
 /// After the operation, both the original trees and the new tree remains in the advice
 /// provider (i.e., the input trees are not removed).
 ///
-/// It is not checked whether the provided roots exist as Merkle trees in the advide providers.
+/// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
 fn merge_merkle_nodes(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -235,6 +245,7 @@ fn merge_merkle_nodes(
 /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
 /// onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, depth, index, TREE_ROOT, ...]
 ///   Advice stack: [...]
@@ -243,6 +254,7 @@ fn merge_merkle_nodes(
 /// Outputs:
 ///   Advice stack: [NODE, ...]
 ///   Merkle store: {TREE_ROOT<-NODE}
+/// ```
 ///
 /// # Errors
 /// Returns an error if:
@@ -277,7 +289,7 @@ fn copy_merkle_node_to_adv_stack(
 /// If `pad_to` is not equal to 0, the elements list obtained from the advice map will be padded
 /// with zeros, increasing its length to the next multiple of `pad_to`.
 ///
-/// ```masm
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, KEY, ...]
 ///   Advice stack: [...]
@@ -309,6 +321,7 @@ fn copy_map_value_to_adv_stack(
 /// Pushes a number of elements in a list of field elements onto the advice stack. The list is
 /// looked up in the advice map using the specified word from the operand stack as the key.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, KEY, ...]
 ///   Advice stack: [...]
@@ -317,7 +330,7 @@ fn copy_map_value_to_adv_stack(
 /// Outputs:
 ///   Advice stack: [values.len(), ...]
 ///   Advice map: {KEY: values}
-///
+/// ```
 ///
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
@@ -347,12 +360,14 @@ fn copy_map_value_length_to_adv_stack(
 /// pushes the resulting flag onto the advice stack. If the advice map has the provided key, `1`
 /// will be pushed to the advice stack, `0` otherwise.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, KEY, ...]
 ///   Advice stack:  [...]
 ///
 /// Outputs:
 ///   Advice stack: [has_mapkey, ...]
+/// ```
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
     let map_key = process.get_stack_word_be(1);
 
@@ -365,14 +380,16 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
 /// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
 /// computes its multiplicative inverse and push the result onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, a1, a0, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [b0, b1...]
+/// ```
 ///
-/// Where (b0, b1) is the multiplicative inverse of the extension field element (a0, a1) at the
+/// Where `(b0, b1)` is the multiplicative inverse of the extension field element `(a0, a1)` at the
 /// top of the stack.
 ///
 /// # Errors
@@ -397,12 +414,14 @@ fn push_ext2_inv_result(
 
 /// Pushes the number of the leading zeros of the top stack element onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [leading_zeros, ...]
+/// ```
 fn push_leading_zeros(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -412,12 +431,14 @@ fn push_leading_zeros(
 
 /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [trailing_zeros, ...]
+/// ```
 fn push_trailing_zeros(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -427,12 +448,14 @@ fn push_trailing_zeros(
 
 /// Pushes the number of the leading ones of the top stack element onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [leading_ones, ...]
+/// ```
 fn push_leading_ones(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -442,12 +465,14 @@ fn push_leading_ones(
 
 /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
 ///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [trailing_ones, ...]
+/// ```
 fn push_trailing_ones(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
@@ -456,15 +481,18 @@ fn push_trailing_ones(
 }
 
 /// Pushes the base 2 logarithm of the top stack element, rounded down.
+///
+/// ```text
 /// Inputs:
 ///   Operand stack: [event_id, n, ...]
 ///   Advice stack: [...]
 ///
 /// Outputs:
 ///   Advice stack: [ilog2(n), ...]
+/// ```
 ///
 /// # Errors
-/// Returns an error if the logarithm argument (top stack element) equals ZERO.
+/// Returns an error if the logarithm argument (top stack element) equals `ZERO`.
 fn push_ilog2(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
