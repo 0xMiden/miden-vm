@@ -34,6 +34,25 @@ impl DynNode {
     pub const DYNCALL_DOMAIN: Felt = Felt::new(OPCODE_DYNCALL as u64);
 }
 
+/// Default digest constants
+impl DynNode {
+    /// The default digest for a DynNode representing a dyncall operation.
+    pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
+        Felt::new(8751004906421739448),
+        Felt::new(13469709002495534233),
+        Felt::new(12584249374630430826),
+        Felt::new(7624899870831503004),
+    ]);
+
+    /// The default digest for a DynNode representing a dynexec operation.
+    pub const DYN_DEFAULT_DIGEST: Word = Word::new([
+        Felt::new(8115106948140260551),
+        Felt::new(13491227816952616836),
+        Felt::new(15015806788322198710),
+        Felt::new(16575543461540527115),
+    ]);
+}
+
 /// Public accessors
 impl DynNode {
     /// Returns true if the [`DynNode`] represents a dyncall operation, and false for dynexec.
@@ -322,19 +341,9 @@ impl DynNodeBuilder {
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
+            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         DynNode {
@@ -354,19 +363,9 @@ impl MastForestContributor for DynNodeBuilder {
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
+            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         // Determine the node ID that will be assigned
@@ -413,19 +412,9 @@ impl MastForestContributor for DynNodeBuilder {
             if let Some(forced_digest) = self.digest {
                 forced_digest
             } else if self.is_dyncall {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(8751004906421739448),
-                    miden_crypto::Felt::new(13469709002495534233),
-                    miden_crypto::Felt::new(12584249374630430826),
-                    miden_crypto::Felt::new(7624899870831503004),
-                ])
+                DynNode::DYNCALL_DEFAULT_DIGEST
             } else {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(8115106948140260551),
-                    miden_crypto::Felt::new(13491227816952616836),
-                    miden_crypto::Felt::new(15015806788322198710),
-                    miden_crypto::Felt::new(16575543461540527115),
-                ])
+                DynNode::DYN_DEFAULT_DIGEST
             },
         )
     }
@@ -489,19 +478,9 @@ impl DynNodeBuilder {
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
+            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
