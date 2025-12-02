@@ -2,10 +2,10 @@ use core::ops::ControlFlow;
 
 use miden_core::{Felt, Operation, Word, ZERO};
 
-use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
+use super::{CoreTraceFragmentFiller, trace_builder::OperationTraceConfig};
 use crate::decoder::block_stack::ExecutionContextInfo;
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     /// Adds a trace row for the start of a DYN operation.
     pub fn add_dyn_start_trace_row(&mut self, callee_hash: Word) -> ControlFlow<()> {
         let config = OperationTraceConfig {
