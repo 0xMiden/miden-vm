@@ -501,7 +501,7 @@ impl JoinNodeBuilder {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
         let Some(digest) = self.digest else {
-            panic!("Digest is required for deserialization")
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
