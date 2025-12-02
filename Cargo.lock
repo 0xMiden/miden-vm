@@ -1413,13 +1413,14 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.18.4"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0048d2d987f215bc9633ced499a8c488d0e2474350c765f904b87cae3462acb7"
+checksum = "1162f8648a13e262c6d454ace2357fc1a301c404ca3111a5d2314e0ca286de0c"
 dependencies = [
  "blake3",
  "cc",
  "chacha20poly1305",
+ "curve25519-dalek",
  "ed25519-dalek",
  "flume",
  "glob",
@@ -1433,6 +1434,7 @@ dependencies = [
  "rand_core 0.9.3",
  "rand_hc",
  "serde",
+ "sha2",
  "sha3",
  "subtle",
  "thiserror",
@@ -1444,9 +1446,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.18.4"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca3b38aace84e157fb02aba8f8ae85bbf8c3afdcdbdf8190fbe7476f3be7ef44"
+checksum = "64f681563cf529e22114890c531d6ca40583e7235733dec4d265c8ecb48d1f2c"
 dependencies = [
  "quote",
  "syn 2.0.111",

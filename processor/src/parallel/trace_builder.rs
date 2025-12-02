@@ -12,7 +12,7 @@ use miden_air::trace::{
 };
 use miden_core::{Felt, ONE, Operation, Word, ZERO};
 
-use super::CoreTraceFragmentGenerator;
+use super::CoreTraceFragmentFiller;
 use crate::{fast::trace_state::NodeFlags, processor::StackInterface};
 
 /// Configuration for operation-specific trace row data
@@ -26,7 +26,7 @@ pub struct OperationTraceConfig {
     pub addr: Felt,
 }
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     // TODO(plafer): move in a different file (when we merge all the other control flow ones)
     pub fn add_end_trace_row(&mut self, node_digest: Word) -> ControlFlow<()> {
         // Pop the block from stack and use its info for END operations

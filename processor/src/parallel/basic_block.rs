@@ -13,11 +13,11 @@ use miden_core::{
     mast::{BasicBlockNode, MastNodeExt, OpBatch},
 };
 
-use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
+use super::{CoreTraceFragmentFiller, trace_builder::OperationTraceConfig};
 
 const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     // TODO(plafer): cleanup to use `add_control_flow_trace_row()`
     /// Adds a trace row for SPAN start operation to the main trace fragment.
     ///
