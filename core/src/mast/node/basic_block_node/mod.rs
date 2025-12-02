@@ -103,7 +103,7 @@ impl BasicBlockNode {
     /// Returns an error if:
     /// - `operations` vector is empty.
     #[cfg(any(test, feature = "arbitrary"))]
-    pub(crate) fn new(
+    pub(crate) fn new_owned_with_decorators(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
@@ -193,15 +193,12 @@ impl BasicBlockNode {
         forest: &'a MastForest,
     ) -> DecoratorOpLinkIterator<'a> {
         match &self.decorators {
-            DecoratorStore::Owned { decorators, .. } => {
-                // For owned decorators, use the existing logic
-                DecoratorOpLinkIterator::from_slice_iters(
-                    &[],
-                    decorators,
-                    &[],
-                    self.num_operations() as usize,
-                )
-            },
+            DecoratorStore::Owned { decorators, .. } => DecoratorOpLinkIterator::from_slice_iters(
+                &[],
+                decorators,
+                &[],
+                self.num_operations() as usize,
+            ),
             DecoratorStore::Linked { id } => {
                 // This is used in MastForestMerger::merge_nodes, which strips the `MastForest` of
                 // some nodes before remapping decorators, so calling
@@ -257,7 +254,6 @@ impl BasicBlockNode {
     ) -> RawDecoratorOpLinkIterator<'a> {
         match &self.decorators {
             DecoratorStore::Owned { decorators, before_enter, after_exit } => {
-                // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(
                     before_enter,
                     decorators,
@@ -320,7 +316,6 @@ impl BasicBlockNode {
     pub fn raw_op_indexed_decorators(&self, forest: &MastForest) -> Vec<(usize, DecoratorId)> {
         match &self.decorators {
             DecoratorStore::Owned { decorators, .. } => {
-                // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(&[], decorators, &[], &self.op_batches)
                     .collect()
             },

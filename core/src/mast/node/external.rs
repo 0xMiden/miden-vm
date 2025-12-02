@@ -390,22 +390,14 @@ impl ExternalNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        let node = self.build();
-
-        let ExternalNode {
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("ExternalNodeBuilder::build() should always return owned decorators");
-        };
-
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest
-            .debug_info
-            .register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.debug_info.register_node_decorators(
+            future_node_id,
+            &self.before_enter,
+            &self.after_exit,
+        );
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -413,7 +405,7 @@ impl ExternalNodeBuilder {
             .nodes
             .push(
                 ExternalNode {
-                    digest,
+                    digest: self.digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
                 .into(),

@@ -402,9 +402,10 @@ mod round_trip_tests {
         let forced_join_digest =
             Word::new([Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)]);
         let join_builder2 = JoinNodeBuilder::new([child1, child2]).with_digest(forced_join_digest);
-        let join_node2 = join_builder2
-            .build(&forest)
-            .expect("Failed to build join node with forced digest");
+        let join_node_id2 = join_builder2
+            .add_to_forest(&mut forest)
+            .expect("Failed to add join node to forest with forced digest");
+        let join_node2 = forest.get_node_by_id(join_node_id2).unwrap().unwrap_join();
 
         assert_eq!(
             join_node2.digest(),
@@ -415,13 +416,16 @@ mod round_trip_tests {
 
     #[test]
     fn test_mast_node_builder_enum_digest_forcing() {
-        let forest = MastForest::new();
+        let mut forest = MastForest::new();
 
         let mast_builder1 = MastNodeBuilder::BasicBlock(BasicBlockNodeBuilder::new(
             vec![Operation::Push(Felt::new(10))],
             vec![],
         ));
-        let mast_node1 = mast_builder1.build(&forest).expect("Failed to build mast node1");
+        let mast_node_id1 = mast_builder1
+            .add_to_forest(&mut forest)
+            .expect("Failed to add mast node1 to forest");
+        let mast_node1 = forest.get_node_by_id(mast_node_id1).unwrap().unwrap_basic_block();
         let mast_normal_digest = mast_node1.digest();
 
         let forced_mast_digest =
@@ -430,9 +434,10 @@ mod round_trip_tests {
             BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(10))], vec![])
                 .with_digest(forced_mast_digest),
         );
-        let mast_node2 = mast_builder2
-            .build(&forest)
-            .expect("Failed to build mast node with forced digest");
+        let mast_node_id2 = mast_builder2
+            .add_to_forest(&mut forest)
+            .expect("Failed to add mast node with forced digest to forest");
+        let mast_node2 = forest.get_node_by_id(mast_node_id2).unwrap().unwrap_basic_block();
 
         assert_ne!(
             mast_normal_digest, forced_mast_digest,

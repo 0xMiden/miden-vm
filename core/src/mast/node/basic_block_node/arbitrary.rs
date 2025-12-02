@@ -175,7 +175,7 @@ impl Arbitrary for BasicBlockNode {
             })
             .prop_map(|(ops, decorators)| {
                 // BasicBlockNode::new will adjust indices for padding and set be/ae empty.
-                BasicBlockNode::new(ops, decorators)
+                BasicBlockNode::new_owned_with_decorators(ops, decorators)
                     .expect("non-empty ops; new() only errs on empty ops")
             })
             .boxed()
