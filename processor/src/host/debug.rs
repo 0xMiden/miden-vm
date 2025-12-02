@@ -2,8 +2,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
-use core::{fmt, ops::RangeInclusive};
-use std::convert::Infallible;
+use core::{convert::Infallible, fmt, ops::RangeInclusive};
 
 use miden_core::{DebugOptions, FMP_ADDR, Felt};
 

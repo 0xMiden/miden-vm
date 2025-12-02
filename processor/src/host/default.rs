@@ -1,5 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
-use std::convert::Infallible;
+use core::convert::Infallible;
 
 use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
 use miden_debug_types::{

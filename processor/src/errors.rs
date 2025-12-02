@@ -1,9 +1,8 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{string::String, sync::Arc, vec::Vec};
-use core::fmt;
-use std::{error::Error, prelude::rust_2015::Box};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use core::{error::Error, fmt};
 
 use miden_air::RowIndex;
 use miden_core::{
