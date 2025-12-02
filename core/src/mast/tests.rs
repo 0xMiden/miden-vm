@@ -795,17 +795,70 @@ fn test_mast_forest_compaction_comprehensive() {
     assert!(forest.num_nodes() > 14); // Supporting nodes (children) increase total count
     assert!(!forest.debug_info.is_empty());
 
-    // Action: Compact
-    let compacted_forest = forest.compact().unwrap();
+    // Action: Strip decorators first, then compact
+    forest.strip_decorators();
+    forest.compact().unwrap();
 
     // Verify compaction results:
     // - 7 node pairs merged into 7 single nodes
     // - Supporting nodes preserved as they're reachable
     // - All decorators removed
     // - Roots preserved (at least 7, possibly more due to deduplication)
-    assert_eq!(compacted_forest.num_nodes(), 13); // 7 main nodes + 6 supporting nodes (children)
-    assert!(compacted_forest.num_procedures() >= 7);
-    assert!(compacted_forest.debug_info.is_empty());
+    assert_eq!(forest.num_nodes(), 13); // 7 main nodes + 6 supporting nodes (children)
+    assert!(forest.num_procedures() >= 7);
+    assert!(forest.debug_info.is_empty());
+}
+
+#[test]
+fn test_decorator_stripping_independent() {
+    let mut forest = MastForest::new();
+
+    // Add some nodes with decorators
+    let decorator = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let node_with_deco = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(node_with_deco);
+
+    // Verify initial state has decorators
+    assert!(!forest.debug_info.is_empty());
+    assert_eq!(forest.decorators().len(), 1);
+
+    // Strip decorators only
+    forest.strip_decorators();
+
+    // Verify decorators are removed but structure remains
+    assert!(forest.debug_info.is_empty());
+    assert_eq!(forest.num_nodes(), 1);
+    assert_eq!(forest.num_procedures(), 1);
+}
+
+#[test]
+fn test_compaction_independent() {
+    let mut forest = MastForest::new();
+
+    // Create two identical nodes without decorators
+    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(node1);
+    forest.make_root(node2);
+
+    // Verify initial state has duplicate nodes
+    assert_eq!(forest.num_nodes(), 2);
+    assert_eq!(forest.num_procedures(), 2);
+    assert!(forest.debug_info.is_empty()); // No decorators from start
+
+    // Compact only (should merge the two identical nodes)
+    forest.compact().unwrap();
+
+    // Verify nodes were merged
+    assert_eq!(forest.num_nodes(), 1);
+    assert_eq!(forest.num_procedures(), 1);
+    assert!(forest.debug_info.is_empty());
 }
 
 // HELPER FUNCTIONS

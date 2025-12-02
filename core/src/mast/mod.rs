@@ -133,43 +133,60 @@ impl MastForest {
     }
 
     /// Removes all decorators from this MAST forest.
+    ///
+    /// This method modifies the forest in-place, removing all decorator information
+    /// including operation-indexed decorators, before-enter decorators, after-exit
+    /// decorators, and error codes.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use miden_core::mast::MastForest;
+    ///
+    /// let mut forest = MastForest::new();
+    /// // Add decorators and nodes to the forest
+    /// forest.strip_decorators(); // forest is now stripped
+    /// ```
     pub fn strip_decorators(&mut self) {
         // Clear all debug info (decorators and error codes)
         self.debug_info.clear();
     }
 
-    /// Compacts the forest by merging nodes that become identical after decorator stripping.
+    /// Compacts the forest by merging duplicate nodes.
     ///
-    /// This operation takes ownership of the forest and returns a compacted version.
-    /// If the caller needs to preserve the original forest, they should clone it before calling.
+    /// This operation performs node deduplication by merging the forest with itself.
+    /// The method assumes that decorators have already been stripped if that is desired.
+    /// The operation modifies the forest in-place, updating all node references as needed.
     ///
     /// The process works by:
-    /// 1. Creating a copy of the forest and stripping all decorators
-    /// 2. Merging the stripped forest with itself to deduplicate identical nodes
-    /// 3. Returning the compacted forest
+    /// 1. Merging the forest with itself to deduplicate identical nodes
+    /// 2. Updating internal node references and remappings
+    /// 3. Modifying the forest in-place with the compacted result
     ///
     /// # Examples
     ///
     /// ```rust
-    /// // Compact without preserving original
-    /// let compacted = forest.compact()?;
+    /// use miden_core::mast::MastForest;
     ///
-    /// // Preserve original if needed
-    /// let original_backup = forest.clone();
-    /// let compacted = forest.compact()?;
+    /// let mut forest = MastForest::new();
+    /// // Add nodes to the forest
+    ///
+    /// // First strip decorators if needed
+    /// forest.strip_decorators();
+    ///
+    /// // Then compact the forest
+    /// forest.compact().unwrap();
+    ///
+    /// // Forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(self) -> Result<Self, MastForestError> {
-        // Early out if no decorators present
-        if self.debug_info.is_empty() {
-            return Ok(self);
-        }
+    pub fn compact(&mut self) -> Result<(), MastForestError> {
+        // Merge with itself to deduplicate nodes
+        let (compacted_forest, _root_map) = MastForest::merge([&*self])?;
 
-        let mut stripped_forest = self.clone();
-        stripped_forest.strip_decorators();
+        // Replace current forest with compacted version
+        *self = compacted_forest;
 
-        let (compacted_forest, _root_map) = MastForest::merge([&stripped_forest])?;
-
-        Ok(compacted_forest)
+        Ok(())
     }
 
     /// Merges all `forests` into a new [`MastForest`].
