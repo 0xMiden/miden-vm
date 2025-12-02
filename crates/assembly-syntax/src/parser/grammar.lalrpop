@@ -1059,7 +1059,18 @@ SystemEvent: Instruction = {
     "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
     "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
     "adv" "." "push_mapval_count" => Instruction::SysEvent(SystemEventNode::PushMapValCount),
-    "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
+    "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN0),
+    "adv" "." "push_mapvaln" "." <pad_to:U8> =>? {
+        let (span, n) = pad_to.into_parts();
+        match n {
+            0 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN0)),
+            4 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN4)),
+            8 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN8)),
+            _ => Err(ParseError::User {
+                error: ParsingError::InvalidPadValue { span, padding: n },
+            }),
+        }
+    },
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
 }

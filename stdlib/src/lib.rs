@@ -8,9 +8,9 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
 use miden_core::{
-    EventName, Felt, Word, precompile::PrecompileVerifierRegistry, utils::Serializable,
+    EventName, Felt, Word, crypto::dsa::ecdsa_k256_keccak, precompile::PrecompileVerifierRegistry,
+    utils::Serializable,
 };
-use miden_crypto::dsa::ecdsa_k256_keccak;
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -177,7 +177,7 @@ pub fn falcon_sign(sk: &[Felt], msg: Word) -> Option<Vec<Felt>> {
     use miden_core::{
         Felt,
         crypto::{
-            dsa::rpo_falcon512::{Polynomial, SecretKey},
+            dsa::falcon512_rpo::{Polynomial, SecretKey},
             hash::Rpo256,
         },
         utils::Deserializable,

@@ -122,7 +122,7 @@ proc load_public_inputs
     padw padw
     repeat.5
         exec.public_inputs::load_base_store_extension_double_word
-        hperm
+        exec.rpo::permute
     end
 
     # 2) Load and hash the variable length public inputs
@@ -150,7 +150,7 @@ proc load_public_inputs
     ## d) Hash the variable length public inputs
     while.true
         adv_pipe
-        hperm
+        exec.rpo::permute
         # => [R2, R1, C, ptr, num_iter, ...]
         dup.13 sub.1 swap.14
         push.0 neq
