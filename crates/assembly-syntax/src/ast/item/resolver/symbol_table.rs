@@ -132,7 +132,11 @@ impl LocalSymbolTable {
         let mut items = Vec::with_capacity(16);
 
         for (i, symbol) in iter.symbols(source_manager.clone()).enumerate() {
-            log::debug!(target: "symbol-table::new", "registering symbol: {}", symbol.name());
+            log::debug!(target: "symbol-table::new", "registering {} symbol: {}", match symbol {
+                LocalSymbol::Item { .. } => "local",
+                LocalSymbol::Import { .. } => "imported",
+            }, symbol.name());
+
             let id = ItemIndex::new(i);
             let name = match &symbol {
                 LocalSymbol::Item { name, .. } => name.clone().into_inner(),

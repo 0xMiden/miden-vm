@@ -169,7 +169,7 @@ impl TestContext {
         let module = source.parse_with_options(
             self.source_manager.clone(),
             ParseOptions {
-                path: Some(path.as_ref().into()),
+                path: Some(path.as_ref().to_absolute().into_owned().into()),
                 ..ParseOptions::for_library()
             },
         )?;

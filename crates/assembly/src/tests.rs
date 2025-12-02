@@ -844,6 +844,45 @@ fn constant_err_div_by_zero() -> TestResult {
 }
 
 #[test]
+fn constant_err_div_by_zero_link_time() -> TestResult {
+    let mut context = TestContext::default();
+
+    let module_a = source_file!(
+        &context,
+        "pub const NUMERATOR = 10
+        pub const DENOMINATOR = 0"
+    );
+
+    context.add_module_from_source("module_a", module_a)?;
+
+    let source = source_file!(
+        &context,
+        "use module_a::NUMERATOR
+    use module_a::DENOMINATOR
+
+    const BAD_DIV = NUMERATOR / DENOMINATOR
+
+    begin
+        push.BAD_DIV
+    end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "invalid constant expression: division by zero",
+        regex!(r#",-\[test[\d]+:4:21\]"#),
+        "3 |",
+        "4 |     const BAD_DIV = NUMERATOR / DENOMINATOR",
+        "  :                     ^^^^^^^^^^^^^^^^^^^^^^^",
+        "5 |",
+        "  `----"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn constants_must_be_uppercase() -> TestResult {
     let context = TestContext::default();
     let source = source_file!(

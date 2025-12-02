@@ -302,10 +302,10 @@ impl<'a> SymbolResolver<'a> {
         let module = &self.graph[context.module];
         log::debug!(target: "name-resolver::import", "context source type is '{:?}'", module.source());
 
-        let found = module.resolve(symbol, self)?;
+        let found = module.resolve(symbol, self);
         log::debug!(target: "name-resolver::import", "local resolution for '{symbol}': {found:?}");
         match found {
-            SymbolResolution::External(path) => {
+            Ok(SymbolResolution::External(path)) => {
                 let context = SymbolResolutionContext {
                     span: symbol.span(),
                     module: context.module,
@@ -313,14 +313,14 @@ impl<'a> SymbolResolver<'a> {
                 };
                 self.resolve_path(&context, path.as_deref())
             },
-            SymbolResolution::Local(item) => {
+            Ok(SymbolResolution::Local(item)) => {
                 let gid = context.module + item.into_inner();
                 Ok(SymbolResolution::Exact {
                     gid,
                     path: Span::new(item.span(), self.item_path(gid)),
                 })
             },
-            SymbolResolution::MastRoot(digest) => {
+            Ok(SymbolResolution::MastRoot(digest)) => {
                 match self.graph.get_procedure_index_by_digest(&digest) {
                     Some(gid) => Ok(SymbolResolution::Exact {
                         gid,
@@ -329,7 +329,23 @@ impl<'a> SymbolResolver<'a> {
                     None => Ok(SymbolResolution::MastRoot(digest)),
                 }
             },
-            res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. }) => Ok(res),
+            Ok(res @ (SymbolResolution::Exact { .. } | SymbolResolution::Module { .. })) => Ok(res),
+            Err(err) if matches!(&*err, SymbolResolutionError::UndefinedSymbol { .. }) => {
+                // If we attempted to resolve a symbol to an import, but there is no such import,
+                // then we should attempt to resolve the symbol as a global module name, as it
+                // may simply be an unqualified module path.
+                let path = Path::new(symbol.into_inner());
+                match self.get_module_index_by_path(path) {
+                    // Success
+                    Some(found) => Ok(SymbolResolution::Module {
+                        id: found,
+                        path: Span::new(symbol.span(), self.module_path(found).into()),
+                    }),
+                    // No such module known to the linker, must be an invalid path
+                    None => Err(err.into()),
+                }
+            },
+            Err(err) => Err(err.into()),
         }
     }
 
