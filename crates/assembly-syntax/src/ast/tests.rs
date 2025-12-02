@@ -920,6 +920,22 @@ fn test_unterminated_if() {
     );
 }
 
+#[test]
+fn test_invalid_mapvaln_pad() {
+    let context = SyntaxTestContext::default();
+    let source = source_file!(&context, "begin adv.push_mapvaln.3 end");
+
+    assert_parse_diagnostic_lines!(
+        source,
+        "invalid padding value for the `adv.push_mapvaln` instruction: 3",
+        regex!(r#",-\[test[\d]+:1:24\]"#),
+        "1 | begin adv.push_mapvaln.3 end",
+        "  :                        ^",
+        "  `----",
+        " help: valid padding values are 0, 4, and 8"
+    );
+}
+
 // DOCUMENTATION PARSING TESTS
 // ================================================================================================
 

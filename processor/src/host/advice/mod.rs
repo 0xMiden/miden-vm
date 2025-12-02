@@ -139,28 +139,50 @@ impl AdviceProvider {
     /// If `include_len` is set to true, this also pushes the number of elements onto the advice
     /// stack.
     ///
+    /// If `pad_to` is not equal to 0, the elements list obtained from the advice map will be padded
+    /// with zeros, increasing its length to the next multiple of `pad_to`.
+    ///
     /// Note: this operation doesn't consume the map element so it can be called multiple times
     /// for the same key.
     ///
     /// # Example
     /// Given an advice stack `[a, b, c, ...]`, and a map `x |-> [d, e, f]`:
     ///
-    /// A call `push_stack(AdviceSource::Map { key: x, include_len: false })` will result in
-    /// advice stack: `[d, e, f, a, b, c, ...]`.
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: false, pad_to: 0 })` will result
+    /// in advice stack: `[d, e, f, a, b, c, ...]`.
     ///
-    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true })` will result in
-    /// advice stack: `[3, d, e, f, a, b, c, ...]`.
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true, pad_to: 0 })` will result
+    /// in advice stack: `[3, d, e, f, a, b, c, ...]`.
+    ///
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true, pad_to: 4 })` will result
+    /// in advice stack: `[3, d, e, f, 0, a, b, c, ...]`.
     ///
     /// # Errors
     /// Returns an error if the key was not found in the key-value map.
-    pub fn push_from_map(&mut self, key: Word, include_len: bool) -> Result<(), AdviceError> {
-        let values = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
+    pub fn push_from_map(
+        &mut self,
+        key: Word,
+        include_len: bool,
+        pad_to: u8,
+    ) -> Result<(), AdviceError> {
+        // get the advice map value
+        let map_value = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
 
-        self.stack.extend(values.iter().rev());
+        // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
+        // final (padded) elements list length will be the next multiple of pad_to
+        if pad_to != 0 {
+            let num_pad_elements =
+                map_value.len().next_multiple_of(pad_to as usize) - map_value.len();
+            self.stack.extend(core::iter::repeat_n(Felt::default(), num_pad_elements));
+        }
+
+        // push the reversed map_value list and its initial length to the advice stack
+        self.stack.extend(map_value.iter().rev());
         if include_len {
             self.stack
-                .push(Felt::try_from(values.len() as u64).expect("value length too big"));
+                .push(Felt::try_from(map_value.len() as u64).expect("value length too big"));
         }
+
         Ok(())
     }
 
