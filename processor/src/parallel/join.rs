@@ -5,9 +5,9 @@ use miden_core::{
     mast::{JoinNode, MastNodeExt},
 };
 
-use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
+use super::{CoreTraceFragmentFiller, trace_builder::OperationTraceConfig};
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     /// Adds a trace row for starting a JOIN operation to the main trace fragment.
     pub fn add_join_start_trace_row(
         &mut self,

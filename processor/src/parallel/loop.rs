@@ -5,9 +5,9 @@ use miden_core::{
     mast::{LoopNode, MastForest, MastNodeExt},
 };
 
-use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
+use super::{CoreTraceFragmentFiller, trace_builder::OperationTraceConfig};
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     /// Adds a trace row for the start of a LOOP operation.
     pub fn add_loop_start_trace_row(
         &mut self,
