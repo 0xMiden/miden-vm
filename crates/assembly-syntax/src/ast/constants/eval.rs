@@ -42,6 +42,13 @@ pub enum ConstEvalError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
     },
+    #[error("invalid constant expression: division by zero")]
+    DivisionByZero {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
     #[error("invalid constant")]
     #[diagnostic(help("this constant does not resolve to a value of the right type"))]
     InvalidConstant {
@@ -326,10 +333,30 @@ where
                         let lhs = lhs.into_inner();
                         let rhs = rhs.into_inner();
                         let result = match op {
-                            ConstantOp::Add => lhs + rhs,
-                            ConstantOp::Sub => lhs - rhs,
-                            ConstantOp::Mul => lhs * rhs,
-                            ConstantOp::Div | ConstantOp::IntDiv => lhs / rhs,
+                            ConstantOp::Add => lhs.checked_add(rhs).ok_or_else(|| {
+                                ConstEvalError::ImmediateOverflow {
+                                    span,
+                                    source_file: env.get_source_file_for(span),
+                                }
+                            })?,
+                            ConstantOp::Sub => lhs.checked_sub(rhs).ok_or_else(|| {
+                                ConstEvalError::ImmediateOverflow {
+                                    span,
+                                    source_file: env.get_source_file_for(span),
+                                }
+                            })?,
+                            ConstantOp::Mul => lhs.checked_mul(rhs).ok_or_else(|| {
+                                ConstEvalError::ImmediateOverflow {
+                                    span,
+                                    source_file: env.get_source_file_for(span),
+                                }
+                            })?,
+                            ConstantOp::Div | ConstantOp::IntDiv => lhs
+                                .checked_div(rhs)
+                                .ok_or_else(|| ConstEvalError::DivisionByZero {
+                                    span,
+                                    source_file: env.get_source_file_for(span),
+                                })?,
                         };
                         stack.push(ConstantExpr::Int(Span::new(span, result)));
                     },

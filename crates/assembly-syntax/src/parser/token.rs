@@ -251,6 +251,22 @@ impl IntValue {
             Self::Felt(value) => value.as_int(),
         }
     }
+
+    pub fn checked_add(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_add(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_sub(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_sub(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_mul(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_mul(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_div(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_div(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
 }
 
 impl core::ops::Add<IntValue> for IntValue {

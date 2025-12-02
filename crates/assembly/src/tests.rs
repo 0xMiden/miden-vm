@@ -844,6 +844,38 @@ fn constant_err_div_by_zero() -> TestResult {
 }
 
 #[test]
+fn constant_err_div_by_zero_indirect() -> TestResult {
+    let context = TestContext::default();
+
+    let source = source_file!(
+        &context,
+        "pub const NUMERATOR = 10
+    pub const DENOMINATOR = 0
+    pub const BAD_DIV = NUMERATOR / DENOMINATOR
+
+    begin
+        push.BAD_DIV
+    end"
+    );
+
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid constant expression: division by zero",
+        regex!(r#",-\[test[\d]+:3:25\]"#),
+        "2 |     pub const DENOMINATOR = 0",
+        "3 |     pub const BAD_DIV = NUMERATOR / DENOMINATOR",
+        "  :                         ^^^^^^^^^^^^^^^^^^^^^^^",
+        "4 |",
+        "  `----"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn constant_err_div_by_zero_link_time() -> TestResult {
     let mut context = TestContext::default();
 
