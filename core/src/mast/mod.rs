@@ -138,6 +138,40 @@ impl MastForest {
         self.debug_info.clear();
     }
 
+    /// Compacts the forest by merging nodes that become identical after decorator stripping.
+    ///
+    /// This operation takes ownership of the forest and returns a compacted version.
+    /// If the caller needs to preserve the original forest, they should clone it before calling.
+    ///
+    /// The process works by:
+    /// 1. Creating a copy of the forest and stripping all decorators
+    /// 2. Merging the stripped forest with itself to deduplicate identical nodes
+    /// 3. Returning the compacted forest
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// // Compact without preserving original
+    /// let compacted = forest.compact()?;
+    ///
+    /// // Preserve original if needed
+    /// let original_backup = forest.clone();
+    /// let compacted = forest.compact()?;
+    /// ```
+    pub fn compact(self) -> Result<Self, MastForestError> {
+        // Early out if no decorators present
+        if self.debug_info.is_empty() {
+            return Ok(self);
+        }
+
+        let mut stripped_forest = self.clone();
+        stripped_forest.strip_decorators();
+
+        let (compacted_forest, _root_map) = MastForest::merge([&stripped_forest])?;
+
+        Ok(compacted_forest)
+    }
+
     /// Merges all `forests` into a new [`MastForest`].
     ///
     /// Merging two forests means combining all their constituent parts, i.e. [`MastNode`]s,
