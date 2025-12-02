@@ -565,7 +565,7 @@ proc insert_single_to_multi_leaf
 
     # => [leaf_index, R]
 
-    # Prepare for hash_memory_words,
+    # Prepare for hash_words,
     locaddr.12 add.4
     locaddr.0
     # => [start_addr, end_addr, leaf_index, R]
@@ -891,7 +891,7 @@ proc insert_into_leaf
     exec.memcopy_word_range_and_advance_ptrs
     # => [cur_read', cur_write', leaf_index, R]
 
-    # Prepare for hash_memory_words and mtree_set.
+    # Prepare for hash_words and mtree_set.
 
     drop
     # => [cur_write, leaf_index, R]
@@ -935,7 +935,7 @@ proc replace_in_multi_leaf
     mem_storew_be
     # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
 
-    # Prepare for hash_memory_words
+    # Prepare for hash_words
 
     dropw
     # => [z, val_ptr, start_ptr, end_ptr, V_old, K, R]
@@ -1115,7 +1115,7 @@ proc hash_and_insert_mem
     dup.1 dup.1
     # => [start_addr, end_addr, start_addr, end_addr, leaf_index, R, ...]
 
-    exec.rpo::hash_memory_words
+    exec.rpo::hash_words
     # => [NV, start_addr, end_addr, leaf_index, R, ...]
 
     adv.insert_mem

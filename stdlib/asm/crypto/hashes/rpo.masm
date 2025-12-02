@@ -85,7 +85,7 @@ end
 #! - `HASH` is the cumulative hash of the provided memory values.
 #!
 #! Cycles: 37 + 3 * words, where `words` is the `start_addr - end_addr`
-pub proc hash_memory_double_words
+pub proc hash_double_words
     # enforce `start_addr ≤ end_addr`
     dup.1 dup.1 u32assert2
     u32gte assert.err="start address should be less or equal to the end address"
@@ -118,7 +118,7 @@ end
 #! - even words: 53 cycles + 3 * words
 #! - odd words: 65 cycles + 3 * words
 #! where `words` is the `start_addr - end_addr - 1`
-pub proc hash_memory_words
+pub proc hash_words
     # enforce `start_addr ≤ end_addr`
     dup.1 dup.1 u32assert2 u32gte assert
 
@@ -165,7 +165,7 @@ pub proc hash_memory_words
     # => [HASH]
 end
 
-#! Initializes the hasher state required for the `hash_memory_with_state` procedure.
+#! Initializes the hasher state required for the `hash_elements_with_state` procedure.
 #!
 #! Depending on the provided pad_inputs_flag, this procedure initializes the hasher state using
 #! different values for capacity element:
@@ -233,7 +233,7 @@ end
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
 #! - HASH is the resulting hash of the provided memory values.
-pub proc hash_memory_with_state
+pub proc hash_elements_with_state
     # hash every pair of words
     exec.absorb_double_words_from_memory
     # => [C', B', A', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
@@ -383,7 +383,7 @@ pub proc hash_elements
     exec.prepare_hasher_state
     # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
 
-    exec.hash_memory_with_state
+    exec.hash_elements_with_state
     # => [HASH]
 end
 
@@ -417,7 +417,7 @@ pub proc pad_and_hash_elements
     exec.prepare_hasher_state
     # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
 
-    exec.hash_memory_with_state
+    exec.hash_elements_with_state
     # => [HASH]
 end
 
