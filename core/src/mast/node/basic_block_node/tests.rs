@@ -714,12 +714,14 @@ fn test_basic_block_digest_forcing_with_decorators() {
     let operations = vec![Operation::Add];
     let forced_digest = Word::new([Felt::new(13), Felt::new(14), Felt::new(15), Felt::new(16)]);
 
-    let builder = BasicBlockNodeBuilder::new(operations, vec![])
+    let node_id = BasicBlockNodeBuilder::new(operations, vec![])
         .with_before_enter(vec![decorator_id])
         .with_after_exit(vec![decorator_id])
-        .with_digest(forced_digest);
+        .with_digest(forced_digest)
+        .add_to_forest(&mut forest)
+        .expect("Failed to add node to forest");
 
-    let node = builder.build().expect("Failed to build node with forced digest");
+    let node = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
     assert_eq!(node.digest(), forced_digest, "Digest should be forced");
     assert_eq!(
