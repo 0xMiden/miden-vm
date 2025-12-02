@@ -12,7 +12,7 @@ fn test_invalid_end_addr() {
         push.0999 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
     end
     ";
     let test = build_test!(empty_range, &[]);
@@ -50,7 +50,7 @@ fn test_hash_empty() {
     ]).into_iter().map(|e| e.as_int()).collect();
     build_test!(two_zeros_mem_stream, &[]).expect_stack(&zero_hash);
 
-    // checks the hash compute from 8 zero elements is the same when using hash_memory_words
+    // checks the hash compute from 8 zero elements is the same when using hash_words
     let two_zeros = "
     use std::crypto::hashes::rpo
 
@@ -58,7 +58,7 @@ fn test_hash_empty() {
         push.1008 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw
@@ -97,7 +97,7 @@ fn test_single_iteration() {
     ]).into_iter().map(|e| e.as_int()).collect();
     build_test!(one_memstream, &[]).expect_stack(&one_hash);
 
-    // checks the hash of 1 is the same when using hash_memory_words
+    // checks the hash of 1 is the same when using hash_words
     // Note: This is testing the hashing of two words, so no padding is added
     // here
     let one_element = "
@@ -110,7 +110,7 @@ fn test_single_iteration() {
         push.1008 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw
@@ -131,7 +131,7 @@ fn test_hash_one_word() {
         1, 0, 0, 0,
     ]).into_iter().map(|e| e.as_int()).collect();
 
-    // checks the hash of 1 is the same when using hash_memory_words
+    // checks the hash of 1 is the same when using hash_words
     let one_element = "
     use std::crypto::hashes::rpo
 
@@ -141,7 +141,7 @@ fn test_hash_one_word() {
         push.1004 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw
@@ -164,7 +164,7 @@ fn test_hash_even_words() {
         push.1008 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw
@@ -193,7 +193,7 @@ fn test_hash_odd_words() {
         push.1012 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw
@@ -244,7 +244,7 @@ fn test_absorb_double_words_from_memory() {
 }
 
 #[test]
-fn test_hash_memory_double_words() {
+fn test_hash_double_words() {
     // test the standard case
     let double_words = "
     use std::sys
@@ -261,7 +261,7 @@ fn test_hash_memory_double_words() {
         push.1000      # start address
         # => [start_addr, end_addr]
 
-        exec.rpo::hash_memory_double_words
+        exec.rpo::hash_double_words
         # => [HASH]
 
         # truncate stack
@@ -289,7 +289,7 @@ fn test_hash_memory_double_words() {
         push.1000.1000 # start and end addresses
         # => [start_addr, end_addr]
 
-        exec.rpo::hash_memory_double_words
+        exec.rpo::hash_double_words
         # => [HASH]
 
         # assert that the resulting hash is equal to the empty word
@@ -503,7 +503,7 @@ fn test_hash_elements_empty() {
 
     build_test!(source, &[]).expect_stack(&expected_stack);
 
-    // hash_memory_words
+    // hash_words
     let source = "
     use std::crypto::hashes::rpo
 
@@ -511,7 +511,7 @@ fn test_hash_elements_empty() {
         push.1000 # end address
         push.1000 # start address
 
-        exec.rpo::hash_memory_words
+        exec.rpo::hash_words
 
         # truncate stack
         swapw dropw

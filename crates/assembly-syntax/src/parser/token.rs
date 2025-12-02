@@ -944,6 +944,7 @@ impl<'input> Token<'input> {
                 | Token::Hmerge
                 | Token::HornerBase
                 | Token::HornerExt
+                | Token::LogPrecompile
                 | Token::ILog2
                 | Token::Inv
                 | Token::IsOdd
@@ -1061,6 +1062,8 @@ impl<'input> Token<'input> {
                 | Token::U32
                 | Token::U64
                 | Token::U128
+                | Token::Felt
+                | Token::Word
                 | Token::Struct
         )
     }
