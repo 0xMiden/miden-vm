@@ -359,8 +359,8 @@ end
 #! Notice that this procedure does not pad the elements to hash to the next multiple of 8.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
 #!
 #! Inputs:  [ptr, num_elements]
 #! Outputs: [HASH]
@@ -393,8 +393,8 @@ end
 #! by setting the capacity element to 0.
 #!
 #! This procedure divides the hashing process into two parts: hashing pairs of words using
-#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `hperm`
-#! instruction.
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
 #!
 #! Inputs:  [ptr, num_elements]
 #! Outputs: [HASH]
