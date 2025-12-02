@@ -86,8 +86,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        // Upstream renamed module; keep our public API stable
-        pub use miden_crypto::dsa::falcon512_rpo as rpo_falcon512;
+        pub use miden_crypto::dsa::falcon512_rpo;
     }
 }
 
