@@ -546,8 +546,9 @@ impl FastProcessor {
                 if self.in_debug_mode {
                     let clk = self.clk;
                     let process = &mut self.state();
-                    host.on_debug(process, options)
-                        .map_err(|err| ExecutionError::DebugHandlerError { clk, err })?;
+                    host.on_debug(process, options).map_err(|err| {
+                        ExecutionError::DebugHandlerError { clk, err: Box::new(err) }
+                    })?;
                 }
             },
             Decorator::AsmOp(_assembly_op) => {
@@ -559,7 +560,7 @@ impl FastProcessor {
                 host.on_trace(process, *id).map_err(|err| ExecutionError::TraceHandlerError {
                     clk,
                     trace_id: *id,
-                    err,
+                    err: Box::new(err),
                 })?;
             },
         };

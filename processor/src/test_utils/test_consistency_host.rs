@@ -1,4 +1,5 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use core::convert::Infallible;
 
 use miden_core::{DebugOptions, Felt};
 use miden_debug_types::{
@@ -6,9 +7,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    AdviceMutation, AssertError, AsyncHost, BaseHost, DebugError, DebugHandler, EventError,
-    FutureMaybeSend, MastForest, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
-    TraceError, Word,
+    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventError, FutureMaybeSend, MastForest,
+    MastForestStore, MemMastForestStore, ProcessState, SyncHost, Word,
 };
 
 /// A snapshot of the process state for consistency checking between processors.
@@ -65,7 +65,19 @@ impl TraceCollector {
 }
 
 impl DebugHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    type DebugError = Infallible;
+    type TraceError = Infallible;
+    type AssertInfo = ();
+
+    fn on_debug(
+        &mut self,
+        _process: &ProcessState,
+        _options: &DebugOptions,
+    ) -> Result<(), Self::DebugError> {
+        Ok(())
+    }
+
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), Self::TraceError> {
         // Count the trace event
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
@@ -73,6 +85,10 @@ impl DebugHandler for TraceCollector {
         self.execution_order.push((trace_id, process.clk().into()));
 
         Ok(())
+    }
+
+    fn on_assert_failed(&mut self, _process: &ProcessState) -> Option<Self::AssertInfo> {
+        None
     }
 }
 
@@ -141,6 +157,10 @@ impl<S> BaseHost for TestConsistencyHost<S>
 where
     S: SourceManager,
 {
+    type DebugError = Infallible;
+    type TraceError = Infallible;
+    type AssertInfo = ();
+
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -154,11 +174,15 @@ where
         &mut self,
         _process: &mut ProcessState,
         _options: &DebugOptions,
-    ) -> Result<(), DebugError> {
+    ) -> Result<(), Self::DebugError> {
         Ok(())
     }
 
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), Self::TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
@@ -169,12 +193,7 @@ where
         Ok(())
     }
 
-    fn on_assert_failed(
-        &mut self,
-        _process: &ProcessState,
-        _err_code: crate::Felt,
-    ) -> Option<AssertError> {
-        // For testing, do nothing
+    fn on_assert_failed(&mut self, _process: &ProcessState) -> Option<Self::AssertInfo> {
         None
     }
 }

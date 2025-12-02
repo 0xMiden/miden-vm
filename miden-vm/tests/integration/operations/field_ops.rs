@@ -1,7 +1,7 @@
 use miden_assembly::testing::regex;
 use miden_processor::{ExecutionError, RowIndex};
 use miden_utils_testing::{
-    Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
+    Felt, FieldElement, ONE, StarkField, WORD_SIZE, assert_assembler_diagnostic,
     assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
     proptest::prelude::*, rand::rand_value,
 };
@@ -324,8 +324,8 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_msg, .. }
+        if clk == RowIndex::from(21) && err_msg.is_none()
     );
 }
 
@@ -356,8 +356,8 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_msg, .. }
+        if clk == RowIndex::from(23) && err_msg.is_none()
     );
 
     //---------------------- exp containing more than 64 bits -------------------------------------

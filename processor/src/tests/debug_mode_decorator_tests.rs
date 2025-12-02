@@ -55,6 +55,10 @@ fn test_decorators_only_execute_in_debug_mode() {
     }
 
     impl BaseHost for TestHost {
+        type DebugError = crate::DebugError;
+        type AssertContext = ();
+        type TraceError = crate::TraceError;
+        
         fn get_label_and_source_file(
             &self,
             _location: &Location,
@@ -66,7 +70,7 @@ fn test_decorators_only_execute_in_debug_mode() {
             &mut self,
             _process: &mut ProcessState,
             _options: &miden_core::DebugOptions,
-        ) -> Result<(), ExecutionError> {
+        ) -> Result<(), Self::DebugError> {
             Ok(())
         }
 
@@ -74,7 +78,7 @@ fn test_decorators_only_execute_in_debug_mode() {
             &mut self,
             _process: &mut ProcessState,
             trace_id: u32,
-        ) -> Result<(), ExecutionError> {
+        ) -> Result<(), Self::TraceError> {
             if trace_id == 999 {
                 self.decorator_executed = true;
             }

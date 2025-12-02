@@ -1,7 +1,10 @@
+use alloc::boxed::Box;
+
 use miden_core::{Felt, ONE, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError,
+    errors::AssertInfo,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -22,9 +25,9 @@ pub(super) fn op_assert<P: Processor>(
     if processor.stack().get(0) != ONE {
         let process = &mut processor.state();
         let clk = process.clk();
-        let err = host.on_assert_failed(process, err_code);
+        let err_info = host.on_assert_failed(process).map(|e| -> AssertInfo { Box::new(e) });
         let err_msg = program.resolve_error_message(err_code);
-        return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
+        return Err(ExecutionError::failed_assertion(clk, err_msg, err_info, err_ctx));
     }
     processor.stack().decrement_size(tracer);
     Ok(())

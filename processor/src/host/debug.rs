@@ -3,10 +3,11 @@ use alloc::{
     vec::Vec,
 };
 use core::{fmt, ops::RangeInclusive};
+use std::convert::Infallible;
 
-use miden_core::{DebugOptions, FMP_ADDR};
+use miden_core::{DebugOptions, FMP_ADDR, Felt};
 
-use crate::{DebugError, DebugHandler, Felt, ProcessState, TraceError};
+use crate::{ProcessState, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -54,11 +55,15 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 }
 
 impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
+    type DebugError = Infallible;
+    type TraceError = Infallible;
+    type AssertInfo = ();
+
     fn on_debug(
         &mut self,
         process: &ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), DebugError> {
+    ) -> Result<(), Self::DebugError> {
         match *options {
             DebugOptions::StackAll => {
                 let stack = process.get_stack_state();
@@ -83,10 +88,11 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
                 self.print_stack(&reversed_stack, count, "Advice stack", process)
             },
         }
-        .map_err(DebugError::from)
+        .expect("failed to write output");
+        Ok(())
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), Self::TraceError> {
         writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
@@ -94,7 +100,23 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
             process.clk(),
             process.ctx()
         )
-        .map_err(TraceError::from)
+        .expect("failed to write output");
+        Ok(())
+    }
+
+    /// Prints assertion context (clk, ctx, code) and full stack; returns the code as info.
+    fn on_assert_failed(&mut self, process: &ProcessState) -> Option<Self::AssertInfo> {
+        writeln!(
+            self.writer,
+            "Assertion failed at step {} in context {}",
+            process.clk(),
+            process.ctx(),
+        )
+        .expect("failed to write output");
+        let stack = process.get_stack_state();
+        self.print_stack(&stack, None, "Stack", process)
+            .expect("failed to write output");
+        Some(())
     }
 }
 

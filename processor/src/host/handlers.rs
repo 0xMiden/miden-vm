@@ -70,27 +70,6 @@ impl EventHandler for NoopEventHandler {
 /// ```
 pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
-// DEBUG AND TRACE ERRORS
-// ================================================================================================
-
-/// A generic [`Error`] wrapper for debug handler errors.
-///
-/// Debug handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
-
-/// A generic [`Error`] wrapper for trace handler errors.
-///
-/// Trace handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
-
-/// A generic [`Error`] wrapper for assertion handler errors.
-///
-/// Assertion handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type AssertError = Box<dyn Error + Send + Sync + 'static>;
-
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 
@@ -199,26 +178,20 @@ impl Debug for EventHandlerRegistry {
 
 /// Handler for debug and trace operations
 pub trait DebugHandler: Sync {
-    /// This function is invoked when the `Debug` decorator is executed.
+    type DebugError: Error + Send + Sync + 'static;
+    type TraceError: Error + Send + Sync + 'static;
+    type AssertInfo: Debug + Send + Sync + 'static;
+
+    /// Invoked when the `Debug` decorator is executed.
     fn on_debug(
         &mut self,
         process: &ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        let mut handler = crate::host::debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
-    }
+    ) -> Result<(), Self::DebugError>;
 
-    /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
-        let _ = (&process, trace_id);
-        #[cfg(feature = "std")]
-        std::println!(
-            "Trace with id {} emitted at step {} in context {}",
-            trace_id,
-            process.clk(),
-            process.ctx()
-        );
-        Ok(())
-    }
+    /// Invoked when the `Trace` decorator is executed.
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), Self::TraceError>;
+
+    /// Handles the failure of the assertion instruction.
+    fn on_assert_failed(&mut self, process: &ProcessState) -> Option<Self::AssertInfo>;
 }

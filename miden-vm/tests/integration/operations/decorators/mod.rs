@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::{convert::Infallible, sync::Arc};
 
 use miden_core::DebugOptions;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
-    AdviceMutation, AsyncHost, BaseHost, DebugError, EventError, FutureMaybeSend, MastForest,
-    ProcessState, SyncHost, TraceError,
+    AdviceMutation, AsyncHost, BaseHost, EventError, FutureMaybeSend, MastForest, ProcessState,
+    SyncHost,
 };
 use miden_prover::Word;
 
@@ -22,6 +22,10 @@ pub struct TestHost {
 }
 
 impl BaseHost for TestHost {
+    type DebugError = Infallible;
+    type TraceError = Infallible;
+    type AssertInfo = ();
+
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -35,14 +39,22 @@ impl BaseHost for TestHost {
         &mut self,
         _process: &mut ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), DebugError> {
+    ) -> Result<(), Self::DebugError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(&mut self, _process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(
+        &mut self,
+        _process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), Self::TraceError> {
         self.trace_handler.push(trace_id);
         Ok(())
+    }
+
+    fn on_assert_failed(&mut self, _process: &ProcessState) -> Option<Self::AssertInfo> {
+        None
     }
 }
 

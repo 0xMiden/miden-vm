@@ -1,5 +1,5 @@
 use alloc::{sync::Arc, vec::Vec};
-use core::future::Future;
+use core::{error::Error as StdError, future::Future};
 
 use miden_core::{
     AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
@@ -7,7 +7,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{AssertError, DebugError, EventError, ProcessState, TraceError};
+use crate::{EventError, ProcessState};
 
 pub(super) mod advice;
 
@@ -16,7 +16,6 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::DebugHandler;
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -61,6 +60,12 @@ impl AdviceMutation {
 /// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
 pub trait BaseHost {
+    // ASSOCIATED ERROR TYPES
+    // --------------------------------------------------------------------------------------------
+    type DebugError: StdError + Send + Sync + 'static;
+    type TraceError: StdError + Send + Sync + 'static;
+    type AssertInfo: core::fmt::Debug + Send + Sync + 'static;
+
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -75,25 +80,17 @@ pub trait BaseHost {
         &mut self,
         process: &mut ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
-    }
+    ) -> Result<(), Self::DebugError>;
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_trace(process, trace_id)
-    }
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState,
+        trace_id: u32,
+    ) -> Result<(), Self::TraceError>;
 
     /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(
-        &mut self,
-        _process: &ProcessState,
-        _err_code: Felt,
-    ) -> Option<AssertError> {
-        None
-    }
+    fn on_assert_failed(&mut self, _process: &ProcessState) -> Option<Self::AssertInfo>;
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///

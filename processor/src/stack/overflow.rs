@@ -266,6 +266,7 @@ impl OverflowTable {
     /// and `restore_context` functions.
     fn save_stack_to_history(&mut self) {
         let clk = self.clk;
+        #[expect(clippy::unnecessary_unwrap)]
         if self.history.is_some() {
             let stack_after_op: Vec<Felt> = self
                 .get_current_overflow_stack()

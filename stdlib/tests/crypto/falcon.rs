@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventName, StarkField, ZERO};
+use miden_core::{EventName, StarkField};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -203,8 +203,8 @@ fn test_falcon512_probabilistic_product_failure() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _, err: _ }
-        if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_msg, .. }
+        if clk == RowIndex::from(3202) && err_msg.is_none()
     );
 }
 
