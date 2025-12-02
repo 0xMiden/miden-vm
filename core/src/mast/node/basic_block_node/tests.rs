@@ -441,12 +441,21 @@ proptest! {
     fn test_raw_decorator_iter_preserves_decorators(
         (ops, decs) in decorator_list_strategy(20)
     ) {
-        // Create a basic block with the generated operations and decorators
-        let block = BasicBlockNode::new_owned_with_decorators(ops.clone(), decs.clone()).unwrap();
+        // Create a basic block with the generated operations and decorators using linked storage
+        let mut dummy_forest = MastForest::new();
+
+        // Convert decorators to use forest's decorator IDs
+        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decs
+            .iter()
+            .map(|(idx, decorator_id)| (*idx, *decorator_id))
+            .collect();
+
+        let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
+            .add_to_forest(&mut dummy_forest)
+            .unwrap();
+        let block = dummy_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
         // Collect the decorators using raw_decorator_iter()
-        // Create a dummy forest since the method now requires it
-        let dummy_forest = MastForest::new();
         let collected_decorators: Vec<(usize, DecoratorId)> = block.raw_decorator_iter(&dummy_forest).collect();
 
         // The collected decorators should match the original decorators
@@ -610,9 +619,17 @@ proptest! {
         decorator_list_strategy(72)
     ) {
 
-        // Build BasicBlockNode (this applies padding)
-        // Use the decorator IDs directly as DecoratorList
-        let block = BasicBlockNode::new_owned_with_decorators(ops.clone(), decorators).unwrap();
+        // Build BasicBlockNode using linked storage (this applies padding)
+        let mut forest = MastForest::new();
+        // Convert decorators to use forest's decorator IDs
+        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+            .iter()
+            .map(|(idx, decorator_id)| (*idx, *decorator_id))
+            .collect();
+        let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
         let padded_ops = block.op_batches().iter().flat_map(|batch| batch.ops()).collect::<Vec<_>>();
 
         // Build both prefix arrays
@@ -669,13 +686,20 @@ proptest! {
         (ops, decorators) in
         decorator_list_strategy(72)
     ) {
-        // Build BasicBlockNode
-        // Use the decorator IDs directly as DecoratorList
-        let block = BasicBlockNode::new_owned_with_decorators(ops.clone(), decorators.clone()).unwrap();
+        // Build BasicBlockNode using linked storage
+        let mut forest = MastForest::new();
+        // Convert decorators to use forest's decorator IDs
+        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+            .iter()
+            .map(|(idx, decorator_id)| (*idx, *decorator_id))
+            .collect();
+        let node_id = BasicBlockNodeBuilder::new(ops.clone(), forest_decorators)
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
         // Create raw decorator iterator
-        let dummy_forest = MastForest::new();
-        let raw_iter = block.raw_decorator_iter(&dummy_forest);
+        let raw_iter = block.raw_decorator_iter(&forest);
 
         // Collect all decorators from the iterator
         let collected_decorators: Vec<_> = raw_iter.collect();

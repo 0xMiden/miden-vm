@@ -310,8 +310,8 @@ mod tests {
     use crate::{
         Operation, Word,
         mast::{
-            BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder,
-            JoinNodeBuilder, MastForestContributor, SplitNodeBuilder,
+            BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+            MastForestContributor, SplitNodeBuilder,
         },
     };
 
@@ -394,9 +394,7 @@ mod tests {
         let foo_digest = temp_forest[id_foo_block].digest();
 
         let mut forest_a = MastForest::new();
-        let id_foo_a = ExternalNodeBuilder::new(block_foo.digest())
-            .add_to_forest(&mut forest_a)
-            .unwrap();
+        let id_foo_a = ExternalNodeBuilder::new(foo_digest).add_to_forest(&mut forest_a).unwrap();
         let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
         forest_a.make_root(id_call_a);
 
@@ -485,8 +483,7 @@ mod tests {
         let foo_digest = temp_forest[id_foo_block].digest();
 
         let mut forest = MastForest::new();
-        let id_foo =
-            ExternalNodeBuilder::new(block_foo.digest()).add_to_forest(&mut forest).unwrap();
+        let id_foo = ExternalNodeBuilder::new(foo_digest).add_to_forest(&mut forest).unwrap();
         let id_call1 = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest).unwrap();
         let id_call2 = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest).unwrap();
         let id_split =

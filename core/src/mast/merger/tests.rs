@@ -133,7 +133,7 @@ fn mast_forest_merge_remap() {
     let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
     let expected_foo_block = merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_foo_block, &merged));
+        if merged_block.semantic_eq(expected_foo_block, &merged));
 
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
 
@@ -141,7 +141,7 @@ fn mast_forest_merge_remap() {
     let expected_bar_id = block_bar().add_to_forest(&mut merged).unwrap();
     let expected_bar_block = merged.get_node_by_id(expected_bar_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_bar_block, &merged));
+        if merged_block.semantic_eq(expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -226,9 +226,10 @@ fn mast_forest_merge_replace_external() {
         // Check that the first node is semantically equal to the expected foo block
         // Build expected node in the merged forest for proper semantic comparison
         let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
-        let expected_foo_block = merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
+        let expected_foo_block =
+            merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
         assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-            if merged_block.semantic_eq(&expected_foo_block, &merged));
+            if merged_block.semantic_eq(expected_foo_block, &merged));
 
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.
