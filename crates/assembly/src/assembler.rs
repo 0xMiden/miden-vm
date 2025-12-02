@@ -526,6 +526,16 @@ impl Assembler {
         symbol_path: Arc<Path>,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<Option<LibraryExport>, Report> {
+        log::trace!(target: "assembler::export_symbol", "exporting {} {symbol_path}", match self.linker[gid].item() {
+            SymbolItem::Compiled(ItemInfo::Procedure(_)) => "compiled procedure",
+            SymbolItem::Compiled(ItemInfo::Constant(_)) => "compiled constant",
+            SymbolItem::Compiled(ItemInfo::Type(_)) => "compiled type",
+            SymbolItem::Procedure(_) => "procedure",
+            SymbolItem::Constant(_) => "constant",
+            SymbolItem::Type(_) => "type",
+            SymbolItem::Alias { .. } => "alias",
+        });
+        let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
                 let resolved = match mast_forest_builder.get_procedure(gid) {
@@ -596,7 +606,7 @@ impl Assembler {
             },
             SymbolItem::Constant(item) => {
                 // Evaluate constant to a concrete value for export
-                let value = self.linker.const_eval(gid, &item.value)?;
+                let value = self.linker.const_eval(gid, &item.value, &mut cache)?;
 
                 LibraryExport::Constant(ConstantExport { path: symbol_path, value })
             },

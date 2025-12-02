@@ -4462,3 +4462,43 @@ fn test_assembler_debug_info_present() {
         "AsmOp decorators should be present for tracking instructions"
     );
 }
+
+#[test]
+fn test_cross_module_constant_resolution() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            pub const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a
+            pub const B_VAL = module_a::A_VAL + 5  # <-- Should work but fails
+            pub proc b_proc
+                push.B_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}

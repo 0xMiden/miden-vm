@@ -21,6 +21,7 @@ pub fn rewrite_symbol(
         return Ok(());
     }
 
+    log::trace!(target: "linker::rewrite_symbol", "rewriting {}", symbol.name());
     match symbol.item() {
         SymbolItem::Compiled(item) => match item {
             ItemInfo::Constant(value) => {

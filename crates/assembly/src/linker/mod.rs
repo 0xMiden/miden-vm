@@ -28,7 +28,7 @@ pub use self::{
     callgraph::{CallGraph, CycleError},
     errors::LinkerError,
     library::{LinkLibrary, LinkLibraryKind},
-    resolver::{SymbolResolutionContext, SymbolResolver},
+    resolver::{ResolverCache, SymbolResolutionContext, SymbolResolver},
     symbols::{Symbol, SymbolItem},
 };
 use self::{
@@ -781,16 +781,16 @@ impl Linker {
 /// Const evaluation
 impl Linker {
     /// Evaluate `expr` to a concrete constant value, in the context of the given item.
-    pub fn const_eval(
+    pub(super) fn const_eval(
         &self,
         gid: GlobalItemIndex,
         expr: &ast::ConstantExpr,
+        cache: &mut ResolverCache,
     ) -> Result<ast::ConstantValue, LinkerError> {
         let symbol_resolver = SymbolResolver::new(self);
-        let mut cache = ResolverCache::default();
         let mut resolver = Resolver {
             resolver: &symbol_resolver,
-            cache: &mut cache,
+            cache,
             current_module: gid.module,
         };
 

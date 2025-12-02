@@ -162,16 +162,6 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
         }
         ControlFlow::Continue(())
     }
-
-    fn visit_mut_inst(&mut self, inst: &mut Span<ast::Instruction>) -> ControlFlow<LinkerError> {
-        if matches!(&**inst, ast::Instruction::EmitImm(_)) {
-            let mut visitor = ConstEvalVisitor::new(self);
-            let _ = visitor.visit_mut_inst(inst);
-            wrap_const_control_flow!(visitor)
-        } else {
-            visit::visit_mut_inst(self, inst)
-        }
-    }
     fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
         let mut visitor = ConstEvalVisitor::new(self);
         let _ = visitor.visit_mut_immediate_u8(imm);
@@ -237,7 +227,12 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
     fn get(&self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
         let module = &self.resolver.linker()[self.module_id];
         let name = Span::new(name.span(), name.as_str());
-        let symbol = match module.resolve(name, self.resolver)? {
+        let context = SymbolResolutionContext {
+            span: name.span(),
+            module: self.module_id,
+            kind: None,
+        };
+        let symbol = match self.resolver.resolve_local(&context, &name)? {
             SymbolResolution::Exact { gid, .. } => &self.resolver.linker()[gid],
             SymbolResolution::Local(item) => &module[*item.inner()],
             SymbolResolution::External(path) => {

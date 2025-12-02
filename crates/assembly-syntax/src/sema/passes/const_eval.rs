@@ -56,6 +56,34 @@ where
                         CachedConstantValue::Hit(ConstantValue::Int(value))
                         | CachedConstantValue::Miss(ConstantExpr::Int(value)),
                     )) => *value,
+                    Ok(Some(CachedConstantValue::Miss(
+                        expr @ (ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }),
+                    ))) => {
+                        // A reference to another constant was used, try to evaluate the expression
+                        let expr = expr.clone();
+                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                            Ok(ConstantExpr::Int(value)) => value,
+                            // Unable to evaluate in the current context
+                            Ok(ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }) => {
+                                return ControlFlow::Continue(());
+                            },
+                            Ok(_) => {
+                                self.errors.push(
+                                    ConstEvalError::InvalidConstant {
+                                        span,
+                                        expected: "an integer",
+                                        source_file: self.env.get_source_file_for(span),
+                                    }
+                                    .into(),
+                                );
+                                return ControlFlow::Continue(());
+                            },
+                            Err(err) => {
+                                self.errors.push(err);
+                                return ControlFlow::Continue(());
+                            },
+                        }
+                    },
                     Ok(Some(_)) => {
                         self.errors.push(
                             ConstEvalError::InvalidConstant {
@@ -130,9 +158,27 @@ where
                     //   const.EVT = event("...")
                     //   emit.EVT
                 },
-                Ok(Some(CachedConstantValue::Miss(ConstantExpr::Var(_)))) | Ok(None) => {
-                    // The value is not yet available, proceed for now
-                    return ControlFlow::Continue(());
+                Ok(Some(CachedConstantValue::Miss(expr @ ConstantExpr::Var(_)))) => {
+                    // A reference to another constant was used, try to evaluate the expression
+                    let expr = expr.clone();
+                    match crate::ast::constants::eval::expr(&expr, self.env) {
+                        Ok(ConstantExpr::Hash(HashKind::Event, _)) => (),
+                        // Unable to evaluate in the current context
+                        Ok(ConstantExpr::Var(_)) => return ControlFlow::Continue(()),
+                        Ok(_) => {
+                            self.errors.push(
+                                ConstEvalError::InvalidConstant {
+                                    span,
+                                    expected: "an event name",
+                                    source_file: self.env.get_source_file_for(span),
+                                }
+                                .into(),
+                            );
+                        },
+                        Err(err) => {
+                            self.errors.push(err);
+                        },
+                    }
                 },
                 Ok(Some(_)) => {
                     // CHANGE: disallow `emit.CONST` unless CONST is defined via `event("...")`.
@@ -150,6 +196,8 @@ where
                         .into(),
                     );
                 },
+                // The value is not yet available, proceed for now
+                Ok(None) => return ControlFlow::Continue(()),
                 Err(err) => {
                     self.errors.push(err);
                 },
@@ -211,12 +259,44 @@ where
                         let event_id = EventId::from_name(string.as_str()).as_felt();
                         *imm = Immediate::Value(Span::new(span, event_id));
                     },
-                    // The constant expression references an externally-defined symbol which is
-                    // not available yet, so ignore for now
                     Ok(Some(CachedConstantValue::Miss(
-                        ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. },
-                    )))
-                    | Ok(None) => (),
+                        expr @ (ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }),
+                    ))) => {
+                        // A reference to another constant was used, try to evaluate the expression
+                        let expr = expr.clone();
+                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                            Ok(ConstantExpr::Int(value)) => {
+                                *imm = Immediate::Value(Span::new(
+                                    span,
+                                    Felt::new(value.inner().as_int()),
+                                ));
+                            },
+                            Ok(ConstantExpr::Hash(HashKind::Event, value)) => {
+                                // CHANGE: resolve `event("...")` to a Felt when a Felt immediate is
+                                // expected (e.g. enables `emit.EVENT`):
+                                //   const.EVT = event("...")
+                                //   emit.EVT
+                                let event_id = EventId::from_name(value.as_str()).as_felt();
+                                *imm = Immediate::Value(Span::new(span, event_id));
+                            },
+                            // Unable to evaluate in the current context
+                            Ok(ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }) => (),
+                            Ok(_) => {
+                                self.errors.push(
+                                    ConstEvalError::InvalidConstant {
+                                        span,
+                                        expected: "a felt",
+                                        source_file: self.env.get_source_file_for(span),
+                                    }
+                                    .into(),
+                                );
+                            },
+                            Err(err) => {
+                                self.errors.push(err);
+                            },
+                        }
+                    },
+                    // Invalid value
                     Ok(Some(_)) => {
                         self.errors.push(
                             ConstEvalError::InvalidConstant {
@@ -227,6 +307,9 @@ where
                             .into(),
                         );
                     },
+                    // The constant expression references an externally-defined symbol which is
+                    // not available yet, so ignore for now
+                    Ok(None) => (),
                     Err(err) => {
                         self.errors.push(err);
                     },
@@ -274,18 +357,67 @@ where
                             // CHANGE: allow `const.EVT = event("...")` with IntValue contexts by
                             // reducing to a Felt via word()[0]. Enables:
                             //   const.EVT = event("...")
-                            //   push.EVT                # pushes the Felt event id
+                            //   push.EVT # pushes the Felt event id
                             let event_id = EventId::from_name(string.as_str()).as_felt();
                             *imm =
                                 Immediate::Value(Span::new(span, IntValue::Felt(event_id).into()));
                         },
                     },
-                    // The constant references an externally-defined symbol which is not yet
-                    // available, so ignore for now
                     Ok(Some(CachedConstantValue::Miss(
-                        ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. },
-                    )))
-                    | Ok(None) => (),
+                        expr @ (ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }),
+                    ))) => {
+                        // A reference to another constant was used, try to evaluate the expression
+                        let expr = expr.clone();
+                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                            Ok(ConstantExpr::Int(value)) => {
+                                *imm = Immediate::Value(Span::new(
+                                    span,
+                                    PushValue::Int(*value.inner()),
+                                ));
+                            },
+                            Ok(ConstantExpr::Word(value)) => {
+                                *imm = Immediate::Value(Span::new(
+                                    span,
+                                    PushValue::Word(*value.inner()),
+                                ));
+                            },
+                            Ok(ConstantExpr::Hash(HashKind::Word, value)) => {
+                                // Existing behavior for `const.W = word("...")`:
+                                //   push.W    # pushes a Word
+                                let hash_word = hash_string_to_word(value.as_str());
+                                *imm = Immediate::Value(Span::new(
+                                    span,
+                                    PushValue::Word(WordValue(*hash_word)),
+                                ));
+                            },
+                            Ok(ConstantExpr::Hash(HashKind::Event, value)) => {
+                                // CHANGE: allow `const.EVT = event("...")` with IntValue contexts
+                                // by reducing to a Felt via word()[0]. Enables:
+                                //     const.EVT = event("...")
+                                //     push.EVT # pushes the Felt event id
+                                let event_id = EventId::from_name(value.as_str()).as_felt();
+                                *imm = Immediate::Value(Span::new(
+                                    span,
+                                    IntValue::Felt(event_id).into(),
+                                ));
+                            },
+                            // Unable to evaluate in the current context
+                            Ok(ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }) => (),
+                            Ok(_) => {
+                                self.errors.push(
+                                    ConstEvalError::InvalidConstant {
+                                        span,
+                                        expected: "an integer or word",
+                                        source_file: self.env.get_source_file_for(span),
+                                    }
+                                    .into(),
+                                );
+                            },
+                            Err(err) => {
+                                self.errors.push(err);
+                            },
+                        }
+                    },
                     Ok(Some(_)) => {
                         self.errors.push(
                             ConstEvalError::InvalidConstant {
@@ -296,6 +428,9 @@ where
                             .into(),
                         );
                     },
+                    // The constant references an externally-defined symbol which is not yet
+                    // available, so ignore for now
+                    Ok(None) => (),
                     Err(err) => {
                         self.errors.push(err);
                     },
@@ -329,9 +464,36 @@ where
                         let hash_word = hash_string_to_word(string.as_str());
                         *imm = Immediate::Value(Span::new(span, WordValue(*hash_word)));
                     },
-                    // The constant references an externally-defined symbol which is not yet
-                    // available, so ignore for now
-                    Ok(Some(CachedConstantValue::Miss(ConstantExpr::Var(_)))) | Ok(None) => (),
+                    Ok(Some(CachedConstantValue::Miss(expr @ ConstantExpr::Var(_)))) => {
+                        // A reference to another constant was used, try to evaluate the expression
+                        let expr = expr.clone();
+                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                            Ok(ConstantExpr::Word(value)) => {
+                                *imm = Immediate::Value(Span::new(span, *value.inner()));
+                            },
+                            Ok(ConstantExpr::Hash(HashKind::Word, value)) => {
+                                // Existing behavior for `const.W = word("...")`:
+                                //   push.W    # pushes a Word
+                                let hash_word = hash_string_to_word(value.as_str());
+                                *imm = Immediate::Value(Span::new(span, WordValue(*hash_word)));
+                            },
+                            // Unable to evaluate in the current context
+                            Ok(ConstantExpr::Var(_)) => (),
+                            Ok(_) => {
+                                self.errors.push(
+                                    ConstEvalError::InvalidConstant {
+                                        span,
+                                        expected: "a word",
+                                        source_file: self.env.get_source_file_for(span),
+                                    }
+                                    .into(),
+                                );
+                            },
+                            Err(err) => {
+                                self.errors.push(err);
+                            },
+                        }
+                    },
                     Ok(Some(_)) => {
                         self.errors.push(
                             ConstEvalError::InvalidConstant {
@@ -342,6 +504,9 @@ where
                             .into(),
                         );
                     },
+                    // The constant references an externally-defined symbol which is not yet
+                    // available, so ignore for now
+                    Ok(None) => (),
                     Err(err) => {
                         self.errors.push(err);
                     },
