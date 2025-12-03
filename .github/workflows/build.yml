@@ -21,6 +21,8 @@ jobs:
         toolchain: [stable, nightly]
     steps:
       - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
       - name: Build for no-std
         run: |
           rustup update --no-self-update ${{ matrix.toolchain }}

@@ -58,6 +58,11 @@ miden-crypto = { version = "0.19", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
+# Constraints to resolve duplicates
+semver = "1.0"
+syn = "1.0"
+windows-sys = "0.61"
+
 # Third-party crates
 blake3 = { version = "1.8" }
 criterion = { version = "0.7" }
@@ -74,7 +79,7 @@ serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged = {version = "0.1" }
 smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 thiserror = { version = "2.0", default-features = false }
-tokio = { version = "1.47", default-features = false }
+tokio = { version = "1.48", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 winter-air = { version = "0.13", default-features = false }
 winter-fri = "0.13"
