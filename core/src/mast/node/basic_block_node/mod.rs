@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
 use miden_crypto::{
@@ -414,6 +414,92 @@ impl BasicBlockNode {
     /// Return the MastNodeId of this `BasicBlockNode`, if in `Linked` state
     pub fn linked_id(&self) -> Option<MastNodeId> {
         self.decorators.linked_id()
+    }
+}
+
+// BATCH VALIDATION
+// ================================================================================================
+
+impl BasicBlockNode {
+    /// Validates that this BasicBlockNode satisfies the three core invariants:
+    /// 1. Power-of-two number of groups in each batch
+    /// 2. No batch ends with an immediate operation
+    /// 3. Minimal NOOP padding (no extraneous NOOPs)
+    ///
+    /// Returns an error string describing which invariant was violated if validation fails.
+    pub fn validate_batch_invariants(&self) -> Result<(), String> {
+        // Check invariant 1: Power-of-two groups in each batch
+        self.validate_power_of_two_groups()?;
+
+        // Check invariant 2: No batch ends with immediate operation
+        self.validate_no_immediate_endings()?;
+
+        // Check invariant 3: Minimal NOOP padding
+        self.validate_minimal_noop_padding()?;
+
+        Ok(())
+    }
+
+    /// Validates that each batch has a power-of-two number of groups.
+    fn validate_power_of_two_groups(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let num_groups = batch.num_groups();
+            if !num_groups.is_power_of_two() && num_groups > 0 {
+                return Err(format!(
+                    "Batch {}: {} groups is not power of two",
+                    batch_idx, num_groups
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates that no batch ends with an operation that has an immediate value.
+    fn validate_no_immediate_endings(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            if let Some(last_op) = batch.ops().last()
+                && last_op.imm_value().is_some()
+            {
+                return Err(format!(
+                    "Batch {}: ends with immediate operation without padding NOOP",
+                    batch_idx
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates that NOOP padding is minimal.
+    /// i.e. no batch should have its second half as all NOOPs if the first half would be a valid
+    /// batch.
+    fn validate_minimal_noop_padding(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let ops = batch.ops();
+
+            // Only check batches with at least 4 operations (so we have a meaningful split)
+            if ops.len() >= 4 {
+                let midpoint = ops.len() / 2;
+                let first_half = &ops[..midpoint];
+                let second_half = &ops[midpoint..];
+
+                // Check if second half is all NOOPs
+                let second_half_all_noops =
+                    second_half.iter().all(|op| matches!(op, Operation::Noop));
+
+                // Check if first half would be valid (power of two and doesn't end with immediate)
+                let first_half_valid = first_half.len().is_power_of_two()
+                    && first_half.last().is_none_or(|op| op.imm_value().is_none());
+
+                if second_half_all_noops && first_half_valid {
+                    return Err(format!(
+                        "Batch {}: non-minimal NOOP padding - could be reduced to {} operations",
+                        batch_idx,
+                        first_half.len()
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 

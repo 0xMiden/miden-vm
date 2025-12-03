@@ -1,6 +1,7 @@
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -601,6 +602,30 @@ impl MastForest {
 }
 
 // ------------------------------------------------------------------------------------------------
+/// Validation methods
+impl MastForest {
+    /// Validates that all BasicBlockNodes in this forest satisfy the three core invariants:
+    /// 1. Power-of-two number of operations in each batch
+    /// 2. No batch ends with an immediate operation
+    /// 3. NOOP padding is minimal
+    ///
+    /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
+    /// at assembly time rather than dynamically during execution.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        for (node_id_idx, node) in self.nodes.iter().enumerate() {
+            let node_id =
+                MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
+            if let MastNode::Block(basic_block) = node {
+                basic_block.validate_batch_invariants().map_err(|error_msg| {
+                    MastForestError::InvalidBatchPadding(node_id, error_msg)
+                })?;
+            }
+        }
+        Ok(())
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
 /// Error message methods
 impl MastForest {
     /// Given an error code as a Felt, resolves it to its corresponding error message.
@@ -960,6 +985,8 @@ pub enum MastForestError {
     DecoratorError(DecoratorIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
+    #[error("invalid batch padding in node {0:?}: {1}")]
+    InvalidBatchPadding(MastNodeId, String),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly
