@@ -2648,7 +2648,7 @@ fn program_with_import_errors() {
     let source = source_file!(
         &context,
         "\
-        use std::math::u512
+        use miden::core::math::u512
         begin \
             push.4 push.3 \
             exec.u512::iszero_unsafe \
@@ -2658,10 +2658,10 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined module '::std::math::u512'",
+        "undefined module '::miden::core::math::u512'",
         regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use std::math::u512",
-        "  :     ^^^^^^^^^^^^^^^",
+        "1 | use miden::core::math::u512",
+        "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u512::iszero_unsafe end",
         "  `----"
     );
@@ -2670,7 +2670,7 @@ fn program_with_import_errors() {
     let source = source_file!(
         &context,
         "\
-        use std::math::u256
+        use miden::core::math::u256
         begin \
             push.4 push.3 \
             exec.u256::foo \
@@ -2680,10 +2680,10 @@ fn program_with_import_errors() {
     assert_assembler_diagnostic!(
         context,
         source,
-        "undefined module '::std::math::u256'",
+        "undefined module '::miden::core::math::u256'",
         regex!(r#",-\[test[\d]+:1:5\]"#),
-        "1 | use std::math::u256",
-        "  :     ^^^^^^^^^^^^^^^",
+        "1 | use miden::core::math::u256",
+        "  :     ^^^^^^^^^^^^^^^^^^^^^^^",
         "2 |         begin push.4 push.3 exec.u256::foo end",
         "  `----"
     );
@@ -4183,4 +4183,38 @@ end"#
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
     Ok(())
+}
+
+#[test]
+fn test_assembler_debug_info_conditional() {
+    let context = TestContext::default();
+    let source = r#"
+    pub proc foo
+        push.1 push.2 add
+    end
+    "#;
+
+    let module = parse_module!(&context, "test::foo", source);
+
+    // Test 1: Default assembler (not in debug mode) should not include debug info
+    let assembler = Assembler::default();
+    let library = assembler.assemble_library([module.clone()]).unwrap();
+    let mast_forest = library.mast_forest();
+
+    // Debug info should NOT be present when not in debug mode
+    assert!(
+        mast_forest.decorators().is_empty(),
+        "Debug info should not be present when assembler is not in debug mode"
+    );
+
+    // Test 2: Assembler in debug mode should include debug info
+    let assembler = Assembler::default().with_debug_mode(true);
+    let library = assembler.assemble_library([module]).unwrap();
+    let mast_forest = library.mast_forest();
+
+    // Debug info should be present when in debug mode
+    assert!(
+        !mast_forest.decorators().is_empty(),
+        "Debug info should be present when assembler is in debug mode"
+    );
 }

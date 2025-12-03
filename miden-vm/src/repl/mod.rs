@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use miden_assembly::{Assembler, Library};
+use miden_libcore::CoreLibrary;
 use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
-use miden_stdlib::StdLibrary;
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
 use rustyline::{DefaultEditor, error::ReadlineError};
 
@@ -145,7 +145,7 @@ use crate::utils::print_mem_address;
 // ```
 
 /// Initiates the Miden Repl tool.
-pub fn start_repl(library_paths: &Vec<PathBuf>, use_stdlib: bool) {
+pub fn start_repl(library_paths: &Vec<PathBuf>, use_corelib: bool) {
     let mut program_lines: Vec<String> = Vec::new();
 
     // set of user imported modules
@@ -159,8 +159,8 @@ pub fn start_repl(library_paths: &Vec<PathBuf>, use_stdlib: bool) {
             .unwrap();
         provided_libraries.push(library);
     }
-    if use_stdlib {
-        provided_libraries.push(StdLibrary::default().into());
+    if use_corelib {
+        provided_libraries.push(CoreLibrary::default().into());
     }
 
     println!("========================== Miden REPL ============================");

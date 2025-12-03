@@ -12,15 +12,15 @@ pub struct ReplCmd {
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
 
-    /// Usage of standard library
-    #[arg(short = 's', long = "stdlib")]
-    use_stdlib: bool,
+    /// Link in the core library
+    #[arg(short = 'c', long = "libcore")]
+    use_libcore: bool,
 }
 
 impl ReplCmd {
     pub fn execute(&self) -> Result<(), Report> {
         // initiates repl tool.
-        start_repl(&self.library_paths, self.use_stdlib);
+        start_repl(&self.library_paths, self.use_libcore);
         Ok(())
     }
 }

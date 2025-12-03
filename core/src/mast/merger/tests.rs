@@ -178,8 +178,8 @@ fn mast_forest_merge_duplicate() {
         forest_a.nodes.iter().find(|node| node.digest() == merged_node).unwrap();
     }
 
-    for merged_decorator in merged.decorators.iter() {
-        assert!(forest_a.decorators.contains(merged_decorator));
+    for merged_decorator in merged.decorators().iter() {
+        assert!(forest_a.decorators().contains(merged_decorator));
     }
 
     assert_child_id_lt_parent_id(&merged).unwrap();
@@ -397,15 +397,15 @@ fn mast_forest_merge_decorators() {
     let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     // There are 4 unique decorators across both forests.
-    assert_eq!(merged.decorators.len(), 4);
-    assert!(merged.decorators.contains(&trace0));
-    assert!(merged.decorators.contains(&trace1));
-    assert!(merged.decorators.contains(&trace2));
-    assert!(merged.decorators.contains(&trace3));
+    assert_eq!(merged.decorators().len(), 4);
+    assert!(merged.decorators().contains(&trace0));
+    assert!(merged.decorators().contains(&trace1));
+    assert!(merged.decorators().contains(&trace2));
+    assert!(merged.decorators().contains(&trace3));
 
     let find_decorator_id = |deco: &Decorator| {
         let idx = merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(
@@ -909,7 +909,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Helper to find a decorator's ID in the merged forest
     let find_decorator = |trace_value: u32| {
         let idx = merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(|(id, deco)| {
@@ -938,7 +938,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Verify that shared decorator appears only once in merged forest
     assert!(
         merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(|(i, deco)| {
@@ -976,7 +976,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     }
 
     // Verify all decorators are referenced at least once (no orphans)
-    for (i, decorator) in merged.decorators.iter().enumerate() {
+    for (i, decorator) in merged.decorators().iter().enumerate() {
         let deco_id = DecoratorId::from_u32_safe(i as u32, &merged).unwrap();
         let ref_count = decorator_ref_counts.get(&deco_id).unwrap_or(&0);
         if ref_count == &0 {
@@ -1066,7 +1066,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Verify no decorator was lost or orphaned
     assert_eq!(
         decorator_ref_counts.len(),
-        merged.decorators.len(),
+        merged.decorators().len(),
         "Every decorator in merged forest should be referenced at least once (no orphans)"
     );
 }

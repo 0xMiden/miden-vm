@@ -42,6 +42,6 @@ thiserror.workspace = true
 # See: https://github.com/rust-lang/cargo/issues/2911#issuecomment-1483256987
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
-miden-stdlib = { path = "../../stdlib", default-features = false }
+miden-libcore = { path = "../../libcore", default-features = false }
 insta.workspace = true
 proptest = { workspace = true, features = ["std"] }

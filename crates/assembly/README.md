@@ -61,30 +61,30 @@ for the full set of APIs and how to use them.
 The first use case that you are likely to encounter is the desire to factor out
 some shared code into a _library_. A library is a set of modules which belong
 to a common namespace, and which are packaged together. The
-[standard library](../stdlib) is an example of this.
+[core library](../../libcore) is an example of this.
 
 To call code in this library from your program entrypoint, you must add the
 library to the instance of the assembler you will compile the program with,
 using the `with_dynamic_library` or `link_dynamic_library` methods.
 
 To be a bit more precise, a library can be anything that implements the `Library`
-trait, allowing for some flexibility in how they are managed. The standard library
+trait, allowing for some flexibility in how they are managed. The core library
 referenced above implements this trait, so if we wanted to make use of the Miden
-standard library in our own program, we would add it like so:
+core library in our own program, we would add it like so:
 
 ```rust
 # use miden_assembly::Assembler;
 # use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-# use miden_stdlib::StdLibrary;
+# use miden_libcore::CoreLibrary;
 # use std::sync::Arc;
 #
 let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()))
-    .with_dynamic_library(&StdLibrary::default())
+    .with_dynamic_library(&CoreLibrary::default())
     .unwrap();
 ```
 
 The resulting assembler can now compile code that invokes any of the
-standard library procedures by importing them from the namespace of
+core library procedures by importing them from the namespace of
 the library, as shown next:
 
 ```masm
@@ -190,7 +190,7 @@ together, let's look at one last example:
 ```rust
 use miden_assembly::Assembler;
 use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-use miden_stdlib::StdLibrary;
+use miden_libcore::CoreLibrary;
 use std::sync::Arc;
 
 // Source code of the kernel module
@@ -207,7 +207,7 @@ let kernel_lib = Assembler::new(source_manager.clone())
 // Instantiate the assembler with multiple options at once
 let assembler = Assembler::with_kernel(source_manager, kernel_lib)
     .with_debug_mode(true)
-    .with_dynamic_library(&StdLibrary::default())
+    .with_dynamic_library(&CoreLibrary::default())
     .unwrap();
 
 // Assemble our program

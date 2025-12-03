@@ -22,5 +22,5 @@ cargo publish -p miden-assembly
 cargo publish -p miden-processor
 cargo publish -p miden-prover
 cargo publish -p miden-verifier
-cargo publish -p miden-stdlib
+cargo publish -p miden-libcore
 cargo publish -p miden-vm

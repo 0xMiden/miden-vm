@@ -1,4 +1,4 @@
-use std::crypto::hashes::sha256
+use miden::core::crypto::hashes::sha256
 
 begin
     # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the

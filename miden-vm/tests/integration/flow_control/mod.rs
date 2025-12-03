@@ -2,9 +2,9 @@ use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_debug_types::{SourceLanguage, SourceManager};
+use miden_libcore::CoreLibrary;
 use miden_processor::ExecutionError;
 use miden_prover::Word;
-use miden_stdlib::StdLibrary;
 use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
@@ -474,7 +474,7 @@ fn dynexec_with_procref() {
     end";
 
     let mut test = build_test!(program_source, &[]);
-    test.libraries.push(StdLibrary::default().library().clone());
+    test.libraries.push(CoreLibrary::default().library().clone());
     test.add_module(
         "external::module",
         "\
@@ -539,10 +539,10 @@ fn simple_dyncall() {
             2,
         ])
         .unwrap(),
-        libraries: vec![StdLibrary::default().into()],
+        libraries: vec![CoreLibrary::default().into()],
         ..Test::new(&format!("test{}", line!()), program_source, false)
     };
-    test.add_event_handlers(StdLibrary::default().handlers());
+    test.add_event_handlers(CoreLibrary::default().handlers());
 
     test.expect_stack(&[6]);
 
@@ -616,7 +616,7 @@ fn dyncall_with_syscall_and_caller() {
 #[test]
 fn procref() -> Result<(), Report> {
     let module_source = "
-    use std::math::u64
+    use miden::core::math::u64
     pub use u64::overflowing_add
 
     @locals(4)
@@ -632,7 +632,7 @@ fn procref() -> Result<(), Report> {
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, &source_manager)?;
         let library = Assembler::new(source_manager)
-            .with_dynamic_library(StdLibrary::default())
+            .with_dynamic_library(CoreLibrary::default())
             .unwrap()
             .assemble_library([module])
             .unwrap();
@@ -643,8 +643,8 @@ fn procref() -> Result<(), Report> {
     };
 
     let source = "
-    use std::math::u64
-    use std::sys
+    use miden::core::math::u64
+    use miden::core::sys
 
     @locals(4)
     proc foo
@@ -659,10 +659,10 @@ fn procref() -> Result<(), Report> {
         exec.sys::truncate_stack
     end";
 
-    let stdlib = StdLibrary::default();
+    let libcore = CoreLibrary::default();
     let mut test = build_test!(source, &[]);
-    test.libraries.push(stdlib.library().clone());
-    test.add_event_handlers(stdlib.handlers());
+    test.libraries.push(libcore.library().clone());
+    test.add_event_handlers(libcore.handlers());
 
     test.expect_stack(&[
         mast_roots[0][3].as_int(),
