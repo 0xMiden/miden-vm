@@ -1,5 +1,0 @@
-
-## std::stark::ood_frames
-| Procedure | Description |
-| ----------- | ------------- |
-| load_and_horner_eval_ood_frames | Loads the execution trace and the quotient trace evaluation frames.<br /><br />This also computes Q^z(alpha) and Q^gz(alpha) where:<br /><br />Q^z(alpha) = (q_z_0, q_z_1) = \sum_{i=0}^{n+m+l} S_i * alpha^i<br /><br />and<br /><br />Q^gz(alpha) = (q_gz_0, q_gz_1) = \sum_{i=0}^{n+m+l} T_i * alpha^i<br /><br />where:<br /><br />1. n, m and l are the widths of the main segment, auxiliary segment and constraint composition<br />traces, respectively.<br />2. S_i are the evaluations of columns in the main segment, auxiliary segment and constraint<br />composition at the the out-of-domain point z.<br />3. T_i are the evaluations of columns in the main segment, auxiliary segment and constraint<br />composition at the the out-of-domain point gz.<br />4. alpha is the randomness used in order to build the DEEP polynomial.<br /><br />Q^z(alpha) and Q^gz(alpha) is then stored, as a word, at OOD_FIXED_TERM_HORNER_EVALS_PTR<br /><br />Inputs:  []<br />Outputs: []<br /> |

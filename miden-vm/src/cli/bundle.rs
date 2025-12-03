@@ -5,12 +5,12 @@ use miden_assembly::{
     Assembler, Library, PathBuf as LibraryPath,
     diagnostics::{IntoDiagnostic, Report},
 };
-use miden_stdlib::StdLibrary;
+use miden_libcore::CoreLibrary;
 
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "Compile Library",
-    about = "Bundles .masm files into a single .masl library with access to the stdlib."
+    about = "Bundles .masm files into a single .masl library with access to the libcore."
 )]
 pub struct BundleCmd {
     /// Disable debug symbols (release mode)
@@ -63,7 +63,7 @@ impl BundleCmd {
                 if !kernel.is_file() {
                     return Err(Report::msg("`kernel` must be a file"));
                 };
-                assembler.link_dynamic_library(StdLibrary::default())?;
+                assembler.link_dynamic_library(CoreLibrary::default())?;
                 let library = assembler.assemble_kernel_from_dir(kernel, Some(&self.dir))?;
                 library.write_to_file(output_file).into_diagnostic()?;
                 println!(
@@ -78,7 +78,7 @@ impl BundleCmd {
                     None => dir.to_string_lossy().into_owned(),
                 };
                 let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
-                assembler.link_dynamic_library(StdLibrary::default())?;
+                assembler.link_dynamic_library(CoreLibrary::default())?;
                 let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
                 library.write_to_file(output_file).into_diagnostic()?;
                 println!("Built library {namespace}");

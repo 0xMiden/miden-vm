@@ -29,6 +29,7 @@
 - `hash_memory_with_state`, `hash_memory_words`, and `hash_memory_double_words` procedures from the `std::crypto::hashes::rpo` module were renamed to the `hash_elements_with_state`, `hash_words`, and `hash_double_words` respectively ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
 - [BREAKING] Updgrade `miden-crypto` to 0.19 ([#2399](https://github.com/0xMiden/miden-vm/pull/2399)).
 - Pre-allocate main trace buffer in trace generation ([#2345](https://github.com/0xMiden/miden-vm/pull/2345)).
+- Rename the MASM standard library to "miden::core", the crate to `miden-libcore`, and various other MASM module refactors ([#2260](https://github.com/0xMiden/miden-vm/issues/2260))
 
 ## 0.19.1 (2025-11-6)
 

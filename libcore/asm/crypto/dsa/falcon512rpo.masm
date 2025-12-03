@@ -1,0 +1,681 @@
+use miden::core::crypto::hashes::rpo256
+use miden::core::math::u64
+
+# CONSTANTS
+# =================================================================================================
+
+const J = 77321994752
+const M = 12289
+const M_HALF = 6144 # (M-1) / 2
+const M_DOUBLE = 24578
+const M_SQUARE = 151019521
+const SQUARE_NORM_BOUND = 34034726
+const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
+const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512rpo::falcon_div")
+
+# MODULAR REDUCTION FALCON PRIME
+# =============================================================================================
+
+#! Given dividend ( i.e. a u64 given by its lower and higher u32 decomposition ) on the stack,
+#! this routine computes c = a % M where M = 12289
+#!
+#! Expected stack state
+#!
+#! [a_hi, a_lo, ...]
+#!
+#! Output stack state looks like
+#!
+#! [c, ...] | c = a % M
+#!
+#! Note that it is the responsibility of the calling procedure to ensure that `a_hi` and `a_lo` are
+#! within the appropriate range i.e., they are u32-s.
+#!
+#! Cycles: 27
+pub proc mod_12289
+    emit.FALCON_DIV_EVENT
+    # the advice stack contains now [qhi, qlo, r, ...] where q = qhi * 2^32 + qlo is quotient
+    # and r is remainder
+
+    adv_push.2
+    u32assert2
+    # => [qlo, qhi, a_hi, a_lo, ...]
+
+    push.M
+    u32overflowing_mul
+    # => [overflow, M * qlo % 2^32, qhi, a_hi, a_lo, ...]
+
+    movup.2
+    push.M
+    # => [M, qhi, overflow, M * qlo % 2^32, a_hi, a_lo, ...]
+    u32overflowing_madd
+    # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
+    # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
+    drop
+    # => [M * q / 2^32, (M * q) % 2^32, a_hi, a_lo, ...]
+    # => [res_hi, res_lo, a_hi, a_lo, ...]
+
+    adv_push.1
+    dup
+    u32overflowing_sub.M
+    # => [underflow_bit, r - M, r, res_hi, res_lo, a_hi, a_lo, ...]
+    assert drop
+    # => [r, res_hi, res_lo, a_hi, a_lo, ...]
+
+    dup
+    movup.3
+    u32overflowing_add
+    # => [flag, (res_lo + r) % 2^32, r, res_hi, a_hi, a_lo, ...] where u = uhi * 2^32 + ulo and u = (res_lo + r) / 2^32
+
+    movup.3
+    u32overflowing_add
+    # => [flag, final_res_hi, final_res_lo, r, a_hi, a_lo, ...] flag should be 0 by the bound on inputs
+    drop
+    # => [final_res_hi, final_res_lo, r, a_hi, a_lo, ...]
+
+    movup.3
+    assert_eq
+    movup.2
+    assert_eq
+    # => [r, ...]
+end
+
+# HASH-TO-POINT
+# =============================================================================================
+
+#! Takes as input a message digest, a nonce of size 40 bytes represented as 8 field elements
+#! and a pointer. The procedure absorbs MSG and NONCE into a fresh RPO state and squeezes the
+#! coefficients of a polynomial c representing the hash-to-point of (MSG || NONCE). The coefficients
+#! are then saved in the memory region [c_ptr, c_ptr + 512).
+#! This implementation of the `hash_to_point` procedure avoids the rejection-sampling step
+#! required in the per-the-spec algorithm by using the observation on page 31 in
+#! https://falcon-sign.info/falcon.pdf
+#!
+#! Input: [c_ptr, MSG, NONCE1, NONCE0, ...]
+#! Output: [...]
+#!
+#! Cycles: ~1430
+@locals(8)
+pub proc hash_to_point
+    # Move pointer out of the way
+    movdn.12
+
+    # Store MSG for later absorption
+    loc_storew_be.4 dropw
+
+    # Absorb the nonce
+    padw movdnw.2
+    exec.rpo256::permute
+
+    # Absorb the message
+    swapw loc_loadw_be.4 swapw exec.rpo256::permute
+
+    # Squeeze the coefficients and save them
+    repeat.63
+        swapw dup.12
+        mem_storew_be
+        swapw dup.12 add.8 swap.13 add.4
+        mem_storew_be
+        exec.rpo256::permute
+    end
+
+    # Save the last remaining coefficients
+    dup.12 add.4 mem_storew_be dropw
+    movup.8 mem_storew_be dropw
+
+    # Clean up the stack
+    dropw
+end
+
+
+# PROBABILISTIC POLYNOMIAL MULTIPLICATION IN Z_Q[x]
+# =============================================================================================
+
+#! Takes as input PK, the hash of the coefficients of the polynomial `h` representing the expanded
+#! public key, and a pointer to the memory location where the coefficients of the polynomial `h`
+#! will be stored.
+#! The procedure loads `h` from the advice stack and compares its hash with the provided hash `PK`.
+#! It then loads the polynomial `s2` representing the signature from the advice stack and lays it
+#! in memory right after `h`.
+#! After that, it loads the claimed polynomial `h * s2` in Z_Q[x] where Q is the Miden VM prime
+#! from the advice stack and lays it right after `s2`.
+#! The hash of `h`, `s2` and the claimed product is also computed and the first two field elements
+#! of the digest (i.e., the Fiat-Shamir challenge) are used in order to check that
+#! pi == h * s2 in Z_Q[x] by evaluating both sides at the random point. Note that since we need
+#! to hash the polynomials before computing their evaluations, the procedure receives
+#! the evaluation point non-deterministically so that it can perform the evaluations while hashing
+#! is still going on. After hashing of the polynomials is finished, the procedure checks that
+#! the evaluation point was indeed derived correctly from the hash of all 3 polynomials.
+#!
+#! Inputs:
+#!   Operand stack: [ptr, PK, ...]
+#!   Advice stack:  [tau0, tau1, h_0, ..., h_511, s2_0, ..., s2_511, pi_0, ..., pi_1022, ...]
+#! Outputs:
+#!   Operand stack: []
+#!   Advice stack:  []
+#!
+#! Cycles: 6780
+@locals(8)
+pub proc load_h_s2_and_product
+    # We will store in local addresses:
+    # 1. 0..4 the public key,
+    # 2. 4..8 the inverse of the evaluation point tau as [tau_inv0, tau_inv1, tau0, tau1].
+
+    # 1) Set up the stack for loading the coefficients of the polynomials, evaluating and hashing them
+
+    ## a) Set up the accumulator for `horner_eval_base` and the memory pointers
+    push.0.0
+    locaddr.4
+    movup.3
+    # => [ptr, tau_inv_ptr, 0, 0, PK, ...]
+
+    ## b) Save PK to later compare it with the hash of the h polynomial
+    swapw
+    loc_storew_be.0
+    # => [PK, ptr, tau_inv_ptr, acc1, acc0, ...]
+
+    ## c) Prepare the capacity portion of the state of the hasher
+    padw swapw
+    # => [Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc1, acc0, ...], where Y is a "garbage" word
+
+    ## d) Load the evaluation point tau from the advice tape, compute its inverse and save both
+    ## Note that we will evaluate the polynomials at `tau_inv = tau^{-1}` as we are loading the coefficients
+    ## in the normal order i.e., not in reversed order required for Horner evaluation.
+    ## This means that the equality we will be checking is
+    ## pi(tau_inv) * tau^1023 == h(tau_inv) * tau^511 * s2(tau_inv) * tau^511
+    ##
+    ## which simplifies to
+    ##
+    ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+    adv_push.2
+    dup.1 dup.1 ext2inv
+    movup.3 movup.3
+    loc_storew_be.4
+    # => [tau1, tau0, tau_inv1, tau_inv0, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc1, acc0, ...]
+
+    # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
+    repeat.64
+        adv_pipe
+
+        # check that all coefficients are less than Falcon prime
+        dupw.1
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+
+        dupw
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+
+        horner_eval_base
+
+        exec.rpo256::permute
+    end
+    # => [Y, D, C, ptr, tau_inv_ptr, acc1, acc0, ...] where D is the digest expected to be PK
+
+    # 3) Load PK, the saved claimed hash of h, and compare hashes
+    loc_loadw_be.0
+    assert_eqw
+    # => [C, ptr, tau_inv_ptr, h(tau)_1, h(tau)_0, ...]
+
+    # 4) Load s2 and evaluate at tau_inv
+
+    ## a) Reset the accumulator, update the pointers and set up the state of the hasher
+    push.0 movdn.6
+    push.0 movdn.6
+    padw padw
+    # => [0, 0, 0, 0, 0, 0, 0, 0, C, ptr, tau_inv_ptr, 0, 0, h(tau)_1, h(tau)_0, ...]
+
+    ## b) Load and evaluate s2 at tau_inv
+    repeat.64
+        adv_pipe
+
+        # check that all coefficients are less than Falcon prime
+        dupw.1
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+
+        dupw
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+        u32assert2
+        u32overflowing_sub.M assert drop
+        u32overflowing_sub.M assert drop
+
+        horner_eval_base
+        exec.rpo256::permute
+    end
+    # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+
+    # 5) Load claimed h * s2 in Z_Q[x]
+
+    ## a) Reset the accumulator, update the pointers and set up the state of the hasher
+    push.0 movdn.14
+    push.0 movdn.14
+    # => [Y, Y, C, ptr, tau_inv_ptr, 0, 0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+    repeat.128
+        adv_pipe
+        horner_eval_base
+        exec.rpo256::permute
+    end
+    # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+    # 6) Check that the challenge we computed the evaluations with is the correct one
+
+    ## a) Extract the expected challenge from the digest and leave a garbage word to load
+    ##    the challenge we got from the advice stack
+    dropw
+    swapw drop drop
+    # => [Y, tau1, tau0, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+    ## b) Load from memory the challenge we got from the advice stack and assert equality between
+    ##    the two challenges
+    loc_loadw_be.4
+    dup.4 assert_eq
+    dup.4 assert_eq
+    drop drop
+    # => [tau1, tau0, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+    # 7) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
+
+    ## a) Compute the left hand side of the equation
+    movup.2 drop
+    movup.2 drop
+    ext2mul
+    # => [LHS1, LHS0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+
+    ## b) Compute the right hand side of the equation
+    movdn.5 movdn.5
+    ext2mul
+    # => [RHS1, RHS0, LHS1, LHS0, ...]
+
+    ## c) Assert equality
+    movup.2
+    assert_eq
+    assert_eq
+    # => [...]
+end
+
+
+# SQUARE NORM OF Z_M[x]/(phi) POLYNOMIALS
+# =============================================================================================
+
+#! Normalizes an `e` in [0, M) to be in [-(M-1) << 1, (M-1) << 1) and returns its square norm.
+#!
+#! We use the following formula to do so:
+#! normalize(e) = e^2 - phi * (2*M*e - M^2) where phi := (e > (M - 1)/2)
+#!
+#! The formula implements:
+#!
+#! if e > (M-1)/2:
+#!   return (M - e)^2
+#! else:
+#!   return e^2
+#!
+#! The use of the formula avoids using the if-else block.
+#!
+#! Input: [e, ...]
+#! Output [norm(e)^2, ...]
+#!
+#! Cycles: 20
+pub proc norm_sq
+    dup
+    dup mul
+    #=> [e^2, e, ...]
+
+    push.M_HALF
+    dup.2
+    u32lt
+    #=> [phi, e^2, e, ...]
+
+    movup.2
+    push.M_DOUBLE       # 2*M
+    mul
+    push.M_SQUARE       # M^2
+    sub
+    #=> [2*M*e - M^2, phi, e^2, ...]
+
+    mul sub
+    #=> [norm(e)^2, ...]
+end
+
+#! Given a tuple (u, w, v), we want to compute (v - (u + (- w % M) % M) % M), where:
+#!
+#! 1. v is a field element given by its u32 decomposition i.e., (c_lo, c_hi) such that
+#!    v = c_hi * 2**32 + c_lo
+#! 2. w is a field element representing the (i+512)-th coefficient of the product polynomial
+#!    pi (i.e., h * s2). We are guaranteed that w is at most 512 * (M-1)^2.
+#! 3. u is a field element representing the i-th coefficient of the product polynomial
+#!    pi (i.e., h * s2). We are guaranteed that u is at most 512 * (M-1)^2.
+#!
+#! We can avoid doing three modular reductions by using the following facts:
+#!
+#! 1. M is much smaller than the Miden prime Q. Precisely, M * 2^50 < Q
+#! 2. The coefficients of the product polynomial, u and w, are strictly less than J := 512 * M^2.
+#! 3. The coefficients of c are at most M - 1.
+#!
+#! This means that we can substitute (v - (u + (- w % M) % M) % M) with  v + w + J - u
+#! (note J % M = 0) without risking Q-underflow but we can still overflow.
+#! For this reason, we use the u32 decomposition of v and perform the addition of
+#! v and w + J - u as u64. Note that |w + J - u| <= 1024 * (M - 1)^2
+#! and hence there is the possibility of an overflow when we add v and w + J - u as u64.
+#! When there is an overflow, we add 10952, which is equal to 2^32 % M, to the upper u32 limb of
+#! the result of (v + (w + J - u)). Note that since |w + J - u| <= 1024 * (M-1)^2 < 2^38, and
+#! 10952 < M, we are guaranteed that this final u32 addition to the upper limb will not overflow.
+#!
+#! To get the final result we reduce (v + w + J - u) modulo M.
+#!
+#! Input: [pi0, pi512 + J, c_hi, c_lo, ...]
+#! Output: [e, ...]
+#!
+#! Cycles: 45
+pub proc diff_mod_M
+    # 1) Subtract
+    sub
+    #=> [pi512 + J - pi, c_hi, c_lo, ...]
+
+    # 2) u32split first u64
+    u32split
+    #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
+
+    # 3) Add the two u64-s
+    exec.u64::overflowing_add
+    #=> [flag, res_hi, res_lo, ..]
+
+    # 4) Handle potential overflow in the u64 addition
+    push.10952 # 2^32 mod M
+    push.0
+    #=> [0, 10952, flag, res_hi, res_lo, ..]
+    swap.2
+    #=> [flag, 10952, 0, res_hi, res_lo, ..]
+    cdrop
+    add
+    #=> [res_hi, res_lo, ..]
+
+    # 5) Reduce modulo M
+    #    Note that by virtue of the above, we are guaranteed that `res_hi` and `res_lo` are u32-s,
+    #    and hence calling `mod_12289` is safe.
+    exec.mod_12289
+    #=> [e, ...]
+end
+
+#! Takes a pointer to a polynomial pi of degree less than 1024 with coefficients in Z_Q and
+#! a polynomial c of degree 512 with coefficients also in Z_Q, where Q is the Miden prime.
+#! The goal is to compute s1 = c - pi  = c - h * s2 in Z_M[x]/(phi) where M is the Falcon prime.
+#! The pointer pi_ptr points both to pi and c through the relation c_ptr = pi_ptr + offset
+#! where offset := 1281.
+#! The naive way to compute s1 would be to first reduce the polynomial pi modulo the Falcon
+#! prime M and then modulo the irreducible polynomial phi = x^512 + 1. Then we would need to negate
+#! the coefficients of pi modulo M and only then can we add these coefficients to the coefficients
+#! of c and then reduce the result modulo M one more time.
+#! Knowing that the end goal of computing c is to compute its norm squared, we can do better.
+#!
+#! We can compute s1 in a single pass by delaying the M-modular reduction til the end. This can
+#! be achieved through a careful analysis of the computation of the difference between pi and c.
+#!
+#! The i-th coefficient s1_i of s1 is equal to c_i - (pi_i - pi_{512 + i}) which is equal to
+#! c_i  + pi_{512 + i} - pi_i. Now, we know that the size of the pi_i coefficients is bounded by
+#! J := 512 * M^2 and this means that J + pi_{512 + i} - pi_i does not Q-underflow and since
+#! J = 0 mod M, the addition of J does not affect the final result. It is also important to
+#! note that adding J does not Q-overflow by virtue of M * 2^50 < Q.
+#! All of the above implies that we can compute s1_i with only one modular reduction at the end,
+#! in addition to one modular reduction applied to c_i.
+#! Moreover, since we are only interested in the square norm of s1_i, we do not have to store
+#! s1_i and then load it at a later point, and instead we can immediately follow the computation
+#! of s1_i with computing its square norm.
+#! After computing the square norm of s1_i, we can accumulate into an accumulator to compute the
+#! sum of the square norms of all the coefficients of polynomial c. Using the overflow stack, this
+#! can be delayed til the end.
+#!
+#! Input: [pi_ptr, ...]
+#! Output: [norm_sq(s1), ...]
+#!
+#! Cycles: 40450
+pub proc compute_s1_norm_sq
+    repeat.128
+        # 1) Load the next 4 * 3 coefficients
+        # load the next four pi_i
+        padw
+        dup.4
+        mem_loadw_be
+
+        # load the next four pi_{i+512}
+        padw
+        dup.8 add.512
+        mem_loadw_be
+
+        # load the next four c_i
+        padw
+        dup.12 add.MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY
+        mem_loadw_be
+        #=> [C, PI_{i+512}, PI, pi_ptr, ...]
+
+        # 2) Compute the squared norm of (i + 0)-th coefficient of s1
+
+        u32split
+        #=> [c0_hi, c0_lo, c1, c2, c3, PI_{i+512}, PI, pi_ptr, ...]
+        movup.5
+        push.J add
+        #=> [pi512_0, c0_hi, c0_lo, c1, c2, c3, pi512_1, pi512_2, pi512_3, PI, pi_ptr, ...]
+        movup.9
+        #=> [pi0, pi512_0, c_hi, c_lo, c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, ...]
+        exec.diff_mod_M
+        #=> [e, c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, ...]
+        exec.norm_sq
+        #=> [norm(e)^2, ...]
+
+        # Move the result out of the way so that we can process the remaining coefficients
+        movdn.10
+        #=> [c1, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, e0, ...]
+
+        # 3) Compute the squared norm of (i + 1)-th coefficient of s1
+
+        u32split
+        #=> [c1_hi, c1_lo, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, e0, ...]
+        movup.4
+        #=> [pi512_1, c1_hi, c1_lo, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
+        push.J add
+        movup.7
+        #=> [pi1, pi512_1, c1_hi, c1_lo, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
+        exec.diff_mod_M
+        exec.norm_sq
+        #=> [e, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
+
+        movdn.7
+        #=> [c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
+
+        # 4) Compute the squared norm of (i + 2)-th coefficient of s1
+
+        u32split
+        #=> [c2_hi, c2_lo, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
+        movup.3
+        push.J add
+        #=> [pi512_2, c2_hi, c2_lo, c3, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
+        movup.5
+        #=> [pi2, pi512_2, c2_hi, c2_lo, c3, pi512_3, pi3, pi_ptr, e0, e1, ...]
+        exec.diff_mod_M
+        exec.norm_sq
+
+        movdn.4
+        #=> [c3, pi512_3, pi3, pi_ptr, e, e, e, ...]
+
+        # 5) Compute the squared norm of (i + 3)-th coefficient of s1
+
+        u32split
+        #=> [c3_hi, c3_lo, pi512_3, pi3, pi_ptr, e0, e1, e2, ...]
+        movup.2 push.J add
+        movup.3
+        #=> [pi3, pi512_3, c3_hi, c3_lo, pi_ptr, e0, e1, e2, ...]
+        exec.diff_mod_M
+        #=> [e3, pi_ptr, e0, e1, e2, ...]
+        exec.norm_sq
+        #=> [e3, pi_ptr, e0, e1, e2, ...]
+
+        swap
+        #=> [pi_ptr, e3, e0, e1, e2, ...]
+
+        # 6) Increment the pointer
+        add.4
+    end
+
+    # Sum up the squared norm of all the coefficients of s1
+    drop    # drop the pointer
+    repeat.511
+        add
+    end
+    #=> [norm_sq(s1), ...]
+end
+
+#! Compute the square norm of the polynomial s2 given a pointer to its coefficients.
+#!
+#! Input: [s2_ptr, ...]
+#! Output: [norm_sq(s2), ...]
+#!
+#! Cycles: 11150
+pub proc compute_s2_norm_sq
+    repeat.128
+        padw
+        dup.4
+        mem_loadw_be
+        # => [c3, c2, c1, c0, s2_ptr, ...] where ci are coefficients of s2
+
+        exec.norm_sq
+        swap
+        # => [c2, norm_sq(c3), c1, c0, s2_ptr, ...]
+        exec.norm_sq
+        add
+        swap
+        # => [c1, norm_sq(c2) + norm_sq(c3), c0, s2_ptr, ...]
+        exec.norm_sq
+        add
+        swap
+        # => [c0, norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
+        exec.norm_sq
+        add
+        # => [norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), s2_ptr, ...]
+        swap
+        add.4
+        # => [s2_ptr + 1, norm_sq(c0) + norm_sq(c1) + norm_sq(c2) + norm_sq(c3), ...]
+    end
+    drop
+    # (512 / 4) - 1 = 127 additions are needed
+    repeat.127
+        add
+    end
+end
+
+
+# FALCON SIGNATURE VERIFICATION ALGORITHM
+# =============================================================================================
+
+#! Verifies a signature against a public key and a message. The procedure gets as inputs the hash
+#! of the public key and the hash of the message via the operand stack. The signature is expected
+#! to be present on the advice stack.
+#!
+#! The signature is valid if and only if the procedure returns.
+#!
+#! Inputs:
+#!   Operand stack: [PK, MSG, ...]
+#!   Advice stack:  [SIGNATURE]
+#! Outputs:
+#!   Operand stack: []
+#!   Advice stack:  []
+#!
+#! where:
+#! - tau = (tau0, tau1) is an element in the quadratic field extension at which the product relation
+#!   between `h * s2 = pi` is checked.
+#! - h_i are the coefficients of the expanded public key polynomial.
+#! - s2_i are the coefficients of the signature polynomial.
+#! - pi_i are the coefficients of `h * s2` in Z_Q[x] where Q is the Miden VM prime.
+#! - nonce_i are field elements representing the nonce associated to the signature.
+#!
+#! Cycles: ~ 59859
+@locals(2560)
+pub proc verify
+    # 1) Load the public key polynomial h and the signature polynomial s2 and the product of
+    # the two polynomials pi := h * s2 in Z_Q[x]. This also checks that h hashes to the provided
+    # digest PK. While loading the polynomials, the first half of the digest of hashing the three
+    # polynomials and is used to check that we indeed have pi := h * s2 in Z_Q[x] by checking that
+    # pi(tau) = h(tau) * s2(tau) where tau is a random (Fiat-Shamir) challenge resulting
+    # from hashing h, s2 and pi.
+
+    locaddr.0
+    exec.load_h_s2_and_product
+    #=> [MSG, ...]                                  (Cycles: 6780)
+
+    # 2) Load the NONCE from the advice provider. This is encoded as 8 field elements
+
+    padw adv_loadw
+    padw adv_loadw
+    #=> [NONCE1, NONCE0, MSG, ...]
+
+    # 3) Compute the hash-to-point of the message MSG from the provided NONCE and save
+    # the resulting polynomial c in the memory region [c_ptr, c_ptr + 512)
+
+    movupw.2
+    locaddr.2048
+    exec.hash_to_point
+    #=> [...]                                       (Cycles: 1430)
+
+    # 4) Compute the squared norm of s1 := c - h * s2 (in Z_M[x]/(phi))
+
+    locaddr.1024
+    #=> [pi_ptr, ...]
+
+    exec.compute_s1_norm_sq
+    #=> [norm_sq(s1), ...]                          (Cycles: 40450)
+
+    # 5) Compute the squared norm of s2
+
+    locaddr.512
+    #=> [s2_ptr, norm_sq(s1), ...]
+
+    exec.compute_s2_norm_sq
+    #=> [norm_sq(s2), norm_sq(s1), ...]             (Cycles: 11150)
+
+    # 6) Check that ||(s1, s2)||^2 < K
+
+    add
+    #=> [norm_sq(s1) + norm_sq(s2), ...]
+
+    push.SQUARE_NORM_BOUND
+    u32assert2 u32lt assert
+    #=> [...]                                       (Cycles: 8)
+end
+
+# HELPERS
+# =============================================================================================
+
+#! Moves the signature from the advice map to the advice stack, where the signature is stored in
+#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the RPO256 hash. The signature is
+#! expected to be stored in reverse order, so that it gets pushed on the advice stack in the
+#! correct order.
+#!
+#! Inputs:
+#!   Operand stack: [PK, MSG, ...]
+#!   Advice stack:  []
+#!   Advice map: hash(MSG || PK) -> SIGNATURE
+#! Outputs:
+#!   Operand stack: [PK, MSG, ...]
+#!   Advice stack:  [SIGNATURE]
+pub proc move_sig_from_map_to_adv_stack
+    dupw.1 dupw.1 hmerge
+    #=> [hash(MSG || PK), PK, MSG, ...]
+
+    adv.push_mapval dropw
+    #=> [PK, MSG, ...]
+    #=> advice stack: [SIGNATURE]
+end

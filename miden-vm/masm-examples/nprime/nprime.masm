@@ -1,4 +1,4 @@
-use std::sys
+use miden::core::sys
 
 # append the current number to the prime list
 proc append

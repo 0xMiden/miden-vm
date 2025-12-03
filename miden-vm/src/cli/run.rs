@@ -2,8 +2,8 @@ use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
+use miden_libcore::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
-use miden_stdlib::StdLibrary;
 use miden_vm::internal::InputFile;
 use tracing::instrument;
 
@@ -132,7 +132,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
-    let mut host = DefaultHost::default().with_library(&StdLibrary::default())?;
+    let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
 
     let execution_options = ExecutionOptions::new(
         Some(params.max_cycles),
@@ -186,9 +186,9 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_source_manager(source_manager);
-    host.load_library(&StdLibrary::default())
+    host.load_library(&CoreLibrary::default())
         .into_diagnostic()
-        .wrap_err("Failed to load stdlib")?;
+        .wrap_err("Failed to load libcore")?;
     for lib in libraries.libraries {
         host.load_library(lib.mast_forest())
             .into_diagnostic()

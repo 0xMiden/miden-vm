@@ -21,7 +21,7 @@ use crate::mast::{
 ///
 /// External nodes can be used to verify the integrity of a program's hash while keeping parts of
 /// the program secret. They also allow a program to refer to a well-known procedure that was not
-/// compiled with the program (e.g. a procedure in the standard library).
+/// compiled with the program (e.g. a procedure in the core library).
 ///
 /// The hash of an external node is the hash of the procedure it represents, such that an external
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
