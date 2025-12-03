@@ -358,7 +358,8 @@ fn locaddr_word_alignment_non_multiple_of_four() {
     // Test for issue #2348: locaddr.0 should be word-aligned even when
     // number of proc locals is not a multiple of 4
     let source = "
-        proc.foo.5
+        @locals(5)
+        proc foo
             loc_storew_be.0
         end
         begin
