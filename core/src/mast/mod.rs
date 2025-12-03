@@ -179,14 +179,14 @@ impl MastForest {
     ///
     /// // Forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(&mut self) -> Result<(), MastForestError> {
+    pub fn compact(&mut self) -> Result<MastForestRootMap, MastForestError> {
         // Merge with itself to deduplicate nodes
-        let (compacted_forest, _root_map) = MastForest::merge([&*self])?;
+        let (compacted_forest, root_map) = MastForest::merge([&*self])?;
 
         // Replace current forest with compacted version
         *self = compacted_forest;
 
-        Ok(())
+        Ok(root_map)
     }
 
     /// Merges all `forests` into a new [`MastForest`].
