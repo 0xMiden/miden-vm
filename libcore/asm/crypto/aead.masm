@@ -10,7 +10,7 @@
 #! Note: Associated data (AD) is currently NOT supported. Only empty AD is handled,
 #! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
-use std::crypto::hashes::rpo
+use miden::core::crypto::hashes::rpo256
 
 # Constants
 # ================================================================================================
@@ -209,8 +209,8 @@ pub proc encrypt
     hperm
     # => [rate_final(8), capacity_final(4), src_ptr_final, dst_ptr_final, ...]
 
-    # Extract the authentication tag (first word of rate) using rpo::squeeze_digest
-    exec.rpo::squeeze_digest
+    # Extract the authentication tag (first word of rate) using rpo256::squeeze_digest
+    exec.rpo256::squeeze_digest
     # => [tag(4), src_ptr_final, dst_ptr_final, ...]
 
     # Clean up stack - remove the two pointers

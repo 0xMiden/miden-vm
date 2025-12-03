@@ -81,6 +81,7 @@ impl CoreLibrary {
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
+            (AEAD_DECRYPT_EVENT_NAME, Arc::new(handle_aead_decrypt)),
         ]
     }
 

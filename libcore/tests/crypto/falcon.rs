@@ -13,10 +13,7 @@ use miden_processor::{
 };
 use miden_utils_testing::{
     Word,
-    crypto::{
-        MerkleStore, Rpo256,
-        falcon512_rpo::{Polynomial, SecretKey},
-    },
+    crypto::{MerkleStore, Rpo256},
     expect_exec_error_matches,
     proptest::proptest,
     rand::rand_value,
