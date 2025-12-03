@@ -61,7 +61,7 @@ Once the capacity elements have been initialized, we need to put the data we'd l
 
 If we have more than $8$ elements to absorb, we need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
 
-Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the standard library: `std::crypto::hashes::rpo::squeeze_digest`.
+Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::rpo256::squeeze_digest`.
 
 For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
 
@@ -79,10 +79,10 @@ mem_stream
 hperm
 
 # get the result of the hash
-exec.::std::crypto::hashes::rpo::squeeze_digest
+exec.::miden::core::crypto::hashes::rpo256::squeeze_digest
 ```
 
-For more examples of how `hperm` instruction is used, please see `std::crypto::hashes::rpo` module in the standard library.
+For more examples of how `hperm` instruction is used, please see `miden::core::crypto::hashes::rpo256` module in the core library.
 
 #### `hash` and `hmerge` implementations
 
@@ -98,8 +98,8 @@ The following instructions are designed mainly for use in recursive verification
 | Instruction                         | Stack_input                                                                                       | Stack_output                                                                                        | Notes                                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | eval_circuit <br /> - *(1 cycle)*     | [ptr, n_read, n_eval, ...]                                                                        | [ptr, n_read, n_eval, ...]                                                                          | Evaluates an arithmetic circuit, and checks that its output is equal to zero. `ptr` specifies the memory address at which the circuit description is stored with the number of input extension field elements specified by `n_read` and the number of evaluation gates, encoded as base field elements, specified by `n_eval`. |
-| horner_eval_base <br /> - *(1 cycle)* | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1, acc0, ...]          | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1', acc0', ...]          | Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over the base field, i.e., it computes `acc' = (((acc_tmp * alpha + c4) * alpha + c5) * alpha + c6) * alpha + c7` where `acc_tmp := (((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3`                                          |
-| horner_eval_ext <br /> - *(1 cycle)*  | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1, acc0, ...] | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1', acc0', ...] | Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over the quadratic extension field, i.e., it computes `acc' = (acc_tmp * alpha + c2) * alpha + c3` where `acc_tmp = (acc * alpha + c0) * alpha + c1`                                                                                        |
+| horner_eval_base <br /> - *(1 cycle)* | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1, acc0, ...]          | [c7,  c6,  c5,  c4,  c3,  c2,  c1,  c0, - , - , - , - , - , alpha_addr, acc1', acc0', ...]          | Performs 8 steps of the Horner evaluation method to update the accumulator using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((((((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3) * alpha + c4) * alpha + c5) * alpha + c6) * alpha + c7`.                                          |
+| horner_eval_ext <br /> - *(1 cycle)*  | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1, acc0, ...] | [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, - , - , - , - , - , alpha_addr, acc1', acc0', ...] | Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over the quadratic extension field using evaluation point `alpha` read from memory at `alpha_addr` and `alpha_addr + 1`. Computes `acc' = (((acc * alpha + c0) * alpha + c1) * alpha + c2) * alpha + c3` where coefficients are extension field elements `c0 = (c0_1, c0_0)`, `c1 = (c1_1, c1_0)`, `c2 = (c2_1, c2_0)`, `c3 = (c3_1, c3_0)`.                                                                                        |
 | log_precompile <br /> - *(1 cycle)*   | [COMM, TAG, ...]                                                                                      | [R1, R0, CAP_NEXT, ...]                                                                               | Absorbs words `TAG` and `COMM` into the precompile sponge.<br />The hasher computes `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])` and updates the processor's precompile sponge capacity.<br />The top 3 stack words are replaced with `[R1, R0, CAP_NEXT]`, and callers typically drop them right away.                   |
 
 

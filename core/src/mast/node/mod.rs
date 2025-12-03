@@ -3,69 +3,61 @@ use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
 pub use basic_block_node::{
-    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, DecoratorOpLinkIterator,
+    BATCH_SIZE as OP_BATCH_SIZE, BasicBlockNode, BasicBlockNodeBuilder, DecoratorOpLinkIterator,
     GROUP_SIZE as OP_GROUP_SIZE, OpBatch, OperationOrDecorator,
 };
-use enum_dispatch::enum_dispatch;
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use derive_more::From;
+use miden_utils_core_derive::MastNodeExt;
 
 mod call_node;
-pub use call_node::CallNode;
+pub use call_node::{CallNode, CallNodeBuilder};
 
 mod dyn_node;
-pub use dyn_node::DynNode;
+pub use dyn_node::{DynNode, DynNodeBuilder};
 
 mod external;
-pub use external::ExternalNode;
+pub use external::{ExternalNode, ExternalNodeBuilder};
 
 mod join_node;
-pub use join_node::JoinNode;
+pub use join_node::{JoinNode, JoinNodeBuilder};
 
 mod split_node;
 use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::PrettyPrint;
-pub use split_node::SplitNode;
+pub use split_node::{SplitNode, SplitNodeBuilder};
 
 mod loop_node;
 #[cfg(any(test, feature = "arbitrary"))]
 pub use basic_block_node::arbitrary;
-pub use loop_node::LoopNode;
+pub use loop_node::{LoopNode, LoopNodeBuilder};
+
+mod mast_forest_contributor;
+pub use mast_forest_contributor::{MastForestContributor, MastNodeBuilder};
+
+mod decorator_store;
+pub use decorator_store::DecoratorStore;
 
 use super::DecoratorId;
 use crate::{
     AssemblyOp, Decorator,
-    mast::{MastForest, MastNodeId, Remapping},
+    mast::{MastForest, MastNodeId},
 };
 
-#[enum_dispatch]
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
     fn digest(&self) -> Word;
 
     /// Returns the decorators to be executed before this node is executed.
-    fn before_enter(&self) -> &[DecoratorId];
+    fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
     /// Returns the decorators to be executed after this node is executed.
-    fn after_exit(&self) -> &[DecoratorId];
-
-    /// Sets the list of decorators to be executed before this node.
-    fn append_before_enter(&mut self, decorator_ids: &[DecoratorId]);
-
-    /// Sets the list of decorators to be executed after this node.
-    fn append_after_exit(&mut self, decorator_ids: &[DecoratorId]);
-
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self);
+    fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
     /// Returns a display formatter for this node.
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a>;
 
     /// Returns a pretty printer for this node.
     fn to_pretty_print<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn PrettyPrint + 'a>;
-
-    /// Remap the node children to their new positions indicated by the given [`Remapping`].
-    fn remap_children(&self, remapping: &Remapping) -> Self;
 
     /// Returns true if the this node has children.
     fn has_children(&self) -> bool;
@@ -80,14 +72,22 @@ pub trait MastNodeExt {
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
+
+    /// Verifies that this node is stored at the ID in its decorators field in the forest.
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest);
+
+    /// Converts this node into its corresponding builder, reusing allocated data where possible.
+    type Builder: MastForestContributor;
+
+    fn to_builder(self, forest: &MastForest) -> Self::Builder;
 }
 
 // MAST NODE
 // ================================================================================================
 
-#[enum_dispatch(MastNodeExt)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[derive(Debug, Clone, PartialEq, Eq, From, MastNodeExt)]
+#[mast_node_ext(builder = "MastNodeBuilder")]
 pub enum MastNode {
     Block(BasicBlockNode),
     Join(JoinNode),
@@ -217,7 +217,10 @@ pub trait MastNodeErrorContext: Send + Sync {
     ///
     /// The index is only meaningful for [`BasicBlockNode`]s, where it corresponds to the index of
     /// the operation in the basic block to which the decorator is attached.
-    fn decorators(&self) -> impl Iterator<Item = DecoratedOpLink>;
+    fn decorators<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> impl Iterator<Item = DecoratedOpLink> + 'a;
 
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
@@ -237,9 +240,9 @@ pub trait MastNodeErrorContext: Send + Sync {
             // If a target operation index is provided, return the assembly op associated with that
             // operation.
             Some(target_op_idx) => {
-                for (op_idx, decorator_id) in self.decorators() {
+                for (op_idx, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         // when an instruction compiles down to multiple operations, only the first
                         // operation is associated with the assembly op. We need to check if the
@@ -255,9 +258,9 @@ pub trait MastNodeErrorContext: Send + Sync {
             },
             // If no target operation index is provided, return the first assembly op found.
             None => {
-                for (_, decorator_id) in self.decorators() {
+                for (_, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         return Some(assembly_op);
                     }

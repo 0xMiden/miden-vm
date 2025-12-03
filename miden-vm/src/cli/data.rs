@@ -6,13 +6,13 @@ use std::{
 };
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, Library, LibraryNamespace, SourceManager,
+    Assembler, DefaultSourceManager, Library, Path as LibraryPath, SourceManager,
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
     utils::Deserializable,
 };
-use miden_stdlib::StdLibrary;
+use miden_libcore::CoreLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -138,7 +138,7 @@ where
         let path = path.as_ref();
         let mut parser = Module::parser(ModuleKind::Executable);
         let ast = parser
-            .parse_file(LibraryNamespace::Exec.into(), path, &source_manager)
+            .parse_file(LibraryPath::exec_path(), path, &source_manager)
             .wrap_err_with(|| format!("Failed to parse program file `{}`", path.display()))?;
 
         Ok(Self { ast, source_manager })
@@ -154,8 +154,8 @@ where
         let mut assembler =
             Assembler::new(self.source_manager.clone()).with_debug_mode(debug.is_on());
         assembler
-            .link_dynamic_library(StdLibrary::default())
-            .wrap_err("Failed to load stdlib")?;
+            .link_dynamic_library(CoreLibrary::default())
+            .wrap_err("Failed to load libcore")?;
 
         for library in libraries {
             assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;

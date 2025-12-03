@@ -25,7 +25,7 @@ use crate::{
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
 #[cfg_attr(
-    all(feature = "arbitrary", test),
+    all(feature = "arbitrary", feature = "std", test),
     miden_test_serde_macros::serde_test(winter_serde(true), serde_test(false))
 )]
 pub struct DecoratorInfo {
@@ -155,7 +155,7 @@ impl Deserializable for DecoratorInfo {
 #[derive(Debug, FromPrimitive, ToPrimitive, PartialEq, Eq)]
 #[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
 #[cfg_attr(
-    all(feature = "arbitrary", test),
+    all(feature = "arbitrary", feature = "std", test),
     miden_test_serde_macros::serde_test(winter_serde(true), serde_test(false))
 )]
 #[repr(u8)]

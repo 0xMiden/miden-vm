@@ -65,7 +65,7 @@ fn advice_insert_mem() {
 
 #[test]
 fn advice_push_mapval() {
-    // --- test simple adv.mapval ---------------------------------------------
+    // --- test simple adv.push_mapval ---------------------------------------------
     let source: &str = "
     begin
         # stack: [4, 3, 2, 1, ...]
@@ -88,7 +88,33 @@ fn advice_push_mapval() {
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
     test.expect_stack(&[5, 6, 7, 8]);
 
-    // --- test simple adv.mapvaln --------------------------------------------
+    // --- test simple adv.push_mapval_count ---------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map and drop the key
+        adv.push_mapval_count
+        dropw
+
+        # move the number of values from the advice stack to the operand stack
+        adv_push.1
+        swap drop
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[5]);
+}
+
+#[test]
+fn adv_push_mapvaln() {
+    // --- test simple adv.push_mapvaln --------------------------------------------
     let source: &str = "
     begin
         # stack: [4, 3, 2, 1, ...]
@@ -111,6 +137,93 @@ fn advice_push_mapval() {
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
     test.expect_stack(&[15, 14, 13, 12, 11, 5]);
+}
+
+#[test]
+fn adv_push_mapvaln_padding() {
+    // --- test adv.push_mapvaln.0 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 0 was provided as an immediate value, the resulting map values should not be padded
+        adv.push_mapvaln.0
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        adv_push.6
+        swapdw dropw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[15, 14, 13, 12, 11, 5]);
+
+    // --- test adv.push_mapvaln.4 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 4 was provided as an immediate value, the resulting map values should be padded to
+        # the next multiple of 4
+        adv.push_mapvaln.4
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        adv_push.5
+        swapdw dropw dropw
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![Felt::new(11), Felt::new(12), Felt::new(13)],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 13, 12, 11, 3]);
+
+    // --- test adv.push_mapvaln.8 -------------------------------------------------
+    let source: &str = "
+    begin
+        # stack: [4, 3, 2, 1, ...]
+
+        # load the advice stack with values from the advice map (including the number
+        # of elements) and drop the key
+        # since 8 was provided as an immediate value, the resulting map values should be padded to
+        # the next multiple of 8
+        adv.push_mapvaln.8
+        dropw
+
+        # move the values from the advice stack to the operand stack
+        adv_push.8 swapdw dropw dropw
+        adv_push.1 movup.9 drop
+    end";
+
+    let stack_inputs = [1, 2, 3, 4];
+    let adv_map = [(
+        Word::try_from(stack_inputs).unwrap(),
+        vec![
+            Felt::new(11),
+            Felt::new(12),
+            Felt::new(13),
+            Felt::new(14),
+            Felt::new(15),
+            Felt::new(16),
+        ],
+    )];
+
+    let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
+    test.expect_stack(&[0, 0, 16, 15, 14, 13, 12, 11, 6]);
 }
 
 #[test]
@@ -230,8 +343,6 @@ fn advice_insert_hdword() {
 #[test]
 fn advice_insert_hqword() {
     let source: &str = "
-    use.std::sys
-
     begin
         # stack: [11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]
 

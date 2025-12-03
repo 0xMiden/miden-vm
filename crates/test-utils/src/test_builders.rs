@@ -18,7 +18,8 @@
 macro_rules! build_op_test {
     ($op_str:expr) => {{
         let source = format!("
-proc.truncate_stack.4
+@locals(4)
+proc truncate_stack
     loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
@@ -35,7 +36,8 @@ begin {} exec.truncate_stack end",
     }};
     ($op_str:expr, $($tail:tt)+) => {{
         let source = format!("
-proc.truncate_stack.4
+@locals(4)
+proc truncate_stack
     loc_storew_be.0 dropw movupw.3
     sdepth neq.16
     while.true
@@ -86,7 +88,7 @@ macro_rules! build_test {
 /// * `merkle_store` (optional): the initial merkle set values. When provided, `stack_inputs` and
 ///   `advice_stack` are also expected.
 ///
-/// NOTE: use `miden_stdlib::tests::build_debug_test` to include the standard library in the test.
+/// NOTE: use `miden_libcore::tests::build_debug_test` to include the core library in the test.
 #[macro_export]
 macro_rules! build_debug_test {
     ($($params:tt)+) => {{

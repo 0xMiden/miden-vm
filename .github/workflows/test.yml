@@ -15,12 +15,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@main
-      - uses: taiki-e/install-action@nextest 
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: taiki-e/install-action@nextest
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
-        run: rustup update --no-self-update 
+        run: rustup update --no-self-update
       - name: Build tests
         run: make test-build
       - name: test
@@ -31,6 +33,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@main
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
@@ -39,32 +43,57 @@ jobs:
       - name: Run doc-tests
         run: make test-docs
 
-  check-stdlib-docs:
-    name: check stdlib docs
+  check-libcore-docs:
+    name: check libcore docs
     runs-on: ubuntu-latest
     needs: [test, doc-tests]
     steps:
       - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Build stdlib (generates docs)
-        run: cargo build -p miden-stdlib
-      - name: Check for uncommitted changes in stdlib/docs
+      - name: Build libcore and generate documentation
         run: |
-          if [ -n "$(git status --porcelain stdlib/docs)" ]; then
-            echo "ERROR: Found uncommitted changes in stdlib/docs/"
-            echo "This indicates that documentation was regenerated during the build but not committed."
+          # Build libcore with documentation generation enabled
+          MIDEN_BUILD_LIBCORE_DOCS=1 cargo build -p miden-libcore
+      - name: Check for documentation changes in libcore/docs
+        run: |
+           if [ -n "$(git status --porcelain libcore/docs)" ]; then
+            echo "ERROR: Found uncommitted changes in libcore/docs/"
+            echo "This indicates that the assembly source code has changed but the documentation was not updated."
             echo "Please commit the generated documentation changes before merging."
             echo ""
+            echo "To fix this:"
+            echo "1. Run: MIDEN_BUILD_LIBCORE_DOCS=1 cargo build -p miden-stdlib"
+            echo "2. Commit the changes in libcore/docs/"
+            echo ""
             echo "Uncommitted changes:"
-            git status stdlib/docs
+            git status libcore/docs
             echo ""
             echo "Diff:"
-            git diff stdlib/docs
+            git diff libcore/docs
             exit 1
           else
-            echo "No uncommitted changes in stdlib/docs/ - OK"
+            echo "No documentation changes in libcore/docs/ - OK"
           fi
+
+  check-features:
+    name: check all feature combinations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+      - name: Check all feature combinations
+        run: make check-features

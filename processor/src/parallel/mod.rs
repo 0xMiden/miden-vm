@@ -1,5 +1,5 @@
 use alloc::{boxed::Box, vec::Vec};
-use core::{mem::MaybeUninit, ops::ControlFlow};
+use core::ops::ControlFlow;
 
 use itertools::Itertools;
 use miden_air::{
@@ -30,16 +30,15 @@ use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 use crate::{
     ChipletsLengths, ColMatrix, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
     ProcessState, TraceLenSummary,
-    chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    chiplets::{Chiplets, CircuitEvaluation},
     continuation_stack::Continuation,
     crypto::RpoRandomCoin,
     decoder::{
         AuxTraceBuilder as DecoderAuxTraceBuilder, BasicBlockContext,
         block_stack::ExecutionContextInfo,
     },
-    errors::AceError,
     fast::{
-        ExecutionOutput, NoopTracer, Tracer,
+        ExecutionOutput, NoopTracer, Tracer, eval_circuit_fast_,
         execution_tracer::TraceGenerationContext,
         trace_state::{
             AceReplay, AdviceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext,
@@ -49,9 +48,7 @@ use crate::{
         },
     },
     host::default::NoopHost,
-    processor::{
-        MemoryInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
-    },
+    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::{AuxTraceBuilders, NUM_RAND_ROWS},
@@ -106,11 +103,11 @@ pub fn build_trace(
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
-    let fragments = generate_core_trace_fragments(core_trace_contexts, fragment_size);
+    let mut core_trace_columns = generate_core_trace_columns(core_trace_contexts, fragment_size);
 
     // Calculate trace length
     let core_trace_len = {
-        let core_trace_len: usize = fragments.iter().map(|f| f.row_count()).sum();
+        let core_trace_len: usize = core_trace_columns[0].len();
 
         // TODO(plafer): We need to do a "- 1" here to be consistent with Process::execute(), which
         // has a bug that causes it to not always insert a HALT row at the end of execution,
@@ -130,8 +127,8 @@ pub fn build_trace(
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
 
-    let (core_trace_columns, (range_checker_trace, chiplets_trace)) = rayon::join(
-        || combine_fragments(fragments, main_trace_len),
+    let ((), (range_checker_trace, chiplets_trace)) = rayon::join(
+        || pad_trace_columns(&mut core_trace_columns, main_trace_len),
         || {
             rayon::join(
                 || {
@@ -147,14 +144,14 @@ pub fn build_trace(
     );
 
     // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
-    let padding = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
+    let padding_columns = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
     // Chain all trace columns together
     let mut trace_columns: Vec<Vec<Felt>> = core_trace_columns
         .into_iter()
         .chain(range_checker_trace.trace)
         .chain(chiplets_trace.trace)
-        .chain(padding)
+        .chain(padding_columns)
         .collect();
 
     // Initialize random element generator using program hash
@@ -207,10 +204,13 @@ fn compute_main_trace_length(
 }
 
 /// Generates core trace fragments in parallel from the provided trace fragment contexts.
-fn generate_core_trace_fragments(
+fn generate_core_trace_columns(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
     fragment_size: usize,
-) -> Vec<CoreTraceFragment> {
+) -> Vec<Vec<Felt>> {
+    let mut core_trace_columns: Vec<Vec<Felt>> =
+        unsafe { vec![uninit_vector(core_trace_contexts.len() * fragment_size); CORE_TRACE_WIDTH] };
+
     // Save the first stack top for initialization
     let first_stack_top = if let Some(first_context) = core_trace_contexts.first() {
         first_context.state.stack.stack_top.to_vec()
@@ -218,53 +218,47 @@ fn generate_core_trace_fragments(
         vec![ZERO; MIN_STACK_DEPTH]
     };
 
-    // Save the first system state for initialization
-    let first_system_state = [
-        ZERO, // clk starts at 0
-        ZERO, // ctx starts at 0 (root context)
-        ZERO, // fn_hash[0] starts as 0
-        ZERO, // fn_hash[1] starts as 0
-        ZERO, // fn_hash[2] starts as 0
-        ZERO, // fn_hash[3] starts as 0
-    ];
+    let mut fragments = create_fragments_from_trace_columns(&mut core_trace_columns, fragment_size);
 
     // Build the core trace fragments in parallel
-    let fragment_results: Vec<(
-        CoreTraceFragment,
-        [Felt; STACK_TRACE_WIDTH],
-        [Felt; SYS_TRACE_WIDTH],
-    )> = core_trace_contexts
-        .into_par_iter()
-        .map(|trace_state| {
-            let main_trace_generator = CoreTraceFragmentGenerator::new(trace_state, fragment_size);
-            main_trace_generator.generate_fragment()
-        })
-        .collect();
+    let fragment_results: Vec<([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize)> =
+        core_trace_contexts
+            .into_par_iter()
+            .zip(fragments.par_iter_mut())
+            .map(|(trace_state, fragment)| {
+                let core_trace_fragment_filler =
+                    CoreTraceFragmentFiller::new(trace_state, fragment);
+                core_trace_fragment_filler.fill_fragment()
+            })
+            .collect();
 
     // Separate fragments, stack_rows, and system_rows
-    let mut fragments = Vec::new();
     let mut stack_rows = Vec::new();
     let mut system_rows = Vec::new();
+    let mut total_core_trace_rows = 0;
 
-    for (fragment, stack_row, system_row) in fragment_results {
-        fragments.push(fragment);
+    for (stack_row, system_row, num_rows_written) in fragment_results {
         stack_rows.push(stack_row);
         system_rows.push(system_row);
+        total_core_trace_rows += num_rows_written;
     }
 
-    // Fix up stack and system rows: first fragment gets initial state, others get values from
-    // previous fragment's rows TODO(plafer): Document why we need to do this (i.e. rows are
-    // written at row i+1)
+    // Fix up stack and system rows
     fixup_stack_and_system_rows(
-        &mut fragments,
+        &mut core_trace_columns,
+        fragment_size,
         &stack_rows,
         &system_rows,
         &first_stack_top,
-        &first_system_state,
     );
 
-    append_halt_opcode_row(
-        fragments.last_mut().expect("expected at least one trace fragment"),
+    // Truncate the core trace columns. After this point, there is no more uninitialized memory.
+    for col in core_trace_columns.iter_mut() {
+        col.truncate(total_core_trace_rows);
+    }
+
+    push_halt_opcode_row(
+        &mut core_trace_columns,
         system_rows.last().expect(
             "system_rows should not be empty, which indicates that there are no trace fragments",
         ),
@@ -273,60 +267,77 @@ fn generate_core_trace_fragments(
         ),
     );
 
-    fragments
+    // Run batch inversion on stack's H0 helper column
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
+        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+
+    core_trace_columns
 }
 
-/// Fixes up the stack and system rows in fragments by initializing the first row of each fragment
-/// with the appropriate stack and system state.
+/// Initializing the first row of each fragment with the appropriate stack and system state.
+///
+/// This needs to be done as a separate pass after all fragments have been generated, because the
+/// system and stack rows write the state at clk `i` to the row at index `i+1`. Hence, the state of
+/// the last row of any given fragment cannot be written in parallel, since any given fragment
+/// filler doesn't have access to the next fragment's first row.
 fn fixup_stack_and_system_rows(
-    fragments: &mut [CoreTraceFragment],
+    core_trace_columns: &mut [Vec<Felt>],
+    fragment_size: usize,
     stack_rows: &[[Felt; STACK_TRACE_WIDTH]],
     system_rows: &[[Felt; SYS_TRACE_WIDTH]],
     first_stack_top: &[Felt],
-    first_system_state: &[Felt; SYS_TRACE_WIDTH],
 ) {
     const MIN_STACK_DEPTH_FELT: Felt = Felt::new(MIN_STACK_DEPTH as u64);
 
-    if fragments.is_empty() {
-        return;
-    }
+    let system_state_first_row = [
+        ZERO, // clk starts at 0
+        ZERO, // ctx starts at 0 (root context)
+        ZERO, // fn_hash[0] starts as 0
+        ZERO, // fn_hash[1] starts as 0
+        ZERO, // fn_hash[2] starts as 0
+        ZERO, // fn_hash[3] starts as 0
+    ];
 
     // Initialize the first fragment with first_stack_top + [16, 0, 0] and first_system_state
-    if let Some(first_fragment) = fragments.first_mut() {
-        // Set system state (8 columns)
-        for (col_idx, &value) in first_system_state.iter().enumerate() {
-            first_fragment.columns[col_idx][0] = value;
+    {
+        // Set system state
+        for (col_idx, &value) in system_state_first_row.iter().enumerate() {
+            core_trace_columns[col_idx][0] = value;
         }
 
         // Set stack top (16 elements)
         // Note: we call `rev()` here because the stack order is reversed in the trace.
         // trace: [top, ..., bottom] vs stack: [bottom, ..., top]
         for (stack_col_idx, &value) in first_stack_top.iter().rev().enumerate() {
-            first_fragment.columns[STACK_TRACE_OFFSET + STACK_TOP_OFFSET + stack_col_idx][0] =
-                value;
+            core_trace_columns[STACK_TRACE_OFFSET + STACK_TOP_OFFSET + stack_col_idx][0] = value;
         }
 
         // Set stack helpers: [16, 0, 0]
-        first_fragment.columns[STACK_TRACE_OFFSET + B0_COL_IDX][0] = MIN_STACK_DEPTH_FELT;
-        first_fragment.columns[STACK_TRACE_OFFSET + B1_COL_IDX][0] = ZERO;
-        first_fragment.columns[STACK_TRACE_OFFSET + H0_COL_IDX][0] = ZERO;
+        core_trace_columns[STACK_TRACE_OFFSET + B0_COL_IDX][0] = MIN_STACK_DEPTH_FELT;
+        core_trace_columns[STACK_TRACE_OFFSET + B1_COL_IDX][0] = ZERO;
+        core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX][0] = ZERO;
     }
 
-    // Initialize subsequent fragments with their corresponding rows from the previous fragment
-    // TODO(plafer): use zip
-    for (i, fragment) in fragments.iter_mut().enumerate().skip(1) {
-        if fragment.row_count() > 0 && i - 1 < stack_rows.len() && i - 1 < system_rows.len() {
-            // Copy the system_row to the first row of this fragment
-            let system_row = &system_rows[i - 1];
-            for (col_idx, &value) in system_row.iter().enumerate() {
-                fragment.columns[col_idx][0] = value;
-            }
+    // Determine the starting row indices for each fragment after the first.
+    // We skip the first due to it already being initialized above.
+    let fragment_start_row_indices = {
+        let num_fragments = core_trace_columns[0].len() / fragment_size;
 
-            // Copy the stack_row to the first row of this fragment
-            let stack_row = &stack_rows[i - 1];
-            for (col_idx, &value) in stack_row.iter().enumerate() {
-                fragment.columns[STACK_TRACE_OFFSET + col_idx][0] = value;
-            }
+        (0..).step_by(fragment_size).take(num_fragments).skip(1)
+    };
+
+    // Initialize subsequent fragments with their corresponding rows from the previous fragment
+    for (row_idx, (system_row, stack_row)) in
+        fragment_start_row_indices.zip(system_rows.iter().zip(stack_rows.iter()))
+    {
+        // Copy the system_row to the first row of this fragment
+        for (col_idx, &value) in system_row.iter().enumerate() {
+            core_trace_columns[col_idx][row_idx] = value;
+        }
+
+        // Copy the stack_row to the first row of this fragment
+        for (col_idx, &value) in stack_row.iter().enumerate() {
+            core_trace_columns[STACK_TRACE_OFFSET + col_idx][row_idx] = value;
         }
     }
 }
@@ -335,33 +346,33 @@ fn fixup_stack_and_system_rows(
 ///
 /// This ensures that the trace ends with at least one HALT operation, which is necessary to satisfy
 /// the constraints.
-fn append_halt_opcode_row(
-    last_fragment: &mut CoreTraceFragment,
+fn push_halt_opcode_row(
+    core_trace_columns: &mut [Vec<Felt>],
     last_system_state: &[Felt; SYS_TRACE_WIDTH],
     last_stack_state: &[Felt; STACK_TRACE_WIDTH],
 ) {
     // system columns
     // ---------------------------------------------------------------------------------------
     for (col_idx, &value) in last_system_state.iter().enumerate() {
-        last_fragment.columns[col_idx].push(value);
+        core_trace_columns[col_idx].push(value);
     }
 
     // stack columns
     // ---------------------------------------------------------------------------------------
     for (col_idx, &value) in last_stack_state.iter().enumerate() {
-        last_fragment.columns[STACK_TRACE_OFFSET + col_idx].push(value);
+        core_trace_columns[STACK_TRACE_OFFSET + col_idx].push(value);
     }
 
     // decoder columns: padding with final decoder state
     // ---------------------------------------------------------------------------------------
     // Pad addr trace (decoder block address column) with ZEROs
-    last_fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].push(ZERO);
+    core_trace_columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].push(ZERO);
 
     // Pad op_bits columns with HALT opcode bits
     let halt_opcode = Operation::Halt.op_code();
     for bit_idx in 0..NUM_OP_BITS {
         let bit_value = Felt::from((halt_opcode >> bit_idx) & 1);
-        last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
+        core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
     }
 
     // Pad hasher state columns (8 columns)
@@ -371,35 +382,35 @@ fn append_halt_opcode_row(
         let col_idx = DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET + hasher_col_idx;
         if hasher_col_idx < 4 {
             // For first 4 hasher columns, copy the last value to propagate program hash
-            let last_row_idx = last_fragment.columns[col_idx].len() - 1;
-            let last_hasher_value = last_fragment.columns[col_idx][last_row_idx];
-            last_fragment.columns[col_idx].push(last_hasher_value);
+            let last_row_idx = core_trace_columns[col_idx].len() - 1;
+            let last_hasher_value = core_trace_columns[col_idx][last_row_idx];
+            core_trace_columns[col_idx].push(last_hasher_value);
         } else {
             // For remaining 4 hasher columns, fill with ZEROs
-            last_fragment.columns[col_idx].push(ZERO);
+            core_trace_columns[col_idx].push(ZERO);
         }
     }
 
     // Pad in_span column with ZEROs
-    last_fragment.columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX].push(ZERO);
+    core_trace_columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX].push(ZERO);
 
     // Pad group_count column with ZEROs
-    last_fragment.columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX].push(ZERO);
+    core_trace_columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX].push(ZERO);
 
     // Pad op_idx column with ZEROs
-    last_fragment.columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX].push(ZERO);
+    core_trace_columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX].push(ZERO);
 
     // Pad op_batch_flags columns (3 columns) with ZEROs
     for batch_flag_idx in 0..NUM_OP_BATCH_FLAGS {
         let col_idx = DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + batch_flag_idx;
-        last_fragment.columns[col_idx].push(ZERO);
+        core_trace_columns[col_idx].push(ZERO);
     }
 
     // Pad op_bit_extra columns (2 columns)
     // - First column: fill with ZEROs (HALT doesn't use this)
     // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET].push(ZERO);
-    last_fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].push(ONE);
+    core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET].push(ZERO);
+    core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].push(ONE);
 }
 
 fn initialize_range_checker(
@@ -564,119 +575,41 @@ fn initialize_chiplets(
     chiplets
 }
 
-/// Combines multiple CoreTraceFragments into core trace columns
-fn combine_fragments(fragments: Vec<CoreTraceFragment>, trace_len: usize) -> Vec<Vec<Felt>> {
-    if fragments.is_empty() {
-        panic!("Cannot combine empty fragments vector");
-    }
-
-    // Calculate total number of rows from fragments
-    let total_program_rows: usize = fragments.iter().map(|f| f.row_count()).sum();
-
-    // Initialize columns for the core trace only using uninitialized memory
-    let mut trace_columns: Vec<Box<[MaybeUninit<Felt>]>> =
-        (0..CORE_TRACE_WIDTH).map(|_| Box::new_uninit_slice(trace_len)).collect();
-
-    // Copy core trace columns from fragments
-    let mut current_row_idx = 0;
-    for fragment in fragments {
-        let fragment_rows = fragment.row_count();
-
-        for local_row_idx in 0..fragment_rows {
-            let global_row_idx = current_row_idx + local_row_idx;
-
-            // Copy core trace columns (system, decoder, stack)
-            for (col_idx, trace_column) in trace_columns.iter_mut().enumerate() {
-                trace_column[global_row_idx].write(fragment.columns[col_idx][local_row_idx]);
-            }
-        }
-
-        current_row_idx += fragment_rows;
-    }
-
-    // Pad the remaining rows (between total_program_rows and trace_len)
-    pad_trace_columns(&mut trace_columns, total_program_rows, trace_len);
-
-    // Convert uninitialized columns to initialized Vec<Felt>
-    let mut core_trace_columns: Vec<Vec<Felt>> = trace_columns
-        .into_iter()
-        .map(|uninit_column| {
-            // Safety: All elements have been initialized through MaybeUninit::write()
-            let init_column = unsafe { uninit_column.assume_init() };
-            Vec::from(init_column)
-        })
-        .collect();
-
-    // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
-
-    // Return the core trace columns
-    core_trace_columns
-}
-
-/// Pads the trace columns from `total_program_rows` rows to `trace_len` rows.
-///
-/// # Safety
-/// - This function assumes that the first `total_program_rows` rows of the trace columns are
-///   already initialized.
-///
-/// # Panics
-/// - If `total_program_rows` is zero.
-/// - If `total_program_rows + NUM_RAND_ROWS - 1 > trace_len`.
-fn pad_trace_columns(
-    trace_columns: &mut [Box<[MaybeUninit<Felt>]>],
-    total_program_rows: usize,
-    trace_len: usize,
-) {
+fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     // TODO(plafer): parallelize this function
-    assert_ne!(total_program_rows, 0);
-    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= trace_len);
+    let total_program_rows = trace_columns[0].len();
+    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= main_trace_len);
+
+    let num_padding_rows = main_trace_len - total_program_rows;
 
     // System columns
     // ------------------------
 
     // Pad CLK trace - fill with index values
-    for (clk_val, clk_row) in
-        trace_columns[CLK_COL_IDX].iter_mut().enumerate().skip(total_program_rows)
-    {
-        clk_row.write(Felt::from(clk_val as u32));
+    for padding_row_idx in 0..num_padding_rows {
+        trace_columns[CLK_COL_IDX].push(Felt::from((total_program_rows + padding_row_idx) as u32));
     }
 
     // Pad CTX trace - fill with ZEROs (root context)
-    for ctx_row in trace_columns[CTX_COL_IDX].iter_mut().skip(total_program_rows) {
-        ctx_row.write(ZERO);
-    }
+    trace_columns[CTX_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad FN_HASH traces (4 columns) - fill with ZEROs as program execution must always end in the
     // root context.
     for fn_hash_col_idx in FN_HASH_RANGE {
-        for fn_hash_row in trace_columns[fn_hash_col_idx].iter_mut().skip(total_program_rows) {
-            fn_hash_row.write(ZERO);
-        }
+        trace_columns[fn_hash_col_idx].resize(main_trace_len, ZERO);
     }
 
     // Decoder columns
     // ------------------------
 
     // Pad addr trace (decoder block address column) with ZEROs
-    for addr_row in trace_columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        addr_row.write(ZERO);
-    }
+    trace_columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad op_bits columns with HALT opcode bits
     let halt_opcode = Operation::Halt.op_code();
     for i in 0..NUM_OP_BITS {
         let bit_value = Felt::from((halt_opcode >> i) & 1);
-        for op_bit_row in trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i]
-            .iter_mut()
-            .skip(total_program_rows)
-        {
-            op_bit_row.write(bit_value);
-        }
+        trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i].resize(main_trace_len, bit_value);
     }
 
     // Pad hasher state columns (8 columns)
@@ -688,66 +621,34 @@ fn pad_trace_columns(
             // For first 4 hasher columns, copy the last value to propagate program hash
             // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
             // and row `total_program_rows - 1` is initialized.
-            let last_hasher_value =
-                unsafe { trace_columns[col_idx][total_program_rows - 1].assume_init() };
-            for hasher_row in trace_columns[col_idx].iter_mut().skip(total_program_rows) {
-                hasher_row.write(last_hasher_value);
-            }
+            let last_hasher_value = trace_columns[col_idx][total_program_rows - 1];
+            trace_columns[col_idx].resize(main_trace_len, last_hasher_value);
         } else {
             // For remaining 4 hasher columns, fill with ZEROs
-            for hasher_row in trace_columns[col_idx].iter_mut().skip(total_program_rows) {
-                hasher_row.write(ZERO);
-            }
+            trace_columns[col_idx].resize(main_trace_len, ZERO);
         }
     }
 
     // Pad in_span column with ZEROs
-    for in_span_row in trace_columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        in_span_row.write(ZERO);
-    }
+    trace_columns[DECODER_TRACE_OFFSET + IN_SPAN_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad group_count column with ZEROs
-    for group_count_row in trace_columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        group_count_row.write(ZERO);
-    }
+    trace_columns[DECODER_TRACE_OFFSET + GROUP_COUNT_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad op_idx column with ZEROs
-    for op_idx_row in trace_columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        op_idx_row.write(ZERO);
-    }
+    trace_columns[DECODER_TRACE_OFFSET + OP_INDEX_COL_IDX].resize(main_trace_len, ZERO);
 
     // Pad op_batch_flags columns (3 columns) with ZEROs
     for i in 0..NUM_OP_BATCH_FLAGS {
-        let col_idx = DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i;
-        for op_batch_flag_row in trace_columns[col_idx].iter_mut().skip(total_program_rows) {
-            op_batch_flag_row.write(ZERO);
-        }
+        trace_columns[DECODER_TRACE_OFFSET + OP_BATCH_FLAGS_OFFSET + i]
+            .resize(main_trace_len, ZERO);
     }
 
     // Pad op_bit_extra columns (2 columns)
     // - First column: fill with ZEROs (HALT doesn't use this)
     // - Second column: fill with ONEs (product of two most significant HALT bits, both are 1)
-    for op_bit_extra_row in trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        op_bit_extra_row.write(ZERO);
-    }
-    for op_bit_extra_row in trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1]
-        .iter_mut()
-        .skip(total_program_rows)
-    {
-        op_bit_extra_row.write(ONE);
-    }
+    trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET].resize(main_trace_len, ZERO);
+    trace_columns[DECODER_TRACE_OFFSET + OP_BITS_EXTRA_COLS_OFFSET + 1].resize(main_trace_len, ONE);
 
     // Stack columns
     // ------------------------
@@ -757,11 +658,8 @@ fn pad_trace_columns(
         let col_idx = STACK_TRACE_OFFSET + i;
         // Safety: per our documented safety guarantees, we know that `total_program_rows > 0`,
         // and row `total_program_rows - 1` is initialized.
-        let last_stack_value =
-            unsafe { trace_columns[col_idx][total_program_rows - 1].assume_init() };
-        for stack_row in trace_columns[col_idx].iter_mut().skip(total_program_rows) {
-            stack_row.write(last_stack_value);
-        }
+        let last_stack_value = trace_columns[col_idx][total_program_rows - 1];
+        trace_columns[col_idx].resize(main_trace_len, last_stack_value);
     }
 }
 
@@ -773,67 +671,48 @@ fn pad_trace_columns(
 /// A fragment is a collection of columns of length `fragment_size` or less. Only a
 /// fragment containing a `HALT` operation is allowed to be shorter than
 /// `fragment_size`.
-struct CoreTraceFragment {
-    pub columns: [Vec<Felt>; CORE_TRACE_WIDTH],
+struct CoreTraceFragment<'a> {
+    pub columns: [&'a mut [Felt]; CORE_TRACE_WIDTH],
 }
 
-impl CoreTraceFragment {
-    /// Creates a new CoreTraceFragment with *uninitialized* columns of length `num_rows`.
-    ///
-    /// # Safety
-    /// The caller is responsible for ensuring that the columns are properly initialized
-    /// before use.
-    pub unsafe fn new_uninit(num_rows: usize) -> Self {
-        Self {
-            // TODO(plafer): Don't use uninit_vector
-            columns: core::array::from_fn(|_| unsafe { uninit_vector(num_rows) }),
-        }
-    }
+// CORE TRACE FRAGMENT FILLER
+// ================================================================================================
 
-    /// Returns the number of rows in this fragment
-    pub fn row_count(&self) -> usize {
-        self.columns[0].len()
-    }
-}
-
-struct CoreTraceFragmentGenerator {
+/// Fills a core trace fragment based on the provided context.
+struct CoreTraceFragmentFiller<'a> {
     fragment_start_clk: RowIndex,
-    fragment: CoreTraceFragment,
+    fragment: &'a mut CoreTraceFragment<'a>,
     context: CoreTraceFragmentContext,
     span_context: Option<BasicBlockContext>,
     stack_rows: Option<[Felt; STACK_TRACE_WIDTH]>,
     system_rows: Option<[Felt; SYS_TRACE_WIDTH]>,
-    fragment_size: usize,
 }
 
-impl CoreTraceFragmentGenerator {
-    /// Creates a new CoreTraceFragmentGenerator with the provided checkpoint.
-    pub fn new(context: CoreTraceFragmentContext, fragment_size: usize) -> Self {
+impl<'a> CoreTraceFragmentFiller<'a> {
+    /// Creates a new CoreTraceFragmentFiller with the provided context and uninitialized fragment.
+    pub fn new(
+        context: CoreTraceFragmentContext,
+        uninit_fragment: &'a mut CoreTraceFragment<'a>,
+    ) -> Self {
         Self {
             fragment_start_clk: context.state.system.clk,
-            // Safety: the `CoreTraceFragmentGenerator` will fill in all the rows, or truncate any
-            // unused rows if a `HALT` operation occurs before `fragment_size` have
-            // been executed.
-            fragment: unsafe { CoreTraceFragment::new_uninit(fragment_size) },
+            fragment: uninit_fragment,
             context,
             span_context: None,
             stack_rows: None,
             system_rows: None,
-            fragment_size,
         }
     }
 
-    /// Processes a single checkpoint into a CoreTraceFragment
-    pub fn generate_fragment(
-        mut self,
-    ) -> (CoreTraceFragment, [Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH]) {
+    /// Fills the fragment and returns the final stack rows, system rows, and number of rows built.
+    pub fn fill_fragment(mut self) -> ([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize) {
         let execution_state = self.context.initial_execution_state.clone();
         // Execute fragment generation and always finalize at the end
         let _ = self.execute_fragment_generation(execution_state);
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
         let final_system_rows = self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]);
-        let fragment = self.finalize_fragment();
-        (fragment, final_stack_rows, final_system_rows)
+        let num_rows_built = self.num_rows_built();
+        (final_stack_rows, final_system_rows, num_rows_built)
     }
 
     /// Internal method that performs fragment generation with automatic early returns
@@ -920,33 +799,7 @@ impl CoreTraceFragmentGenerator {
                 self.add_span_end_trace_row(basic_block_node)?;
             },
             NodeExecutionState::LoopRepeat(node_id) => {
-                // TODO(plafer): merge with the `Continuation::FinishLoop` case
-                let loop_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_loop();
-
-                let mut condition = self.get(0);
-                self.decrement_size(&mut NoopTracer);
-
-                while condition == ONE {
-                    self.add_loop_repeat_trace_row(
-                        loop_node,
-                        &initial_mast_forest,
-                        self.context.state.decoder.current_addr,
-                    )?;
-
-                    self.execute_mast_node(loop_node.body(), &initial_mast_forest)?;
-
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-                }
-
-                // 3. Add "end LOOP" row
-                //
-                // Note that we don't confirm that the condition is properly ZERO here, as
-                // the FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())?;
+                finish_loop_node(self, node_id, &initial_mast_forest, None)?;
             },
             // TODO(plafer): there's a big overlap between `NodeExecutionPhase::End` and
             // `Continuation::Finish*`. We can probably reconcile.
@@ -1015,32 +868,7 @@ impl CoreTraceFragmentGenerator {
                     self.add_end_trace_row(mast_node.digest())?;
                 },
                 Continuation::FinishLoop(node_id) => {
-                    let loop_node = current_forest
-                        .get_node_by_id(node_id)
-                        .expect("node should exist")
-                        .unwrap_loop();
-
-                    let mut condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-
-                    while condition == ONE {
-                        self.add_loop_repeat_trace_row(
-                            loop_node,
-                            &current_forest,
-                            self.context.state.decoder.current_addr,
-                        )?;
-
-                        self.execute_mast_node(loop_node.body(), &current_forest)?;
-
-                        condition = self.get(0);
-                        self.decrement_size(&mut NoopTracer);
-                    }
-
-                    // 3. Add "end LOOP" row
-                    //
-                    // Note that we don't confirm that the condition is properly ZERO here, as
-                    // the FastProcessor already ran that check.
-                    self.add_end_trace_row(loop_node.digest())?;
+                    finish_loop_node(self, node_id, &current_forest, None)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let mast_node =
@@ -1100,12 +928,7 @@ impl CoreTraceFragmentGenerator {
                     .expect("Basic block should have at least one op batch");
 
                 // 1. Add SPAN start trace row
-                self.add_span_start_trace_row(
-                    first_op_batch,
-                    num_groups_left_in_block,
-                    // TODO(plafer): remove as parameter? (and same for all other start methods)
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_span_start_trace_row(first_op_batch, num_groups_left_in_block)?;
 
                 // Initialize the span context for the current basic block. After SPAN operation is
                 // executed, we decrement the number of remaining groups by 1 because executing
@@ -1144,11 +967,7 @@ impl CoreTraceFragmentGenerator {
                 self.update_decoder_state_on_node_start();
 
                 // 1. Add "start JOIN" row
-                self.add_join_start_trace_row(
-                    join_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_join_start_trace_row(join_node, current_forest)?;
 
                 // 2. Execute first child
                 self.execute_mast_node(join_node.first(), current_forest)?;
@@ -1166,11 +985,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start SPLIT" row
-                self.add_split_start_trace_row(
-                    split_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_split_start_trace_row(split_node, current_forest)?;
 
                 // 2. Execute the appropriate branch based on the stack top value
                 if condition == ONE {
@@ -1191,11 +1006,7 @@ impl CoreTraceFragmentGenerator {
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
-                self.add_loop_start_trace_row(
-                    loop_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_loop_start_trace_row(loop_node, current_forest)?;
 
                 // 2. Loop while condition is true
                 //
@@ -1208,24 +1019,7 @@ impl CoreTraceFragmentGenerator {
                     self.decrement_size(&mut NoopTracer);
                 }
 
-                while condition == ONE {
-                    self.add_loop_repeat_trace_row(
-                        loop_node,
-                        current_forest,
-                        self.context.state.decoder.current_addr,
-                    )?;
-
-                    self.execute_mast_node(loop_node.body(), current_forest)?;
-
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
-                }
-
-                // 3. Add "end LOOP" row
-                //
-                // Note that we don't confirm that the condition is properly ZERO here, as the
-                // FastProcessor already ran that check.
-                self.add_end_trace_row(loop_node.digest())
+                finish_loop_node(self, node_id, current_forest, Some(condition))
             },
             MastNode::Call(call_node) => {
                 self.update_decoder_state_on_node_start();
@@ -1242,11 +1036,7 @@ impl CoreTraceFragmentGenerator {
                 }
 
                 // Add "start CALL/SYSCALL" row
-                self.add_call_start_trace_row(
-                    call_node,
-                    current_forest,
-                    self.context.state.decoder.parent_addr,
-                )?;
+                self.add_call_start_trace_row(call_node, current_forest)?;
 
                 // Execute the callee
                 self.execute_mast_node(call_node.callee(), current_forest)?;
@@ -1283,18 +1073,11 @@ impl CoreTraceFragmentGenerator {
                         ContextId::from(self.context.state.system.clk + 1); // New context ID
                     self.context.state.system.fn_hash = callee_hash;
 
-                    self.add_dyncall_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                        ctx_info,
-                    )?;
+                    self.add_dyncall_start_trace_row(callee_hash, ctx_info)?;
                 } else {
                     // Pop the memory address off the stack, and write the DYN trace row
                     self.decrement_size(&mut NoopTracer);
-                    self.add_dyn_start_trace_row(
-                        self.context.state.decoder.parent_addr,
-                        callee_hash,
-                    )?;
+                    self.add_dyn_start_trace_row(callee_hash)?;
                 };
 
                 // 2. Execute the callee
@@ -1436,26 +1219,6 @@ impl CoreTraceFragmentGenerator {
         ctx.num_groups_left -= ONE;
     }
 
-    /// Finalizes and returns the built fragment, truncating any unused rows if necessary.
-    fn finalize_fragment(mut self) -> CoreTraceFragment {
-        debug_assert!(
-            self.num_rows_built() <= self.fragment_size,
-            "built too many rows: {} > {}",
-            self.num_rows_built(),
-            self.fragment_size
-        );
-
-        // If we have not built enough rows, we need to truncate the fragment. This would occur only
-        // in the last fragment of a trace, if we encountered a HALT operation before reaching
-        // `fragment_size`.
-        let num_rows = core::cmp::min(self.num_rows_built(), self.fragment_size);
-        for column in &mut self.fragment.columns {
-            column.truncate(num_rows);
-        }
-
-        self.fragment
-    }
-
     // HELPERS
     // -------------------------------------------------------------------------------------------
 
@@ -1486,7 +1249,8 @@ impl CoreTraceFragmentGenerator {
 
     fn done_generating(&mut self) -> bool {
         // If we have built all the rows in the fragment, we are done
-        self.num_rows_built() >= self.fragment_size
+        let max_num_rows_in_fragment = self.fragment.columns[0].len();
+        self.num_rows_built() >= max_num_rows_in_fragment
     }
 
     fn num_rows_built(&self) -> usize {
@@ -1587,10 +1351,40 @@ fn initialize_span_context(
     BasicBlockContext { group_ops_left, num_groups_left }
 }
 
+/// Splits the core trace columns into fragments of the specified size, returning a vector of
+/// `CoreTraceFragment`s that each borrow from the original columns.
+fn create_fragments_from_trace_columns(
+    core_trace_columns: &mut [Vec<Felt>],
+    fragment_size: usize,
+) -> Vec<CoreTraceFragment<'_>> {
+    let mut column_chunks: Vec<_> = core_trace_columns
+        .iter_mut()
+        .map(|col| col.chunks_exact_mut(fragment_size))
+        .collect();
+    let mut core_trace_fragments = Vec::new();
+
+    loop {
+        let fragment_cols: Vec<&mut [Felt]> =
+            column_chunks.iter_mut().filter_map(|col_chunk| col_chunk.next()).collect();
+        assert!(
+            fragment_cols.is_empty() || fragment_cols.len() == CORE_TRACE_WIDTH,
+            "column chunks don't all have the same size"
+        );
+
+        if fragment_cols.is_empty() {
+            return core_trace_fragments;
+        } else {
+            core_trace_fragments.push(CoreTraceFragment {
+                columns: fragment_cols.try_into().expect("fragment has CORE_TRACE_WIDTH columns"),
+            });
+        }
+    }
+}
+
 // REQUIRED METHODS
 // ===============================================================================================
 
-impl StackInterface for CoreTraceFragmentGenerator {
+impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
     fn top(&self) -> &[Felt] {
         &self.context.state.stack.stack_top
     }
@@ -1724,7 +1518,7 @@ impl StackInterface for CoreTraceFragmentGenerator {
     }
 }
 
-impl Processor for CoreTraceFragmentGenerator {
+impl<'a> Processor for CoreTraceFragmentFiller<'a> {
     type HelperRegisters = TraceGenerationHelpers;
     type System = Self;
     type Stack = Self;
@@ -1774,7 +1568,7 @@ impl Processor for CoreTraceFragmentGenerator {
         let ptr = self.stack().get(0);
         let ctx = self.system().ctx();
 
-        let _circuit_evaluation = eval_circuit_fast_(
+        let _circuit_evaluation = eval_circuit_parallel_(
             ctx,
             ptr,
             self.system().clk(),
@@ -1789,7 +1583,7 @@ impl Processor for CoreTraceFragmentGenerator {
     }
 }
 
-impl SystemInterface for CoreTraceFragmentGenerator {
+impl<'a> SystemInterface for CoreTraceFragmentFiller<'a> {
     fn caller_hash(&self) -> Word {
         self.context.state.system.fn_hash
     }
@@ -1934,7 +1728,23 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_horner_eval_registers(
+    fn op_horner_eval_base_registers(
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS] {
+        [
+            alpha.base_element(0),
+            alpha.base_element(1),
+            tmp1.to_base_elements()[0],
+            tmp1.to_base_elements()[1],
+            tmp0.to_base_elements()[0],
+            tmp0.to_base_elements()[1],
+        ]
+    }
+
+    #[inline(always)]
+    fn op_horner_eval_ext_registers(
         alpha: QuadFelt,
         k0: Felt,
         k1: Felt,
@@ -1961,85 +1771,64 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 // HELPERS
 // ================================================================================================
 
-// TODO(plafer): If we want to keep this strategy, then move the `op_eval_circuit()` method
-// implementation to the `Processor` trait, and have `FastProcessor` and
-// `CoreTraceFragmentGenerator` both use it.
-/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
+/// Executes a loop node by processing its body repeatedly while the condition is true.
+///
+/// This function is shared between `NodeExecutionState::LoopRepeat` and `Continuation::FinishLoop`
+/// to eliminate code duplication. Both cases have identical logic for handling loop execution.
+#[inline(always)]
+fn finish_loop_node(
+    processor: &mut CoreTraceFragmentFiller,
+    node_id: MastNodeId,
+    mast_forest: &MastForest,
+    condition: Option<Felt>,
+) -> ControlFlow<()> {
+    let loop_node = mast_forest.get_node_by_id(node_id).expect("node should exist").unwrap_loop();
+
+    // If no condition is provided, read it from the stack
+    let mut condition = if let Some(cond) = condition {
+        cond
+    } else {
+        let cond = processor.get(0);
+        processor.decrement_size(&mut NoopTracer);
+        cond
+    };
+
+    while condition == ONE {
+        processor.add_loop_repeat_trace_row(
+            loop_node,
+            mast_forest,
+            processor.context.state.decoder.current_addr,
+        )?;
+
+        processor.execute_mast_node(loop_node.body(), mast_forest)?;
+
+        condition = processor.get(0);
+        processor.decrement_size(&mut NoopTracer);
+    }
+
+    // 3. Add "end LOOP" row
+    //
+    // Note that we don't confirm that the condition is properly ZERO here, as
+    // the FastProcessor already ran that check.
+    processor.add_end_trace_row(loop_node.digest())?;
+
+    ControlFlow::Continue(())
+}
+
+/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
+/// `[CoreTraceFragmentGenerator]`.
 #[allow(clippy::too_many_arguments)]
-fn eval_circuit_fast_(
+fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
     num_vars: Felt,
     num_eval: Felt,
-    processor: &mut CoreTraceFragmentGenerator,
+    processor: &mut CoreTraceFragmentFiller,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
-
-    let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
-    }
-
-    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
-    // quadratic extension field elements while instructions are encoded as base field elements.
-    // Hence we can pack 2 variables and 4 instructions per word.
-    if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
-    }
-    if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
-    }
-
-    // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
-    let num_eval_rows = num_eval as u32;
-
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
-
-    let mut ptr = ptr;
-    // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
-    for _ in 0..num_read_rows {
-        let word = processor
-            .memory()
-            .read_word(ctx, ptr, clk, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word)?;
-        ptr += PTR_OFFSET_WORD;
-    }
-    // perform EVAL operations
-    for _ in 0..num_eval_rows {
-        let instruction = processor
-            .memory()
-            .read_element(ctx, ptr, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
-        ptr += PTR_OFFSET_ELEM;
-    }
-
-    // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
-    }
-
-    Ok(evaluation_context)
+    // Delegate to the fast implementation with the processor's memory interface.
+    // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), err_ctx, tracer)
 }

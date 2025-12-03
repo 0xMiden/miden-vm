@@ -1,28 +1,31 @@
 use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    KernelLibrary, Library, LibraryNamespace, LibraryPath, Parse, ParseOptions,
-    SemanticAnalysisError,
+    KernelLibrary, Library, Parse, ParseOptions, SemanticAnalysisError,
     ast::{
-        self, Export, InvocationTarget, InvokeKind, ModuleKind, QualifiedProcedureName,
+        self, Export, InvocationTarget, InvokeKind, ModuleKind, SymbolResolution, Visibility,
         types::FunctionType,
     },
     debuginfo::{DefaultSourceManager, SourceManager, SourceSpan, Spanned},
-    diagnostics::{RelatedLabel, Report},
-    library::LibraryExport,
+    diagnostics::{IntoDiagnostic, RelatedLabel, Report},
+    library::{ItemInfo, LibraryExport},
 };
 use miden_core::{
     AssemblyOp, Decorator, Kernel, Operation, Program, Word,
-    mast::{DecoratorId, MastNodeExt, MastNodeId},
+    mast::{
+        DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
+        SplitNodeBuilder,
+    },
 };
 
 use crate::{
-    GlobalProcedureIndex, ModuleIndex, Procedure, ProcedureContext,
+    GlobalItemIndex, ModuleIndex, Procedure, ProcedureContext,
+    ast::Path,
     basic_block_builder::{BasicBlockBuilder, BasicBlockOrDecorators},
     fmp::{fmp_end_frame_sequence, fmp_initialization_sequence, fmp_start_frame_sequence},
     linker::{
-        CallerInfo, LinkLibrary, LinkLibraryKind, Linker, LinkerError, ModuleLink, ProcedureLink,
-        ResolvedTarget,
+        ItemLink, LinkLibrary, LinkLibraryKind, Linker, LinkerError, ModuleLink,
+        SymbolResolutionContext,
     },
     mast_forest_builder::MastForestBuilder,
 };
@@ -182,33 +185,47 @@ impl Assembler {
         Ok(self)
     }
 
-    /// Compiles all Miden Assembly modules in the provided directory, and then statically links
-    /// them into the final artifact.
+    /// Compiles and statically links all Miden Assembly modules in the provided directory, using
+    /// the provided [Path] as the root namespace for the compiled modules.
     ///
-    /// When compiling each module, the path of the module is derived by appending path components
+    /// When compiling each module, its Miden Assembly path is derived by appending path components
     /// corresponding to the relative path of the module in `dir`, to `namespace`. If a source file
     /// named `mod.masm` is found, the resulting module will derive its path using the path
     /// components of the parent directory, rather than the file name.
     ///
-    /// For example, let's assume we call this function with the namespace `my_lib`, for a
-    /// directory at path `~/masm`. Now, let's look at how various file system paths would get
-    /// translated to their corresponding module paths:
+    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
+    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
+    /// allows defining multiple projects relative to a common root namespace without conflict.
     ///
-    /// | file path           | module path        |
-    /// |---------------------|--------------------|
-    /// | ~/masm/mod.masm     | "my_lib"           |
-    /// | ~/masm/foo.masm     | "my_lib::foo"      |
-    /// | ~/masm/bar/mod.masm | "my_lib::bar"      |
-    /// | ~/masm/bar/baz.masm | "my_lib::bar::baz" |
+    /// This function recursively parses the entire directory structure under `dir`, ignoring
+    /// any files which do not have the `.masm` extension.
+    ///
+    /// For example, let's say I call this function like so:
+    ///
+    /// ```rust
+    /// use miden_assembly::{Assembler, Path};
+    ///
+    /// let mut assembler = Assembler::default();
+    /// assembler.compile_and_statically_link_from_dir("~/masm/core", "miden::core::foo");
+    /// ```
+    ///
+    /// Here's how we would handle various files under this path:
+    ///
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn compile_and_statically_link_from_dir(
         &mut self,
-        namespace: crate::LibraryNamespace,
         dir: impl AsRef<std::path::Path>,
+        namespace: impl AsRef<Path>,
     ) -> Result<(), Report> {
         use miden_assembly_syntax::parser;
 
-        let modules = parser::read_modules_from_dir(namespace, dir, &self.source_manager)?;
+        let namespace = namespace.as_ref();
+        let modules = parser::read_modules_from_dir(dir, namespace, &self.source_manager)?;
         self.linker.link_modules(modules)?;
         Ok(())
     }
@@ -358,12 +375,21 @@ impl Assembler {
         self.assemble_common(&module_indices)
     }
 
-    /// Assemble a [Library] from a standard Miden Assembly project layout.
+    /// Assemble a [Library] from a standard Miden Assembly project layout, using the provided
+    /// [Path] as the root under which the project is rooted.
     ///
-    /// The standard layout dictates that a given path is the root of a namespace, and the
-    /// directory hierarchy corresponds to the namespace hierarchy. A `.masm` file found in a
-    /// given subdirectory of the root, will be parsed with its [LibraryPath] set based on
-    /// where it resides in the directory structure.
+    /// The standard layout assumes that the given filesystem path corresponds to the root of
+    /// `namespace`. Modules will be parsed with their path made relative to `namespace` according
+    /// to their location in the directory structure with respect to `path`. See below for an
+    /// example of what this looks like in practice.
+    ///
+    /// The `namespace` can be any valid Miden Assembly path, e.g. `std` is a valid path, as is
+    /// `std::math::u64` - there is no requirement that the namespace be a single identifier. This
+    /// allows defining multiple projects relative to a common root namespace without conflict.
+    ///
+    /// NOTE: You must ensure there is no conflict in namespace between projects, e.g. two projects
+    /// both assembled with `namespace` set to `std::math` would conflict with each other in a way
+    /// that would prevent them from being used at the same time.
     ///
     /// This function recursively parses the entire directory structure under `path`, ignoring
     /// any files which do not have the `.masm` extension.
@@ -371,31 +397,31 @@ impl Assembler {
     /// For example, let's say I call this function like so:
     ///
     /// ```rust
-    /// use miden_assembly::{Assembler, LibraryNamespace};
+    /// use miden_assembly::{Assembler, Path};
     ///
-    /// Assembler::default()
-    ///     .assemble_library_from_dir("~/masm/std", LibraryNamespace::new("std").unwrap());
+    /// Assembler::default().assemble_library_from_dir("~/masm/core", "miden::core::foo");
     /// ```
     ///
     /// Here's how we would handle various files under this path:
     ///
-    /// - ~/masm/std/sys.masm            -> Parsed as "std::sys"
-    /// - ~/masm/std/crypto/hash.masm    -> Parsed as "std::crypto::hash"
-    /// - ~/masm/std/math/u32.masm       -> Parsed as "std::math::u32"
-    /// - ~/masm/std/math/u64.masm       -> Parsed as "std::math::u64"
-    /// - ~/masm/std/math/README.md      -> Ignored
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn assemble_library_from_dir(
         self,
-        path: impl AsRef<std::path::Path>,
-        namespace: LibraryNamespace,
+        dir: impl AsRef<std::path::Path>,
+        namespace: impl AsRef<Path>,
     ) -> Result<Library, Report> {
         use miden_assembly_syntax::parser;
 
-        let path = path.as_ref();
+        let dir = dir.as_ref();
+        let namespace = namespace.as_ref();
 
         let source_manager = self.source_manager.clone();
-        let modules = parser::read_modules_from_dir(namespace, path, &source_manager)?;
+        let modules = parser::read_modules_from_dir(dir, namespace, &source_manager)?;
         self.assemble_library(modules)
     }
 
@@ -408,7 +434,7 @@ impl Assembler {
         let module = module.parse_with_options(
             &self.source_manager,
             ParseOptions {
-                path: Some(LibraryPath::new_from_components(LibraryNamespace::Kernel, [])),
+                path: Some(Path::kernel_path().into()),
                 warnings_as_errors: self.warnings_as_errors,
                 ..ParseOptions::for_kernel()
             },
@@ -441,7 +467,7 @@ impl Assembler {
     ) -> Result<KernelLibrary, Report> {
         // if library directory is provided, add modules from this directory to the assembler
         if let Some(lib_dir) = lib_dir {
-            self.compile_and_statically_link_from_dir(LibraryNamespace::Kernel, lib_dir)?;
+            self.compile_and_statically_link_from_dir(lib_dir, Path::kernel_path())?;
         }
 
         self.assemble_kernel(sys_module_path.as_ref())
@@ -449,6 +475,8 @@ impl Assembler {
 
     /// Shared code used by both [`Self::assemble_library`] and [`Self::assemble_kernel`].
     fn assemble_common(mut self, module_indices: &[ModuleIndex]) -> Result<Library, Report> {
+        use miden_assembly_syntax::library::{ConstantExport, ProcedureExport, TypeExport};
+
         let staticlibs = self.linker.libraries().filter_map(|lib| {
             if matches!(lib.kind, LinkLibraryKind::Static) {
                 Some(lib.library.as_ref())
@@ -467,26 +495,171 @@ impl Assembler {
 
                 mast_forest_builder.merge_advice_map(ast_module.advice_map())?;
 
-                for (proc_idx, fqn) in ast_module.exported_procedures() {
-                    let gid = module_idx + proc_idx;
-                    self.compile_subgraph(
-                        SubgraphRoot::not_as_entrypoint(gid),
-                        &mut mast_forest_builder,
-                    )?;
+                for (idx, fqn) in ast_module.exported() {
+                    let fqn: Arc<Path> = fqn.into();
+                    let gid = module_idx + idx;
+                    match &ast_module[idx] {
+                        Export::Procedure(_) => {
+                            self.compile_subgraph(
+                                SubgraphRoot::not_as_entrypoint(gid),
+                                &mut mast_forest_builder,
+                            )?;
+                            let node = mast_forest_builder
+                                .get_procedure(gid)
+                                .expect("compilation succeeded but root not found in cache")
+                                .body_node_id();
+                            let signature = self.linker.resolve_signature(gid)?;
+                            let attributes = self.linker.resolve_attributes(gid)?;
+                            let export = LibraryExport::Procedure(ProcedureExport {
+                                node,
+                                path: fqn.clone(),
+                                signature: signature.map(Arc::unwrap_or_clone),
+                                attributes,
+                            });
+                            exports.insert(fqn, export);
+                        },
+                        Export::Constant(item) => {
+                            // Evaluate constant to a concrete value for export
+                            let value = self.linker.const_eval(gid, &item.value)?;
 
-                    let node = mast_forest_builder
-                        .get_procedure(gid)
-                        .expect("compilation succeeded but root not found in cache")
-                        .body_node_id();
-                    let signature = self.linker.resolve_signature(gid)?;
-                    let attributes = self.linker.resolve_attributes(gid)?;
-                    let export = LibraryExport {
-                        node,
-                        name: fqn.clone(),
-                        signature: signature.map(Arc::unwrap_or_clone),
-                        attributes,
-                    };
-                    exports.insert(fqn, export);
+                            let export = LibraryExport::Constant(ConstantExport {
+                                path: fqn.clone(),
+                                value,
+                            });
+                            exports.insert(fqn, export);
+                        },
+                        Export::Type(item) => {
+                            let ty = self.linker.resolve_type(item.span(), gid)?;
+                            let export = LibraryExport::Type(TypeExport { path: fqn.clone(), ty });
+                            exports.insert(fqn, export);
+                        },
+                        Export::Alias(item) => {
+                            let alias_span = item.span();
+                            let context = SymbolResolutionContext {
+                                span: item.target().span(),
+                                module: module_idx,
+                                kind: None,
+                            };
+                            match self.linker.resolve_alias_target(&context, item.target())? {
+                                SymbolResolution::Exact { gid, .. } => {
+                                    match self.linker.get_item_unsafe(gid) {
+                                        ItemLink::Ast(Export::Procedure(_)) => {
+                                            self.compile_subgraph(
+                                                SubgraphRoot::not_as_entrypoint(gid),
+                                                &mut mast_forest_builder,
+                                            )?;
+                                            let node = mast_forest_builder
+                                                .get_procedure(gid)
+                                                .expect("compilation succeeded but root not found in cache")
+                                                .body_node_id();
+                                            let signature = self.linker.resolve_signature(gid)?;
+                                            let attributes = self.linker.resolve_attributes(gid)?;
+                                            let export =
+                                                LibraryExport::Procedure(ProcedureExport {
+                                                    node,
+                                                    path: fqn.clone(),
+                                                    signature: signature.map(Arc::unwrap_or_clone),
+                                                    attributes,
+                                                });
+                                            exports.insert(fqn, export);
+                                        },
+                                        ItemLink::Ast(Export::Constant(item)) => {
+                                            // Evaluate constant to a concrete value for export
+                                            let value = self.linker.const_eval(gid, &item.value)?;
+
+                                            let export = LibraryExport::Constant(ConstantExport {
+                                                path: fqn.clone(),
+                                                value,
+                                            });
+                                            exports.insert(fqn, export);
+                                        },
+                                        ItemLink::Ast(Export::Type(item)) => {
+                                            let ty = self.linker.resolve_type(item.span(), gid)?;
+                                            let export = LibraryExport::Type(TypeExport {
+                                                path: fqn.clone(),
+                                                ty,
+                                            });
+                                            exports.insert(fqn, export);
+                                        },
+                                        ItemLink::Ast(Export::Alias(_)) => {
+                                            todo!("re-exporting a re-exported item")
+                                        },
+                                        ItemLink::Info(ItemInfo::Procedure(item)) => {
+                                            let resolved =
+                                                match mast_forest_builder.get_procedure(gid) {
+                                                    Some(proc) => ResolvedProcedure {
+                                                        node: proc.body_node_id(),
+                                                        signature: proc.signature(),
+                                                    },
+                                                    // We didn't find the procedure in our current
+                                                    // MAST forest. We still need to
+                                                    // check if it exists in one of a library
+                                                    // dependency.
+                                                    None => {
+                                                        let node = self
+                                                            .ensure_valid_procedure_mast_root(
+                                                                InvokeKind::ProcRef,
+                                                                alias_span,
+                                                                item.digest,
+                                                                &mut mast_forest_builder,
+                                                            )?;
+                                                        ResolvedProcedure {
+                                                            node,
+                                                            signature: item.signature.clone(),
+                                                        }
+                                                    },
+                                                };
+                                            let digest = item.digest;
+                                            let ResolvedProcedure { node, signature } = resolved;
+                                            let attributes = item.attributes.clone();
+                                            let pctx = ProcedureContext::new(
+                                                gid,
+                                                /* is_program_entrypoint= */ false,
+                                                fqn.clone(),
+                                                Visibility::Public,
+                                                signature.clone(),
+                                                ast_module.is_in_kernel(),
+                                                self.source_manager.clone(),
+                                            )
+                                            .with_span(alias_span);
+
+                                            let procedure = pctx.into_procedure(digest, node);
+                                            self.linker.register_procedure_root(gid, digest)?;
+                                            mast_forest_builder.insert_procedure(gid, procedure)?;
+                                            let export =
+                                                LibraryExport::Procedure(ProcedureExport {
+                                                    node,
+                                                    path: fqn.clone(),
+                                                    signature: signature.map(|sig| (*sig).clone()),
+                                                    attributes,
+                                                });
+                                            exports.insert(fqn, export);
+                                        },
+                                        ItemLink::Info(ItemInfo::Constant(item)) => {
+                                            let export = LibraryExport::Constant(ConstantExport {
+                                                path: fqn.clone(),
+                                                value: item.value.clone(),
+                                            });
+                                            exports.insert(fqn, export);
+                                        },
+                                        ItemLink::Info(ItemInfo::Type(item)) => {
+                                            let export = LibraryExport::Type(TypeExport {
+                                                path: fqn.clone(),
+                                                ty: item.ty.clone(),
+                                            });
+                                            exports.insert(fqn, export);
+                                        },
+                                    }
+                                },
+                                // Module imports are ignored here
+                                SymbolResolution::Module { .. } => (),
+                                SymbolResolution::MastRoot(_) => todo!("phantom procedure"),
+                                SymbolResolution::Local(_) | SymbolResolution::External(_) => {
+                                    unreachable!()
+                                },
+                            }
+                        },
+                    }
                 }
             }
 
@@ -495,8 +668,13 @@ impl Assembler {
 
         let (mast_forest, id_remappings) = mast_forest_builder.build();
         for (_proc_name, export) in exports.iter_mut() {
-            if let Some(&new_node_id) = id_remappings.get(&export.node) {
-                export.node = new_node_id;
+            match export {
+                LibraryExport::Procedure(export) => {
+                    if let Some(&new_node_id) = id_remappings.get(&export.node) {
+                        export.node = new_node_id;
+                    }
+                },
+                LibraryExport::Constant(_) | LibraryExport::Type(_) => (),
             }
         }
 
@@ -514,7 +692,7 @@ impl Assembler {
         let options = ParseOptions {
             kind: ModuleKind::Executable,
             warnings_as_errors: self.warnings_as_errors,
-            path: Some(LibraryPath::from(LibraryNamespace::Exec)),
+            path: Some(Path::exec_path().into()),
         };
 
         let program = source.parse_with_options(&self.source_manager, options)?;
@@ -528,7 +706,7 @@ impl Assembler {
         let entrypoint = self.linker[module_index]
             .unwrap_ast()
             .index_of(|p| p.is_main())
-            .map(|index| GlobalProcedureIndex { module: module_index, index })
+            .map(|index| GlobalItemIndex { module: module_index, index })
             .ok_or(SemanticAnalysisError::MissingEntrypoint)?;
 
         // Compile the linked module graph rooted at the entrypoint
@@ -570,7 +748,7 @@ impl Assembler {
         root: SubgraphRoot,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<(), Report> {
-        let mut worklist: Vec<GlobalProcedureIndex> = self
+        let mut worklist: Vec<GlobalItemIndex> = self
             .linker
             .topological_sort_from_root(root.proc_id)
             .map_err(|cycle| {
@@ -578,13 +756,13 @@ impl Assembler {
                 let mut nodes = Vec::with_capacity(iter.len());
                 for node in iter {
                     let module = self.linker[node.module].path();
-                    let proc = self.linker.get_procedure_unsafe(node);
+                    let proc = self.linker.get_item_unsafe(node);
                     nodes.push(format!("{}::{}", module, proc.name()));
                 }
                 LinkerError::Cycle { nodes: nodes.into() }
             })?
             .into_iter()
-            .filter(|&gid| self.linker.get_procedure_unsafe(gid).is_ast())
+            .filter(|&gid| self.linker.get_item_unsafe(gid).is_ast())
             .collect();
 
         assert!(!worklist.is_empty());
@@ -595,7 +773,7 @@ impl Assembler {
     /// Compiles all procedures in the `worklist`.
     fn process_graph_worklist(
         &mut self,
-        worklist: &mut Vec<GlobalProcedureIndex>,
+        worklist: &mut Vec<GlobalItemIndex>,
         root: &SubgraphRoot,
         mast_forest_builder: &mut MastForestBuilder,
     ) -> Result<(), Report> {
@@ -619,11 +797,7 @@ impl Assembler {
             match export {
                 Export::Procedure(proc) => {
                     let num_locals = proc.num_locals();
-                    let name = QualifiedProcedureName {
-                        span: proc.span(),
-                        module: module.path().clone(),
-                        name: proc.name().clone(),
-                    };
+                    let path = module.path().join(proc.name().as_str()).into();
                     let signature = self.linker.resolve_signature(procedure_gid)?;
                     let is_program_entrypoint =
                         root.is_program_entrypoint && root.proc_id == procedure_gid;
@@ -631,10 +805,10 @@ impl Assembler {
                     let pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        name,
+                        path,
                         proc.visibility(),
                         signature,
-                        module.is_in_kernel(),
+                        module.kind().is_kernel(),
                         self.source_manager.clone(),
                     )
                     .with_num_locals(num_locals)
@@ -652,33 +826,34 @@ impl Assembler {
                     self.linker.register_procedure_root(procedure_gid, procedure.mast_root())?;
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
-                Export::Alias(proc_alias) => {
-                    let name = QualifiedProcedureName {
-                        span: proc_alias.span(),
-                        module: module.path().clone(),
-                        name: proc_alias.name().clone(),
-                    };
+                Export::Alias(alias) => {
+                    let path = module.path().join(alias.name().as_str()).into();
                     // A program entrypoint is never an alias
                     let is_program_entrypoint = false;
-
                     let mut pctx = ProcedureContext::new(
                         procedure_gid,
                         is_program_entrypoint,
-                        name,
+                        path,
                         ast::Visibility::Public,
                         None,
-                        module.is_in_kernel(),
+                        module.kind().is_kernel(),
                         self.source_manager.clone(),
                     )
-                    .with_span(proc_alias.span());
+                    .with_span(alias.span());
 
-                    let ResolvedProcedure { node: proc_node_id, signature, .. } = self
+                    // We must resolve aliases at this point to their real definition, in order to
+                    // know whether we need to emit a MAST node for a foreign procedure item. If
+                    // the aliased item is not a procedure, we can ignore the alias entirely.
+                    let Some(ResolvedProcedure { node: proc_node_id, signature, .. }) = self
                         .resolve_target(
                             InvokeKind::ProcRef,
-                            &proc_alias.target().into(),
+                            &alias.target().into(),
                             procedure_gid,
                             mast_forest_builder,
-                        )?;
+                        )?
+                    else {
+                        continue;
+                    };
 
                     pctx.set_signature(signature);
 
@@ -691,6 +866,8 @@ impl Assembler {
                     self.linker.register_procedure_root(procedure_gid, proc_mast_root)?;
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
+                // Type and constant exports are irrelevant at this stage
+                Export::Type(_) | Export::Constant(_) => continue,
             }
         }
 
@@ -708,7 +885,7 @@ impl Assembler {
 
         let num_locals = proc_ctx.num_locals();
 
-        let wrapper_proc = self.linker.get_procedure_unsafe(gid);
+        let wrapper_proc = self.linker.get_item_unsafe(gid);
         let proc = wrapper_proc.unwrap_ast().unwrap_procedure();
         let body_wrapper = if proc_ctx.is_program_entrypoint() {
             assert!(num_locals == 0, "program entrypoint cannot have locals");
@@ -761,7 +938,8 @@ impl Assembler {
                         } else if let Some(decorator_ids) = block_builder.drain_decorators() {
                             block_builder
                                 .mast_forest_builder_mut()
-                                .append_before_enter(node_id, &decorator_ids);
+                                .append_before_enter(node_id, decorator_ids)
+                                .into_diagnostic()?;
                         }
 
                         body_node_ids.push(node_id);
@@ -786,18 +964,15 @@ impl Assembler {
                         block_builder.mast_forest_builder_mut(),
                     )?;
 
-                    let split_node_id =
-                        block_builder.mast_forest_builder_mut().ensure_split(then_blk, else_blk)?;
+                    let mut split_builder = SplitNodeBuilder::new([then_blk, else_blk]);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(split_node_id, &decorator_ids)
+                        split_builder.append_before_enter(decorator_ids);
                     }
 
                     // Add an assembly operation decorator to the if node in debug mode.
                     if self.in_debug_mode() {
                         let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.name().to_string();
+                        let context_name = proc_ctx.path().to_string();
                         let num_cycles = 0;
                         let op = "if.true".to_string();
                         let should_break = false;
@@ -806,10 +981,11 @@ impl Assembler {
                         let decorator_id = block_builder
                             .mast_forest_builder_mut()
                             .ensure_decorator(Decorator::AsmOp(op))?;
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(split_node_id, &[decorator_id]);
+                        split_builder.append_before_enter([decorator_id]);
                     }
+
+                    let split_node_id =
+                        block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
 
                     body_node_ids.push(split_node_id);
                 },
@@ -828,12 +1004,14 @@ impl Assembler {
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         // Attach the decorators before the first instance of the repeated node
-                        let mut first_repeat_node =
-                            block_builder.mast_forest_builder_mut()[repeat_node_id].clone();
-                        first_repeat_node.append_before_enter(&decorator_ids);
+                        let first_repeat_builder = block_builder.mast_forest_builder()
+                            [repeat_node_id]
+                            .clone()
+                            .to_builder(block_builder.mast_forest_builder().mast_forest())
+                            .with_before_enter(decorator_ids);
                         let first_repeat_node_id = block_builder
                             .mast_forest_builder_mut()
-                            .ensure_node(first_repeat_node)?;
+                            .ensure_node(first_repeat_builder)?;
 
                         body_node_ids.push(first_repeat_node_id);
                         for _ in 0..(*count - 1) {
@@ -851,25 +1029,21 @@ impl Assembler {
                         body_node_ids.push(basic_block_id);
                     }
 
-                    let loop_node_id = {
-                        let loop_body_node_id = self.compile_body(
-                            body.iter(),
-                            proc_ctx,
-                            None,
-                            block_builder.mast_forest_builder_mut(),
-                        )?;
-                        block_builder.mast_forest_builder_mut().ensure_loop(loop_body_node_id)?
-                    };
+                    let loop_body_node_id = self.compile_body(
+                        body.iter(),
+                        proc_ctx,
+                        None,
+                        block_builder.mast_forest_builder_mut(),
+                    )?;
+                    let mut loop_builder = LoopNodeBuilder::new(loop_body_node_id);
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(loop_node_id, &decorator_ids)
+                        loop_builder.append_before_enter(decorator_ids);
                     }
 
                     // Add an assembly operation decorator to the loop node in debug mode.
                     if self.in_debug_mode() {
                         let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.name().to_string();
+                        let context_name = proc_ctx.path().to_string();
                         let num_cycles = 0;
                         let op = "while.true".to_string();
                         let should_break = false;
@@ -878,10 +1052,11 @@ impl Assembler {
                         let decorator_id = block_builder
                             .mast_forest_builder_mut()
                             .ensure_decorator(Decorator::AsmOp(op))?;
-                        block_builder
-                            .mast_forest_builder_mut()
-                            .append_before_enter(loop_node_id, &[decorator_id]);
+                        loop_builder.append_before_enter([decorator_id]);
                     }
+
+                    let loop_node_id =
+                        block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;
 
                     body_node_ids.push(loop_node_id);
                 },
@@ -918,14 +1093,16 @@ impl Assembler {
                 ));
             }
 
-            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new())?
+            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new(), vec![], vec![])?
         } else {
             mast_forest_builder.join_nodes(body_node_ids)?
         };
 
         // Make sure that any post decorators are added at the end of the procedure body
         if let Some(post_decorator_ids) = maybe_post_decorators {
-            mast_forest_builder.append_after_exit(procedure_body_id, &post_decorator_ids);
+            mast_forest_builder
+                .append_after_exit(procedure_body_id, post_decorator_ids)
+                .into_diagnostic()?;
         }
 
         Ok(procedure_body_id)
@@ -933,55 +1110,65 @@ impl Assembler {
 
     /// Resolves the specified target to the corresponding procedure root [`MastNodeId`].
     ///
+    /// If the resolved target is a non-procedure item, this returns `Ok(None)`.
+    ///
     /// If no [`MastNodeId`] exists for that procedure root, we wrap the root in an
     /// [`crate::mast::ExternalNode`], and return the resulting [`MastNodeId`].
     pub(super) fn resolve_target(
         &self,
         kind: InvokeKind,
         target: &InvocationTarget,
-        caller_id: GlobalProcedureIndex,
+        caller_id: GlobalItemIndex,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<ResolvedProcedure, Report> {
-        let caller = CallerInfo {
+    ) -> Result<Option<ResolvedProcedure>, Report> {
+        let caller = SymbolResolutionContext {
             span: target.span(),
             module: caller_id.module,
-            kind,
+            kind: Some(kind),
         };
-        let resolved = self.linker.resolve_target(&caller, target)?;
+        let resolved = self.linker.resolve_invoke_target(&caller, target)?;
         match resolved {
-            ResolvedTarget::Phantom(mast_root) => {
+            SymbolResolution::MastRoot(mast_root) => {
                 let node = self.ensure_valid_procedure_mast_root(
                     kind,
                     target.span(),
-                    mast_root,
+                    mast_root.into_inner(),
                     mast_forest_builder,
                 )?;
-                Ok(ResolvedProcedure { node, signature: None })
+                Ok(Some(ResolvedProcedure { node, signature: None }))
             },
-            ResolvedTarget::Exact { gid } | ResolvedTarget::Resolved { gid, .. } => {
+            SymbolResolution::Exact { gid, .. } => {
                 match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => Ok(ResolvedProcedure {
+                    Some(proc) => Ok(Some(ResolvedProcedure {
                         node: proc.body_node_id(),
                         signature: proc.signature(),
-                    }),
+                    })),
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
-                    None => match self.linker.get_procedure_unsafe(gid) {
-                        ProcedureLink::Info(p) => {
+                    None => match self.linker.get_item_unsafe(gid) {
+                        ItemLink::Info(ItemInfo::Procedure(p)) => {
                             let node = self.ensure_valid_procedure_mast_root(
                                 kind,
                                 target.span(),
                                 p.digest,
                                 mast_forest_builder,
                             )?;
-                            Ok(ResolvedProcedure { node, signature: p.signature.clone() })
+                            Ok(Some(ResolvedProcedure { node, signature: p.signature.clone() }))
                         },
-                        ProcedureLink::Ast(_) => panic!(
+                        ItemLink::Info(_) => Ok(None),
+                        ItemLink::Ast(Export::Procedure(_)) => panic!(
                             "AST procedure {gid:?} exists in the linker, but not in the MastForestBuilder"
                         ),
+                        ItemLink::Ast(Export::Alias(_)) => {
+                            unreachable!("unexpected reference to ast alias item from {gid:?}")
+                        },
+                        ItemLink::Ast(Export::Type(_) | Export::Constant(_)) => Ok(None),
                     },
                 }
             },
+            SymbolResolution::Module { .. }
+            | SymbolResolution::External(_)
+            | SymbolResolution::Local(_) => unreachable!(),
         }
     }
 
@@ -1007,25 +1194,23 @@ impl Assembler {
                 // NOTE: The assembler is expected to know the full set of all kernel
                 // procedures at this point, so if we can't identify the callee as a
                 // kernel procedure, it is a definite error.
-                if !proc.visibility().is_syscall() {
-                    assert!(
-                        !proc.visibility().is_syscall(),
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file,
-                            callee: proc.fully_qualified_name().clone().into(),
-                        })
-                    );
-                }
-                let maybe_kernel_path = proc.path();
+                assert!(
+                    proc.is_syscall(),
+                    "linker failed to validate syscall correctly: {}",
+                    Report::new(LinkerError::InvalidSysCallTarget {
+                        span,
+                        source_file: current_source_file,
+                        callee: proc.path().clone(),
+                    })
+                );
+                let maybe_kernel_path = proc.module();
                 let module = self.linker.find_module(maybe_kernel_path).unwrap_or_else(|| {
                     panic!(
                         "linker failed to validate syscall correctly: {}",
                         Report::new(LinkerError::InvalidSysCallTarget {
                             span,
                             source_file: current_source_file.clone(),
-                            callee: proc.fully_qualified_name().clone().into(),
+                            callee: proc.path().clone(),
                         })
                     )
                 });
@@ -1038,7 +1223,7 @@ impl Assembler {
                         Report::new(LinkerError::InvalidSysCallTarget {
                             span,
                             source_file: current_source_file.clone(),
-                            callee: proc.fully_qualified_name().clone().into(),
+                            callee: proc.path().clone(),
                         })
                     )
                 }
@@ -1058,16 +1243,16 @@ impl Assembler {
 /// `is_program_entrypoint` is true if the root procedure is the entrypoint of an executable
 /// program.
 struct SubgraphRoot {
-    proc_id: GlobalProcedureIndex,
+    proc_id: GlobalItemIndex,
     is_program_entrypoint: bool,
 }
 
 impl SubgraphRoot {
-    fn with_entrypoint(proc_id: GlobalProcedureIndex) -> Self {
+    fn with_entrypoint(proc_id: GlobalItemIndex) -> Self {
         Self { proc_id, is_program_entrypoint: true }
     }
 
-    fn not_as_entrypoint(proc_id: GlobalProcedureIndex) -> Self {
+    fn not_as_entrypoint(proc_id: GlobalItemIndex) -> Self {
         Self { proc_id, is_program_entrypoint: false }
     }
 }

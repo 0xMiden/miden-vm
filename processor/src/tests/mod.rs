@@ -2,13 +2,14 @@
 use alloc::string::ToString;
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, LibraryPath,
+    Assembler, DefaultSourceManager, PathBuf,
     ast::Module,
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
@@ -27,7 +28,7 @@ mod decorator_execution_tests;
 #[test]
 fn test_advice_map_inline() {
     let source = "\
-adv_map.A=[0x01]
+adv_map A = [0x01]
 
 begin
   push.A
@@ -53,10 +54,8 @@ fn test_diagnostic_advice_map_key_already_present() {
     let test_context = TestContext::new();
 
     let (lib_1, lib_2) = {
-        let dummy_library_source = source_file!(&test_context, "export.foo add end");
-        let module = test_context
-            .parse_module_with_path("foo::bar".parse().unwrap(), dummy_library_source)
-            .unwrap();
+        let dummy_library_source = source_file!(&test_context, "pub proc foo add end");
+        let module = test_context.parse_module_with_path("foo::bar", dummy_library_source).unwrap();
         let lib = test_context.assemble_library(std::iter::once(module)).unwrap();
         let lib_1 = lib
             .clone()
@@ -71,7 +70,9 @@ fn test_diagnostic_advice_map_key_already_present() {
     host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = mast_forest.add_block(vec![Operation::Noop], Vec::new()).unwrap();
+    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -304,7 +305,7 @@ fn test_diagnostic_failed_assertion() {
 
     // With error message as constant
     let source = "
-        const.ERR_MSG=\"some error message\"
+        const ERR_MSG = \"some error message\"
         begin
             push.1.2
             assertz.err=ERR_MSG
@@ -442,7 +443,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     // returning from a function with non-empty overflow table should result in an error
     // Note: we add the `trace.2` to ensure that asm ops co-exist well with other decorators.
     let source = "
-        proc.foo
+        proc foo
             push.1
         end
 
@@ -471,7 +472,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
 fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     // returning from a function with non-empty overflow table should result in an error
     let source = "
-        proc.foo
+        proc foo
             push.1
         end
 
@@ -527,7 +528,7 @@ fn test_diagnostic_log_argument_zero() {
 fn test_diagnostic_unaligned_word_access() {
     // mem_storew_be
     let source = "
-        proc.foo add end
+        proc foo add end
         begin
             exec.foo mem_storew_be.3
         end";
@@ -712,7 +713,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     let lib_module = {
         let module_name = "foo::bar";
         let src = "
-        export.dummy_proc
+        pub proc dummy_proc
             push.1
         end
     ";
@@ -720,7 +721,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
         let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
         Module::parse(
-            LibraryPath::new(module_name).unwrap(),
+            PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
             source_file,
         )
@@ -728,7 +729,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     };
 
     let program_source = "
-        use.foo::bar
+        use foo::bar
 
         begin
             call.bar::dummy_proc
@@ -759,7 +760,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x1b0a6d4b3976737badf180f3df558f45e06e6d1803ea5ad3b95fa7428caccd02",
-        regex!(r#",-\[\$exec:5:13\]"#),
+        regex!(r#",-\[::\$exec:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^^^",
@@ -950,7 +951,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let kernel_source = "
-        export.dummy_proc
+        pub proc dummy_proc
             push.1 drop
         end
     ";
@@ -984,7 +985,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root d754f5422c74afd0b094889be6b288f9ffd2cc630e3c44d412b1408b2be3b99c was not found in the kernel",
-        regex!(r#",-\[\$exec:3:13\]"#),
+        regex!(r#",-\[::\$exec:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^",
@@ -998,7 +999,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 #[test]
 fn test_assert_messages() {
     let source = "
-        const.NONZERO = \"Value is not zero\"
+        const NONZERO = \"Value is not zero\"
         begin
             push.1
             assertz.err=NONZERO
@@ -1056,4 +1057,89 @@ fn test_debug_stack_issue_2295_original_repeat() {
     ├── 11: 42
     └── (16 more items)
     ");
+}
+
+// Debug Mode Flag Propagation Test
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn test_debug_mode_flag_propagation() {
+    use miden_core::stack::StackInputs;
+
+    use crate::{AdviceInputs, ExecutionOptions, Kernel};
+
+    // Test case 1: Both debugging and tracing disabled
+    let exec_options_disabled = ExecutionOptions::default();
+    let kernel = Kernel::new(&[]).expect("Failed to create kernel");
+    let stack_inputs = StackInputs::default();
+    let advice_inputs = AdviceInputs::default();
+
+    let process_disabled = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_disabled,
+    );
+
+    // Test case 2: Only tracing enabled
+    let exec_options_tracing = ExecutionOptions::default().with_tracing();
+    let process_tracing = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_tracing,
+    );
+
+    // Test case 3: Only debugging enabled
+    let exec_options_debugging = ExecutionOptions::default().with_debugging(true);
+    let process_debugging = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_debugging,
+    );
+
+    // Test case 4: Both tracing and debugging enabled
+    let exec_options_both = ExecutionOptions::default().with_tracing().with_debugging(true);
+    let process_both = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_both,
+    );
+
+    // Test case 5: Process::new_debug() method
+    let process_new_debug = Process::new_debug(kernel, stack_inputs, advice_inputs);
+
+    // Verify that in_debug_mode is false when neither is enabled
+    assert!(
+        !process_disabled.decoder.in_debug_mode(),
+        "Debug mode should be disabled when neither debugging nor tracing is enabled"
+    );
+
+    // According to the task description, in_debug_mode should be true when tracing is enabled
+    // But currently this will fail because the logic is incorrect
+    // This test will help us verify our fix
+    assert!(
+        process_tracing.decoder.in_debug_mode(),
+        "Debug mode should be enabled when tracing is enabled"
+    );
+
+    // Verify that in_debug_mode is true when debugging is enabled
+    assert!(
+        process_debugging.decoder.in_debug_mode(),
+        "Debug mode should be enabled when debugging is enabled"
+    );
+
+    // Verify that in_debug_mode is true when both are enabled
+    assert!(
+        process_both.decoder.in_debug_mode(),
+        "Debug mode should be enabled when both debugging and tracing are enabled"
+    );
+
+    // Verify that Process::new_debug() correctly enables debug mode
+    assert!(
+        process_new_debug.decoder.in_debug_mode(),
+        "Debug mode should be enabled when using Process::new_debug()"
+    );
 }

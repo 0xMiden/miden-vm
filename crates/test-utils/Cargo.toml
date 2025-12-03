@@ -30,7 +30,7 @@ miden-assembly = { workspace = true, features = ["testing"] }
 miden-core.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
-miden-stdlib.workspace = true
+miden-libcore.workspace = true
 miden-verifier.workspace = true
 test-case = "3.2"
 winter-prover.workspace = true
@@ -39,6 +39,7 @@ winter-prover.workspace = true
 pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-pretty_assertions = { version = "1.4" }
+env_logger.workspace = true
+pretty_assertions = "1.4"
 proptest.workspace = true
 winter-rand-utils.workspace = true

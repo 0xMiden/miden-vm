@@ -13,11 +13,11 @@ use miden_core::{
     mast::{BasicBlockNode, MastNodeExt, OpBatch},
 };
 
-use super::{CoreTraceFragmentGenerator, trace_builder::OperationTraceConfig};
+use super::{CoreTraceFragmentFiller, trace_builder::OperationTraceConfig};
 
 const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
-impl CoreTraceFragmentGenerator {
+impl<'a> CoreTraceFragmentFiller<'a> {
     // TODO(plafer): cleanup to use `add_control_flow_trace_row()`
     /// Adds a trace row for SPAN start operation to the main trace fragment.
     ///
@@ -27,7 +27,6 @@ impl CoreTraceFragmentGenerator {
         &mut self,
         first_op_batch: &OpBatch,
         num_groups: Felt,
-        parent_addr: Felt,
     ) -> ControlFlow<()> {
         let row_idx = self.num_rows_built();
 
@@ -36,7 +35,8 @@ impl CoreTraceFragmentGenerator {
 
         // Populate decoder trace columns
         // Set the address to the parent address
-        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] = parent_addr;
+        self.fragment.columns[DECODER_TRACE_OFFSET + ADDR_COL_IDX][row_idx] =
+            self.context.state.decoder.parent_addr;
 
         self.append_opcode(Operation::Span.op_code(), row_idx);
 

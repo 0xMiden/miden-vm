@@ -1,7 +1,7 @@
-use.std::sys
+use miden::core::sys
 
 # append the current number to the prime list
-proc.append
+proc append
     # initial state
     # [prime, i, n, primes..]
 
@@ -21,7 +21,7 @@ proc.append
 end
 
 # push a boolean on whether or not the program should continue
-proc.should_continue
+proc should_continue
     # initial state
     # [i, n, primes..]
 
@@ -35,7 +35,7 @@ end
 
 # define if check should continue
 # will return two flags: one if the loop should continue, the other if candidate is prime
-proc.is_not_prime_should_continue
+proc is_not_prime_should_continue
     # initial state
     # [j, candidate, i, n, primes..]
 
@@ -95,7 +95,7 @@ proc.is_not_prime_should_continue
 end
 
 # check if current candidate isn't a prime
-proc.is_not_prime
+proc is_not_prime
     # initial state
     # [candidate, i, n, primes..]
 
@@ -120,7 +120,7 @@ proc.is_not_prime
 end
 
 # calculate and push next prime to the stack
-proc.next
+proc next
     # initial state
     # [i, n, primes..]
 

@@ -27,8 +27,7 @@ pub use miden_core::{
 use miden_core::{
     Decorator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DecoratorOpLinkIterator, DynNode, ExternalNode, JoinNode,
-        LoopNode, OpBatch, SplitNode,
+        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -291,7 +290,8 @@ impl Process {
         advice_inputs: AdviceInputs,
         execution_options: ExecutionOptions,
     ) -> Self {
-        let in_debug_mode = execution_options.enable_debugging();
+        let in_debug_mode =
+            execution_options.enable_debugging() || execution_options.enable_tracing();
         Self {
             advice: advice_inputs.into(),
             system: System::new(execution_options.expected_cycles() as usize),
@@ -340,12 +340,12 @@ impl Process {
             .get_node_by_id(node_id)
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
         match node {
-            MastNode::Block(node) => self.execute_basic_block_node(node, program, host)?,
+            MastNode::Block(node) => self.execute_basic_block_node(node_id, node, program, host)?,
             MastNode::Join(node) => self.execute_join_node(node, program, host)?,
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
@@ -370,7 +370,7 @@ impl Process {
             },
         }
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(program) {
             self.execute_decorator(&program[decorator_id], host)?;
         }
 
@@ -539,9 +539,14 @@ impl Process {
     }
 
     /// Executes the specified [BasicBlockNode].
+    ///
+    /// # Arguments
+    /// * `node_id` - The ID of this basic block node in the `program` MAST forest. This should
+    ///   match the ID in `basic_block.decorators` when it's `Linked`.
     #[inline(always)]
     fn execute_basic_block_node(
         &mut self,
+        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -549,17 +554,9 @@ impl Process {
         self.start_basic_block_node(basic_block, program, host)?;
 
         let mut op_offset = 0;
-        let mut decorator_ids = basic_block.indexed_decorator_iter();
 
         // execute the first operation batch
-        self.execute_op_batch(
-            basic_block,
-            &basic_block.op_batches()[0],
-            &mut decorator_ids,
-            op_offset,
-            program,
-            host,
-        )?;
+        self.execute_op_batch(basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
         op_offset += basic_block.op_batches()[0].ops().len();
 
         // if the span contains more operation batches, execute them. each additional batch is
@@ -568,14 +565,7 @@ impl Process {
         for op_batch in basic_block.op_batches().iter().skip(1) {
             self.respan(op_batch);
             self.execute_op(Operation::Noop, program, host)?;
-            self.execute_op_batch(
-                basic_block,
-                op_batch,
-                &mut decorator_ids,
-                op_offset,
-                program,
-                host,
-            )?;
+            self.execute_op_batch(basic_block, op_batch, op_offset, program, host)?;
             op_offset += op_batch.ops().len();
         }
 
@@ -585,10 +575,9 @@ impl Process {
         // can happen for decorators appearing after all operations in a block. these decorators
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
-        for (_, decorator_id) in decorator_ids {
-            let decorator = program
-                .get_decorator_by_id(decorator_id)
-                .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+        // For the linked case, check for decorators at an operation index beyond the last operation
+        let num_ops = basic_block.num_operations() as usize;
+        for decorator in program.decorators_for_op(node_id, num_ops) {
             self.execute_decorator(decorator, host)?;
         }
 
@@ -606,7 +595,6 @@ impl Process {
         &mut self,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
-        decorators: &mut DecoratorOpLinkIterator,
         op_offset: usize,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -621,12 +609,16 @@ impl Process {
         // the actual number of groups is smaller, we'll pad the batch with NOOPs at the end
         let num_batch_groups = batch.num_groups().next_power_of_two();
 
+        // Get the node ID once since it doesn't change within the loop
+        let node_id = basic_block
+            .linked_id()
+            .expect("basic block node should be linked when executing operations");
+
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            while let Some((_, decorator_id)) = decorators.next_filtered(i + op_offset) {
-                let decorator = program
-                    .get_decorator_by_id(decorator_id)
-                    .ok_or(ExecutionError::DecoratorNotFoundInForest { decorator_id })?;
+            // Use the forest's decorator storage to get decorators for this operation
+            let current_op_idx = i + op_offset;
+            for decorator in program.decorators_for_op(node_id, current_op_idx) {
                 self.execute_decorator(decorator, host)?;
             }
 

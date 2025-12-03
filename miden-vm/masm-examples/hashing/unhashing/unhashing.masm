@@ -1,23 +1,23 @@
 # This example showcases how to "unhash" data from the advice provider; that is, how to
 # read untrusted data from the advice provider, and verify that it hashes to an expected
 # value. Specifically, we
-# 1. Read data from the advice provider and store it simultaneously on the stack and 
+# 1. Read data from the advice provider and store it simultaneously on the stack and
 # 2. Apply a permutation of the RPO256 hash function
 
-use.std::crypto::hashes::rpo
+use miden::core::crypto::hashes::rpo256
 
 begin
     # Reads 100 words from the advice provider, stores them in memory, and computes their hash.
     repeat.50
         adv_pipe hperm
     end
-    # => [X, HASH, X, addr]  
+    # => [X, HASH, X, addr]
 
     # Drop the junk words (denoted by `X` above).
-    exec.rpo::squeeze_digest  
-    # => [HASH, addr]  
+    exec.rpo256::squeeze_digest
+    # => [HASH, addr]
 
     # Drop the memory address.
-    movup.4 drop  
-    # => [HASH] 
+    movup.4 drop
+    # => [HASH]
 end

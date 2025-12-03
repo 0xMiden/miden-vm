@@ -68,9 +68,25 @@ pub enum SystemEvent {
     ///   Advice map: {KEY: values}
     MapValueToStack,
 
-    /// Pushes a list of field elements onto the advice stack, and then the number of elements
-    /// pushed. The list is looked up in the advice map using the specified word from the operand
+    /// Pushes the number of elements in a list of field elements onto the advice stack. The list is
+    /// looked up in the advice map using the specified word from the operand stack as the key.
+    ///
+    /// Inputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [...]
+    ///   Advice map: {KEY: values}
+    ///
+    /// Outputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [values.len(), ...]
+    ///   Advice map: {KEY: values}
+    MapValueCountToStack,
+
+    /// Pushes a list of field elements onto the advice stack, along with the number of elements in
+    /// that list. The list is looked up in the advice map using the word at the top of the operand
     /// stack as the key.
+    ///
+    /// Notice that the resulting elements list is not padded.
     ///
     /// Inputs:
     ///   Operand stack: [KEY, ...]
@@ -81,7 +97,43 @@ pub enum SystemEvent {
     ///   Operand stack: [KEY, ...]
     ///   Advice stack: [num_values, values, ...]
     ///   Advice map: {KEY: values}
-    MapValueToStackN,
+    MapValueToStackN0,
+
+    /// Pushes a padded list of field elements onto the advice stack, along with the number of
+    /// elements in that list. The list is looked up in the advice map using the word at the top of
+    /// the operand stack as the key.
+    ///
+    /// Notice that the elements list obtained from the advice map will be padded with zeros,
+    /// increasing its length to the next multiple of 4.
+    ///
+    /// Inputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [...]
+    ///   Advice map: {KEY: values}
+    ///
+    /// Outputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [num_values, values, padding, ...]
+    ///   Advice map: {KEY: values}
+    MapValueToStackN4,
+
+    /// Pushes a padded list of field elements onto the advice stack, along with the number of
+    /// elements in that list. The list is looked up in the advice map using the word at the top of
+    /// the operand stack as the key.
+    ///
+    /// Notice that the elements list obtained from the advice map will be padded with zeros,
+    /// increasing its length to the next multiple of 8.
+    ///
+    /// Inputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [...]
+    ///   Advice map: {KEY: values}
+    ///
+    /// Outputs:
+    ///   Operand stack: [KEY, ...]
+    ///   Advice stack: [num_values, values, padding, ...]
+    ///   Advice map: {KEY: values}
+    MapValueToStackN8,
 
     /// Pushes a flag onto the advice stack whether advice map has an entry with specified key.
     ///
@@ -297,7 +349,10 @@ impl SystemEvent {
             Self::MerkleNodeMerge,
             Self::MerkleNodeToStack,
             Self::MapValueToStack,
-            Self::MapValueToStackN,
+            Self::MapValueCountToStack,
+            Self::MapValueToStackN0,
+            Self::MapValueToStackN4,
+            Self::MapValueToStackN8,
             Self::HasMapKey,
             Self::Ext2Inv,
             Self::U32Clz,
@@ -351,7 +406,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 19;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -374,9 +429,24 @@ impl SystemEvent {
             name: "sys::map_value_to_stack",
         },
         SystemEventEntry {
-            id: EventId::from_u64(7354377147644073171),
-            event: SystemEvent::MapValueToStackN,
-            name: "sys::map_value_to_stack_n",
+            id: EventId::from_u64(3470274154276391308),
+            event: SystemEvent::MapValueCountToStack,
+            name: "sys::map_value_count_to_stack",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(11775886982554463322),
+            event: SystemEvent::MapValueToStackN0,
+            name: "sys::map_value_to_stack_n_0",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(3443305460233942990),
+            event: SystemEvent::MapValueToStackN4,
+            name: "sys::map_value_to_stack_n_4",
+        },
+        SystemEventEntry {
+            id: EventId::from_u64(1741586542981559489),
+            event: SystemEvent::MapValueToStackN8,
+            name: "sys::map_value_to_stack_n_8",
         },
         SystemEventEntry {
             id: EventId::from_u64(5642583036089175977),
@@ -530,7 +600,10 @@ mod test {
                 SystemEvent::MerkleNodeMerge
                 | SystemEvent::MerkleNodeToStack
                 | SystemEvent::MapValueToStack
-                | SystemEvent::MapValueToStackN
+                | SystemEvent::MapValueCountToStack
+                | SystemEvent::MapValueToStackN0
+                | SystemEvent::MapValueToStackN4
+                | SystemEvent::MapValueToStackN8
                 | SystemEvent::HasMapKey
                 | SystemEvent::Ext2Inv
                 | SystemEvent::U32Clz

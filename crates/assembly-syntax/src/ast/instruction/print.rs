@@ -280,56 +280,44 @@ impl PrettyPrint for Instruction {
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice()))),
             ),
-            Self::Exec(InvocationTarget::ProcedureName(name)) => {
+            Self::Exec(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("exec") + const_text(".") + text(name))
             },
-            Self::Exec(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("exec") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::Exec(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("exec") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::Exec(InvocationTarget::Path(path)) => {
+                const_text("exec") + const_text(".") + display(path)
             },
             Self::Call(InvocationTarget::MastRoot(root)) => {
                 const_text("call")
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice())))
             },
-            Self::Call(InvocationTarget::ProcedureName(name)) => {
+            Self::Call(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("call") + const_text(".") + text(name))
             },
-            Self::Call(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("call") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::Call(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("call") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::Call(InvocationTarget::Path(path)) => {
+                const_text("call") + const_text(".") + display(path)
             },
             Self::SysCall(InvocationTarget::MastRoot(root)) => {
                 const_text("syscall")
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice())))
             },
-            Self::SysCall(InvocationTarget::ProcedureName(name)) => {
+            Self::SysCall(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("syscall") + const_text(".") + text(format!("{name}")))
             },
-            Self::SysCall(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("syscall") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::SysCall(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("syscall") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::SysCall(InvocationTarget::Path(path)) => {
+                const_text("syscall") + const_text(".") + display(path)
             },
             Self::DynExec => const_text("dynexec"),
             Self::DynCall => const_text("dyncall"),
             Self::ProcRef(InvocationTarget::MastRoot(_)) => {
                 panic!("invalid procref instruction: expected name not MAST root")
             },
-            Self::ProcRef(InvocationTarget::ProcedureName(name)) => {
+            Self::ProcRef(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("procref") + const_text(".") + text(name))
             },
-            Self::ProcRef(InvocationTarget::ProcedurePath { name, module }) => {
-                flatten(const_text("procref") + const_text(".") + text(format!("{module}::{name}")))
-            },
-            Self::ProcRef(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                flatten(const_text("procref") + const_text(".") + text(format!("::{path}::{name}")))
+            Self::ProcRef(InvocationTarget::Path(path)) => {
+                flatten(const_text("procref") + const_text(".") + display(path))
             },
 
             // ----- debug decorators -------------------------------------------------------------
@@ -421,11 +409,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Rpo256::hash(b"std::math::u64::add");
+        let digest = Rpo256::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x90b3926941061b28638b6cc0bbdb3bcb335e834dc9ab8044250875055202d2fe",
+            "exec.0x6998a9e7f13f7e81edcabdbc895ec0141f8ce3e7abd061f1370852c082a028fa",
             instruction
         );
     }

@@ -13,6 +13,7 @@ cargo publish -p miden-utils-sync
 cargo publish -p miden-utils-diagnostics
 cargo publish -p miden-utils-indexing
 cargo publish -p miden-debug-types
+cargo publish -p miden-utils-core-derive
 cargo publish -p miden-core
 cargo publish -p miden-air
 cargo publish -p miden-assembly-syntax
@@ -21,5 +22,5 @@ cargo publish -p miden-assembly
 cargo publish -p miden-processor
 cargo publish -p miden-prover
 cargo publish -p miden-verifier
-cargo publish -p miden-stdlib
+cargo publish -p miden-libcore
 cargo publish -p miden-vm
