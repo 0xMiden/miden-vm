@@ -672,7 +672,7 @@ end
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
 pub proc move_sig_from_map_to_adv_stack
-    dupw.1 dupw.1 hmerge
+    dupw.1 dupw.1 exec.rpo256::merge
     #=> [hash(MSG || PK), PK, MSG, ...]
 
     adv.push_mapval dropw

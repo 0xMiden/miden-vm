@@ -119,14 +119,14 @@ pub proc hash_bytes_impl
     # => [DIGEST_U32[8], COMM_INPUT, TAG, ...]
 
     # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8])
-    dupw.1 dupw.1 reversedw hmerge
+    dupw.1 dupw.1 reversedw exec.rpo256::merge
     # => [COMM_DIGEST, DIGEST_U32[8], COMM_INPUT, TAG, ...]
 
     movupw.3 swapw
     # => [COMM_DIGEST, COMM_INPUT, DIGEST_U32[8], TAG, ...]
 
     # Compute COMM = Rpo256(COMM_INPUT || COMM_DIGEST)
-    hmerge
+    exec.rpo256::merge
     # => [COMM, DIGEST_U32[8], TAG, ...]
 
     # Reorder stack
