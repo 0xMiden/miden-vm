@@ -52,7 +52,7 @@ pub const ECDSA_VERIFY_EVENT_NAME: EventName =
 
 const PUBLIC_KEY_LEN_BYTES: usize = 33;
 const MESSAGE_DIGEST_LEN_BYTES: usize = 32;
-const SIGNATURE_LEN_BYTES: usize = 66; // r (32) + s (32) + v (1) + padding (1)
+const SIGNATURE_LEN_BYTES: usize = 65; // r (32) + s (32) + v (1)
 
 const PRECOMPILE_REQUEST_LEN: usize =
     PUBLIC_KEY_LEN_BYTES + MESSAGE_DIGEST_LEN_BYTES + SIGNATURE_LEN_BYTES;
