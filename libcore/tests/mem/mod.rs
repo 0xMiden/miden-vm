@@ -6,6 +6,171 @@ use miden_utils_testing::{
 };
 
 #[test]
+fn test_memcopy() {
+    // prepare testing data
+    use miden_libcore::CoreLibrary;
+
+    let store_testing_data_source = "
+        push.1.2.3.4.1000 mem_storew_be dropw
+        push.5.6.7.8.1004 mem_storew_be dropw
+        push.9.10.11.12.1008 mem_storew_be dropw
+        push.13.14.15.16.1012 mem_storew_be dropw
+        push.17.18.19.20.1016 mem_storew_be dropw
+    ";
+
+    let stdlib = CoreLibrary::default();
+
+    fn executed_process_from_source(source: String, stdlib: &CoreLibrary) -> Process {
+        let assembler = miden_assembly::Assembler::default()
+            .with_dynamic_library(stdlib)
+            .expect("failed to load stdlib");
+        let program: Program =
+            assembler.assemble_program(source).expect("Failed to compile test source.");
+        let mut host = DefaultHost::default().with_library(stdlib).unwrap();
+
+        let mut process = Process::new(
+            program.kernel().clone(),
+            StackInputs::default(),
+            AdviceInputs::default(),
+            ExecutionOptions::default(),
+        );
+
+        process.execute(&program, &mut host).unwrap();
+
+        process
+    }
+
+    // Case 1: read pointer and write pointer are mutually unaligned
+
+    let source = format!(
+        "
+    use miden::core::mem
+
+    begin
+        {store_testing_data_source}
+
+        push.2002.1001.18 exec.mem::memcopy
+    end
+    "
+    );
+
+    let process = executed_process_from_source(source, &stdlib);
+
+    for addr in 2002..2020 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 2000),
+            "Address {}",
+            addr
+        );
+    }
+
+    // Case 2: pointers are word-aligned; essentially only the "words" handler will work
+
+    let source = format!(
+        "
+    use miden::core::mem
+
+    begin
+        {store_testing_data_source}
+
+        push.2000.1000.16 exec.mem::memcopy
+    end
+    "
+    );
+
+    let process = executed_process_from_source(source, &stdlib);
+
+    for addr in 2000..2016 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 1999),
+            "Address {}",
+            addr
+        );
+    }
+
+    // Case 3: pointers are mutually word-aligned (have equal mis-aligning from the next
+    // word-aligned address); we have enough copy values to run all three handlers: prefix,
+    // words, and suffix
+
+    let source = format!(
+        "
+    use miden::core::mem
+
+    begin
+        {store_testing_data_source}
+
+        push.2001.1001.18 exec.mem::memcopy
+    end
+    "
+    );
+
+    let process = executed_process_from_source(source, &stdlib);
+
+    for addr in 2001..2019 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 1999),
+            "Address {}",
+            addr
+        );
+    }
+
+    // Case 4: pointers are mutually word-aligned (have equal mis-aligning from the next
+    // word-aligned address); we have enough copy values to run only prefix and suffix handlers.
+
+    let source = format!(
+        "
+    use miden::core::mem
+
+    begin
+        {store_testing_data_source}
+
+        push.2001.1001.5 exec.mem::memcopy
+    end
+    "
+    );
+
+    let process = executed_process_from_source(source, &stdlib);
+
+    for addr in 2001..2006 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 1999),
+            "Address {}",
+            addr
+        );
+    }
+
+    // Case 5: pointers are mutually word-aligned (have equal mis-aligning from the next
+    // word-aligned address); we have enough copy values to run only suffix handler.
+
+    let source = format!(
+        "
+    use miden::core::mem
+
+    begin
+        {store_testing_data_source}
+
+        push.2001.1001.2 exec.mem::memcopy
+    end
+    "
+    );
+
+    let process = executed_process_from_source(source, &stdlib);
+
+    for addr in 2001..2003 {
+        assert_eq!(
+            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            Felt::from(addr - 1999),
+            "Address {}",
+            addr
+        );
+    }
+}
+
+#[test]
 fn test_memcopy_words() {
     use miden_libcore::CoreLibrary;
 
