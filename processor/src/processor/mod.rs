@@ -426,8 +426,15 @@ pub trait OperationHelperRegisters {
     /// The helper registers for the MPVerify and MrUpdate operation.
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
-    /// The helper registers for the HornerEvalBase and HornerEvalExt operations.
-    fn op_horner_eval_registers(
+    /// The helper registers for HornerEvalBase operations.
+    fn op_horner_eval_base_registers(
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS];
+
+    /// The helper registers for HornerEvalExt operations.
+    fn op_horner_eval_ext_registers(
         alpha: QuadFelt,
         k0: Felt,
         k1: Felt,

@@ -21,7 +21,7 @@ use crate::mast::{
 ///
 /// External nodes can be used to verify the integrity of a program's hash while keeping parts of
 /// the program secret. They also allow a program to refer to a well-known procedure that was not
-/// compiled with the program (e.g. a procedure in the standard library).
+/// compiled with the program (e.g. a procedure in the core library).
 ///
 /// The hash of an external node is the hash of the procedure it represents, such that an external
 /// node can be swapped with the actual subtree that it represents without changing the MAST root.
@@ -203,8 +203,8 @@ impl MastNodeExt for ExternalNode {
             },
             DecoratorStore::Linked { id } => {
                 // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = ExternalNodeBuilder::new(self.digest);
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
@@ -306,11 +306,9 @@ impl MastForestContributor for ExternalNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest
+            .debug_info
+            .register_node_decorators(future_node_id, &before_enter, &after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -413,11 +411,9 @@ impl ExternalNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest
+            .debug_info
+            .register_node_decorators(future_node_id, &before_enter, &after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning

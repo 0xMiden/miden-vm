@@ -1,0 +1,146 @@
+use miden::core::stark::constants
+use miden::core::crypto::hashes::rpo256
+
+#! Compute the LDE domain generator from the log2 of its size.
+#!
+#! Input: [log2(domain_size), ..]
+#! Output: [domain_gen, ..]
+#! Cycles: 63
+pub proc compute_lde_generator
+    push.32
+    swap
+    sub
+    pow2
+    exec.constants::get_root_unity
+    swap
+    exp.u32
+    # => [domain_gen, ..]
+end
+
+#! Validates the inputs to the recursive verifier.
+#!
+#! Input: [log(trace_length), num_queries, grinding, ...]
+#! Output: [log(trace_length), num_queries, grinding, ...]
+#!
+#! Cycles: 45
+pub proc validate_inputs
+    # 1) Assert that all inputs are u32 so that we can use u32 operations in what follows
+    push.0
+    dupw
+    u32assertw
+    # => [0, log(trace_length), num_queries, grinding, 0, log(trace_length), num_queries, grinding, ...]
+
+    # 2) Assert that the trace length is at most 29. The 2-adicity of our field is 32 and since
+    #    the blowup factor is 8, we need to make sure that the LDE size is at most 2^32.
+    #    We also check that the trace length is greater than the minimal length supported i.e., 2^6.
+    drop
+    dup u32lt.30 assert
+    u32gt.5 assert
+
+    # 3) Assert that the number of FRI queries is at most 150. This restriction is a soft one
+    #    and is due to the memory layout in the `constants.masm` files but can be updated
+    #    therein.
+    #    We also make sure that the number of FRI queries is at least 7.
+    dup u32lt.151 assert
+    u32gt.6 assert
+
+    # 4) Assert that the grinding factor is at most 31
+    u32lt.32 assert
+
+    # 5) Clean up the stack
+    drop
+end
+
+#! Sets up auxiliary inputs to the arithmetic circuit for the constraint evaluation check.
+#!
+#! These inputs are:
+#!
+#! 1) OOD evaluation point z,
+#! 2) random challenge used in computing the DEEP composition polynomial,
+#! 3) z^N where N is the execution trace length
+#! 4) z^k where k = min_num_cycles = trace_len / max_cycle_len and max_cycle_len is the longest cycle
+#!    among all the cycles of periodic columns.
+#! 5) g^{-1} where g is the trace domain generator.
+#!
+#! The only input to this procedure is the log2 of the max cycle length across all periodic columns.
+#!
+#! Input: [max_cycle_len_log, ...]
+#! Output: [...]
+pub proc set_up_auxiliary_inputs_ace
+    padw exec.constants::composition_coef_ptr mem_loadw_be
+
+    # z and z^N
+    push.0.0 exec.constants::z_ptr mem_loadw_be
+    # => [(z_1, z_0)^n, z_1, z_0, alpha1, alpha0, max_cycle_len_log, ...]
+
+    exec.constants::get_trace_length_log
+    movup.7
+    sub
+    # => [log(min_num_cycles), (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where min_num_cycles = trace_len / max_cycle_len
+
+    dup.4 dup.4
+    # => [z_1, z_0, k, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
+    push.1
+    while.true
+        dup.1 dup.1
+        # => [z_1, z_0, z_1, z_0, k, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+        ext2mul
+        # => [z_exp_1, z_exp_0, k, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+        dup.2 sub.1 swap.3
+        push.1 neq
+    end
+
+    movup.2 drop
+    # => [z_k_1, z_k_0, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
+    exec.constants::get_trace_domain_generator
+    inv
+    # => [g^-1, z_k_1, z_k_0, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+    movdn.2
+    push.0
+    movdn.2
+    # => [z_k_1, z_k_0, 0, g^-1, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
+    exec.constants::get_trace_domain_generator
+    inv dup mul
+    push.0
+    # => [0, g^-2, z_k_1, z_k_0, 0, g^-1, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...] where k = min_num_cycles
+
+    # Save [z_k_0, z_k_1, g^-2, 0]
+    exec.constants::auxiliary_ace_inputs_ptr add.8
+    mem_storew_be
+    dropw
+    # => [0, g^-1, (z_1, z_0)^n, z_1, z_0, alpha1, alpha0, ...]
+
+    # Save [(z_0, z_1)^n, g^-1, 0]
+    exec.constants::auxiliary_ace_inputs_ptr add.4
+    mem_storew_be
+    dropw
+
+    # Save [alpha0, alpha1, z_0, z_1]
+    exec.constants::auxiliary_ace_inputs_ptr
+    mem_storew_be
+    dropw
+    # => [...]
+end
+
+#! Executes the constraints evalution check.
+#!
+#! Input: [...]
+#! Output: [...]
+proc execute_constraint_evaluation_check
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr dynexec
+end
+
+#! Stores digests of dynamically executed procedures.
+#!
+#! Input: [D3, D2, D1, D0, ...]
+#! Output: [...]
+pub proc store_dynamically_executed_procedures
+    exec.constants::get_procedure_digest_process_public_inputs_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_process_row_ood_evaluations_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_execute_constraint_evaluation_check_ptr mem_storew_be dropw
+    exec.constants::get_procedure_digest_compute_deep_composition_polynomial_queries_ptr mem_storew_be dropw
+    # => [...]
+end

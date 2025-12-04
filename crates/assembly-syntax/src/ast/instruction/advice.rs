@@ -14,7 +14,9 @@ use miden_core::sys_events::SystemEvent;
 pub enum SystemEventNode {
     PushMapVal,
     PushMapValCount,
-    PushMapValN,
+    PushMapValN0,
+    PushMapValN4,
+    PushMapValN8,
     HasMapKey,
     PushMtNode,
     InsertMem,
@@ -30,7 +32,9 @@ impl From<&SystemEventNode> for SystemEvent {
         match value {
             PushMapVal => Self::MapValueToStack,
             PushMapValCount => Self::MapValueCountToStack,
-            PushMapValN => Self::MapValueToStackN,
+            PushMapValN0 => Self::MapValueToStackN0,
+            PushMapValN4 => Self::MapValueToStackN4,
+            PushMapValN8 => Self::MapValueToStackN8,
             HasMapKey => Self::HasMapKey,
             PushMtNode => Self::MerkleNodeToStack,
             InsertMem => Self::MemToMap,
@@ -53,7 +57,9 @@ impl fmt::Display for SystemEventNode {
         match self {
             Self::PushMapVal => write!(f, "push_mapval"),
             Self::PushMapValCount => write!(f, "push_mapval_count"),
-            Self::PushMapValN => write!(f, "push_mapvaln"),
+            Self::PushMapValN0 => write!(f, "push_mapvaln.0"),
+            Self::PushMapValN4 => write!(f, "push_mapvaln.4"),
+            Self::PushMapValN8 => write!(f, "push_mapvaln.8"),
             Self::HasMapKey => write!(f, "has_mapkey"),
             Self::PushMtNode => write!(f, "push_mtnode"),
             Self::InsertMem => write!(f, "insert_mem"),

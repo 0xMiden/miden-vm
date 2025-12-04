@@ -373,7 +373,16 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_horner_eval_registers(
+    fn op_horner_eval_base_registers(
+        _alpha: QuadFelt,
+        _tmp0: QuadFelt,
+        _tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
+    fn op_horner_eval_ext_registers(
         _alpha: QuadFelt,
         _k0: Felt,
         _k1: Felt,
