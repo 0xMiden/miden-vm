@@ -3,7 +3,7 @@
 # Exclude URLs and mail addresses from checking (supports regex).
 exclude = [
     '^file:///.*test-utils',                    # Missing test-utils directory
-    '^file:///.*stdlib/docs/sys\.md',           # Missing stdlib docs file
+    '^file:///.*libcore/docs/sys\.md',           # Missing libcore docs file
     '^file:///.*\.png$',                        # Image files
     '^file:///.*\.svg$',                        # SVG files
     '^https://www.gnu.org/software/make/manual/make\.html$',  # GNU make manual

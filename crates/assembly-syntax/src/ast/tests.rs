@@ -657,12 +657,12 @@ fn test_ast_parsing_use() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-    use std::abc::foo
+    use miden::core::abc::foo
     begin
         exec.foo::bar
     end"#
     );
-    let forms = module!(import!("std::abc::foo"), begin!(exec!(foo::bar)));
+    let forms = module!(import!("miden::core::abc::foo"), begin!(exec!(foo::bar)));
     assert_eq!(context.parse_forms(source)?, forms);
     // TODO: Assert fully-resolved name is `std::abc::foo::bar`
     Ok(())
@@ -1585,7 +1585,7 @@ fn test_type_signatures() -> Result<(), Report> {
     let source = source_file!(
         &context,
         r#"
-use std::math::u64
+use miden::core::math::u64
 
 type Int64 = struct { hi: u32, lo: u32 }
 
@@ -1605,7 +1605,7 @@ end
     );
 
     let forms = module!(
-        import!("std::math::u64"),
+        import!("miden::core::math::u64"),
         type_alias!(Int64, struct_ty!(hi: Type::U32, lo: Type::U32)),
         typed_export!(
             mul,

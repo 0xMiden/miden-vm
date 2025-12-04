@@ -39,11 +39,11 @@ mod tests;
 /// The size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some
-/// existing programs need it (e.g. `std::math::secp256k1::group::gen_mul`), so we're forced to push
-/// it up. At this high a value, we're starting to see some performance degradation on benchmarks.
-/// For example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a
-/// better solution would be to make this value much smaller (~1000), and then fallback to a `Vec`
-/// if the stack overflows.
+/// existing programs need it, so we're forced to push it up (though this should be double-checked).
+/// At this high a value, we're starting to see some performance degradation on benchmarks. For
+/// example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a better
+/// solution would be to make this value much smaller (~1000), and then fallback to a `Vec` if the
+/// stack overflows.
 const STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.

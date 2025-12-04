@@ -206,16 +206,16 @@ impl Assembler {
     /// use miden_assembly::{Assembler, Path};
     ///
     /// let mut assembler = Assembler::default();
-    /// assembler.compile_and_statically_link_from_dir("~/masm/std", "std::foo");
+    /// assembler.compile_and_statically_link_from_dir("~/masm/core", "miden::core::foo");
     /// ```
     ///
     /// Here's how we would handle various files under this path:
     ///
-    /// - ~/masm/std/sys.masm            -> Parsed as "std::foo::sys"
-    /// - ~/masm/std/crypto/hash.masm    -> Parsed as "std::foo::crypto::hash"
-    /// - ~/masm/std/math/u32.masm       -> Parsed as "std::foo::math::u32"
-    /// - ~/masm/std/math/u64.masm       -> Parsed as "std::foo::math::u64"
-    /// - ~/masm/std/math/README.md      -> Ignored
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn compile_and_statically_link_from_dir(
         &mut self,
@@ -399,16 +399,16 @@ impl Assembler {
     /// ```rust
     /// use miden_assembly::{Assembler, Path};
     ///
-    /// Assembler::default().assemble_library_from_dir("~/masm/std", "std::foo");
+    /// Assembler::default().assemble_library_from_dir("~/masm/core", "miden::core::foo");
     /// ```
     ///
     /// Here's how we would handle various files under this path:
     ///
-    /// - ~/masm/std/sys.masm            -> Parsed as "std::foo::sys"
-    /// - ~/masm/std/crypto/hash.masm    -> Parsed as "std::foo::crypto::hash"
-    /// - ~/masm/std/math/u32.masm       -> Parsed as "std::foo::math::u32"
-    /// - ~/masm/std/math/u64.masm       -> Parsed as "std::foo::math::u64"
-    /// - ~/masm/std/math/README.md      -> Ignored
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn assemble_library_from_dir(
         self,

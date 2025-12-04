@@ -209,7 +209,7 @@ impl proptest::prelude::Arbitrary for EventName {
         prop_oneof![
             // Static strings (Cow::Borrowed)
             Just(EventName::new("test::static::event")),
-            Just(EventName::new("stdlib::handler::example")),
+            Just(EventName::new("core::handler::example")),
             Just(EventName::new("user::custom::event")),
             // Dynamic strings (Cow::Owned)
             any::<(u32, u32)>()

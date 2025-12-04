@@ -208,9 +208,9 @@ fn test_debug_local() {
     // Computed as follows:
     // - fmp starts at FMP_INIT_VALUE
     // - "+ 8": find the `fmp` value for the `test` procedure (6 locals, which gets rounded up to 8)
-    // - "- 6": find the address of the 0th local (we have 6 locals, so we subtract 6)
+    // - "- 8": find the address of the 0th local (use rounded value for alignment)
     // - "+ 4": get the address of the 4th local
-    let local_addr_4 = FMP_INIT_VALUE_U64 + 8 - 6 + 4;
+    let local_addr_4 = FMP_INIT_VALUE_U64 + 8 - 8 + 4;
     let source = format!(
         "
         @locals(6)
@@ -248,13 +248,13 @@ fn test_debug_local() {
 
     insta::assert_snapshot!(output, @r"
     Memory state before step 43 for the context 0:
-    ├── 0x80000000: 0
-    ├── 0x80000001: 0
-    ├── 0x80000002: 1
-    ├── 0x80000003: 2
-    ├── 0x80000004: 3
+    ├── 0x80000000: 1
+    ├── 0x80000001: 2
+    ├── 0x80000002: 3
+    ├── 0x80000003: 0
+    ├── 0x80000004: 42
     ├── 0x80000005: 0
-    ├── 0x80000006: 42
+    ├── 0x80000006: 0
     ├── 0x80000007: 0
     ├── 0xfffffffc: 0
     ├── 0xfffffffd: 0
@@ -280,21 +280,21 @@ fn test_debug_local() {
     ├── 4: 5
     └── 5: 0
     State of procedure local 4 before step 50: 5
-    State of procedure local 6 before step 50: EMPTY
+    State of procedure local 6 before step 50: 0
     State of procedure locals [2, 6] before step 50:
     ├── 2: 3
     ├── 3: 0
     ├── 4: 5
     ├── 5: 0
-    └── 6: EMPTY
+    └── 6: 0
     Memory state before step 58 for the context 0:
-    ├── 0x80000000: 0
-    ├── 0x80000001: 0
-    ├── 0x80000002: 1
-    ├── 0x80000003: 2
-    ├── 0x80000004: 3
+    ├── 0x80000000: 1
+    ├── 0x80000001: 2
+    ├── 0x80000002: 3
+    ├── 0x80000003: 0
+    ├── 0x80000004: 5
     ├── 0x80000005: 0
-    ├── 0x80000006: 5
+    ├── 0x80000006: 0
     ├── 0x80000007: 0
     ├── 0xfffffffc: 0
     ├── 0xfffffffd: 0

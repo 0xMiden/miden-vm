@@ -12,6 +12,7 @@
 
 #### Changes
 
+- Fixed `locaddr` alignment when procedure local count is not a multiple of 4 ([#2350](https://github.com/0xMiden/miden-vm/pull/2350)).
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
 - [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
@@ -29,6 +30,7 @@
 - `hash_memory_with_state`, `hash_memory_words`, and `hash_memory_double_words` procedures from the `std::crypto::hashes::rpo` module were renamed to the `hash_elements_with_state`, `hash_words`, and `hash_double_words` respectively ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
 - [BREAKING] Updgrade `miden-crypto` to 0.19 ([#2399](https://github.com/0xMiden/miden-vm/pull/2399)).
 - Pre-allocate main trace buffer in trace generation ([#2345](https://github.com/0xMiden/miden-vm/pull/2345)).
+- Rename the MASM standard library to "miden::core", the crate to `miden-libcore`, and various other MASM module refactors ([#2260](https://github.com/0xMiden/miden-vm/issues/2260))
 
 ## 0.19.1 (2025-11-6)
 

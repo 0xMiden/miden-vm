@@ -160,7 +160,7 @@ If the assembler cannot resolve external symbol references to a known module or 
 #### Re-exporting items
 Items imported into a module, can also be simultaneously re-exported from that module, using the name bound to the symbol when it was imported. For example:
 ```
-use std::math::u64
+use miden::core::math::u64
 
 pub use u64::add
 pub use u64::mul->mul64
@@ -170,12 +170,12 @@ pub proc foo
 end
 ```
 
-In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `std::math::u64` module.
+In the module shown above, not only is the locally-defined procedure `foo` exported, but so are two procedures named `add` and `mul64`, whose implementations are defined in the `miden::core::math::u64` module.
 
 Similar to procedure invocation, you can bypass the explicit import by specifying an absolute path, like so:
 
 ```
-pub use ::std::math::u64::mul->mul64
+pub use ::miden::core::math::u64::mul->mul64
 ```
 
 Additionally, you may re-export a procedure using its MAST root, so long as you specify a name for it, as shown below:
@@ -192,7 +192,7 @@ You may attach documentation to re-exported items, e.g.:
 
 ```
 #! Multiply two u64 integers
-pub use ::std::math::u64::mul
+pub use ::miden::core::math::u64::mul
 ```
 
 However you cannot attach attributes to re-exported items, i.e. the following is
@@ -200,7 +200,7 @@ not supported:
 
 ```
 @foo
-pub use ::std::math::u64::mul
+pub use ::miden::core::math::u64::mul
 ```
 
 ### Constants
@@ -211,7 +211,7 @@ A constant's name must start with an upper-case letter and can contain any combi
 A constant's value must be in a decimal or hexadecimal form and be in the range between $0$ and $2^{64} - 2^{32}$ (both inclusive). Value can be defined by an arithmetic expression using `+`, `-`, `*`, `/`, `//`, `(`, `)` operators and references to the previously defined constants if it uses only decimal numbers. Here `/` is a field division and `//` is an integer division. Note that the arithmetic expression cannot contain spaces.
 
 ```
-use std::math::u64
+use miden::core::math::u64
 use mylib::CONSTANT_1 # constants can be imported like other items
 
 # Constants can be exported like other items
