@@ -1,12 +1,8 @@
-use alloc::boxed::Box;
-
 use miden_core::{EventId, Felt, mast::MastForest, sys_events::SystemEvent};
 
 use super::{super::ONE, ExecutionError, Process};
 use crate::{
-    SyncHost,
-    errors::{AssertInfo, ErrorContext},
-    operations::sys_ops::sys_event_handlers::handle_system_event,
+    SyncHost, errors::ErrorContext, operations::sys_ops::sys_event_handlers::handle_system_event,
 };
 
 pub(crate) mod sys_event_handlers;
@@ -32,9 +28,9 @@ impl Process {
         if self.stack.get(0) != ONE {
             let process = &mut self.state();
             let clk = process.clk();
-            let err_info = host.on_assert_failed(process).map(|e| -> AssertInfo { Box::new(e) });
+            let err = host.on_assert_failed(process, err_code);
             let err_msg = program.resolve_error_message(err_code);
-            return Err(ExecutionError::failed_assertion(clk, err_msg, err_info, err_ctx));
+            return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
         }
         self.stack.shift_left(1);
         Ok(())

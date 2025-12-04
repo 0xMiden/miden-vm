@@ -1,5 +1,4 @@
 use alloc::{sync::Arc, vec::Vec};
-use core::convert::Infallible;
 
 use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
 use miden_debug_types::{
@@ -7,8 +6,9 @@ use miden_debug_types::{
 };
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
-    ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventHandler,
+    EventHandlerRegistry, ExecutionError, MastForestStore, MemMastForestStore, ProcessState,
+    SyncHost, TraceError,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
@@ -124,10 +124,6 @@ where
     D: DebugHandler,
     S: SourceManager,
 {
-    type DebugError = <D as DebugHandler>::DebugError;
-    type TraceError = <D as DebugHandler>::TraceError;
-    type AssertInfo = <D as DebugHandler>::AssertInfo;
-
     fn get_label_and_source_file(
         &self,
         location: &Location,
@@ -141,21 +137,12 @@ where
         &mut self,
         process: &mut ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), Self::DebugError> {
+    ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), Self::TraceError> {
+    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
-    }
-
-    /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(&mut self, process: &ProcessState) -> Option<Self::AssertInfo> {
-        self.debug_handler.on_assert_failed(process)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
@@ -214,38 +201,12 @@ where
 pub struct NoopHost;
 
 impl BaseHost for NoopHost {
-    type DebugError = Infallible;
-    type TraceError = Infallible;
-    type AssertInfo = ();
-
     #[inline(always)]
     fn get_label_and_source_file(
         &self,
         _location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
-    }
-
-    #[inline(always)]
-    fn on_debug(
-        &mut self,
-        _process: &mut ProcessState,
-        _options: &DebugOptions,
-    ) -> Result<(), Self::DebugError> {
-        Ok(())
-    }
-
-    #[inline(always)]
-    fn on_trace(
-        &mut self,
-        _process: &mut ProcessState,
-        _trace_id: u32,
-    ) -> Result<(), Self::TraceError> {
-        Ok(())
-    }
-
-    fn on_assert_failed(&mut self, _process: &ProcessState) -> Option<Self::AssertInfo> {
-        None
     }
 }
 

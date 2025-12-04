@@ -1,5 +1,5 @@
 use miden_air::RowIndex;
-use miden_processor::ExecutionError;
+use miden_processor::{ExecutionError, ZERO};
 use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 
 #[test]
@@ -19,8 +19,8 @@ fn test_invalid_end_addr() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_msg , .. }
-        if clk == RowIndex::from(24) && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg , .. }
+        if clk == RowIndex::from(24) && err_code == ZERO && err_msg.is_none()
     );
 }
 

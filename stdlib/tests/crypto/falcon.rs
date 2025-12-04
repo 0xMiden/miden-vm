@@ -3,7 +3,7 @@ use std::{sync::Arc, vec};
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{
-    EventName, StarkField,
+    EventName, StarkField, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
 };
 use miden_processor::{
@@ -203,8 +203,8 @@ fn test_falcon512_probabilistic_product_failure() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_msg, .. }
-        if clk == RowIndex::from(3202) && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
     );
 }
 

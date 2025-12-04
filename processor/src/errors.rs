@@ -1,8 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
-use core::{error::Error, fmt};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -15,7 +14,10 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
-use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
+use crate::{
+    AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
+    host::advice::AdviceError,
+};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -92,16 +94,15 @@ pub enum ExecutionError {
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error(
-        "assertion failed at clock cycle {clk}{msg}{info}",
-        msg = match err_msg.as_deref() {
-            Some(msg) => format!(" with error message: {msg}"),
-            None => String::new(),
-        },
-        info = match err_info.as_ref() {
-            Some(info) => format!(" (info: {info:?})"),
-            None => String::new(),
-        }
+    #[error("assertion failed at clock cycle {clk} with error {}{}",
+      match err_msg {
+        Some(msg) => format!("message: {msg}"),
+        None => format!("code: {err_code}"),
+      },
+      match err {
+        Some(err) => format!(" (host error: {err})"),
+        None => String::new(),
+      }
     )]
     #[diagnostic()]
     FailedAssertion {
@@ -110,10 +111,10 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         clk: RowIndex,
-        /// Optional human-readable error message for the code, if available
+        err_code: Felt,
         err_msg: Option<Arc<str>>,
-        /// Optional host-provided assertion context/info
-        err_info: Option<AssertInfo>,
+        #[source]
+        err: Option<AssertError>,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
@@ -348,8 +349,9 @@ impl ExecutionError {
 
     pub fn failed_assertion(
         clk: RowIndex,
+        err_code: Felt,
         err_msg: Option<Arc<str>>,
-        err_info: Option<AssertInfo>,
+        err: Option<AssertError>,
         err_ctx: &impl ErrorContext,
     ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
@@ -358,8 +360,9 @@ impl ExecutionError {
             label,
             source_file,
             clk,
+            err_code,
             err_msg,
-            err_info,
+            err,
         }
     }
 
@@ -500,29 +503,6 @@ pub enum AceError {
     #[error("num of wires must be less than 2^30 but was {0}")]
     TooManyWires(u64),
 }
-// DEBUG AND TRACE ERRORS
-// ================================================================================================
-
-/// Boxed error type for debug handlers.
-///
-/// Any error produced by a host's `DebugHandler` is converted into this boxed trait object.
-/// The alias documents the shape the VM expects; concrete host error types are allowed and
-/// are boxed by the VM at the call boundary.
-type DebugError = Box<dyn Error + Send + Sync + 'static>;
-
-/// Boxed error type for trace handlers.
-///
-/// Any error produced by a host's trace hook is converted into this boxed trait object.
-/// As with `DebugError`, concrete host error types are permitted and boxed at the boundary.
-type TraceError = Box<dyn Error + Send + Sync + 'static>;
-
-/// Boxed assertion context attached to failed assertions.
-///
-/// Hosts may return any type implementing `fmt::Debug + Send + Sync + 'static` from
-/// `BaseHost::on_assert_failed`. The VM then boxes it into this trait object and includes it in
-/// diagnostics. Prefer a concrete, sized type for `BaseHost::AssertInfo` (e.g., `Felt` or `()`),
-/// and let the VM perform the boxing to avoid double-boxing.
-pub(crate) type AssertInfo = Box<dyn fmt::Debug + Send + Sync + 'static>;
 
 // ERROR CONTEXT
 // ===============================================================================================

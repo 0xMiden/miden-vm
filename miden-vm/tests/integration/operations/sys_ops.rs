@@ -1,4 +1,4 @@
-use miden_core::EventName;
+use miden_core::{EventName, ZERO, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, RowIndex};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
@@ -23,10 +23,12 @@ fn assert_with_code() {
     // triggered assertion captures both the VM cycle and resolved message
     let test = build_op_test!(asm_op, &[0]);
 
+    let code = mast::error_code_from_msg("123");
+
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_msg, .. }
-        if clk == RowIndex::from(6) && err_msg.as_deref() == Some("123")
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(6) && err_code == code && err_msg.as_deref() == Some("123")
     );
 }
 
@@ -38,8 +40,8 @@ fn assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_msg, .. }
-        if clk == RowIndex::from(6) && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, .. }
+        if clk == RowIndex::from(6) && err_code == ZERO
     );
 }
 
@@ -62,16 +64,16 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_msg, .. }
-        if clk == RowIndex::from(7) && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_msg, .. }
-        if clk == RowIndex::from(7) && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 }
 

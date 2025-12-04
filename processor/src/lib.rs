@@ -6,7 +6,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{sync::Arc, vec::Vec};
 use core::fmt::{Display, LowerHex};
 
 use miden_air::trace::{
@@ -66,7 +66,10 @@ pub use host::{
     advice::{AdviceError, AdviceInputs, AdviceProvider},
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
-    handlers::{DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler},
+    handlers::{
+        AssertError, DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry,
+        NoopEventHandler, TraceError,
+    },
 };
 
 mod chiplets;
@@ -666,9 +669,8 @@ impl Process {
                 if self.decoder.in_debug_mode() {
                     let process = &mut self.state();
                     let clk = process.clk();
-                    host.on_debug(process, options).map_err(|err| {
-                        ExecutionError::DebugHandlerError { clk, err: Box::new(err) }
-                    })?;
+                    host.on_debug(process, options)
+                        .map_err(|err| ExecutionError::DebugHandlerError { clk, err })?;
                 }
             },
             Decorator::AsmOp(assembly_op) => {
@@ -681,7 +683,7 @@ impl Process {
                     let process = &mut self.state();
                     let clk = process.clk();
                     host.on_trace(process, *id).map_err(|err| {
-                        ExecutionError::TraceHandlerError { clk, trace_id: *id, err: Box::new(err) }
+                        ExecutionError::TraceHandlerError { clk, trace_id: *id, err }
                     })?;
                 }
             },
