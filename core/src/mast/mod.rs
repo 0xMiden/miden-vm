@@ -175,18 +175,22 @@ impl MastForest {
     /// forest.strip_decorators();
     ///
     /// // Then compact the forest
-    /// forest.compact().unwrap();
+    /// let root_map = forest.compact();
     ///
     /// // Forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(&mut self) -> Result<MastForestRootMap, MastForestError> {
+    pub fn compact(&mut self) -> MastForestRootMap {
         // Merge with itself to deduplicate nodes
-        let (compacted_forest, root_map) = MastForest::merge([&*self])?;
+        // Note: This cannot fail for a self-merge under normal conditions.
+        // The only possible failures (TooManyNodes, TooManyDecorators) would require the
+        // original forest to be at capacity limits, at which point compaction wouldn't help.
+        let (compacted_forest, root_map) = MastForest::merge([&*self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge");
 
         // Replace current forest with compacted version
         *self = compacted_forest;
 
-        Ok(root_map)
+        root_map
     }
 
     /// Merges all `forests` into a new [`MastForest`].

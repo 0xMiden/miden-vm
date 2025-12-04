@@ -797,7 +797,7 @@ fn test_mast_forest_compaction_comprehensive() {
 
     // Action: Strip decorators first, then compact
     forest.strip_decorators();
-    forest.compact().unwrap();
+    forest.compact();
 
     // Verify compaction results:
     // - 7 node pairs merged into 7 single nodes
@@ -853,7 +853,7 @@ fn test_compaction_independent() {
     assert!(forest.debug_info.is_empty()); // No decorators from start
 
     // Compact only (should merge the two identical nodes)
-    forest.compact().unwrap();
+    forest.compact();
 
     // Verify nodes were merged
     assert_eq!(forest.num_nodes(), 1);
