@@ -236,7 +236,7 @@ impl fmt::Display for QualifiedProcedureName {
 ///
 /// # A symbol which contains `::`, which would be treated as a namespace operator, so requires
 /// # quoting
-/// proc "std::foo"
+/// proc "miden::core::foo"
 ///   ...
 /// end
 ///

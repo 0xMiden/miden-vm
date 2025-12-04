@@ -1,3 +1,4 @@
+mod kind;
 mod manifest;
 mod section;
 mod serialization;
@@ -11,6 +12,7 @@ use miden_core::{Program, Word};
 use serde::{Deserialize, Serialize};
 
 pub use self::{
+    kind::{InvalidPackageKindError, PackageKind},
     manifest::{ConstantExport, PackageExport, PackageManifest, ProcedureExport, TypeExport},
     section::{InvalidSectionIdError, Section, SectionId},
 };
@@ -31,6 +33,8 @@ pub struct Package {
     /// An optional description of the package
     #[cfg_attr(feature = "serde", serde(default))]
     pub description: Option<String>,
+    /// The kind of project that produced this package.
+    pub kind: PackageKind,
     /// The MAST artifact ([Program] or [Library]) of the package
     pub mast: MastArtifact,
     /// The package manifest, containing the set of exported procedures and their signatures,
@@ -107,6 +111,7 @@ impl Package {
                 name: self.name.clone(),
                 version: self.version.clone(),
                 description: self.description.clone(),
+                kind: PackageKind::Executable,
                 mast: MastArtifact::Executable(Arc::new(Program::new(
                     library.mast_forest().clone(),
                     node_id,

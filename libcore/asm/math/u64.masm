@@ -1,0 +1,690 @@
+# ===== HELPER FUNCTIONS ==========================================================================
+
+#! Asserts that both values at the top of the stack are u64 values.
+#! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
+#! This takes 6 cycles.
+proc u32assert4
+    u32assert2
+    movup.3
+    movup.3
+    u32assert2
+    movup.3
+    movup.3
+end
+
+# ===== ADDITION ==================================================================================
+
+#! Performs addition of two unsigned 64 bit integers preserving the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [overflowing_flag, c_hi, c_lo, ...], where c = (a + b) % 2^64
+#! This takes 6 cycles.
+pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
+    swap
+    movup.3
+    u32overflowing_add
+    movup.3
+    movup.3
+    u32overflowing_add3
+end
+
+#! Performs addition of two unsigned 64 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a + b) % 2^64
+#! This takes 7 cycles.
+pub proc wrapping_add(b: u64, a: u64) -> u64
+    exec.overflowing_add
+    drop
+end
+
+# ===== SUBTRACTION ===============================================================================
+
+#! Performs subtraction of two unsigned 64 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a - b) % 2^64
+#! This takes 10 cycles.
+pub proc wrapping_sub(b: u64, a: u64) -> u64
+    movup.3
+    movup.2
+    u32overflowing_sub
+    movup.3
+    movup.3
+    u32overflowing_sub
+    drop
+    swap
+    u32overflowing_sub
+    drop
+end
+
+#! Performs subtraction of two unsigned 64 bit integers preserving the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [underflowing_flag, c_hi, c_lo, ...], where c = (a - b) % 2^64
+#! This takes 11 cycles.
+pub proc overflowing_sub(b: u64, a: u64) -> (i1, u64)
+    movup.3
+    movup.2
+    u32overflowing_sub
+    movup.3
+    movup.3
+    u32overflowing_sub
+    swap
+    movup.2
+    u32overflowing_sub
+    movup.2
+    or
+end
+
+# ===== MULTIPLICATION ============================================================================
+
+#! Performs multiplication of two unsigned 64 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a * b) % 2^64
+#! This takes 11 cycles.
+pub proc wrapping_mul(b: u64, a: u64) -> u64
+    dup.3
+    dup.2
+    u32overflowing_mul
+    movup.4
+    movup.4
+    u32overflowing_madd
+    drop
+    movup.3
+    movup.3
+    u32overflowing_madd
+    drop
+end
+
+#! Performs multiplication of two unsigned 64 bit integers preserving the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_mid_hi, c_mid_lo, c_lo, ...], where c = (a * b) % 2^64
+#! This takes 18 cycles.
+pub proc overflowing_mul(b: u64, a: u64) -> (i1, u64)
+    dup.3
+    dup.2
+    u32overflowing_mul
+    dup.4
+    movup.4
+    u32overflowing_madd
+    swap
+    movup.5
+    dup.4
+    u32overflowing_madd
+    movup.5
+    movup.5
+    u32overflowing_madd
+    movup.3
+    movup.2
+    u32overflowing_add
+    movup.2
+    add
+end
+
+# ===== COMPARISONS ===============================================================================
+
+#! Performs less-than comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
+#! This takes 11 cycles.
+pub proc lt(b: u64, a: u64) -> i1
+    movup.3
+    movup.2
+    u32overflowing_sub
+    movdn.3
+    drop
+    u32overflowing_sub
+    swap
+    eq.0
+    movup.2
+    and
+    or
+end
+
+#! Performs greater-than comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
+#! This takes 11 cycles.
+pub proc gt(b: u64, a: u64) -> i1
+    movup.2
+    u32overflowing_sub
+    movup.2
+    movup.3
+    u32overflowing_sub
+    swap
+    drop
+    movup.2
+    eq.0
+    and
+    or
+end
+
+#! Performs less-than-or-equal comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a <= b, and 0 otherwise.
+#! This takes 12 cycles.
+pub proc lte(b: u64, a: u64) -> i1
+    exec.gt
+    not
+end
+
+#! Performs greater-than-or-equal comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a >= b, and 0 otherwise.
+#! This takes 12 cycles.
+pub proc gte(b: u64, a: u64) -> i1
+    exec.lt
+    not
+end
+
+#! Performs equality comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
+#! This takes 6 cycles.
+pub proc eq(b: u64, a: u64) -> i1
+    movup.2
+    eq
+    swap
+    movup.2
+    eq
+    and
+end
+
+#! Performs inequality comparison of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
+#! This takes 6 cycles.
+pub proc neq(b: u64, a: u64) -> i1
+    movup.2
+    neq
+    swap
+    movup.2
+    neq
+    or
+end
+
+#! Performs comparison to zero of an unsigned 64 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == 0, and 0 otherwise.
+#! This takes 4 cycles.
+pub proc eqz(b: u64, a: u64) -> i1
+    eq.0
+    swap
+    eq.0
+    and
+end
+
+#! Compares two unsigned 64 bit integers and drop the larger one from the stack.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a < b, and b otherwise.
+#! This takes 23 cycles.
+pub proc min(b: u64, a: u64) -> u64
+    dupw
+    exec.gt
+    movup.4
+    movup.3
+    dup.2
+    cdrop
+    movdn.3
+    cdrop
+end
+
+#! Compares two unsigned 64 bit integers and drop the smaller one from the stack.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a > b, and b otherwise.
+#! This takes 23 cycles.
+pub proc max(b: u64, a: u64) -> u64
+    dupw
+    exec.lt
+    movup.4
+    movup.3
+    dup.2
+    cdrop
+    movdn.3
+    cdrop
+end
+
+# ===== DIVISION ==================================================================================
+
+const U64_DIV_EVENT = event("miden::core::math::u64::u64_div")
+
+#! Performs division of two unsigned 64 bit integers discarding the remainder.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a // b
+#! This takes 54 cycles.
+pub proc div(b: u64, a: u64) -> u64
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+
+    adv_push.2          # pop the quotient from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    dup.3               # multiply quotient by the divisor and make sure the resulting value
+    dup.2               # fits into 2 32-bit limbs
+    u32overflowing_mul
+    dup.4
+    dup.4
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.5
+    dup.3
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.4
+    dup.3
+    mul
+    eq.0
+    assert
+
+    adv_push.2          # pop the remainder from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    movup.7             # make sure the divisor is greater than the remainder. this also consumes
+    movup.7             # the divisor
+    dup.3
+    dup.3
+    exec.gt
+    assert
+
+    swap                # add remainder to the previous result; this also consumes the remainder
+    movup.3
+    u32overflowing_add
+    movup.3
+    movup.3
+    u32overflowing_add3
+    eq.0
+    assert
+
+    movup.4             # make sure the result we got is equal to the dividend
+    assert_eq
+    movup.3
+    assert_eq           # quotient remains on the stack
+end
+
+# ===== MODULO OPERATION ==========================================================================
+
+#! Performs modulo operation of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a % b
+#! This takes 54 cycles.
+pub proc mod(b: u64, a: u64) -> u64
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+
+    adv_push.2          # pop the quotient from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    dup.3               # multiply quotient by the divisor and make sure the resulting value
+    dup.2               # fits into 2 32-bit limbs
+    u32overflowing_mul
+    dup.4
+    movup.4
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.4
+    dup.3
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.3
+    movup.3
+    mul
+    eq.0
+    assert
+
+    adv_push.2          # pop the quotient from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    movup.5             # make sure the divisor is greater than the remainder. this also consumes
+    movup.5             # the divisor
+    dup.3
+    dup.3
+    exec.gt
+    assert
+
+    dup.1               # add remainder to the previous result
+    movup.4
+    u32overflowing_add
+    movup.4
+    dup.3
+    u32overflowing_add3
+    eq.0
+    assert
+
+    movup.4             # make sure the result we got is equal to the dividend
+    assert_eq
+    movup.3
+    assert_eq           # remainder remains on the stack
+end
+
+# ===== DIVMOD OPERATION ==========================================================================
+
+#! Performs divmod operation of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [r_hi, r_lo, q_hi, q_lo ...], where r = a % b, q = a / b
+#! This takes 54 cycles.
+pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
+    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+
+    adv_push.2          # pop the quotient from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    dup.3               # multiply quotient by the divisor and make sure the resulting value
+    dup.2               # fits into 2 32-bit limbs
+    u32overflowing_mul
+    dup.4
+    dup.4
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.5
+    dup.3
+    u32overflowing_madd
+    eq.0
+    assert
+    dup.4
+    dup.3
+    mul
+    eq.0
+    assert
+
+    adv_push.2          # pop the quotient from the advice stack and assert it consists of
+    u32assert2          # 32-bit limbs
+
+    movup.7             # make sure the divisor is greater than the remainder. this also consumes
+    movup.7             # the divisor
+    dup.3
+    dup.3
+    exec.gt
+    assert
+
+    dup.1               # add remainder to the previous result
+    movup.4
+    u32overflowing_add
+    movup.4
+    dup.3
+    u32overflowing_add3
+    eq.0
+    assert
+
+    movup.6             # make sure the result we got is equal to the dividend
+    assert_eq
+    movup.5
+    assert_eq           # remainder remains on the stack
+end
+
+# ===== BITWISE OPERATIONS ========================================================================
+
+#! Performs bitwise AND of two unsigned 64-bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a AND b.
+#! This takes 6 cycles.
+pub proc and(b: u64, a: u64) -> u64
+    swap
+    movup.3
+    u32and
+    swap
+    movup.2
+    u32and
+end
+
+#! Performs bitwise OR of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a OR b.
+#! This takes 16 cycles.
+pub proc or(b: u64, a: u64) -> u64
+    swap
+    movup.3
+    u32or
+    swap
+    movup.2
+    u32or
+end
+
+#! Performs bitwise XOR of two unsigned 64 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
+#! Stack transition looks as follows:
+#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a XOR b.
+#! This takes 6 cycles.
+pub proc xor(b: u64, a: u64) -> u64
+    swap
+    movup.3
+    u32xor
+    swap
+    movup.2
+    u32xor
+end
+
+#! Performs left shift of one unsigned 64-bit integer using the pow2 operation.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs.
+#! The shift value should be in the range [0, 64), otherwise it will result in an
+#! error.
+#! Stack transition looks as follows:
+#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
+#! This takes 28 cycles.
+pub proc shl(b: u64, a: u64) -> u64
+    pow2
+    u32split
+    exec.wrapping_mul
+end
+
+
+#! Performs right shift of one unsigned 64-bit integer using the pow2 operation.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs.
+#! The shift value should be in the range [0, 64), otherwise it will result in an
+#! error.
+#! Stack transition looks as follows:
+#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a >> b.
+#! This takes 44 cycles.
+pub proc shr(b: u64, a: u64) -> u64
+    pow2
+    u32split
+
+    dup.1
+    add
+    movup.2
+    swap
+    u32divmod
+    movup.3
+    movup.3
+    dup
+    eq.0
+    u32overflowing_sub
+    not
+    movdn.4
+    dup
+    movdn.4
+    u32divmod
+    drop
+    push.4294967296
+    dup.5
+    mul
+    movup.4
+    div
+    movup.2
+    mul
+    add
+    movup.2
+    cswap
+end
+
+#! Performs left rotation of one unsigned 64-bit integer using the pow2 operation.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs.
+#! The shift value should be in the range [0, 64), otherwise it will result in an
+#! error.
+#! Stack transition looks as follows:
+#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
+#! This takes 35 cycles.
+pub proc rotl(b: u64, a: u64) -> u64
+    push.31
+    dup.1
+    u32overflowing_sub
+    swap
+    drop
+    movdn.3
+
+    # Shift the low limb.
+    push.31
+    u32and
+    pow2
+    dup
+    movup.3
+    u32overflowing_mul
+
+    # Shift the high limb.
+    movup.3
+    movup.3
+    u32overflowing_madd
+
+    # Carry the overflow shift to the low bits.
+    movup.2
+    add
+    swap
+
+    # Conditionally select the limb order based on whether it's shifting by > 31 or not.
+    movup.2
+    cswap
+end
+
+#! Performs right rotation of one unsigned 64-bit integer using the pow2 operation.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs.
+#! The shift value should be in the range [0, 64), otherwise it will result in an
+#! error.
+#! Stack transition looks as follows:
+#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
+#! This takes 44 cycles.
+pub proc rotr(b: u64, a: u64) -> u64
+    push.31
+    dup.1
+    u32lt
+    movdn.3
+
+    # Shift the low limb left by 32-b.
+    push.31
+    u32and
+    push.32
+    swap
+    u32wrapping_sub
+    pow2
+    dup
+    movup.3
+    mul
+    u32split
+
+    # Shift the high limb left by 32-b.
+    movup.3
+    movup.3
+    mul
+    add
+    u32split
+
+    # Carry the overflow shift to the low bits.
+    movup.2
+    add
+    swap
+
+    # Conditionally select the limb order based on whether it's shifting by > 31 or not.
+    movup.2
+    not
+    cswap
+end
+
+#! Counts the number of leading zeros of one unsigned 64-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n_hi, n_lo, ...] -> [clz, ...], where clz is a number of leading zeros of value n.
+#! This takes 48 cycles.
+pub proc clz(n: u64) -> u8
+    dup.0
+    eq.0
+
+    if.true    # if n_hi == 0
+        drop
+        u32clz
+        add.32 # clz(n_lo) + 32
+    else
+        swap
+        drop
+        u32clz # clz(n_hi)
+    end
+end
+
+#! Counts the number of trailing zeros of one unsigned 64-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n_hi, n_lo, ...] -> [ctz, ...], where ctz is a number of trailing zeros of value n.
+#! This takes 41 cycles.
+pub proc ctz(n: u64) -> u8
+    swap
+    dup.0
+    eq.0
+
+    if.true    # if n_lo == 0
+        drop
+        u32ctz
+        add.32 # ctz(n_hi) + 32
+    else
+        swap
+        drop
+        u32ctz # ctz(n_lo)
+    end
+end
+
+#! Counts the number of leading ones of one unsigned 64-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n_hi, n_lo, ...] -> [clo, ...], where clo is a number of leading ones of value n.
+#! This takes 47 cycles.
+pub proc clo(n: u64) -> u8
+    dup.0
+    eq.4294967295
+
+    if.true    # if n_hi == 11111111111111111111111111111111
+        drop
+        u32clo
+        add.32 # clo(n_lo) + 32
+    else
+        swap
+        drop
+        u32clo # clo(n_hi)
+    end
+end
+
+#! Counts the number of trailing ones of one unsigned 64-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [n_hi, n_lo, ...] -> [cto, ...], where cto is a number of trailing ones of value n.
+#! This takes 40 cycles.
+pub proc cto(n: u64) -> u8
+    swap
+    dup.0
+    eq.4294967295
+
+    if.true    # if n_lo == 11111111111111111111111111111111
+        drop
+        u32cto
+        add.32 # cto(n_hi) + 32
+    else
+        swap
+        drop
+        u32cto # ctz(n_lo)
+    end
+end

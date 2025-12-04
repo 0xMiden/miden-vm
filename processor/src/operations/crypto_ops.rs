@@ -5,7 +5,7 @@ use miden_air::trace::{
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt, Word};
+use crate::{ErrorContext, Felt, Word, operations::utils::validate_dual_word_stream_addrs};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -187,6 +187,122 @@ impl Process {
             self.stack.set(i, value);
         }
         self.stack.copy_state(4);
+
+        Ok(())
+    }
+
+    // STREAM CIPHER OPERATIONS
+    // --------------------------------------------------------------------------------------------
+
+    /// Encrypts data from source memory to destination memory using RPO sponge keystream.
+    ///
+    /// This operation performs AEAD encryption by:
+    /// 1. Loading 8 elements (2 words) from source memory at stack[12]
+    /// 2. Adding each element to the corresponding rate element (stack[0..7])
+    /// 3. Writing the resulting ciphertext to destination memory at stack[13]
+    /// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next hperm)
+    /// 5. Preserving capacity (stack[8..11])
+    /// 6. Incrementing both source and destination pointers by 8
+    ///
+    /// Stack transition:
+    /// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
+    /// ...]
+    pub(super) fn op_crypto_stream(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        const WORD_SIZE_FELT: Felt = Felt::new(4);
+        const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+        // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+        const SRC_PTR_IDX: usize = 12;
+        const DST_PTR_IDX: usize = 13;
+
+        let ctx = self.system.ctx();
+        let clk = self.system.clk();
+
+        // Get source and destination pointers
+        let src_addr = self.stack.get(SRC_PTR_IDX);
+        let dst_addr = self.stack.get(DST_PTR_IDX);
+
+        // Validate address ranges and check for overlap
+        validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
+
+        // Load plaintext from source memory (2 words = 8 elements)
+        let src_addr_word2 = src_addr + WORD_SIZE_FELT;
+        let plaintext_word1 = self
+            .chiplets
+            .memory
+            .read_word(ctx, src_addr, clk, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        let plaintext_word2 = self
+            .chiplets
+            .memory
+            .read_word(ctx, src_addr_word2, clk, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+
+        // Get rate (keystream) from stack[0..7]
+        let rate = [
+            self.stack.get(7),
+            self.stack.get(6),
+            self.stack.get(5),
+            self.stack.get(4),
+            self.stack.get(3),
+            self.stack.get(2),
+            self.stack.get(1),
+            self.stack.get(0),
+        ];
+
+        // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+        let ciphertext_word1 = [
+            plaintext_word1[0] + rate[0],
+            plaintext_word1[1] + rate[1],
+            plaintext_word1[2] + rate[2],
+            plaintext_word1[3] + rate[3],
+        ];
+        let ciphertext_word2 = [
+            plaintext_word2[0] + rate[4],
+            plaintext_word2[1] + rate[5],
+            plaintext_word2[2] + rate[6],
+            plaintext_word2[3] + rate[7],
+        ];
+
+        // Write ciphertext to destination memory
+        let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+        self.chiplets
+            .memory
+            .write_word(ctx, dst_addr, clk, ciphertext_word1.into(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        self.chiplets
+            .memory
+            .write_word(ctx, dst_addr_word2, clk, ciphertext_word2.into(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+
+        // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+        // Stack order is reversed: stack[0] = top
+        // Word 2 goes to stack[0..3]
+        self.stack.set(0, ciphertext_word2[3]);
+        self.stack.set(1, ciphertext_word2[2]);
+        self.stack.set(2, ciphertext_word2[1]);
+        self.stack.set(3, ciphertext_word2[0]);
+        // Word 1 goes to stack[4..7]
+        self.stack.set(4, ciphertext_word1[3]);
+        self.stack.set(5, ciphertext_word1[2]);
+        self.stack.set(6, ciphertext_word1[1]);
+        self.stack.set(7, ciphertext_word1[0]);
+
+        // Copy capacity elements (stack[8..11]) to preserve them
+        for i in 8..SRC_PTR_IDX {
+            let value = self.stack.get(i);
+            self.stack.set(i, value);
+        }
+
+        // Increment pointers by 8 (2 words)
+        self.stack.set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+        self.stack.set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+
+        // Copy the rest of the stack (position 14 onwards)
+        self.stack.copy_state(14);
 
         Ok(())
     }

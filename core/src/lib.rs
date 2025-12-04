@@ -61,9 +61,11 @@ pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::Lexicograph
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
-            EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
-            MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SMT_DEPTH, SimpleSmt, Smt,
-            SmtProof, SmtProofError, StoreNode,
+            EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
+            PartialMerkleTree,
+            mmr::{Mmr, MmrPeaks},
+            smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
+            store::{MerkleStore, StoreNode},
         };
     }
 
@@ -84,7 +86,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::rpo_falcon512;
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_rpo};
     }
 }
 

@@ -2,8 +2,8 @@ use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
+use miden_libcore::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
-use miden_stdlib::StdLibrary;
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
 use super::{
@@ -99,7 +99,7 @@ impl ProveCmd {
 
         let input_data = InputFile::read(&self.input_file, &self.program_file)?;
 
-        let host = DefaultHost::default().with_library(&StdLibrary::default())?;
+        let host = DefaultHost::default().with_library(&CoreLibrary::default())?;
         // Use a single match expression to load the program.
         let (program, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),

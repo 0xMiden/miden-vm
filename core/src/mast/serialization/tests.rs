@@ -104,6 +104,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::MStore => (),
         Operation::MStream => (),
         Operation::Pipe => (),
+        Operation::CryptoStream => (),
         Operation::HPerm => (),
         Operation::MpVerify(_) => (),
         Operation::MrUpdate => (),

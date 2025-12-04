@@ -35,7 +35,7 @@ pub fn verify(
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let registry = miden_stdlib::StdLibrary::default().verifier_registry();
+    let registry = miden_libcore::CoreLibrary::default().verifier_registry();
     let (security_level, _) = miden_verifier::verify_with_precompiles(
         program_info,
         stack_inputs,

@@ -527,6 +527,7 @@ impl Assembler {
                 let error_code = block_builder.register_error(err_msg.expect_string());
                 block_builder.push_op(MpVerify(error_code))
             },
+            Instruction::CryptoStream => block_builder.push_op(CryptoStream),
 
             // ----- STARK proof verification -----------------------------------------------------
             Instruction::FriExt2Fold4 => block_builder.push_op(FriE2F4),

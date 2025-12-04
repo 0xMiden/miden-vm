@@ -140,7 +140,7 @@ As described [here](https://0xMiden.github.io/miden-vm/intro/overview.html#input
 
 _Check out the [comparison example](https://github.com/0xMiden/examples/blob/main/examples/comparison.masm) to see how secret inputs work._
 
-After a program finishes executing, the elements that remain on the stack become the outputs of the program. Notice that the number of values on the operand stack at the end of the program execution can not be greater than 16, otherwise the program will return an error. The [`truncate_stack`](./user_docs/stdlib/sys.md) utility procedure from the standard library could be used to conveniently truncate the stack at the end of the program.
+After a program finishes executing, the elements that remain on the stack become the outputs of the program. Notice that the number of values on the operand stack at the end of the program execution can not be greater than 16, otherwise the program will return an error. The [`truncate_stack`](./user_docs/libcore/sys.md) utility procedure from the core library could be used to conveniently truncate the stack at the end of the program.
 
 ## Fibonacci example
 

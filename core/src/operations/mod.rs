@@ -121,6 +121,7 @@ pub(super) mod opcode_constants {
     pub const OPCODE_LOGPRECOMPILE: u8  = 0b0101_1110;
 
     pub const OPCODE_MRUPDATE: u8       = 0b0110_0000;
+    pub const OPCODE_CRYPTOSTREAM: u8   = 0b0110_0100;
     pub const OPCODE_SYSCALL: u8        = 0b0110_1000;
     pub const OPCODE_CALL: u8           = 0b0110_1100;
     pub const OPCODE_END: u8            = 0b0111_0000;
@@ -517,6 +518,24 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = OPCODE_PIPE,
 
+    /// Encrypts data from source memory to destination memory using the RPO sponge keystream.
+    ///
+    /// Two consecutive words (8 elements) are loaded from source memory, each element is added
+    /// to the corresponding element in the rate (top 8 stack elements), and the resulting
+    /// ciphertext is written to destination memory and replaces the rate. Source and destination
+    /// addresses are incremented by 8.
+    ///
+    /// Stack transition:
+    /// ```text
+    /// [rate(8), cap(4), src, dst, ...]
+    ///     ↓
+    /// [ct(8), cap(4), src+8, dst+8, ...]
+    /// ```
+    /// where `ct = mem[src..src+8] + rate`, where addition is element-wise.
+    ///
+    /// After this operation, `hperm` should be applied to refresh the keystream for the next block.
+    CryptoStream = OPCODE_CRYPTOSTREAM,
+
     // ----- cryptographic operations ------------------------------------------------------------
     /// Performs a Rescue Prime Optimized permutation on the top 3 words of the operand stack,
     /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
@@ -778,6 +797,7 @@ impl fmt::Display for Operation {
 
             Self::MStream => write!(f, "mstream"),
             Self::Pipe => write!(f, "pipe"),
+            Self::CryptoStream => write!(f, "crypto_stream"),
 
             Self::Emit => write!(f, "emit"),
 
@@ -893,6 +913,7 @@ impl Serializable for Operation {
             | Operation::MStore
             | Operation::MStream
             | Operation::Pipe
+            | Operation::CryptoStream
             | Operation::HPerm
             | Operation::MrUpdate
             | Operation::FriE2F4
@@ -988,6 +1009,7 @@ impl Deserializable for Operation {
             OPCODE_MPVERIFY => Self::MpVerify(Felt::read_from(source)?),
             OPCODE_PIPE => Self::Pipe,
             OPCODE_MSTREAM => Self::MStream,
+            OPCODE_CRYPTOSTREAM => Self::CryptoStream,
             OPCODE_SPLIT => Self::Split,
             OPCODE_LOOP => Self::Loop,
             OPCODE_SPAN => Self::Span,

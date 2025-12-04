@@ -1,8 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use miden_libcore::CoreLibrary;
 use miden_processor::{AdviceInputs, ExecutionOptions, fast::FastProcessor, parallel};
-use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -51,8 +51,8 @@ fn build_trace(c: &mut Criterion) {
                 group.bench_function(file_stem.clone(), |bench| {
                     let mut assembler = Assembler::default();
                     assembler
-                        .link_dynamic_library(StdLibrary::default())
-                        .expect("failed to load stdlib");
+                        .link_dynamic_library(CoreLibrary::default())
+                        .expect("failed to load libcore");
 
                     let program = assembler
                         .assemble_program(&source)
@@ -62,7 +62,7 @@ fn build_trace(c: &mut Criterion) {
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
-                                .with_library(&StdLibrary::default())
+                                .with_library(&CoreLibrary::default())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_advice_inputs(
@@ -95,8 +95,8 @@ fn build_trace(c: &mut Criterion) {
                 group.bench_function(format!("{file_stem}_legacy"), |bench| {
                     let mut assembler = Assembler::default();
                     assembler
-                        .link_dynamic_library(StdLibrary::default())
-                        .expect("failed to load stdlib");
+                        .link_dynamic_library(CoreLibrary::default())
+                        .expect("failed to load libcore");
 
                     let program = assembler
                         .assemble_program(&source)
@@ -105,7 +105,7 @@ fn build_trace(c: &mut Criterion) {
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
-                                .with_library(&StdLibrary::default())
+                                .with_library(&CoreLibrary::default())
                                 .unwrap();
                             let stack_inputs = stack_inputs.clone();
                             let advice_inputs = advice_inputs.clone();

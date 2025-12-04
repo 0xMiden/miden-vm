@@ -61,7 +61,7 @@ Once the capacity elements have been initialized, we need to put the data we'd l
 
 If we have more than $8$ elements to absorb, we need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
 
-Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the standard library: `std::crypto::hashes::rpo::squeeze_digest`.
+Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::rpo256::squeeze_digest`.
 
 For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
 
@@ -79,10 +79,10 @@ mem_stream
 hperm
 
 # get the result of the hash
-exec.::std::crypto::hashes::rpo::squeeze_digest
+exec.::miden::core::crypto::hashes::rpo256::squeeze_digest
 ```
 
-For more examples of how `hperm` instruction is used, please see `std::crypto::hashes::rpo` module in the standard library.
+For more examples of how `hperm` instruction is used, please see `miden::core::crypto::hashes::rpo256` module in the core library.
 
 #### `hash` and `hmerge` implementations
 
