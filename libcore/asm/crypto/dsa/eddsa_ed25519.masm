@@ -1,0 +1,252 @@
+use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::sha512
+use miden::core::sys
+use miden::core::word
+
+# ENCODING CONVENTIONS
+# ================================================================================================
+#
+# - Byte data is stored in memory as packed u32 values in little-endian format
+# - Each u32 packs four bytes: u32 = u32::from_le_bytes([b0, b1, b2, b3])
+# - Unused bytes in the final u32 must be zero
+# - Memory addresses supplied to this module must be word-aligned (divisible by 4)
+
+# CONSTANTS
+# ================================================================================================
+
+const EDDSA_VERIFY_EVENT = event("miden::core::dsa::eddsa_ed25519::verify")
+
+const PK_LEN_FELTS = 8        # 32.div_ceil(4)
+const K_DIGEST_LEN_FELTS = 16 # 64.div_ceil(4)
+const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
+
+# PROCEDURES
+# ================================================================================================
+
+#! Verifies an Ed25519 EdDSA signature compatible with `miden-crypto::eddsa_25519_sha512`.
+#!
+#! This wrapper mirrors the materialization performed in `miden-crypto::eddsa_25519_sha512`: given
+#! a public key commitment and the original message, it reconstructs the calldata expected by the
+#! precompile (public key bytes, SHA512(R || PK || MSG), signature). The public key and signature
+#! are supplied via the advice stack, and can be obtained with the `eddsa_sign` function.
+#!
+#! Inputs:
+#!   Operand stack: [PK_COMM, MSG, ...]
+#!   Advice stack:  [PK[8] | SIG[16] | ...]
+#! Outputs:
+#!   Operand stack: []
+#!   Advice stack:  []
+#!
+#! Where:
+#! - `PK_COMM`: RPO hash commitment of the 32-byte Ed25519 public key
+#! - `MSG`: single word (4 field elements) representing the message to verify
+#! - `PK[8]`: 32-byte public key packed as 8 field elements on advice stack
+#! - `SIG[16]`: 64-byte signature packed as 16 field elements on advice stack
+#!
+#! Local memory layout (element addresses):
+#!   - locaddr[0..8]:   public key (32 bytes packed as 8 felts)
+#!   - locaddr[8..16]:  message (32 bytes = 8 felts)
+#!   - locaddr[16..32]: signature (64 bytes packed as 16 felts)
+#!   - locaddr[32..56]: SHA512 input buffer (R || PK || MSG = 96 bytes = 24 felts)
+#!   - locaddr[56..72]: k_digest = SHA512(R || PK || MSG) (64 bytes = 16 felts)
+#!
+#! The procedure traps if:
+#! - The public key does not hash to `PK_COMM` (invalid commitment)
+#! - The signature verification fails
+@locals(72)
+pub proc verify
+    # Load the public key (8 felts = 32 bytes) from advice into locaddr[0..8]
+    adv_push.4 loc_storew_be.0
+    adv_loadw  loc_storew_be.4 dropw
+    # => [PK_COMM, MSG, ...]
+
+    # Compute the RPO hash of the public key and verify it matches PK_COMM
+    push.PK_LEN_FELTS locaddr.0 exec.rpo256::hash_elements
+    assert_eqw.err="invalid public key commitment"
+    # => [MSG, ...]
+
+    # Store the message at locaddr[8..16]
+    locaddr.8 movdn.4 exec.word::store_word_u32s_le
+    # => [...]
+
+    # Load the signature (16 felts = 64 bytes) from advice into locaddr[16..32]
+    adv_push.4 loc_storew_be.16
+    adv_loadw  loc_storew_be.20
+    adv_loadw  loc_storew_be.24
+    adv_loadw  loc_storew_be.28 dropw
+    # => [...]
+
+    # Build the SHA512 input: R || PK || MSG at locaddr[32..56] (96 bytes/24 felts total)
+    # Copy R (first 32 bytes of signature = 8 felts) from locaddr[16..24] to locaddr[32..40]
+    locaddr.32 locaddr.16
+    exec.copy_two_words_from_memory
+    drop
+    # => [...]
+
+    # Copy PK (8 felts) from locaddr[0..8] to locaddr[40..48]
+    locaddr.40 locaddr.0
+    exec.copy_two_words_from_memory
+    drop
+    # => [...]
+
+    # Copy MSG (8 felts) from locaddr[8..16] to locaddr[48..56]
+    locaddr.48 locaddr.8
+    exec.copy_two_words_from_memory
+    drop
+    # => [...]
+
+    # Compute k_digest = SHA512(R || PK || MSG) over 96 bytes
+    push.96 locaddr.32 exec.sha512::hash_bytes
+    # => [DIGEST[16], ...]
+
+    # Store the digest at locaddr[56..72] (16 felts = 64 bytes)
+    loc_storew_le.56 dropw
+    loc_storew_le.60 dropw
+    loc_storew_le.64 dropw
+    loc_storew_le.68 dropw
+    # => [...]
+
+    # Call the low-level verifier with [pk_ptr, k_digest_ptr, sig_ptr]
+    locaddr.16  # sig_ptr
+    locaddr.56  # k_digest_ptr
+    locaddr.0   # pk_ptr
+    exec.verify_with_unchecked_k_digest
+    # => [result, ...]
+
+    # Trap if verification failed
+    assert.err="EdDSA signature verification failed"
+    # => []
+end
+
+#! Verifies an EdDSA (Ed25519) signature with a pre-computed nonce digest.
+#!
+#! This procedure uses deferred verification via a precompile. The actual cryptographic
+#! verification is performed by the host, and the result is provided via the advice stack.
+#!
+#! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
+#! Output: `[result, ...]`
+#!
+#! Where:
+#! - `pk_ptr`:  word-aligned memory address containing the 32-byte Ed25519 public key
+#! - `k_digest_ptr`: word-aligned memory address containing the 64-byte challenge hash `k`
+#! - `sig_ptr`: word-aligned memory address containing the 64-byte Ed25519 signature
+#! - `result`:  1 if the signature is valid, 0 otherwise
+#!
+#! All data must be stored in memory as packed u32 field elements (little-endian), with unused limbs
+#! in the final word set to zero.
+pub proc verify_with_unchecked_k_digest
+    exec.verify_with_unchecked_k_digest_impl
+    # => [COMM, TAG, result, ...]
+
+    # Log the precompile request for deferred verification.
+    exec.sys::log_precompile_request
+    # => [result, ...]
+end
+
+# INTERNAL PROCEDURES
+# ================================================================================================
+
+#! Streams two 4-element words (each storing four u32 limbs) from `ptr_in` into `ptr_out`.
+#!
+#! Input:  `[PAD, PAD, [ptr_out, 0, 0, 0], ptr_in, ...]`
+#! Output: `[PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]`
+proc write_mem_stream_pair
+    # Read two words from memory starting at `ptr_in`.
+    mem_stream
+    swapw
+    # => [MEM[ptr_in], MEM[ptr_in+4], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
+
+    # Store the first word at `ptr_out`.
+    dup.8
+    mem_storew_be
+    swapw
+    # => [MEM[ptr_in+4], MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
+
+    # Store the second word at `ptr_out + 4`.
+    dup.8 add.4
+    mem_storew_be
+    # => [MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
+
+    # Advance `ptr_out` by 8 and restore the padding words.
+    movup.8 add.8 movdn.8
+    # => [PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]
+end
+
+#! Copies two 4-element words from memory into another region using `write_mem_stream_pair`.
+#!
+#! Input:  `[ptr_out, ptr_in, ...]`
+#! Output: `[ptr_out + 8, ...]`
+proc copy_two_words_from_memory
+    # Arrange arguments so `ptr_in` stays directly beneath the pointer word.
+    swap
+    dup.1
+    # => [ptr_out, ptr_in, ptr_out, ...]
+
+    # Build `[ptr_out, 0, 0, 0]` and prepend two padding words.
+    padw
+    drop
+    movup.4
+    padw
+    padw
+    # => [PAD, PAD, [ptr_out, 0, 0, 0], ptr_in, ptr_out, ...]
+
+    # Stream two words from `ptr_in` into `ptr_out`.
+    exec.write_mem_stream_pair
+    # => [PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ptr_out, ...]
+
+    # Drop helper scaffolding and restore `ptr_out` to the top.
+    dropw
+    dropw
+    drop
+    dropw
+    # => [ptr_out, ...]
+
+    # Advance the write pointer by two words (eight field elements).
+    push.8 add
+    # => [ptr_out + 8, ...]
+end
+
+#! Internal implementation of EdDSA verification via deferred computation.
+#!
+#! Emits an event to trigger the host precompile, reads the verification result from the
+#! advice stack, and computes the commitment/tag pair used for deferred verification.
+#!
+#! Input:  `[pk_ptr, k_digest_ptr, sig_ptr, ...]`
+#! Output: `[COMM, TAG, result, ...]`
+#!
+#! Where:
+#! - `COMM`: `Rpo256(Rpo256(Rpo256(pk) || Rpo256(k_digest)) || Rpo256(sig))`
+#! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
+#! - `result`: host verification result (1 or 0)
+pub proc verify_with_unchecked_k_digest_impl
+    emit.EDDSA_VERIFY_EVENT
+    # => [pk_ptr, k_digest_ptr, sig_ptr, ...]
+
+    # Read verification result from advice stack (provided by the host).
+    adv_push.1
+    # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
+
+    # Compute COMM_PK = rpo::hash_memory(pk_ptr, PK_LEN_FELTS)
+    push.PK_LEN_FELTS movup.2 exec.rpo256::hash_elements
+    # => [COMM_PK, result, k_digest_ptr, sig_ptr]
+
+    # Compute COMM_K = rpo::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
+    push.K_DIGEST_LEN_FELTS movup.6 exec.rpo256::hash_elements
+    # => [COMM_K, COMM_PK, result, sig_ptr]
+
+    # Merge COMM_PK and COMM_K into COMM_PK_K = rpo::merge(COMM_PK, COMM_K)
+    exec.rpo256::merge
+    # => [COMM_PK_K, result, sig_ptr]
+
+    # Compute COMM_SIG = rpo::hash_memory(sig_ptr, SIG_LEN_FELTS)
+    push.SIG_LEN_FELTS movup.6 exec.rpo256::hash_elements
+    # => [COMM_SIG, COMM_PK_K, result]
+
+    # Merge into final commitment COMM = rpo::merge(COMM_PK_K, COMM_SIG)
+    exec.rpo256::merge
+    # => [COMM, result]
+
+    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0]
+    push.EDDSA_VERIFY_EVENT dup.5 push.0.0 swapw
+    # => [COMM, TAG, result]
+end
