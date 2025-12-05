@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use miden_assembly::diagnostics::Report;
 use miden_core::Program;
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{AsmOpInfo, RowIndex, TraceLenSummary};
 use miden_prover::AdviceInputs;
 use miden_vm::{DefaultHost, Operation, StackInputs, SyncHost, internal::InputFile};

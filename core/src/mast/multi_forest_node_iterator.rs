@@ -473,7 +473,7 @@ mod tests {
     /// processing the children of node 2.
     ///
     /// This test and example is essentially a copy from a part of the MastForest of the Miden
-    /// libcore where this failed on a previous implementation.
+    /// core library where this failed on a previous implementation.
     #[test]
     fn multi_mast_forest_child_duplicate() {
         let mut temp_forest = MastForest::new();

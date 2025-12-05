@@ -1352,7 +1352,7 @@ dependencies = [
  "miden-assembly",
  "miden-assembly-syntax",
  "miden-core",
- "miden-libcore",
+ "miden-core-lib",
  "miden-mast-package",
  "miden-processor",
  "proptest",
@@ -1411,6 +1411,36 @@ dependencies = [
  "winter-math",
  "winter-rand-utils",
  "winter-utils",
+]
+
+[[package]]
+name = "miden-core-lib"
+version = "0.20.0"
+dependencies = [
+ "blake3",
+ "criterion",
+ "env_logger",
+ "fs-err",
+ "miden-air",
+ "miden-assembly",
+ "miden-core",
+ "miden-crypto",
+ "miden-processor",
+ "miden-test-utils",
+ "miden-utils-sync",
+ "miden-verifier",
+ "num",
+ "num-bigint",
+ "pretty_assertions",
+ "rand",
+ "rand_chacha",
+ "rstest",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "thiserror",
+ "winter-air",
+ "winter-fri",
 ]
 
 [[package]]
@@ -1490,36 +1520,6 @@ dependencies = [
  "metal",
  "once_cell",
  "winter-math",
-]
-
-[[package]]
-name = "miden-libcore"
-version = "0.20.0"
-dependencies = [
- "blake3",
- "criterion",
- "env_logger",
- "fs-err",
- "miden-air",
- "miden-assembly",
- "miden-core",
- "miden-crypto",
- "miden-processor",
- "miden-test-utils",
- "miden-utils-sync",
- "miden-verifier",
- "num",
- "num-bigint",
- "pretty_assertions",
- "rand",
- "rand_chacha",
- "rstest",
- "serde_json",
- "sha2",
- "sha3",
- "thiserror",
- "winter-air",
- "winter-fri",
 ]
 
 [[package]]
@@ -1640,7 +1640,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-libcore",
+ "miden-core-lib",
  "miden-processor",
  "miden-prover",
  "miden-verifier",
@@ -1712,8 +1712,8 @@ dependencies = [
  "hex",
  "miden-assembly",
  "miden-core",
+ "miden-core-lib",
  "miden-debug-types",
- "miden-libcore",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",

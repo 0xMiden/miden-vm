@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 

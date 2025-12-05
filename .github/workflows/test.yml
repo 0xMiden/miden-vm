@@ -43,8 +43,8 @@ jobs:
       - name: Run doc-tests
         run: make test-docs
 
-  check-libcore-docs:
-    name: check libcore docs
+  check-core-lib-docs:
+    name: check core library docs
     runs-on: ubuntu-latest
     needs: [test, doc-tests]
     steps:
@@ -56,29 +56,29 @@ jobs:
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
       - name: Install rust
         run: rustup update --no-self-update
-      - name: Build libcore and generate documentation
+      - name: Build core library and generate documentation
         run: |
-          # Build libcore with documentation generation enabled
-          MIDEN_BUILD_LIBCORE_DOCS=1 cargo build -p miden-libcore
-      - name: Check for documentation changes in libcore/docs
+          # Build core library with documentation generation enabled
+          MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib
+      - name: Check for documentation changes in crates/lib/core/docs
         run: |
-          if [ -n "$(git status --porcelain libcore/docs)" ]; then
-            echo "ERROR: Found uncommitted changes in libcore/docs/"
+          if [ -n "$(git status --porcelain crates/lib/core/docs)" ]; then
+            echo "ERROR: Found uncommitted changes in crates/lib/core/docs/"
             echo "This indicates that the assembly source code has changed but the documentation was not updated."
             echo "Please commit the generated documentation changes before merging."
             echo ""
             echo "To fix this:"
-            echo "1. Run: MIDEN_BUILD_LIBCORE_DOCS=1 cargo build -p miden-stdlib"
-            echo "2. Commit the changes in libcore/docs/"
+            echo "1. Run: MIDEN_BUILD_LIB_DOCS=1 cargo build -p miden-core-lib"
+            echo "2. Commit the changes in crates/lib/core/docs/"
             echo ""
             echo "Uncommitted changes:"
-            git status libcore/docs
+            git status crates/lib/core/docs
             echo ""
             echo "Diff:"
-            git diff libcore/docs
+            git diff crates/lib/core/docs
             exit 1
           else
-            echo "No documentation changes in libcore/docs/ - OK"
+            echo "No documentation changes in crates/lib/core/docs/ - OK"
           fi
 
   check-features:

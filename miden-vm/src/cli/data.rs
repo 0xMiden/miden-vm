@@ -12,7 +12,7 @@ use miden_assembly::{
     report,
     utils::Deserializable,
 };
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -132,7 +132,7 @@ where
         let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
             .link_dynamic_library(CoreLibrary::default())
-            .wrap_err("Failed to load libcore")?;
+            .wrap_err("Failed to load core library")?;
 
         for library in libraries {
             assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
