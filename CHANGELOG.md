@@ -10,6 +10,7 @@
 - Run batch inversion concurrently per fragment in parallel trace generation ([#2405](https://github.com/0xMiden/miden-vm/issues/2405)).
 - Adds a cached commitment to the `MastForest` ([#2447](https://github.com/0xMiden/miden-vm/pull/2447))
 - Add MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).
+- Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 
 ## 0.20.0 (2025-12-05)
 
@@ -55,6 +56,8 @@
 - Refactored Blake3_256 fingerprints to allocate less ([#2375](https://github.com/0xMiden/miden-vm/pull/2375)).
 - [BREAKING] Normalized signature encoding methods in the `dsa` module of the core library.
 
+- [BREAKING] Make the Assembler work in debug mode, remove optionality ([#2396](https://github.com/0xMiden/miden-vm/pull/2396)).
+- Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 
 ## 0.19.1 (2025-11-6)
 
