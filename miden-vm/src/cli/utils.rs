@@ -39,29 +39,29 @@ pub fn get_masm_program(
     // If kernel is provided, compile it and use it when compiling the program
     let program = if let Some(kernel_path) = kernel_file {
         // Determine file type based on extension
-        let ext = kernel_path
-            .extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+        let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
 
         // Load kernel from .masp package or compile from .masm source
         let kernel_lib = match ext.as_str() {
             "masp" => {
                 // Load kernel from package file
-                let bytes = fs::read(kernel_path)
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("Failed to read kernel package `{}`", kernel_path.display()))?;
-                let package = Package::read_from_bytes(&bytes)
-                    .into_diagnostic()
-                    .wrap_err_with(|| format!("Failed to deserialize kernel package `{}`", kernel_path.display()))?;
-                
+                let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
+                    format!("Failed to read kernel package `{}`", kernel_path.display())
+                })?;
+                let package =
+                    Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
+                        format!("Failed to deserialize kernel package `{}`", kernel_path.display())
+                    })?;
+
                 match package.into_mast_artifact() {
                     MastArtifact::Library(lib) => {
                         let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
-                        KernelLibrary::try_from(library)
-                            .map_err(|err| Report::msg(format!("Failed to convert library to kernel: {err}")))
-                            .wrap_err_with(|| format!("The package `{}` is not a valid kernel package", kernel_path.display()))?
+                        KernelLibrary::try_from(library).wrap_err_with(|| {
+                            format!(
+                                "The package `{}` is not a valid kernel package",
+                                kernel_path.display()
+                            )
+                        })?
                     },
                     MastArtifact::Executable(_) => {
                         return Err(Report::msg(format!(
