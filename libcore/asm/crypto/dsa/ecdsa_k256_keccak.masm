@@ -19,7 +19,7 @@ const ECDSA_VERIFY_EVENT = event("miden::core::crypto::dsa::ecdsa_k256_keccak::v
 
 const PK_LEN_FELTS = 9     # 33.div_ceil(4)
 const DIGEST_LEN_FELTS = 8 # 32.div_ceil(4)
-const SIG_LEN_FELTS = 17   # 66.div_ceil(4)
+const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 
 # PROCEDURES
 # ================================================================================================
@@ -136,7 +136,7 @@ end
 #! - `digest_ptr`: word-aligned memory address containing 32-byte digest
 #! - `sig_ptr`: word-aligned memory address containing 66-byte signature
 #! - `COMM`: commitment to calldata computed as
-#!       `rpo256256(rpo256256(rpo256256(pk) || rpo256256(digest)) || rpo256256(sig))`
+#!       `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))`
 #! - `TAG`: `[ECDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: 1 if signature is valid, 0 if invalid
 pub proc verify_impl
@@ -147,25 +147,25 @@ pub proc verify_impl
     adv_push.1
     # => [result, pk_ptr, digest_ptr, sig_ptr, ...]
 
-    # Compute commitment: COMM = rpo256256(rpo256256(rpo256256(pk) || rpo256256(digest)) || rpo256256(sig))
-    # Compute COMM_PK = rpo256256(pk)
+    # Compute commitment: COMM = Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))
+    # Compute COMM_PK = Rpo256(pk)
     push.PK_LEN_FELTS movup.2 exec.rpo256::hash_elements
     # => [COMM_PK, result, digest_ptr, sig_ptr]
 
-    # Compute COMM_DIGEST = rpo256256(digest_bytes)
+    # Compute COMM_DIGEST = Rpo256(digest_bytes)
     push.DIGEST_LEN_FELTS movup.6 exec.rpo256::hash_elements
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
-    # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = rpo256256(rpo256256(pk) || rpo256256(digest))
-    hmerge
+    # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
+    exec.rpo256::merge
     # => [COMM_PK_DIGEST, result, sig_ptr]
 
-    # Compute COMM_SIG = rpo256256(sig_bytes)
+    # Compute COMM_SIG = Rpo256(sig_bytes)
     push.SIG_LEN_FELTS movup.6 exec.rpo256::hash_elements
     # => [COMM_SIG, COMM_PK_DIGEST, result]
 
-    # Merge into final commitment COMM = rpo256256(COMM_PK_DIGEST || COMM_SIG)
-    hmerge
+    # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
+    exec.rpo256::merge
     # => [COMM, result]
 
     # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0]

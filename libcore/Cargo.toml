@@ -39,6 +39,7 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 
 # External dependencies
+sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

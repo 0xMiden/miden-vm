@@ -66,7 +66,7 @@ fn test_decorators_only_execute_in_debug_mode() {
             &mut self,
             _process: &mut ProcessState,
             _options: &miden_core::DebugOptions,
-        ) -> Result<(), ExecutionError> {
+        ) -> Result<(), DebugError> {
             Ok(())
         }
 
@@ -74,7 +74,7 @@ fn test_decorators_only_execute_in_debug_mode() {
             &mut self,
             _process: &mut ProcessState,
             trace_id: u32,
-        ) -> Result<(), ExecutionError> {
+        ) -> Result<(), TraceError> {
             if trace_id == 999 {
                 self.decorator_executed = true;
             }

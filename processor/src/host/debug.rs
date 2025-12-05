@@ -4,9 +4,9 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::{DebugOptions, FMP_ADDR};
+use miden_core::{DebugOptions, FMP_ADDR, Felt};
 
-use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
+use crate::{DebugError, ProcessState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -58,8 +58,8 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
         &mut self,
         process: &ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
-        let _ = match *options {
+    ) -> Result<(), DebugError> {
+        match *options {
             DebugOptions::StackAll => {
                 let stack = process.get_stack_state();
                 self.print_stack(&stack, None, "Stack", process)
@@ -82,19 +82,19 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
                 let count = if n == 0 { None } else { Some(n as usize) };
                 self.print_stack(&reversed_stack, count, "Advice stack", process)
             },
-        };
-        Ok(())
+        }
+        .map_err(DebugError::from)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
-        let _ = writeln!(
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+        writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
             trace_id,
             process.clk(),
             process.ctx()
-        );
-        Ok(())
+        )
+        .map_err(TraceError::from)
     }
 }
 

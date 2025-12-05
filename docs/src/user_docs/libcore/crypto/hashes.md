@@ -42,6 +42,17 @@ Module `miden::core::crypto::hashes::sha256` contains procedures for computing h
 | hash_1to1   | Computes SHA256 1-to-1 hash.<br/><br/>Input: 32-bytes stored in the first 8 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element).  |
 | hash_2to1   | Computes SHA256 2-to-1 hash.<br/><br/>Input: 64-bytes stored in the first 16 elements of the stack (32 bits per element).<br /> <br/>Output: A 32-byte digest stored in the first 8 elements of stack (32 bits per element). |
 
+## SHA512
+Module `miden::core::crypto::hashes::sha512` contains procedures for computing hashes using the SHA512 hash function.
+
+Data representation and u32/u8 packing conventions are the same as in Keccak256. The only difference is the digest size: SHA512 digests are 64 bytes, represented as `DIGEST_U32[16] = [d_0, ..., d_15]`.
+
+Internally, the result of the computation is provided non-deterministically via a precompile. The VM records this computation so that it can be verified externally.
+
+| Procedure   | Description |
+|-------------|-------------|
+| hash_bytes  | Computes SHA512 hash of data stored in memory.<br /><br />Input: `[ptr, len_bytes, ...]`<br />Output: `[DIGEST_U32[16], ...]`<br /><br />Where:<br />- `ptr`: word-aligned memory address containing `INPUT_U32[len_u32]` where `len_u32=⌈len_bytes/4⌉`<br />- `len_bytes`: number of bytes to hash<br />- `INPUT_U32[len_u32] ~ INPUT_U8[len_bytes]` with u32 packing (unused bytes in final u32 must be 0)<br />- `DIGEST_U32[16] = [d_0, ..., d_15] = SHA512(INPUT_U8[len_bytes])` |
+
 ## RPO256
 Module `miden::core::crypto::hashes::rpo256` contains procedures for computing and managing hashes using [Rescue Prime Optimized](https://docs.rs/miden-crypto/latest/miden_crypto/hash/rpo/struct.Rpo256.html) hash function.
 

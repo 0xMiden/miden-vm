@@ -5,7 +5,8 @@ use miden_core::{
     Kernel, Operation, Program,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
+        SplitNodeBuilder,
     },
 };
 use miden_utils_testing::get_column_name;

@@ -10,7 +10,7 @@ use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
 use miden_core::{
     EventName, Felt, Word, precompile::PrecompileVerifierRegistry, utils::Serializable,
 };
-use miden_crypto::dsa::ecdsa_k256_keccak;
+use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512};
 use miden_processor::{EventHandler, HostLibrary};
 use miden_utils_sync::LazyLock;
 
@@ -18,8 +18,10 @@ use crate::handlers::{
     aead_decrypt::{AEAD_DECRYPT_EVENT_NAME, handle_aead_decrypt},
     bytes_to_packed_u32_felts,
     ecdsa::{ECDSA_VERIFY_EVENT_NAME, EcdsaPrecompile},
+    eddsa_ed25519::{EDDSA25519_VERIFY_EVENT_NAME, EddsaPrecompile},
     falcon_div::{FALCON_DIV_EVENT_NAME, handle_falcon_div},
     keccak256::{KECCAK_HASH_BYTES_EVENT_NAME, KeccakPrecompile},
+    sha512::{SHA512_HASH_BYTES_EVENT_NAME, Sha512Precompile},
     smt_peek::{SMT_PEEK_EVENT_NAME, handle_smt_peek},
     sorted_array::{
         LOWERBOUND_ARRAY_EVENT_NAME, LOWERBOUND_KEY_VALUE_EVENT_NAME, handle_lowerbound_array,
@@ -75,7 +77,9 @@ impl CoreLibrary {
     pub fn handlers(&self) -> Vec<(EventName, Arc<dyn EventHandler>)> {
         vec![
             (KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile)),
+            (SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile)),
             (ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile)),
+            (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
@@ -90,7 +94,9 @@ impl CoreLibrary {
     pub fn verifier_registry(&self) -> PrecompileVerifierRegistry {
         PrecompileVerifierRegistry::new()
             .with_verifier(&KECCAK_HASH_BYTES_EVENT_NAME, Arc::new(KeccakPrecompile))
+            .with_verifier(&SHA512_HASH_BYTES_EVENT_NAME, Arc::new(Sha512Precompile))
             .with_verifier(&ECDSA_VERIFY_EVENT_NAME, Arc::new(EcdsaPrecompile))
+            .with_verifier(&EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile))
     }
 }
 
@@ -146,6 +152,41 @@ pub fn prepare_ecdsa_signature(
 pub fn encode_ecdsa_signature(
     pk: &ecdsa_k256_keccak::PublicKey,
     sig: &ecdsa_k256_keccak::Signature,
+) -> Vec<Felt> {
+    let mut out = Vec::new();
+    let pk_bytes = pk.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&pk_bytes));
+    let sig_bytes = sig.to_bytes();
+    out.extend(bytes_to_packed_u32_felts(&sig_bytes));
+    out
+}
+
+// EDDSA SIGNATURE
+// ================================================================================================
+
+/// Signs the provided message with the supplied secret key and encodes this signature and the
+/// associated public key into a vector of field elements in the format expected by
+/// `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
+///
+/// See [encode_eddsa_signature()] for more info.
+pub fn eddsa_sign(sk: &eddsa_25519_sha512::SecretKey, msg: Word) -> Vec<Felt> {
+    let pk = sk.public_key();
+    let sig = sk.sign(msg);
+    encode_eddsa_signature(&pk, &sig)
+}
+
+/// Encodes the provided public key and signature into a vector of field elements in the format
+/// expected by `miden::core::crypto::dsa::eddsa_ed25519::verify` procedure.
+///
+/// The encoding format is:
+/// 1. The Ed25519 public key encoded as 8 packed-u32 felts (32 bytes total).
+/// 2. The EdDSA signature encoded as 16 packed-u32 felts (64 bytes total).
+///
+/// The two chunks are concatenated as `[PK[8] || SIG[16]]` so they can be streamed straight to
+/// the advice provider before invoking `eddsa_ed25519::verify`.
+pub fn encode_eddsa_signature(
+    pk: &eddsa_25519_sha512::PublicKey,
+    sig: &eddsa_25519_sha512::Signature,
 ) -> Vec<Felt> {
     let mut out = Vec::new();
     let pk_bytes = pk.to_bytes();

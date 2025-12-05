@@ -11,8 +11,10 @@ use core::mem::size_of;
 pub(crate) const BYTES_PER_U32: usize = size_of::<u32>();
 
 pub mod ecdsa;
+pub mod eddsa_ed25519;
 pub mod falcon_div;
 pub mod keccak256;
+pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u64_div;

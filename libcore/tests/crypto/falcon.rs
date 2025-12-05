@@ -203,7 +203,7 @@ fn test_falcon512_probabilistic_product_failure() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
         if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
     );
 }
