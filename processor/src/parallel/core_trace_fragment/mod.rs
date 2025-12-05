@@ -875,7 +875,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,

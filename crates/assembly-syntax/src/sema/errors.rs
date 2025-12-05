@@ -1,6 +1,3 @@
-// Allow unused assignments - required by miette::Diagnostic derive macro
-#![allow(unused_assignments)]
-
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
@@ -37,7 +34,7 @@ pub struct SyntaxError {
 #[derive(Debug, thiserror::Error, Diagnostic)]
 #[error("one or more warnings were emitted")]
 #[diagnostic(help("see below for details"))]
-#[cfg_attr(not(feature = "std"), allow(unused))]
+#[cfg_attr(not(feature = "std"), expect(unused))]
 pub struct SyntaxWarning {
     #[source_code]
     pub source_file: Arc<SourceFile>,

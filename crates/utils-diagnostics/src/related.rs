@@ -69,7 +69,6 @@ impl RelatedLabel {
         Self::new(Severity::Error, message)
     }
 
-    #[allow(unused)]
     pub fn warning<S>(message: S) -> Self
     where
         Cow<'static, str>: From<S>,
@@ -77,7 +76,6 @@ impl RelatedLabel {
         Self::new(Severity::Warning, message)
     }
 
-    #[allow(unused)]
     pub fn advice<S>(message: S) -> Self
     where
         Cow<'static, str>: From<S>,
@@ -103,7 +101,6 @@ impl RelatedLabel {
         self
     }
 
-    #[allow(unused)]
     pub fn with_labels<I>(mut self, labels: I) -> Self
     where
         I: IntoIterator<Item = Label>,

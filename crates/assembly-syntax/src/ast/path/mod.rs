@@ -1,5 +1,5 @@
 mod components;
-#[allow(clippy::module_inception)]
+#[expect(clippy::module_inception)]
 mod path;
 mod path_buf;
 

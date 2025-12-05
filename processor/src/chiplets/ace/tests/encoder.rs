@@ -39,6 +39,7 @@ impl EncodedCircuit {
     }
 
     /// Computes the hash of all circuit constants and instructions.
+    #[expect(dead_code)]
     fn raw_circuit_hash<H: ElementHasher<BaseField = Felt>>(&self) -> H::Digest {
         H::hash_elements(&self.encoded_circuit)
     }

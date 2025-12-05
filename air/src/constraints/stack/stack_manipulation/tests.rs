@@ -261,7 +261,7 @@ pub fn get_swap_test_frame(a: u64, b: u64) -> EvaluationFrame<Felt> {
 
 /// Generates the correct current and next rows for the SWAPW operation and inputs and
 /// returns an EvaluationFrame for testing.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn get_swapw_test_frame(
     a: u64,
     b: u64,
@@ -299,7 +299,7 @@ pub fn get_swapw_test_frame(
 
 /// Generates the correct current and next rows for the SWAPW2 operation and inputs and
 /// returns an EvaluationFrame for testing.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn get_swapw2_test_frame(
     a: u64,
     b: u64,
@@ -337,7 +337,7 @@ pub fn get_swapw2_test_frame(
 
 /// Generates the correct current and next rows for the SWAPW3 operation and inputs and
 /// returns an EvaluationFrame for testing.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn get_swapw3_test_frame(
     a: u64,
     b: u64,
@@ -375,7 +375,7 @@ pub fn get_swapw3_test_frame(
 
 /// Generates the correct current and next rows for the SWAPW operation and inputs and
 /// returns an EvaluationFrame for testing.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn get_swapdw_test_frame(
     a: u64,
     b: u64,
@@ -517,7 +517,7 @@ pub fn get_cswap_test_frame(c: u64, a: u64, b: u64) -> EvaluationFrame<Felt> {
 
 /// Generates the correct current and next rows for the CSWAPW operation and inputs and
 /// returns an EvaluationFrame for testing.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn get_cswapw_test_frame(
     x: u64,
     a: u64,

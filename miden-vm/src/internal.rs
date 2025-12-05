@@ -23,7 +23,6 @@ const SIMPLE_SMT_DEPTH: u8 = u64::BITS as u8;
 
 /// Struct used to deserialize merkle data from input file. Merkle data can be represented as a
 /// merkle tree or a Sparse Merkle Tree.
-#[allow(clippy::enum_variant_names)]
 #[derive(Deserialize, Debug)]
 pub enum MerkleData {
     /// String representation of a merkle tree. The merkle tree is represented as a vector of

@@ -90,7 +90,6 @@ pub struct Cli {
     /// under an alias (like in the case of
     /// [Midenup](https://github.com/0xMiden/midenup).
     #[arg(skip)]
-    #[allow(unused)]
     external: bool,
 }
 

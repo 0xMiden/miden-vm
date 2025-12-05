@@ -107,7 +107,7 @@ pub const MR_UPDATE_NEW_LABEL: u8 = 0b1110 + 1;
 pub const RETURN_HASH: Selectors = [ZERO, ZERO, ZERO];
 /// Unique label computed as 1 plus the full chiplet selector with the bits reversed.
 /// `selector = [0 | 0, 0, 0]`, `flag = rev(selector) + 1 = [0, 0, 0 | 0] + 1 = 1`
-#[allow(clippy::identity_op)]
+#[expect(clippy::identity_op)]
 pub const RETURN_HASH_LABEL: u8 = 0b0000 + 1;
 
 /// Specifies a completion of a computation such that the entire hasher state (values in h0 through

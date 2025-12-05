@@ -434,7 +434,7 @@ impl ConstantExpr {
     }
 
     #[inline(always)]
-    #[allow(clippy::boxed_local)]
+    #[expect(clippy::boxed_local)]
     fn into_inner(self: Box<Self>) -> Self {
         *self
     }

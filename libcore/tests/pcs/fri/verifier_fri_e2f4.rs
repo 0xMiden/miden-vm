@@ -139,7 +139,7 @@ pub fn build_evaluations(trace_length: usize, lde_blowup: usize) -> Vec<QuadFelt
     p
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 fn verify_proof(
     proof: FriProof,
     commitments: Vec<<MidenHasher as Hasher>::Digest>,
@@ -240,7 +240,7 @@ impl FriVerifierFold4Ext2 {
 
     /// Verifier in the setting of (folding_factor, blowup_factor, extension_degree) = (4, (1 << 3),
     /// 2)
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     fn verify_fold_4_ext_2(
         &self,
         channel: &mut MidenFriVerifierChannel<QuadFelt, MidenHasher>,
@@ -296,7 +296,7 @@ impl FriVerifierFold4Ext2 {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn iterate_query_fold_4_quad_ext(
     layer_alphas: &[QuadFelt],
     partial_trees: &[PartialMerkleTree],

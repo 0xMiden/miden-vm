@@ -244,7 +244,6 @@ impl ExecutionTrace {
     // TEST HELPERS
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
-    #[allow(dead_code)]
     pub fn print(&self) {
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.length() {

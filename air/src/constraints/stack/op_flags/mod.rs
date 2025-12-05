@@ -52,7 +52,6 @@ const DEGREE_5_OPCODE_ENDS: usize = DEGREE_5_OPCODE_STARTS + 15;
 const DEGREE_4_OPCODE_STARTS: usize = DEGREE_5_OPCODE_ENDS + 1;
 
 /// Opcode at which degree 4 operations end.
-#[allow(dead_code)]
 const DEGREE_4_OPCODE_ENDS: usize = DEGREE_4_OPCODE_STARTS + 31;
 
 // Operation Flags
@@ -85,7 +84,6 @@ pub struct OpFlags<E: FieldElement> {
     u32_rc_op: E,
 }
 
-#[allow(dead_code)]
 impl<E: FieldElement> OpFlags<E> {
     // CONSTRUCTOR
     // =================================================================================================

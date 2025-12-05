@@ -9,7 +9,7 @@ macro_rules! span {
 }
 
 lalrpop_util::lalrpop_mod!(
-    #[allow(clippy::all)]
+    #[expect(clippy::all)]
     grammar,
     "/parser/grammar.rs"
 );

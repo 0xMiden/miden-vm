@@ -61,7 +61,7 @@ macro_rules! exec {
     }};
 }
 
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! call {
     ($name:ident) => {
         inst!(Call(InvocationTarget::Symbol(stringify!($name).parse())))
@@ -434,7 +434,7 @@ macro_rules! assert_module_diagnostic_lines {
     }};
 }
 
-#[allow(unused_macros)]
+#[expect(unused_macros)]
 macro_rules! assert_program_diagnostic_lines {
     ($context:ident, $source:expr, $($expected:literal),+) => {{
         let error = $context

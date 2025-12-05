@@ -100,7 +100,6 @@ impl TestContext {
     ///
     /// This runs semantic analysis, and the returned module is guaranteed to be syntactically
     /// valid.
-    #[allow(unused)]
     #[track_caller]
     pub fn parse_kernel(&self, source: impl Parse) -> Result<Box<Module>, Report> {
         source.parse_with_options(
