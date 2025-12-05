@@ -445,7 +445,7 @@ fn mast_forest_merge_decorators() {
             if node.is_basic_block() {
                 // Find the ID of this node by searching the forest
                 for (id, forest_node) in merged.nodes.iter().enumerate() {
-                    if std::ptr::eq(node, forest_node) {
+                    if core::ptr::eq(node, forest_node) {
                         return Some(MastNodeId::from_u32_safe(id as u32, &merged).unwrap());
                     }
                 }
