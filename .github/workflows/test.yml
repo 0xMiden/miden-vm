@@ -62,7 +62,7 @@ jobs:
           MIDEN_BUILD_LIBCORE_DOCS=1 cargo build -p miden-libcore
       - name: Check for documentation changes in libcore/docs
         run: |
-           if [ -n "$(git status --porcelain libcore/docs)" ]; then
+          if [ -n "$(git status --porcelain libcore/docs)" ]; then
             echo "ERROR: Found uncommitted changes in libcore/docs/"
             echo "This indicates that the assembly source code has changed but the documentation was not updated."
             echo "Please commit the generated documentation changes before merging."
