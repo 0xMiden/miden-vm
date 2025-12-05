@@ -41,7 +41,7 @@ impl BundleCmd {
         println!("Build library");
         println!("============================================================");
 
-        let mut assembler = Assembler::default().with_debug_mode(!self.release);
+        let mut assembler = Assembler::default();
 
         if self.dir.is_file() {
             return Err(Report::msg("`dir` must be a directory."));

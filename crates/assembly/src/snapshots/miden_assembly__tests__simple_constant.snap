@@ -1,7 +1,16 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 692
 expression: program
 ---
 begin
-    basic_block push(2147483648) push(4294967294) mstore drop push(7) noop end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(push.7, 1)
+        push(7)
+        noop
+    end
 end

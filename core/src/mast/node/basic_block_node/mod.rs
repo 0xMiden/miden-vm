@@ -103,7 +103,7 @@ impl BasicBlockNode {
     /// Returns an error if:
     /// - `operations` vector is empty.
     #[cfg(any(test, feature = "arbitrary"))]
-    pub(crate) fn new(
+    pub(crate) fn new_owned_with_decorators(
         operations: Vec<Operation>,
         decorators: DecoratorList,
     ) -> Result<Self, MastForestError> {
@@ -136,7 +136,7 @@ impl BasicBlockNode {
     //
     // IOW this makes its `decorators` padding-aware, or equivalently "adds" the padding to these
     // decorators
-    fn adjust_decorators(decorators: DecoratorList, op_batches: &[OpBatch]) -> DecoratorList {
+    pub fn adjust_decorators(decorators: DecoratorList, op_batches: &[OpBatch]) -> DecoratorList {
         let raw2pad = RawToPaddedPrefix::new(op_batches);
         decorators
             .into_iter()
@@ -193,15 +193,12 @@ impl BasicBlockNode {
         forest: &'a MastForest,
     ) -> DecoratorOpLinkIterator<'a> {
         match &self.decorators {
-            DecoratorStore::Owned { decorators, .. } => {
-                // For owned decorators, use the existing logic
-                DecoratorOpLinkIterator::from_slice_iters(
-                    &[],
-                    decorators,
-                    &[],
-                    self.num_operations() as usize,
-                )
-            },
+            DecoratorStore::Owned { decorators, .. } => DecoratorOpLinkIterator::from_slice_iters(
+                &[],
+                decorators,
+                &[],
+                self.num_operations() as usize,
+            ),
             DecoratorStore::Linked { id } => {
                 // This is used in MastForestMerger::merge_nodes, which strips the `MastForest` of
                 // some nodes before remapping decorators, so calling
@@ -257,7 +254,6 @@ impl BasicBlockNode {
     ) -> RawDecoratorOpLinkIterator<'a> {
         match &self.decorators {
             DecoratorStore::Owned { decorators, before_enter, after_exit } => {
-                // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(
                     before_enter,
                     decorators,
@@ -320,7 +316,6 @@ impl BasicBlockNode {
     pub fn raw_op_indexed_decorators(&self, forest: &MastForest) -> Vec<(usize, DecoratorId)> {
         match &self.decorators {
             DecoratorStore::Owned { decorators, .. } => {
-                // For owned decorators, use the existing logic
                 RawDecoratorOpLinkIterator::from_slice_iters(&[], decorators, &[], &self.op_batches)
                     .collect()
             },
@@ -1291,38 +1286,37 @@ impl BasicBlockNodeBuilder {
 
 impl MastForestContributor for BasicBlockNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let basic_block = self.build()?;
+        if self.operations.is_empty() {
+            return Err(MastForestError::EmptyBasicBlock);
+        }
 
-        let BasicBlockNode {
-            op_batches,
-            digest,
-            decorators:
-                DecoratorStore::Owned {
-                    decorators: decorators_info,
-                    before_enter,
-                    after_exit,
-                },
-        } = basic_block
-        else {
-            unreachable!("BasicBlockBuilder::build() should always return owned decorators");
-        };
+        // Validate decorators list (only in debug mode).
+        #[cfg(debug_assertions)]
+        validate_decorators(self.operations.len(), &self.decorators);
 
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
+        // Process operations and decorators directly without creating an intermediate Owned node
+        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations);
+
+        // Use the forced digest if provided, otherwise use the computed digest
+        let digest = self.digest.unwrap_or(computed_digest);
+
+        // Adjust decorator indices from raw to padded using the same logic as
+        // BasicBlockNode::adjust_decorators
+        let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+
         // Add decorator info to the forest storage
         forest
             .debug_info
-            .register_op_indexed_decorators(future_node_id, decorators_info)
+            .register_op_indexed_decorators(future_node_id, reflowed_decorators)
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
-        forest
-            .debug_info
-            .register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
-        // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
             .push(MastNode::Block(BasicBlockNode {
@@ -1332,7 +1326,6 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             }))
             .map_err(|_| MastForestError::TooManyNodes)?;
 
-        // The decorator info was already added to forest storage, so we're done
         Ok(node_id)
     }
 

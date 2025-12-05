@@ -170,8 +170,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let libraries = Libraries::new(&params.library_paths)?;
 
     // load program from file and compile
-    let (program, source_manager) =
-        get_masm_program(&params.program_file, &libraries, !params.release)?;
+    let (program, source_manager) = get_masm_program(&params.program_file, &libraries)?;
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let execution_options = ExecutionOptions::new(

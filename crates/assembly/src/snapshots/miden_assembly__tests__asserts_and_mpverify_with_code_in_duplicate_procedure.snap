@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1883
 expression: program
 ---
 begin
@@ -8,49 +9,73 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(u32assert.err="1", 3)
         pad
         u32assert2(13948122101519563734)
         drop
+        asmOp(u32assert.err="2", 3)
         pad
         u32assert2(17575088163785490049)
         drop
+        asmOp(u32assert.err="1", 3)
         pad
         u32assert2(13948122101519563734)
         drop
+        asmOp(u32assert.err="2", 3)
         pad
         u32assert2(17575088163785490049)
         drop
+        asmOp(u32assert.err="2", 3)
         pad
         u32assert2(17575088163785490049)
         drop
+        asmOp(u32assert.err="1", 3)
         pad
         u32assert2(13948122101519563734)
         drop
+        asmOp(assert.err="1", 1)
         assert(13948122101519563734)
+        asmOp(assert.err="2", 1)
         assert(17575088163785490049)
+        asmOp(assert.err="1", 1)
         assert(13948122101519563734)
+        asmOp(assert.err="2", 1)
         assert(17575088163785490049)
+        asmOp(assert.err="2", 1)
         assert(17575088163785490049)
+        asmOp(assert.err="1", 1)
         assert(13948122101519563734)
+        asmOp(assert.err="1", 1)
         assert(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         pad
         u32assert2(13948122101519563734)
         drop
+        asmOp(assert.err="2", 1)
         assert(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         pad
         u32assert2(17575088163785490049)
         drop
+        asmOp(u32assert.err="1", 3)
         pad
         u32assert2(13948122101519563734)
         drop
+        asmOp(assert.err="1", 1)
         assert(13948122101519563734)
+        asmOp(u32assert.err="2", 3)
         pad
         u32assert2(17575088163785490049)
         drop
+        asmOp(assert.err="2", 1)
         assert(17575088163785490049)
+        asmOp(mtree_verify.err="1", 1)
         mpverify(13948122101519563734)
+        asmOp(mtree_verify.err="2", 1)
         mpverify(17575088163785490049)
+        asmOp(mtree_verify.err="2", 1)
         mpverify(17575088163785490049)
+        asmOp(mtree_verify.err="1", 1)
         mpverify(13948122101519563734)
     end
 end

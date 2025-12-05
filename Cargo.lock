@@ -1354,6 +1354,7 @@ dependencies = [
  "miden-core",
  "miden-libcore",
  "miden-mast-package",
+ "miden-processor",
  "proptest",
  "smallvec",
  "thiserror",

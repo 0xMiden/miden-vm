@@ -51,8 +51,7 @@ impl Analyze {
         let (program, host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
-                let (program, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, true)?;
+                let (program, source_manager) = get_masm_program(&self.program_file, &libraries)?;
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
@@ -376,7 +375,7 @@ mod tests {
         let stack_inputs = StackInputs::default();
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();
-        let program = Assembler::default().with_debug_mode(true).assemble_program(source).unwrap();
+        let program = Assembler::default().assemble_program(source).unwrap();
         let execution_details = super::analyze(&program, stack_inputs, advice_inputs, host);
         let expected_details = ExecutionDetails {
             total_noops: 0,

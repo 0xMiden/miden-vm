@@ -795,6 +795,8 @@ pub enum MastForestError {
     AdviceMapKeyCollisionOnMerge(Word),
     #[error("decorator storage error: {0}")]
     DecoratorError(DecoratorIndexError),
+    #[error("digest is required for deserialization")]
+    DigestRequiredForDeserialization,
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly

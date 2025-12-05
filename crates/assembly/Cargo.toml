@@ -43,5 +43,6 @@ thiserror.workspace = true
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-libcore = { path = "../../libcore", default-features = false }
+miden-processor = { workspace = true, features = ["testing"] }
 insta.workspace = true
 proptest = { workspace = true, features = ["std"] }

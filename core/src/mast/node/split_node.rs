@@ -331,22 +331,29 @@ impl SplitNodeBuilder {
 
 impl MastForestContributor for SplitNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let node = self.build(forest)?;
+        // Validate branch node IDs
+        let forest_len = forest.nodes.len();
+        if self.branches[0].to_usize() >= forest_len {
+            return Err(MastForestError::NodeIdOverflow(self.branches[0], forest_len));
+        } else if self.branches[1].to_usize() >= forest_len {
+            return Err(MastForestError::NodeIdOverflow(self.branches[1], forest_len));
+        }
 
-        let SplitNode {
-            branches,
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("SplitNodeBuilder::build() should always return owned decorators");
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
+            let true_branch_hash = forest[self.branches[0]].digest();
+            let false_branch_hash = forest[self.branches[1]].digest();
+
+            hasher::merge_in_domain(&[true_branch_hash, false_branch_hash], SplitNode::DOMAIN)
         };
 
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -354,7 +361,7 @@ impl MastForestContributor for SplitNodeBuilder {
             .nodes
             .push(
                 SplitNode {
-                    branches,
+                    branches: self.branches,
                     digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
@@ -454,7 +461,7 @@ impl SplitNodeBuilder {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
         let Some(digest) = self.digest else {
-            panic!("Digest is required for deserialization")
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);

@@ -19,7 +19,11 @@ use crate::{
 fn dyn_hash_is_correct() {
     let expected_constant =
         hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    assert_eq!(expected_constant, DynNodeBuilder::new_dyn().build().digest());
+
+    let mut forest = MastForest::new();
+    let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
+    assert_eq!(expected_constant, dyn_node.digest());
 }
 
 proptest! {

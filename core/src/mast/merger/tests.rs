@@ -124,21 +124,24 @@ fn mast_forest_merge_remap() {
     let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
 
-    let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    let (mut merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     assert_eq!(merged.nodes().len(), 4);
 
     // Check that the first node is semantically equal to the expected foo block
-    let expected_foo_block = block_foo().build().unwrap();
+    // Build expected nodes in the merged forest for proper semantic comparison
+    let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+    let expected_foo_block = merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_foo_block, &merged));
+        if merged_block.semantic_eq(expected_foo_block, &merged));
 
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
 
     // Check that the third node is semantically equal to the expected bar block
-    let expected_bar_block = block_bar().build().unwrap();
+    let expected_bar_id = block_bar().add_to_forest(&mut merged).unwrap();
+    let expected_bar_block = merged.get_node_by_id(expected_bar_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_bar_block, &merged));
+        if merged_block.semantic_eq(expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -154,7 +157,9 @@ fn mast_forest_merge_duplicate() {
     forest_a.add_decorator(Decorator::Debug(crate::DebugOptions::MemAll)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
-    let id_external = ExternalNodeBuilder::new(block_bar().build().unwrap().digest())
+    let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();
+    let bar_block = forest_a.get_node_by_id(bar_block_id).unwrap().unwrap_basic_block();
+    let id_external = ExternalNodeBuilder::new(bar_block.digest())
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
@@ -200,7 +205,8 @@ fn mast_forest_merge_duplicate() {
 #[test]
 fn mast_forest_merge_replace_external() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = ExternalNodeBuilder::new(block_foo().build().unwrap().digest())
+    let foo_block_a = block_foo().build().unwrap();
+    let id_foo_a = ExternalNodeBuilder::new(foo_block_a.digest())
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
@@ -214,13 +220,16 @@ fn mast_forest_merge_replace_external() {
     let (merged_ab, root_maps_ab) = MastForest::merge([&forest_a, &forest_b]).unwrap();
     let (merged_ba, root_maps_ba) = MastForest::merge([&forest_b, &forest_a]).unwrap();
 
-    for (merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
+    for (mut merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
         assert_eq!(merged.nodes().len(), 2);
 
         // Check that the first node is semantically equal to the expected foo block
-        let expected_foo_block = block_foo().build().unwrap();
+        // Build expected node in the merged forest for proper semantic comparison
+        let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+        let expected_foo_block =
+            merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
         assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-            if merged_block.semantic_eq(&expected_foo_block, &merged));
+            if merged_block.semantic_eq(expected_foo_block, &merged));
 
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.

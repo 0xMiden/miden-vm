@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 79
 expression: program
 ---
 begin
@@ -8,9 +9,13 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(push.10, 1)
         push(10)
+        asmOp(push.50, 1)
         push(50)
+        asmOp(push.2, 1)
         push(2)
+        asmOp(u32wrapping_add3, 2)
         u32add3
         drop
         noop

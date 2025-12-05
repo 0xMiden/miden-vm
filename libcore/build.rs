@@ -218,10 +218,9 @@ fn main() -> Result<(), Report> {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
-    let assembler = Assembler::default().with_debug_mode(cfg!(feature = "with-debug-info"));
+    let assembler = Assembler::default();
     let namespace = "::miden::core".parse::<masm::PathBuf>().expect("invalid base namespace");
     let libcore = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
-
     // write the masl output
     let build_dir = env::var("OUT_DIR").unwrap();
     let build_dir = Path::new(&build_dir);
