@@ -2,11 +2,20 @@
 members = [
     "air",
     "core",
-    "crates/*",
+    "crates/assembly",
+    "crates/assembly-syntax",
+    "crates/debug-types",
+    "crates/lib/core",
+    "crates/mast-package",
+    "crates/test-serde-macros",
+    "crates/test-utils",
+    "crates/utils-core-derive",
+    "crates/utils-diagnostics",
+    "crates/utils-indexing",
+    "crates/utils-sync",
     "miden-vm",
     "processor",
     "prover",
-    "libcore",
     "verifier",
 ]
 resolver = "2"
@@ -45,7 +54,7 @@ miden-mast-package = { path = "./crates/mast-package", version = "0.20", default
 miden-processor = { path = "./processor", version = "0.20", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
 miden-prover = { path = "./prover", version = "0.20", default-features = false }
-miden-libcore = { path = "./libcore", version = "0.20", default-features = false }
+miden-core-lib = { path = "./crates/lib/core", version = "0.20", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.20", default-features = false }
 miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.20", default-features = false }

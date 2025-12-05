@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
 use miden_vm::internal::InputFile;
 use tracing::instrument;
@@ -187,7 +187,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let mut host = DefaultHost::default().with_source_manager(source_manager);
     host.load_library(&CoreLibrary::default())
         .into_diagnostic()
-        .wrap_err("Failed to load libcore")?;
+        .wrap_err("Failed to load core library")?;
     for lib in libraries.libraries {
         host.load_library(lib.mast_forest())
             .into_diagnostic()
