@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
 use miden_libcore::{
-    ecdsa_sign,
+    dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::{
         bytes_to_packed_u32_felts,
         ecdsa::{EcdsaPrecompile, EcdsaRequest},

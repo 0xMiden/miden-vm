@@ -18,7 +18,7 @@ use miden_crypto::{
     hash::rpo::Rpo256,
 };
 use miden_libcore::{
-    eddsa_sign,
+    dsa::eddsa_ed25519::sign as eddsa_sign,
     handlers::{
         bytes_to_packed_u32_felts,
         eddsa_ed25519::{EddsaPrecompile, EddsaRequest},

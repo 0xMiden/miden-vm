@@ -6,7 +6,7 @@ use miden_core::{
     EventName, StarkField, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
 };
-use miden_libcore::{CoreLibrary, falcon_sign};
+use miden_libcore::{CoreLibrary, dsa::falcon512_rpo::sign as falcon_sign};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
