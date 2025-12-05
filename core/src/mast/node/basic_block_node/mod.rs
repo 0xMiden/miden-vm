@@ -421,10 +421,10 @@ impl BasicBlockNode {
 // ================================================================================================
 
 impl BasicBlockNode {
-    /// Validates that this BasicBlockNode satisfies the three core invariants:
+    /// Validates that this BasicBlockNode satisfies the core invariants:
     /// 1. Power-of-two number of groups in each batch
     /// 2. No batch ends with an immediate operation
-    /// 3. Minimal NOOP padding (no extraneous NOOPs)
+    /// 3. OpBatch structural consistency
     ///
     /// Returns an error string describing which invariant was violated if validation fails.
     pub fn validate_batch_invariants(&self) -> Result<(), String> {
@@ -434,8 +434,8 @@ impl BasicBlockNode {
         // Check invariant 2: No batch ends with immediate operation
         self.validate_no_immediate_endings()?;
 
-        // Check invariant 3: Minimal NOOP padding
-        self.validate_minimal_noop_padding()?;
+        // Check invariant 3: OpBatch structural consistency
+        self.validate_batch_structure()?;
 
         Ok(())
     }
@@ -444,7 +444,7 @@ impl BasicBlockNode {
     fn validate_power_of_two_groups(&self) -> Result<(), String> {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
             let num_groups = batch.num_groups();
-            if !num_groups.is_power_of_two() && num_groups > 0 {
+            if !num_groups.is_power_of_two() {
                 return Err(format!(
                     "Batch {}: {} groups is not power of two",
                     batch_idx, num_groups
@@ -469,32 +469,43 @@ impl BasicBlockNode {
         Ok(())
     }
 
-    /// Validates that NOOP padding is minimal.
-    /// i.e. no batch should have its second half as all NOOPs if the first half would be a valid
-    /// batch.
-    fn validate_minimal_noop_padding(&self) -> Result<(), String> {
+    /// Validates that OpBatch structure is consistent and won't cause panics during access.
+    fn validate_batch_structure(&self) -> Result<(), String> {
         for (batch_idx, batch) in self.op_batches.iter().enumerate() {
-            let ops = batch.ops();
+            // Check num_groups is within bounds
+            if batch.num_groups() > crate::mast::node::basic_block_node::BATCH_SIZE {
+                return Err(format!(
+                    "Batch {}: num_groups {} exceeds maximum {}",
+                    batch_idx,
+                    batch.num_groups(),
+                    crate::mast::node::basic_block_node::BATCH_SIZE
+                ));
+            }
 
-            // Only check batches with at least 4 operations (so we have a meaningful split)
-            if ops.len() >= 4 {
-                let midpoint = ops.len() / 2;
-                let first_half = &ops[..midpoint];
-                let second_half = &ops[midpoint..];
+            // Check indptr array consistency
+            let indptr = batch.indptr();
 
-                // Check if second half is all NOOPs
-                let second_half_all_noops =
-                    second_half.iter().all(|op| matches!(op, Operation::Noop));
-
-                // Check if first half would be valid (power of two and doesn't end with immediate)
-                let first_half_valid = first_half.len().is_power_of_two()
-                    && first_half.last().is_none_or(|op| op.imm_value().is_none());
-
-                if second_half_all_noops && first_half_valid {
+            // indptr should be monotonic non-decreasing
+            for i in 0..batch.num_groups() {
+                if indptr[i] > indptr[i + 1] {
                     return Err(format!(
-                        "Batch {}: non-minimal NOOP padding - could be reduced to {} operations",
+                        "Batch {}: indptr[{}] {} > indptr[{}] {} - array is not monotonic",
                         batch_idx,
-                        first_half.len()
+                        i,
+                        indptr[i],
+                        i + 1,
+                        indptr[i + 1]
+                    ));
+                }
+            }
+
+            // All indptr values should be within ops bounds
+            let ops_len = batch.ops().len();
+            for (i, &indptr) in indptr.iter().enumerate().take(batch.num_groups() + 1) {
+                if indptr > ops_len {
+                    return Err(format!(
+                        "Batch {}: indptr[{}] {} exceeds ops length {}",
+                        batch_idx, i, indptr, ops_len
                     ));
                 }
             }

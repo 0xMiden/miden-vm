@@ -604,13 +604,14 @@ impl MastForest {
 // ------------------------------------------------------------------------------------------------
 /// Validation methods
 impl MastForest {
-    /// Validates that all BasicBlockNodes in this forest satisfy the three core invariants:
-    /// 1. Power-of-two number of operations in each batch
+    /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
+    /// 1. Power-of-two number of groups in each batch
     /// 2. No batch ends with an immediate operation
-    /// 3. NOOP padding is minimal
+    /// 3. OpBatch structural consistency (indptr integrity, bounds checking)
     ///
     /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
-    /// at assembly time rather than dynamically during execution.
+    /// at assembly time rather than dynamically during execution, and adds comprehensive
+    /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
@@ -985,7 +986,7 @@ pub enum MastForestError {
     DecoratorError(DecoratorIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
-    #[error("invalid batch padding in node {0:?}: {1}")]
+    #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
 }
 
