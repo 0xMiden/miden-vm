@@ -349,3 +349,22 @@ fn free_memory_pointer() {
     let test = build_test!(source, &inputs);
     test.expect_stack(&[7, 6, 5, 4, 1]);
 }
+
+// WORD ALIGNMENT
+// ================================================================================================
+
+#[test]
+fn locaddr_word_alignment_non_multiple_of_four() {
+    // Test for issue #2348: locaddr.0 should be word-aligned even when
+    // number of proc locals is not a multiple of 4
+    let source = "
+        @locals(5)
+        proc foo
+            loc_storew_be.0
+        end
+        begin
+            exec.foo
+        end";
+
+    build_test!(source, &[]).execute().unwrap();
+}

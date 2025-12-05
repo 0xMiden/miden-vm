@@ -236,7 +236,7 @@ impl fmt::Display for QualifiedProcedureName {
 ///
 /// # A symbol which contains `::`, which would be treated as a namespace operator, so requires
 /// # quoting
-/// proc "std::foo"
+/// proc "miden::core::foo"
 ///   ...
 /// end
 ///
@@ -454,7 +454,7 @@ fn is_valid_unquoted_identifier_char(c: char) -> bool {
 // ARBITRARY IMPLEMENTATION
 // ================================================================================================
 
-#[cfg(any(test, feature = "arbitrary"))]
+#[cfg(feature = "arbitrary")]
 impl proptest::prelude::Arbitrary for ProcedureName {
     type Parameters = ();
 

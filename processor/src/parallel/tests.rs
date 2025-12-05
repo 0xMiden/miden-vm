@@ -5,7 +5,8 @@ use miden_core::{
     Kernel, Operation, Program,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
-        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
+        SplitNodeBuilder,
     },
 };
 use miden_utils_testing::get_column_name;
@@ -280,8 +281,9 @@ fn test_trace_generation_at_fragment_boundaries(
     #[case] fragment_size: usize,
     #[case] stack_inputs: &[Felt],
 ) {
-    /// This is the largest fragment size that can be proved
-    const MAX_FRAGMENT_SIZE: usize = 1 << 29;
+    /// We make the fragment size large enough here to avoid fragmenting the trace in multiple
+    /// fragments, but still not too large so as to not cause memory allocation issues.
+    const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let trace_from_fragments = {
         let processor = FastProcessor::new(stack_inputs);

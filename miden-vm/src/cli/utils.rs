@@ -7,7 +7,7 @@ use miden_assembly::{
 use miden_mast_package::{MastArtifact, Package};
 use miden_prover::utils::Deserializable;
 
-use crate::cli::data::{Debug, Libraries, ProgramFile};
+use crate::cli::data::{Libraries, ProgramFile};
 
 /// Returns a `Program` type from a `.masp` package file.
 pub fn get_masp_program(path: &Path) -> Result<miden_core::Program, Report> {
@@ -32,7 +32,7 @@ pub fn get_masm_program(
     debug_on: bool,
     kernel_file: Option<&Path>,
 ) -> Result<(miden_core::Program, Arc<DefaultSourceManager>), Report> {
-    let debug_mode = if debug_on { Debug::On } else { Debug::Off };
+    // Assembler debug mode is always enabled (issue #1821)
     let program_file = ProgramFile::read(path)?;
     let source_manager = program_file.source_manager().clone();
 

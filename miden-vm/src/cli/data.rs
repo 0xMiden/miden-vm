@@ -12,35 +12,13 @@ use miden_assembly::{
     report,
     utils::Deserializable,
 };
-use miden_stdlib::StdLibrary;
+use miden_libcore::CoreLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 // HELPERS
 // ================================================================================================
-
-/// Indicates whether debug mode is on or off.
-pub enum Debug {
-    On,
-    Off,
-}
-
-impl Debug {
-    /// Returns true if debug mode is on.
-    fn is_on(&self) -> bool {
-        matches!(self, Self::On)
-    }
-}
-
-impl From<bool> for Debug {
-    fn from(value: bool) -> Self {
-        match value {
-            true => Debug::On,
-            false => Debug::Off,
-        }
-    }
-}
 
 // OUTPUT FILE
 // ================================================================================================
@@ -146,16 +124,15 @@ where
 
     /// Compiles this program file into a [Program].
     #[instrument(name = "compile_program", skip_all)]
-    pub fn compile<'a, I>(&self, debug: Debug, libraries: I) -> Result<Program, Report>
+    pub fn compile<'a, I>(&self, libraries: I) -> Result<Program, Report>
     where
         I: IntoIterator<Item = &'a Library>,
     {
         // compile program
-        let mut assembler =
-            Assembler::new(self.source_manager.clone()).with_debug_mode(debug.is_on());
+        let mut assembler = Assembler::new(self.source_manager.clone());
         assembler
-            .link_dynamic_library(StdLibrary::default())
-            .wrap_err("Failed to load stdlib")?;
+            .link_dynamic_library(CoreLibrary::default())
+            .wrap_err("Failed to load libcore")?;
 
         for library in libraries {
             assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
@@ -291,24 +268,5 @@ impl Libraries {
         }
 
         Ok(Self { libraries })
-    }
-}
-
-// TESTS
-// ================================================================================================
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_debug_from_true() {
-        let debug_mode: Debug = true.into(); // true.into() will also test Debug.from(true)
-        assert!(matches!(debug_mode, Debug::On));
-    }
-
-    #[test]
-    fn test_debug_from_false() {
-        let debug_mode: Debug = false.into(); // false.into() will also test Debug.from(false)
-        assert!(matches!(debug_mode, Debug::Off));
     }
 }

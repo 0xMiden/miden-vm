@@ -4,9 +4,9 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::{DebugOptions, FMP_ADDR};
+use miden_core::{DebugOptions, FMP_ADDR, Felt};
 
-use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
+use crate::{DebugError, ProcessState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -16,9 +16,12 @@ use crate::{DebugHandler, ExecutionError, Felt, ProcessState};
 pub struct StdoutWriter;
 
 impl fmt::Write for StdoutWriter {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
+    fn write_str(&mut self, _s: &str) -> fmt::Result {
+        // When the `std` feature is disabled, the parameter `_s` is unused because
+        // the std::print! macro is not available. We prefix with underscore to
+        // indicate this intentional unused state and suppress warnings.
         #[cfg(feature = "std")]
-        std::print!("{}", s);
+        std::print!("{}", _s);
         Ok(())
     }
 }
@@ -55,8 +58,8 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
         &mut self,
         process: &ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
-        let _ = match *options {
+    ) -> Result<(), DebugError> {
+        match *options {
             DebugOptions::StackAll => {
                 let stack = process.get_stack_state();
                 self.print_stack(&stack, None, "Stack", process)
@@ -79,19 +82,19 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
                 let count = if n == 0 { None } else { Some(n as usize) };
                 self.print_stack(&reversed_stack, count, "Advice stack", process)
             },
-        };
-        Ok(())
+        }
+        .map_err(DebugError::from)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
-        let _ = writeln!(
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+        writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
             trace_id,
             process.clk(),
             process.ctx()
-        );
-        Ok(())
+        )
+        .map_err(TraceError::from)
     }
 }
 

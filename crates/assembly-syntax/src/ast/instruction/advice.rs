@@ -13,7 +13,10 @@ use miden_core::sys_events::SystemEvent;
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum SystemEventNode {
     PushMapVal,
-    PushMapValN,
+    PushMapValCount,
+    PushMapValN0,
+    PushMapValN4,
+    PushMapValN8,
     HasMapKey,
     PushMtNode,
     InsertMem,
@@ -28,7 +31,10 @@ impl From<&SystemEventNode> for SystemEvent {
         use SystemEventNode::*;
         match value {
             PushMapVal => Self::MapValueToStack,
-            PushMapValN => Self::MapValueToStackN,
+            PushMapValCount => Self::MapValueCountToStack,
+            PushMapValN0 => Self::MapValueToStackN0,
+            PushMapValN4 => Self::MapValueToStackN4,
+            PushMapValN8 => Self::MapValueToStackN8,
             HasMapKey => Self::HasMapKey,
             PushMtNode => Self::MerkleNodeToStack,
             InsertMem => Self::MemToMap,
@@ -50,7 +56,10 @@ impl fmt::Display for SystemEventNode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::PushMapVal => write!(f, "push_mapval"),
-            Self::PushMapValN => write!(f, "push_mapvaln"),
+            Self::PushMapValCount => write!(f, "push_mapval_count"),
+            Self::PushMapValN0 => write!(f, "push_mapvaln.0"),
+            Self::PushMapValN4 => write!(f, "push_mapvaln.4"),
+            Self::PushMapValN8 => write!(f, "push_mapvaln.8"),
             Self::HasMapKey => write!(f, "has_mapkey"),
             Self::PushMtNode => write!(f, "push_mtnode"),
             Self::InsertMem => write!(f, "insert_mem"),

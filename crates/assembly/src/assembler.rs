@@ -86,8 +86,6 @@ pub struct Assembler {
     linker: Linker,
     /// Whether to treat warning diagnostics as errors
     warnings_as_errors: bool,
-    /// Whether the assembler enables extra debugging information.
-    in_debug_mode: bool,
 }
 
 impl Default for Assembler {
@@ -98,7 +96,6 @@ impl Default for Assembler {
             source_manager,
             linker,
             warnings_as_errors: false,
-            in_debug_mode: false,
         }
     }
 }
@@ -113,7 +110,6 @@ impl Assembler {
             source_manager,
             linker,
             warnings_as_errors: false,
-            in_debug_mode: false,
         }
     }
 
@@ -134,17 +130,6 @@ impl Assembler {
     pub fn with_warnings_as_errors(mut self, yes: bool) -> Self {
         self.warnings_as_errors = yes;
         self
-    }
-
-    /// Puts the assembler into the debug mode.
-    pub fn with_debug_mode(mut self, yes: bool) -> Self {
-        self.in_debug_mode = yes;
-        self
-    }
-
-    /// Sets the debug mode flag of the assembler
-    pub fn set_debug_mode(&mut self, yes: bool) {
-        self.in_debug_mode = yes;
     }
 }
 
@@ -206,16 +191,16 @@ impl Assembler {
     /// use miden_assembly::{Assembler, Path};
     ///
     /// let mut assembler = Assembler::default();
-    /// assembler.compile_and_statically_link_from_dir("~/masm/std", "std::foo");
+    /// assembler.compile_and_statically_link_from_dir("~/masm/core", "miden::core::foo");
     /// ```
     ///
     /// Here's how we would handle various files under this path:
     ///
-    /// - ~/masm/std/sys.masm            -> Parsed as "std::foo::sys"
-    /// - ~/masm/std/crypto/hash.masm    -> Parsed as "std::foo::crypto::hash"
-    /// - ~/masm/std/math/u32.masm       -> Parsed as "std::foo::math::u32"
-    /// - ~/masm/std/math/u64.masm       -> Parsed as "std::foo::math::u64"
-    /// - ~/masm/std/math/README.md      -> Ignored
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn compile_and_statically_link_from_dir(
         &mut self,
@@ -326,11 +311,6 @@ impl Assembler {
         self.warnings_as_errors
     }
 
-    /// Returns true if this assembler was instantiated in debug mode.
-    pub fn in_debug_mode(&self) -> bool {
-        self.in_debug_mode
-    }
-
     /// Returns a reference to the kernel for this assembler.
     ///
     /// If the assembler was instantiated without a kernel, the internal kernel will be empty.
@@ -399,16 +379,16 @@ impl Assembler {
     /// ```rust
     /// use miden_assembly::{Assembler, Path};
     ///
-    /// Assembler::default().assemble_library_from_dir("~/masm/std", "std::foo");
+    /// Assembler::default().assemble_library_from_dir("~/masm/core", "miden::core::foo");
     /// ```
     ///
     /// Here's how we would handle various files under this path:
     ///
-    /// - ~/masm/std/sys.masm            -> Parsed as "std::foo::sys"
-    /// - ~/masm/std/crypto/hash.masm    -> Parsed as "std::foo::crypto::hash"
-    /// - ~/masm/std/math/u32.masm       -> Parsed as "std::foo::math::u32"
-    /// - ~/masm/std/math/u64.masm       -> Parsed as "std::foo::math::u64"
-    /// - ~/masm/std/math/README.md      -> Ignored
+    /// - ~/masm/core/sys.masm            -> Parsed as "miden::core::foo::sys"
+    /// - ~/masm/core/crypto/hash.masm    -> Parsed as "miden::core::foo::crypto::hash"
+    /// - ~/masm/core/math/u32.masm       -> Parsed as "miden::core::foo::math::u32"
+    /// - ~/masm/core/math/u64.masm       -> Parsed as "miden::core::foo::math::u64"
+    /// - ~/masm/core/math/README.md      -> Ignored
     #[cfg(feature = "std")]
     pub fn assemble_library_from_dir(
         self,
@@ -912,6 +892,20 @@ impl Assembler {
         Ok(proc_ctx.into_procedure(proc_body_node.digest(), proc_body_id))
     }
 
+    /// Creates an assembly operation decorator for control flow nodes.
+    fn create_asmop_decorator(
+        &self,
+        span: &SourceSpan,
+        op_name: &str,
+        proc_ctx: &ProcedureContext,
+    ) -> AssemblyOp {
+        let location = proc_ctx.source_manager().location(*span).ok();
+        let context_name = proc_ctx.path().to_string();
+        let num_cycles = 0;
+        let should_break = false;
+        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string(), should_break)
+    }
+
     fn compile_body<'a, I>(
         &self,
         body: I,
@@ -969,20 +963,12 @@ impl Assembler {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the if node in debug mode.
-                    if self.in_debug_mode() {
-                        let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.path().to_string();
-                        let num_cycles = 0;
-                        let op = "if.true".to_string();
-                        let should_break = false;
-                        let op =
-                            AssemblyOp::new(location, context_name, num_cycles, op, should_break);
-                        let decorator_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_decorator(Decorator::AsmOp(op))?;
-                        split_builder.append_before_enter([decorator_id]);
-                    }
+                    // Add an assembly operation decorator to the if node.
+                    let op = self.create_asmop_decorator(span, "if.true", proc_ctx);
+                    let decorator_id = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_decorator(Decorator::AsmOp(op))?;
+                    split_builder.append_before_enter([decorator_id]);
 
                     let split_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
@@ -1040,20 +1026,12 @@ impl Assembler {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the loop node in debug mode.
-                    if self.in_debug_mode() {
-                        let location = proc_ctx.source_manager().location(*span).ok();
-                        let context_name = proc_ctx.path().to_string();
-                        let num_cycles = 0;
-                        let op = "while.true".to_string();
-                        let should_break = false;
-                        let op =
-                            AssemblyOp::new(location, context_name, num_cycles, op, should_break);
-                        let decorator_id = block_builder
-                            .mast_forest_builder_mut()
-                            .ensure_decorator(Decorator::AsmOp(op))?;
-                        loop_builder.append_before_enter([decorator_id]);
-                    }
+                    // Add an assembly operation decorator to the loop node.
+                    let op = self.create_asmop_decorator(span, "while.true", proc_ctx);
+                    let decorator_id = block_builder
+                        .mast_forest_builder_mut()
+                        .ensure_decorator(Decorator::AsmOp(op))?;
+                    loop_builder.append_before_enter([decorator_id]);
 
                     let loop_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;

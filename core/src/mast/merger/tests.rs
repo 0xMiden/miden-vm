@@ -124,21 +124,24 @@ fn mast_forest_merge_remap() {
     let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
 
-    let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    let (mut merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     assert_eq!(merged.nodes().len(), 4);
 
     // Check that the first node is semantically equal to the expected foo block
-    let expected_foo_block = block_foo().build().unwrap();
+    // Build expected nodes in the merged forest for proper semantic comparison
+    let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+    let expected_foo_block = merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_foo_block, &merged));
+        if merged_block.semantic_eq(expected_foo_block, &merged));
 
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
 
     // Check that the third node is semantically equal to the expected bar block
-    let expected_bar_block = block_bar().build().unwrap();
+    let expected_bar_id = block_bar().add_to_forest(&mut merged).unwrap();
+    let expected_bar_block = merged.get_node_by_id(expected_bar_id).unwrap().unwrap_basic_block();
     assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
-        if merged_block.semantic_eq(&expected_bar_block, &merged));
+        if merged_block.semantic_eq(expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -154,7 +157,9 @@ fn mast_forest_merge_duplicate() {
     forest_a.add_decorator(Decorator::Debug(crate::DebugOptions::MemAll)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
-    let id_external = ExternalNodeBuilder::new(block_bar().build().unwrap().digest())
+    let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();
+    let bar_block = forest_a.get_node_by_id(bar_block_id).unwrap().unwrap_basic_block();
+    let id_external = ExternalNodeBuilder::new(bar_block.digest())
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
@@ -178,8 +183,8 @@ fn mast_forest_merge_duplicate() {
         forest_a.nodes.iter().find(|node| node.digest() == merged_node).unwrap();
     }
 
-    for merged_decorator in merged.decorators.iter() {
-        assert!(forest_a.decorators.contains(merged_decorator));
+    for merged_decorator in merged.decorators().iter() {
+        assert!(forest_a.decorators().contains(merged_decorator));
     }
 
     assert_child_id_lt_parent_id(&merged).unwrap();
@@ -200,7 +205,8 @@ fn mast_forest_merge_duplicate() {
 #[test]
 fn mast_forest_merge_replace_external() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = ExternalNodeBuilder::new(block_foo().build().unwrap().digest())
+    let foo_block_a = block_foo().build().unwrap();
+    let id_foo_a = ExternalNodeBuilder::new(foo_block_a.digest())
         .add_to_forest(&mut forest_a)
         .unwrap();
     let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
@@ -214,13 +220,16 @@ fn mast_forest_merge_replace_external() {
     let (merged_ab, root_maps_ab) = MastForest::merge([&forest_a, &forest_b]).unwrap();
     let (merged_ba, root_maps_ba) = MastForest::merge([&forest_b, &forest_a]).unwrap();
 
-    for (merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
+    for (mut merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
         assert_eq!(merged.nodes().len(), 2);
 
         // Check that the first node is semantically equal to the expected foo block
-        let expected_foo_block = block_foo().build().unwrap();
+        // Build expected node in the merged forest for proper semantic comparison
+        let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+        let expected_foo_block =
+            merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
         assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
-            if merged_block.semantic_eq(&expected_foo_block, &merged));
+            if merged_block.semantic_eq(expected_foo_block, &merged));
 
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.
@@ -397,15 +406,15 @@ fn mast_forest_merge_decorators() {
     let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     // There are 4 unique decorators across both forests.
-    assert_eq!(merged.decorators.len(), 4);
-    assert!(merged.decorators.contains(&trace0));
-    assert!(merged.decorators.contains(&trace1));
-    assert!(merged.decorators.contains(&trace2));
-    assert!(merged.decorators.contains(&trace3));
+    assert_eq!(merged.decorators().len(), 4);
+    assert!(merged.decorators().contains(&trace0));
+    assert!(merged.decorators().contains(&trace1));
+    assert!(merged.decorators().contains(&trace2));
+    assert!(merged.decorators().contains(&trace3));
 
     let find_decorator_id = |deco: &Decorator| {
         let idx = merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(
@@ -909,7 +918,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Helper to find a decorator's ID in the merged forest
     let find_decorator = |trace_value: u32| {
         let idx = merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(|(id, deco)| {
@@ -938,7 +947,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Verify that shared decorator appears only once in merged forest
     assert!(
         merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(|(i, deco)| {
@@ -976,7 +985,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     }
 
     // Verify all decorators are referenced at least once (no orphans)
-    for (i, decorator) in merged.decorators.iter().enumerate() {
+    for (i, decorator) in merged.decorators().iter().enumerate() {
         let deco_id = DecoratorId::from_u32_safe(i as u32, &merged).unwrap();
         let ref_count = decorator_ref_counts.get(&deco_id).unwrap_or(&0);
         if ref_count == &0 {
@@ -1066,7 +1075,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     // Verify no decorator was lost or orphaned
     assert_eq!(
         decorator_ref_counts.len(),
-        merged.decorators.len(),
+        merged.decorators().len(),
         "Every decorator in merged forest should be referenced at least once (no orphans)"
     );
 }

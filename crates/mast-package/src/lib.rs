@@ -4,12 +4,12 @@
 
 extern crate alloc;
 
+#[cfg(any(test, feature = "std"))]
+extern crate std;
+
 mod artifact;
 mod dependency;
 mod package;
-
-#[cfg(test)]
-extern crate std;
 
 pub use miden_assembly_syntax::{
     Library, PathBuf,
@@ -27,7 +27,8 @@ pub use self::{
         },
     },
     package::{
-        ConstantExport, InvalidSectionIdError, Package, PackageExport, PackageManifest,
-        ProcedureExport, Section, SectionId, TypeExport, Version, VersionError,
+        ConstantExport, InvalidPackageKindError, InvalidSectionIdError, Package, PackageExport,
+        PackageKind, PackageManifest, ProcedureExport, Section, SectionId, TypeExport, Version,
+        VersionError,
     },
 };

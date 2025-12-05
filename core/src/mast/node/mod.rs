@@ -53,9 +53,6 @@ pub trait MastNodeExt {
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId];
 
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self);
-
     /// Returns a display formatter for this node.
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a>;
 
@@ -75,6 +72,10 @@ pub trait MastNodeExt {
 
     /// Returns the domain of this node.
     fn domain(&self) -> Felt;
+
+    /// Verifies that this node is stored at the ID in its decorators field in the forest.
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest);
 
     /// Converts this node into its corresponding builder, reusing allocated data where possible.
     type Builder: MastForestContributor;
@@ -241,7 +242,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             Some(target_op_idx) => {
                 for (op_idx, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         // when an instruction compiles down to multiple operations, only the first
                         // operation is associated with the assembly op. We need to check if the
@@ -259,7 +260,7 @@ pub trait MastNodeErrorContext: Send + Sync {
             None => {
                 for (_, decorator_id) in self.decorators(mast_forest) {
                     if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.get_decorator_by_id(decorator_id)
+                        mast_forest.decorator_by_id(decorator_id)
                     {
                         return Some(assembly_op);
                     }

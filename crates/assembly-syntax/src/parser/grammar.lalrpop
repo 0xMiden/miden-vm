@@ -68,6 +68,7 @@ extern {
         "adv_push" => Token::AdvPush,
         "adv_stack" => Token::AdvStack,
         "push_mapval" => Token::PushMapval,
+        "push_mapval_count" => Token::PushMapvalCount,
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
         "and" => Token::And,
@@ -85,6 +86,7 @@ extern {
         "cdropw" => Token::Cdropw,
         "clk" => Token::Clk,
         "const" => Token::Const,
+        "crypto_stream" => Token::CryptoStream,
         "cswap" => Token::Cswap,
         "cswapw" => Token::Cswapw,
         "debug" => Token::Debug,
@@ -996,6 +998,7 @@ Inst: Instruction = {
     "cdrop" => Instruction::CDrop,
     "cdropw" => Instruction::CDropW,
     "clk" => Instruction::Clk,
+    "crypto_stream" => Instruction::CryptoStream,
     "cswap" => Instruction::CSwap,
     "cswapw" => Instruction::CSwapW,
     "drop" => Instruction::Drop,
@@ -1057,7 +1060,19 @@ SystemEvent: Instruction = {
     "adv" "." "insert_hperm" => Instruction::SysEvent(SystemEventNode::InsertHperm),
     "adv" "." "insert_mem" => Instruction::SysEvent(SystemEventNode::InsertMem),
     "adv" "." "push_mapval" => Instruction::SysEvent(SystemEventNode::PushMapVal),
-    "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN),
+    "adv" "." "push_mapval_count" => Instruction::SysEvent(SystemEventNode::PushMapValCount),
+    "adv" "." "push_mapvaln" => Instruction::SysEvent(SystemEventNode::PushMapValN0),
+    "adv" "." "push_mapvaln" "." <pad_to:U8> =>? {
+        let (span, n) = pad_to.into_parts();
+        match n {
+            0 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN0)),
+            4 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN4)),
+            8 => Ok(Instruction::SysEvent(SystemEventNode::PushMapValN8)),
+            _ => Err(ParseError::User {
+                error: ParsingError::InvalidPadValue { span, padding: n },
+            }),
+        }
+    },
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
 }
@@ -2146,6 +2161,7 @@ Opcode: &'static str = {
     "cdropw" => "cdropw",
     "clk" => "clk",
     "const" => "const",
+    "crypto_stream" => "crypto_stream",
     "cswap" => "cswap",
     "cswapw" => "cswapw",
     "debug" => "debug",

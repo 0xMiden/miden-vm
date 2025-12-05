@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1809
 expression: program
 ---
 begin
@@ -8,18 +9,21 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(u32assertw, 6)
         u32assert2(0)
         movup3
         movup3
         u32assert2(0)
         movup3
         movup3
+        asmOp(u32assertw.err="Oh no", 6)
         u32assert2(15491226248792286710)
         movup3
         movup3
         u32assert2(15491226248792286710)
         movup3
         movup3
+        asmOp(u32assertw.err="Oh no", 6)
         u32assert2(15491226248792286710)
         movup3
         movup3

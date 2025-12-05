@@ -56,9 +56,7 @@ impl DecoratorStore {
     pub fn before_enter<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
         match self {
             DecoratorStore::Owned { before_enter, .. } => before_enter,
-            DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_before_decorators(*id)
-            },
+            DecoratorStore::Linked { id } => forest.before_enter_decorators(*id),
         }
     }
 
@@ -66,9 +64,7 @@ impl DecoratorStore {
     pub fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [DecoratorId] {
         match self {
             DecoratorStore::Owned { after_exit, .. } => after_exit,
-            DecoratorStore::Linked { id } => {
-                forest.node_decorator_storage.get_after_decorators(*id)
-            },
+            DecoratorStore::Linked { id } => forest.after_exit_decorators(*id),
         }
     }
 
@@ -77,16 +73,11 @@ impl DecoratorStore {
         matches!(self, DecoratorStore::Linked { .. })
     }
 
-    /// Remove all decorators (no-op for Linked state as decorators are managed centrally)
-    pub fn remove_decorators(&mut self) {
+    /// Get the node ID if this store is in the Linked state
+    pub fn linked_id(&self) -> Option<MastNodeId> {
         match self {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => {
-                before_enter.clear();
-                after_exit.clear();
-            },
-            DecoratorStore::Linked { .. } => {
-                // No-op: decorators are managed by NodeToDecoratorIds
-            },
+            DecoratorStore::Linked { id } => Some(*id),
+            DecoratorStore::Owned { .. } => None,
         }
     }
 }

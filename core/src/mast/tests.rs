@@ -19,7 +19,11 @@ use crate::{
 fn dyn_hash_is_correct() {
     let expected_constant =
         hasher::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN);
-    assert_eq!(expected_constant, DynNodeBuilder::new_dyn().build().digest());
+
+    let mut forest = MastForest::new();
+    let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
+    assert_eq!(expected_constant, dyn_node.digest());
 }
 
 proptest! {
@@ -81,7 +85,8 @@ fn test_decorator_storage_consistency_with_block_iterator() {
 
     // Test 1: Compare decorators from forest storage vs block iterator
     let forest_decorators: Vec<_> = forest
-        .op_decorator_storage
+        .debug_info
+        .op_decorator_storage()
         .decorator_ids_for_node(block_id)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -97,7 +102,8 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     // Test 2: Verify specific operation decorators match
     for (op_idx, expected_decorator_id) in &decorators {
         let forest_decos = forest
-            .op_decorator_storage
+            .debug_info
+            .op_decorator_storage()
             .decorator_ids_for_operation(block_id, *op_idx)
             .unwrap();
         let block_decos: Vec<_> = block
@@ -119,7 +125,8 @@ fn test_decorator_storage_consistency_with_block_iterator() {
     let operations_without_decorators = [1]; // Add operation
     for op_idx in operations_without_decorators {
         let forest_decos = forest
-            .op_decorator_storage
+            .debug_info
+            .op_decorator_storage()
             .decorator_ids_for_operation(block_id, op_idx)
             .unwrap();
         let block_decos: Vec<_> = block
@@ -153,8 +160,12 @@ fn test_decorator_storage_consistency_with_empty_block() {
     };
 
     // Both should have no indexed decorators
-    let forest_decorators: Vec<_> =
-        forest.op_decorator_storage.decorator_ids_for_node(block_id).unwrap().collect();
+    let forest_decorators: Vec<_> = forest
+        .debug_info
+        .op_decorator_storage()
+        .decorator_ids_for_node(block_id)
+        .unwrap()
+        .collect();
 
     let block_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
 
@@ -189,7 +200,8 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 
     // Verify first block consistency
     let forest_decorators1: Vec<_> = forest
-        .op_decorator_storage
+        .debug_info
+        .op_decorator_storage()
         .decorator_ids_for_node(block_id1)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -206,7 +218,8 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 
     // Verify second block consistency
     let forest_decorators2: Vec<_> = forest
-        .op_decorator_storage
+        .debug_info
+        .op_decorator_storage()
         .decorator_ids_for_node(block_id2)
         .unwrap()
         .flat_map(|(op_idx, decorators)| decorators.iter().map(move |dec_id| (op_idx, *dec_id)))
@@ -222,7 +235,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
     assert_eq!(forest_decorators2, block_decorators2);
 
     // Verify the decorator storage has the correct number of nodes
-    assert_eq!(forest.op_decorator_storage.num_nodes(), 2);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 2);
 }
 
 #[test]
@@ -243,17 +256,17 @@ fn test_decorator_storage_after_strip_decorators() {
         .unwrap();
 
     // Verify decorators exist initially
-    assert!(!forest.op_decorator_storage.is_empty());
-    assert_eq!(forest.op_decorator_storage.num_nodes(), 1);
-    assert_eq!(forest.op_decorator_storage.num_decorator_ids(), 2);
+    assert!(!forest.debug_info.op_decorator_storage().is_empty());
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 2);
 
     // Strip decorators
     forest.strip_decorators();
 
     // Verify decorators are cleared from storage
-    assert!(forest.op_decorator_storage.is_empty());
-    assert_eq!(forest.op_decorator_storage.num_nodes(), 0);
-    assert_eq!(forest.op_decorator_storage.num_decorator_ids(), 0);
+    assert!(forest.debug_info.op_decorator_storage().is_empty());
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 0);
 
     // Verify block also has no decorators after stripping
     let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
@@ -315,9 +328,10 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
     // Verify original forest structure
     assert_eq!(original_forest.num_nodes(), 3);
-    assert_eq!(original_forest.op_decorator_storage.num_nodes(), 3);
+    assert_eq!(original_forest.debug_info.op_decorator_storage().num_nodes(), 3);
     // Note: OpToDecoratorIds may deduplicate identical decorators across blocks
-    let original_decorator_count = original_forest.op_decorator_storage.num_decorator_ids();
+    let original_decorator_count =
+        original_forest.debug_info.op_decorator_storage().num_decorator_ids();
 
     // Serialize the forest to bytes
     let original_bytes = original_forest.to_bytes();
@@ -327,16 +341,16 @@ fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
 
     // Verify basic forest structure
     assert_eq!(deserialized_forest.num_nodes(), 3);
-    assert_eq!(deserialized_forest.op_decorator_storage.num_nodes(), 3);
+    assert_eq!(deserialized_forest.debug_info.op_decorator_storage().num_nodes(), 3);
     assert_eq!(
-        deserialized_forest.op_decorator_storage.num_decorator_ids(),
+        deserialized_forest.debug_info.op_decorator_storage().num_decorator_ids(),
         original_decorator_count
     );
 
     // Verify that the reconstructed forest includes the decorators
     // This ensures the OpToDecoratorIds structure in the deserialized forest is not empty
     assert!(
-        !deserialized_forest.op_decorator_storage.is_empty(),
+        !deserialized_forest.debug_info.op_decorator_storage().is_empty(),
         "Deserialized forest should have decorator storage"
     );
 
@@ -655,8 +669,200 @@ fn test_forest_borrowing_decorator_access() {
     }
 
     // Verify decorator storage is properly populated (no Arc wrapping anymore)
-    assert!(!forest.op_decorator_storage.is_empty(), "Decorator storage should be populated");
-    assert_eq!(forest.op_decorator_storage.num_nodes(), 1, "Should have 1 node with decorators");
+    assert!(
+        !forest.debug_info.op_decorator_storage().is_empty(),
+        "Decorator storage should be populated"
+    );
+    assert_eq!(
+        forest.debug_info.op_decorator_storage().num_nodes(),
+        1,
+        "Should have 1 node with decorators"
+    );
+}
+
+// MAST FOREST COMPACTION TESTS
+// ================================================================================================
+
+/// Tests comprehensive mast forest compaction across all node types and decorator categories.
+///
+/// This test creates pairs of identical nodes for each of the 7 MAST node types, where each pair
+/// differs only by decorators (operation-indexed, before-enter, or after-exit). After compaction,
+/// each pair should be merged into a single node, demonstrating that the compaction correctly
+/// identifies identical nodes regardless of decorator differences.
+#[test]
+fn test_mast_forest_compaction_comprehensive() {
+    let mut forest = MastForest::new();
+
+    // Create common decorators
+    let trace_deco = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let debug_deco = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(10))).unwrap();
+
+    // === BasicBlock nodes with operation-indexed decorators ===
+    let bb_no_deco = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let bb_with_op_deco =
+        BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], vec![(0, trace_deco)])
+            .add_to_forest(&mut forest)
+            .unwrap();
+    forest.make_root(bb_no_deco);
+    forest.make_root(bb_with_op_deco);
+
+    // === Join nodes with before-enter decorators ===
+    let child1 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(1))], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let child2 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(2))], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_no_deco = crate::mast::JoinNodeBuilder::new([child1, child2])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_with_before_deco = crate::mast::JoinNodeBuilder::new([child1, child2])
+        .with_before_enter(vec![debug_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(join_no_deco);
+    forest.make_root(join_with_before_deco);
+
+    // === Split nodes with after-exit decorators ===
+    let split_child1 = BasicBlockNodeBuilder::new(vec![Operation::Eq], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let split_child2 =
+        BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new(1))], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+    let split_no_deco = crate::mast::SplitNodeBuilder::new([split_child1, split_child2])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let split_with_after_deco = crate::mast::SplitNodeBuilder::new([split_child1, split_child2])
+        .with_after_exit(vec![trace_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(split_no_deco);
+    forest.make_root(split_with_after_deco);
+
+    // === Loop nodes with before-enter decorators ===
+    let loop_body = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let loop_no_deco =
+        crate::mast::LoopNodeBuilder::new(loop_body).add_to_forest(&mut forest).unwrap();
+    let loop_with_before_deco = crate::mast::LoopNodeBuilder::new(loop_body)
+        .with_before_enter(vec![debug_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(loop_no_deco);
+    forest.make_root(loop_with_before_deco);
+
+    // === Call nodes with after-exit decorators ===
+    let call_target = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_no_deco = crate::mast::CallNodeBuilder::new(call_target)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let call_with_after_deco = crate::mast::CallNodeBuilder::new(call_target)
+        .with_after_exit(vec![trace_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(call_no_deco);
+    forest.make_root(call_with_after_deco);
+
+    // === Dyn nodes with before-enter decorators ===
+    let dyn_no_deco = crate::mast::DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyn_with_before_deco = crate::mast::DynNodeBuilder::new_dyn()
+        .with_before_enter(vec![debug_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(dyn_no_deco);
+    forest.make_root(dyn_with_before_deco);
+
+    // === External nodes with after-exit decorators ===
+    let external_digest = BasicBlockNodeBuilder::new(vec![Operation::Neg], Vec::new())
+        .build()
+        .unwrap()
+        .digest();
+    let external_no_deco = crate::mast::ExternalNodeBuilder::new(external_digest)
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_with_after_deco = crate::mast::ExternalNodeBuilder::new(external_digest)
+        .with_after_exit(vec![trace_deco])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(external_no_deco);
+    forest.make_root(external_with_after_deco);
+
+    // Verify initial state: 14 root nodes (7 pairs) plus supporting nodes
+    assert_eq!(forest.num_procedures(), 14);
+    assert!(forest.num_nodes() > 14); // Supporting nodes (children) increase total count
+    assert!(!forest.debug_info.is_empty());
+
+    // Action: Strip decorators first, then compact
+    forest.strip_decorators();
+    forest.compact();
+
+    // Verify compaction results:
+    // - 7 node pairs merged into 7 single nodes
+    // - Supporting nodes preserved as they're reachable
+    // - All decorators removed
+    // - Roots preserved (at least 7, possibly more due to deduplication)
+    assert_eq!(forest.num_nodes(), 13); // 7 main nodes + 6 supporting nodes (children)
+    assert!(forest.num_procedures() >= 7);
+    assert!(forest.debug_info.is_empty());
+}
+
+#[test]
+fn test_decorator_stripping_independent() {
+    let mut forest = MastForest::new();
+
+    // Add some nodes with decorators
+    let decorator = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let node_with_deco = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(node_with_deco);
+
+    // Verify initial state has decorators
+    assert!(!forest.debug_info.is_empty());
+    assert_eq!(forest.decorators().len(), 1);
+
+    // Strip decorators only
+    forest.strip_decorators();
+
+    // Verify decorators are removed but structure remains
+    assert!(forest.debug_info.is_empty());
+    assert_eq!(forest.num_nodes(), 1);
+    assert_eq!(forest.num_procedures(), 1);
+}
+
+#[test]
+fn test_compaction_independent() {
+    let mut forest = MastForest::new();
+
+    // Create two identical nodes without decorators
+    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(node1);
+    forest.make_root(node2);
+
+    // Verify initial state has duplicate nodes
+    assert_eq!(forest.num_nodes(), 2);
+    assert_eq!(forest.num_procedures(), 2);
+    assert!(forest.debug_info.is_empty()); // No decorators from start
+
+    // Compact only (should merge the two identical nodes)
+    forest.compact();
+
+    // Verify nodes were merged
+    assert_eq!(forest.num_nodes(), 1);
+    assert_eq!(forest.num_procedures(), 1);
+    assert!(forest.debug_info.is_empty());
 }
 
 // HELPER FUNCTIONS

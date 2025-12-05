@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1689
 expression: program
 ---
 begin
@@ -8,10 +9,13 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(assertz, 2)
         eqz
         assert(0)
+        asmOp(assertz.err="Oh no", 2)
         eqz
         assert(15491226248792286710)
+        asmOp(assertz.err="Oh no", 2)
         eqz
         assert(15491226248792286710)
     end

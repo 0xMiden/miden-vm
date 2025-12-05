@@ -273,7 +273,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error code: 0",
+        "assertion failed at clock cycle 9",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -736,13 +736,9 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_library([lib_module])
-        .unwrap();
+    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
         .with_dynamic_library(&library)
         .unwrap()
         .assemble_program(program_source)
@@ -962,13 +958,10 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         end
     ";
 
-    let kernel_library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_kernel(kernel_source)
-        .unwrap();
+    let kernel_library =
+        Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
 
     let program = Assembler::with_kernel(source_manager.clone(), kernel_library)
-        .with_debug_mode(true)
         .assemble_program(program_source)
         .unwrap();
 
@@ -1057,4 +1050,89 @@ fn test_debug_stack_issue_2295_original_repeat() {
     ├── 11: 42
     └── (16 more items)
     ");
+}
+
+// Debug Mode Flag Propagation Test
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn test_debug_mode_flag_propagation() {
+    use miden_core::stack::StackInputs;
+
+    use crate::{AdviceInputs, ExecutionOptions, Kernel};
+
+    // Test case 1: Both debugging and tracing disabled
+    let exec_options_disabled = ExecutionOptions::default();
+    let kernel = Kernel::new(&[]).expect("Failed to create kernel");
+    let stack_inputs = StackInputs::default();
+    let advice_inputs = AdviceInputs::default();
+
+    let process_disabled = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_disabled,
+    );
+
+    // Test case 2: Only tracing enabled
+    let exec_options_tracing = ExecutionOptions::default().with_tracing();
+    let process_tracing = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_tracing,
+    );
+
+    // Test case 3: Only debugging enabled
+    let exec_options_debugging = ExecutionOptions::default().with_debugging(true);
+    let process_debugging = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_debugging,
+    );
+
+    // Test case 4: Both tracing and debugging enabled
+    let exec_options_both = ExecutionOptions::default().with_tracing().with_debugging(true);
+    let process_both = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_both,
+    );
+
+    // Test case 5: Process::new_debug() method
+    let process_new_debug = Process::new_debug(kernel, stack_inputs, advice_inputs);
+
+    // Verify that in_debug_mode is false when neither is enabled
+    assert!(
+        !process_disabled.decoder.in_debug_mode(),
+        "Debug mode should be disabled when neither debugging nor tracing is enabled"
+    );
+
+    // According to the task description, in_debug_mode should be true when tracing is enabled
+    // But currently this will fail because the logic is incorrect
+    // This test will help us verify our fix
+    assert!(
+        process_tracing.decoder.in_debug_mode(),
+        "Debug mode should be enabled when tracing is enabled"
+    );
+
+    // Verify that in_debug_mode is true when debugging is enabled
+    assert!(
+        process_debugging.decoder.in_debug_mode(),
+        "Debug mode should be enabled when debugging is enabled"
+    );
+
+    // Verify that in_debug_mode is true when both are enabled
+    assert!(
+        process_both.decoder.in_debug_mode(),
+        "Debug mode should be enabled when both debugging and tracing are enabled"
+    );
+
+    // Verify that Process::new_debug() correctly enables debug mode
+    assert!(
+        process_new_debug.decoder.in_debug_mode(),
+        "Debug mode should be enabled when using Process::new_debug()"
+    );
 }

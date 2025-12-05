@@ -109,13 +109,13 @@ fn get_mast_node_ext_methods() -> Vec<&'static str> {
         "digest",
         "before_enter",
         "after_exit",
-        "remove_decorators",
         "to_display",
         "to_pretty_print",
         "has_children",
         "append_children_to",
         "for_each_child",
         "domain",
+        "verify_node_in_forest",
         "to_builder",
     ]
 }
@@ -147,13 +147,6 @@ fn generate_method_impl_for_trait_method(
             fn after_exit<'a>(&'a self, forest: &'a crate::mast::MastForest) -> &'a [crate::mast::DecoratorId] {
                 match self {
                     #(#enum_name::#variant_names(field) => field.after_exit(forest)),*
-                }
-            }
-        },
-        "remove_decorators" => quote! {
-            fn remove_decorators(&mut self) {
-                match self {
-                    #(#enum_name::#variant_names(field) => field.remove_decorators()),*
                 }
             }
         },
@@ -196,6 +189,14 @@ fn generate_method_impl_for_trait_method(
             fn domain(&self) -> miden_crypto::Felt {
                 match self {
                     #(#enum_name::#variant_names(field) => field.domain()),*
+                }
+            }
+        },
+        "verify_node_in_forest" => quote! {
+            #[cfg(debug_assertions)]
+            fn verify_node_in_forest(&self, forest: &crate::mast::MastForest) {
+                match self {
+                    #(#enum_name::#variant_names(field) => field.verify_node_in_forest(forest)),*
                 }
             }
         },

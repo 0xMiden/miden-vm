@@ -346,10 +346,8 @@ impl Test {
             (Assembler::new(self.source_manager.clone()), None)
         };
 
-        let mut assembler = self
-            .add_modules
-            .iter()
-            .fold(assembler, |mut assembler, (path, source)| {
+        let mut assembler =
+            self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
                 let module = source
                     .parse_with_options(
                         &self.source_manager,
@@ -358,8 +356,8 @@ impl Test {
                     .expect("invalid masm source code");
                 assembler.compile_and_statically_link(module).expect("failed to link module");
                 assembler
-            })
-            .with_debug_mode(self.in_debug_mode);
+            });
+        // Debug mode is now always enabled
         for library in &self.libraries {
             assembler.link_dynamic_library(library).unwrap();
         }
@@ -537,7 +535,13 @@ impl Test {
     /// Returns the last state of the stack after executing a test.
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
-        let trace = self.execute().expect("failed to execute");
+        let trace = self
+            .execute()
+            .inspect_err(|_err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+            })
+            .expect("failed to execute");
 
         trace.last_stack_state()
     }
@@ -635,10 +639,10 @@ impl Test {
             return;
         }
 
-        // Note: we fix a large fragment size here (i.e. the largest trace length we can prove), as
-        // we're not testing the fragment boundaries with these tests (which are tested separately),
-        // but rather only the per-fragment trace generation logic.
-        const FRAGMENT_SIZE: usize = 1 << 29;
+        // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
+        // with these tests (which are tested separately), but rather only the per-fragment trace
+        // generation logic - though not too big so as to over-allocate memory.
+        const FRAGMENT_SIZE: usize = 1 << 16;
 
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();

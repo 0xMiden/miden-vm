@@ -6,7 +6,7 @@ members = [
     "miden-vm",
     "processor",
     "prover",
-    "stdlib",
+    "libcore",
     "verifier",
 ]
 resolver = "2"
@@ -45,7 +45,7 @@ miden-mast-package = { path = "./crates/mast-package", version = "0.20", default
 miden-processor = { path = "./processor", version = "0.20", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
 miden-prover = { path = "./prover", version = "0.20", default-features = false }
-miden-stdlib = { path = "./stdlib", version = "0.20", default-features = false }
+miden-libcore = { path = "./libcore", version = "0.20", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.20", default-features = false }
 miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.20", default-features = false }
@@ -54,9 +54,14 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.20", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.18", default-features = false }
+miden-crypto = { version = "0.19", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
+
+# Constraints to resolve duplicates
+semver = "1.0"
+syn = "1.0"
+windows-sys = "0.61"
 
 # Third-party crates
 blake3 = { version = "1.8" }
@@ -72,9 +77,10 @@ proptest-derive = { version = "0.7", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged = {version = "0.1" }
+sha2 = { version = "0.10", default-features = false }
 smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 thiserror = { version = "2.0", default-features = false }
-tokio = { version = "1.47", default-features = false }
+tokio = { version = "1.48", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
 winter-air = { version = "0.13", default-features = false }
 winter-fri = "0.13"

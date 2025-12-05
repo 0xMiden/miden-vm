@@ -339,6 +339,13 @@ pub enum ParsingError {
         span: SourceSpan,
         message: String,
     },
+    #[error("invalid padding value for the `adv.push_mapvaln` instruction: {padding}")]
+    #[diagnostic(help("valid padding values are 0, 4, and 8"))]
+    InvalidPadValue {
+        #[label]
+        span: SourceSpan,
+        padding: u8,
+    },
 }
 
 impl ParsingError {

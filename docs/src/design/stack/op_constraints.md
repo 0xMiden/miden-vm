@@ -193,12 +193,12 @@ This group contains operations which require constraints with degree up to $3$. 
 | `SPAN`        |     $86$     |   `101_0110`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `JOIN`        |     $87$     |   `101_0111`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `DYN`         |     $88$     |   `101_1000`    | [Flow control ops](../decoder/index.md) |     $5$     |
-| `HORNEREXT`   |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `LOGPRECOMPILE` |     $90$     |   `101_1010`    | [Crypto ops](./crypto_ops.md#log_precompile) |     $5$     |
+| `HORNERBASE`  |     $89$     |   `101_1001`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
+| `HORNEREXT`   |     $90$     |   `101_1010`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
 | `PUSH`        |     $91$     |   `101_1011`    |         [I/O ops](./io_ops.md)         |     $5$     |
 | `DYNCALL`     |     $92$     |   `101_1100`    | [Flow control ops](../decoder/index.md) |     $5$     |
 | `EVALCIRCUIT` |     $93$     |   `101_1101`    |     [Crypto ops](./crypto_ops.md)      |     $5$     |
-| `<unused>`    |     $94$     |   `101_1110`    |                                        |     $5$     |
+| `LOGPRECOMPILE` |     $94$     |   `101_1110`    | [Crypto ops](./crypto_ops.md#log_precompile) |     $5$     |
 | `<unused>`    |     $95$     |   `101_1111`    |                                        |     $5$     |
 
 Note that the `SPLIT` and `LOOP` operations are grouped together under the common prefix `101010`, and thus can have a common flag of degree $4$ (using $e_0$ for degree reduction). This is important because both of these operations shift the stack to the left.
@@ -216,7 +216,7 @@ This group contains operations which require constraints with degree up to $5$.
 | Operation    | Opcode value | Binary encoding |            Operation group             | Flag degree |
 | ------------ | :----------: | :-------------: | :------------------------------------: | :---------: |
 | `MRUPDATE`   |     $96$     |   `110_0000`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
-| `HORNERBASE` |    $100$     |   `110_0100`    |     [Crypto ops](./crypto_ops.md)      |     $4$     |
+| `<unused>`   |    $100$     |   `110_0100`    |                                        |     $4$     |
 | `SYSCALL`    |    $104$     |   `110_1000`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `CALL`       |    $108$     |   `110_1100`    | [Flow control ops](../decoder/index.md) |     $4$     |
 | `END`        |    $112$     |   `111_0000`    | [Flow control ops](../decoder/index.md) |     $4$     |

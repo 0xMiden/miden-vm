@@ -115,6 +115,31 @@ pub struct DecoderState {
     pub parent_addr: Felt,
 }
 
+impl DecoderState {
+    /// This function is called when start executing a node (e.g. `JOIN`, `SPLIT`, etc). It emulates
+    /// pushing a new node onto the block stack, and updates the decoder state to point to the
+    /// current node in the block stack. Hence, the `current_addr` is set to the (replayed) address
+    /// of the current node, and the `parent_addr` is set to the (replayed) address of the parent
+    /// node (i.e. the node previously on top of the block stack).
+    pub fn replay_node_start(&mut self, replay: &mut ExecutionReplay) {
+        self.current_addr = replay.hasher.replay_block_address();
+        self.parent_addr = replay.block_stack.replay_node_start_parent_addr();
+    }
+
+    /// This function is called when we hit an `END` operation, signaling the end of execution for a
+    /// node. It updates the decoder state to point to the previous node in the block stack (which
+    /// could be renamed to "node stack"), and returns the address of the node that just ended,
+    /// along with any flags associated with it.
+    pub fn replay_node_end(&mut self, replay: &mut ExecutionReplay) -> (Felt, NodeFlags) {
+        let node_end_data = replay.block_stack.replay_node_end();
+
+        self.current_addr = node_end_data.prev_addr;
+        self.parent_addr = node_end_data.prev_parent_addr;
+
+        (node_end_data.ended_node_addr, node_end_data.flags)
+    }
+}
+
 // STACK STATE
 // ================================================================================================
 
@@ -269,8 +294,8 @@ pub struct ExecutionReplay {
 /// Replay data for the block stack.
 #[derive(Debug, Default)]
 pub struct BlockStackReplay {
-    /// The parent address - needed for each node start operation (JOIN, SPLIT, etc).
-    node_start: VecDeque<Felt>,
+    /// The parent address, recorded when a new node is started (JOIN, SPLIT, etc).
+    node_start_parent_addr: VecDeque<Felt>,
     /// The data needed to recover the state on an END operation.
     node_end: VecDeque<NodeEndData>,
     /// Extra data needed to recover the state on an END operation specifically for
@@ -282,15 +307,15 @@ impl BlockStackReplay {
     /// Creates a new instance of `BlockStackReplay`.
     pub fn new() -> Self {
         Self {
-            node_start: VecDeque::new(),
+            node_start_parent_addr: VecDeque::new(),
             node_end: VecDeque::new(),
             execution_contexts: VecDeque::new(),
         }
     }
 
     /// Records the node's parent address
-    pub fn record_node_start(&mut self, parent_addr: Felt) {
-        self.node_start.push_back(parent_addr);
+    pub fn record_node_start_parent_addr(&mut self, parent_addr: Felt) {
+        self.node_start_parent_addr.push_back(parent_addr);
     }
 
     /// Records the necessary data needed to properly recover the state on an END operation.
@@ -317,8 +342,10 @@ impl BlockStackReplay {
     }
 
     /// Replays the node's parent address
-    pub fn replay_node_start(&mut self) -> Felt {
-        self.node_start.pop_front().expect("No node start address recorded")
+    pub fn replay_node_start_parent_addr(&mut self) -> Felt {
+        self.node_start_parent_addr
+            .pop_front()
+            .expect("No node start parent address recorded")
     }
 
     /// Replays the data needed to recover the state on an END operation.

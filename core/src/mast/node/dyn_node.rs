@@ -34,6 +34,25 @@ impl DynNode {
     pub const DYNCALL_DOMAIN: Felt = Felt::new(OPCODE_DYNCALL as u64);
 }
 
+/// Default digest constants
+impl DynNode {
+    /// The default digest for a DynNode representing a dyncall operation.
+    pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
+        Felt::new(8751004906421739448),
+        Felt::new(13469709002495534233),
+        Felt::new(12584249374630430826),
+        Felt::new(7624899870831503004),
+    ]);
+
+    /// The default digest for a DynNode representing a dynexec operation.
+    pub const DYN_DEFAULT_DIGEST: Word = Word::new([
+        Felt::new(8115106948140260551),
+        Felt::new(13491227816952616836),
+        Felt::new(15015806788322198710),
+        Felt::new(16575543461540527115),
+    ]);
+}
+
 /// Public accessors
 impl DynNode {
     /// Returns true if the [`DynNode`] represents a dyncall operation, and false for dynexec.
@@ -171,17 +190,16 @@ impl MastNodeExt for DynNode {
 
     /// Returns the decorators to be executed before this node is executed.
     fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.before_enter(forest)
     }
 
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.after_exit(forest)
-    }
-
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self) {
-        self.decorator_store.remove_decorators();
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -227,8 +245,8 @@ impl MastNodeExt for DynNode {
             },
             DecoratorStore::Linked { id } => {
                 // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = if self.is_dyncall {
                     DynNodeBuilder::new_dyncall()
                 } else {
@@ -237,6 +255,25 @@ impl MastNodeExt for DynNode {
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
             },
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest) {
+        if let Some(id) = self.decorator_store.linked_id() {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node = &forest.nodes[id];
+            let forest_node_ptr = match forest_node {
+                crate::mast::MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
+                _ => panic!("Node type mismatch at {:?}", id),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {:?} to be self",
+                id
+            );
         }
     }
 }
@@ -304,19 +341,9 @@ impl DynNodeBuilder {
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
-            Word::new([
-                Felt::new(8751004906421739448),
-                Felt::new(13469709002495534233),
-                Felt::new(12584249374630430826),
-                Felt::new(7624899870831503004),
-            ])
+            DynNode::DYNCALL_DEFAULT_DIGEST
         } else {
-            Word::new([
-                Felt::new(8115106948140260551),
-                Felt::new(13491227816952616836),
-                Felt::new(15015806788322198710),
-                Felt::new(16575543461540527115),
-            ])
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         DynNode {
@@ -332,26 +359,20 @@ impl DynNodeBuilder {
 
 impl MastForestContributor for DynNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let node = self.build();
-
-        let DynNode {
-            is_dyncall,
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("DynNodeBuilder::build() should always return owned decorators");
+        // Use the forced digest if provided, otherwise use the default digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else if self.is_dyncall {
+            DynNode::DYNCALL_DEFAULT_DIGEST
+        } else {
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -359,7 +380,7 @@ impl MastForestContributor for DynNodeBuilder {
             .nodes
             .push(
                 DynNode {
-                    is_dyncall,
+                    is_dyncall: self.is_dyncall,
                     digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
@@ -387,19 +408,9 @@ impl MastForestContributor for DynNodeBuilder {
             if let Some(forced_digest) = self.digest {
                 forced_digest
             } else if self.is_dyncall {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(8751004906421739448),
-                    miden_crypto::Felt::new(13469709002495534233),
-                    miden_crypto::Felt::new(12584249374630430826),
-                    miden_crypto::Felt::new(7624899870831503004),
-                ])
+                DynNode::DYNCALL_DEFAULT_DIGEST
             } else {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(8115106948140260551),
-                    miden_crypto::Felt::new(13491227816952616836),
-                    miden_crypto::Felt::new(15015806788322198710),
-                    miden_crypto::Felt::new(16575543461540527115),
-                ])
+                DynNode::DYN_DEFAULT_DIGEST
             },
         )
     }
@@ -459,25 +470,19 @@ impl DynNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        let node = self.build();
-
-        let DynNode {
-            is_dyncall,
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("DynNodeBuilder::build() should always return owned decorators");
+        // Use the same digest computation as in build()
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else if self.is_dyncall {
+            DynNode::DYNCALL_DEFAULT_DIGEST
+        } else {
+            DynNode::DYN_DEFAULT_DIGEST
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -485,7 +490,7 @@ impl DynNodeBuilder {
             .nodes
             .push(
                 DynNode {
-                    is_dyncall,
+                    is_dyncall: self.is_dyncall,
                     digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
@@ -556,13 +561,18 @@ mod tests {
     /// domain.
     #[test]
     pub fn test_dyn_node_digest() {
+        let mut forest = MastForest::new();
+        let dyn_node_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+        let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
-            DynNodeBuilder::new_dyn().build().digest(),
+            dyn_node.digest(),
             Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
+        let dyncall_node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+        let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
-            DynNodeBuilder::new_dyncall().build().digest(),
+            dyncall_node.digest(),
             Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
         );
     }

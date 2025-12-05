@@ -33,23 +33,23 @@
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
     "Liberation Mono", monospace;
-  --font-size-base: 14px;
+  --font-size-base: 16px;
   --line-height-base: 150%;
   --letter-spacing-base: 0;
 
   /* ---- Radii & Spacing ---- */
-  --radius-xs: 5px;
-  --radius-md: 5px;
-  --radius-lg: 5px;
-  --radius-xl: 5px;
+  --radius-xs: 0.357rem;
+  --radius-md: 0.357rem;
+  --radius-lg: 0.357rem;
+  --radius-xl: 0.357rem;
 
-  /* Design system spacing - exact pixel values */
-  --space-4px: 4px; /* Inline code padding */
-  --space-16px: 16px; /* Standard paragraph, list, heading spacing */
-  --space-24px: 24px; /* H1 to first content, H2 to large components, list indent */
-  --space-32px: 32px; /* Section breaks, major structural spacing */
-  --space-40px: 40px; /* Major structural reset (lower bound) */
-  --space-48px: 48px; /* Major structural reset (upper bound) */
+  /* Design system spacing - rem values based on 14px base */
+  --space-4px: 0.286rem; /* Inline code padding */
+  --space-16px: 1.143rem; /* Standard paragraph, list, heading spacing */
+  --space-24px: 1.714rem; /* H1 to first content, H2 to large components, list indent */
+  --space-32px: 2.286rem; /* Section breaks, major structural spacing */
+  --space-40px: 2.857rem; /* Major structural reset (lower bound) */
+  --space-48px: 3.429rem; /* Major structural reset (upper bound) */
 
   /* Legacy spacing variables for compatibility */
   --space-1: 0.25rem; /* 4px  */
@@ -69,10 +69,10 @@
   /* ---- Container widths ---- */
 
   /* Common layout sizes */
-  --navbar-height: 64px;
+  --navbar-height: 4.571rem;
 
   /* Docs sidebar width */
-  --doc-sidebar-width: 250px !important;
+  --doc-sidebar-width: 17.857rem !important;
 }
 
 /* ==========================================
@@ -106,21 +106,21 @@
   --ifm-heading-font-weight: 700;
 
   /* Heading typography specifications */
-  --ifm-h1-font-size: 28px;
-  --ifm-h1-line-height: 32px;
-  --ifm-h2-font-size: 24px;
-  --ifm-h2-line-height: 28px;
-  --ifm-h3-font-size: 20px;
-  --ifm-h3-line-height: 24px;
-  --ifm-h4-font-size: 16px;
-  --ifm-h4-line-height: 16px;
+  --ifm-h1-font-size: 2rem;
+  --ifm-h1-line-height: 114.3%;
+  --ifm-h2-font-size: 1.714rem;
+  --ifm-h2-line-height: 116.7%;
+  --ifm-h3-font-size: 1.429rem;
+  --ifm-h3-line-height: 120%;
+  --ifm-h4-font-size: 1.143rem;
+  --ifm-h4-line-height: 100%;
 
   /* Code typography specifications */
-  --ifm-code-font-size: 14px;
-  --ifm-code-line-height: 150%;
+  --ifm-code-font-size: 1rem;
+  --ifm-code-line-height: 150%; /* Reduced from 171.4% for tighter spacing */
   --ifm-code-letter-spacing: -2%;
-  --ifm-code-padding-horizontal: 4px;
-  --ifm-code-padding-vertical: 4px;
+  --ifm-code-padding-horizontal: 0.286rem;
+  --ifm-code-padding-vertical: 0.214rem; /* Reduced from 0.286rem */
 
   /* Layout & spacing */
   --ifm-spacing-horizontal: var(--space-4);
@@ -265,13 +265,13 @@ h4 {
 
 h5 {
   font-size: 1.125rem;
-  line-height: 20px;
+  line-height: 111.1%;
 }
 
 h6 {
   font-size: 1rem;
   text-transform: none;
-  line-height: 16px;
+  line-height: 100%;
 }
 
 /* Bold text styling */
@@ -351,11 +351,16 @@ img {
 /* ThemeClassNames.layout.navbar.container */
 .theme-layout-navbar {
   height: var(--ifm-navbar-height);
-  backdrop-filter: saturate(1.1) blur(8px);
   border-bottom: 1px solid var(--ifm-border-color) !important;
   background: color-mix(in oklab, var(--ifm-background-color) 75%, transparent);
-  backdrop-filter: saturate(1.1) blur(8px);
   box-shadow: none;
+}
+
+/* Apply backdrop-filter only on desktop to avoid breaking mobile sidebar */
+@media (min-width: 997px) {
+  .theme-layout-navbar {
+    backdrop-filter: saturate(1.1) blur(8px);
+  }
 }
 
 /* ThemeClassNames.layout.footer.container */
@@ -460,6 +465,7 @@ img {
   align-items: flex-start; /* icon aligns with text top */
   gap: 0.75rem; /* spacing between icon and text */
   padding: 1rem 1.25rem;
+  font-size: var(--ifm-font-size-base);
 }
 
 /* ThemeClassNames.common.admonition */
@@ -481,8 +487,8 @@ img {
 
 /* NOTE */
 .theme-admonition.alert--secondary {
-  --ifm-alert-border-color: #df9f26;
-  border-top-color: #df9f26;
+  --ifm-alert-border-color: var(--ifm-color-primary);
+  border-top-color: var(--ifm-color-primary);
 }
 /* TIP */
 .theme-admonition.alert--success {
@@ -569,12 +575,27 @@ img {
 }
 
 /* ==========================================
+   10.1) FIX DOCCARDLIST SPACING IN MARKDOWN
+   ========================================== */
+
+/* Remove all margins from DocCardList containers and card grid elements */
+.theme-doc-markdown [class*="cardContainer"],
+.theme-doc-markdown article[class*="col"],
+.theme-doc-markdown div[class*="row"],
+.theme-doc-markdown section[class*="row"],
+.theme-doc-markdown ul[class*="cardContainer"] {
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+}
+
+/* ==========================================
    11) TABLES
    ========================================== */
 
 /* Apply border radius to the entire table */
 table {
-  border-radius: 5px; /* Adjust this value to change corner rounding */
+  border-radius: 0.357rem; /* 5px converted to rem */
 }
 
 tbody tr {
@@ -588,7 +609,7 @@ tbody tr {
 
 .theme-code-block {
   border: 1px solid var(--ifm-border-color);
-  border-radius: 5px;
+  border-radius: 0.357rem;
   position: relative;
 }
 
@@ -596,8 +617,8 @@ tbody tr {
 .theme-code-block [class*="codeBlockTitle"] {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 0.714rem;
+  padding: 0.714rem 0.857rem;
   font-family: var(--font-sans) !important;
   font-size: 0.875rem !important;
   font-weight: 500 !important;
@@ -614,7 +635,7 @@ tbody tr {
     var(--color-surface) 96%,
     var(--color-bg, #fff)
   );
-  padding: 16px 18px;
+  padding: 0.857rem 1.286rem; /* Reduced vertical padding from 1.143rem to 0.857rem */
 }
 
 /* Code text - design specifications */
@@ -633,10 +654,14 @@ tbody tr {
 /* Inline code - design specifications */
 code {
   font-family: var(--font-mono);
-  font-size: 12px; /* 14px */
-  line-height: 24px; /* 24px */
+  font-size: 0.857rem; /* 12px converted to rem */
+  line-height: 120%; /* Further reduced for tighter spacing */
   letter-spacing: var(--ifm-code-letter-spacing); /* -2% */
   font-weight: 400;
+  background: var(--ifm-background-surface-color);
+  padding: var(--ifm-code-padding-vertical) var(--ifm-code-padding-horizontal);
+  border-radius: var(--ifm-code-border-radius);
+  border: 1px solid var(--ifm-border-color);
 }
 
 /* Highlighted lines / magic comments */
@@ -662,7 +687,7 @@ code {
 /* Scope to docs content only */
 .theme-doc-markdown details {
   border: 1px solid var(--ifm-border-color);
-  border-radius: 5px;
+  border-radius: 0.357rem;
   background: var(--ifm-background-surface-color);
   margin: 0.75rem 0 1rem;
   overflow: hidden; /* crisp rounded corners */
@@ -673,8 +698,8 @@ code {
 .theme-doc-markdown details > summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
+  gap: 0.714rem;
+  padding: 0.714rem 0.857rem;
   font-weight: 500;
   text-transform: uppercase;
   font-family: var(--font-sans);
@@ -684,6 +709,18 @@ code {
   user-select: none;
   color: var(--color-text);
   border-bottom: 1px solid transparent;
+}
+
+/* Normal text variant - use .normal-text class to override uppercase */
+.theme-doc-markdown details.normal-text > summary,
+.theme-doc-markdown details > summary.normal-text {
+  text-transform: none !important;
+  font-family: var(
+    --font-sans
+  ) !important; /* Use monospace like code block titles */
+  font-size: 0.875rem !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.02rem !important;
 }
 
 /* Hide native disclosure marker */
@@ -696,8 +733,8 @@ code {
 /* Custom caret icon */
 .theme-doc-markdown details > summary::before {
   content: "";
-  width: 3px;
-  height: 3px;
+  width: 0.214rem;
+  height: 0.214rem;
   flex-shrink: 0;
   -webkit-mask: url("/img/custom_caret.svg") no-repeat center / contain;
   mask: url("/img/custom_caret.svg") no-repeat center / contain;
@@ -729,7 +766,7 @@ code {
 .theme-doc-markdown details pre {
   margin: 0;
   background: color-mix(in oklab, var(--color-surface) 96%, var(--color-bg));
-  border-radius: 6px;
+  border-radius: 0.429rem;
 }
 
 .theme-doc-markdown details > summary {
@@ -808,7 +845,7 @@ code {
 .table-of-contents__link {
   color: var(--color-text);
   display: block;
-  padding: 4px 0;
+  padding: 0.286rem 0;
 }
 
 .table-of-contents__link--active {
@@ -838,8 +875,8 @@ code {
   display: inline-block !important;
   text-transform: uppercase !important;
   letter-spacing: 0.05em !important;
-  margin-top: 8px !important;
-  margin-bottom: 8px !important;
+  margin-top: 0.571rem !important;
+  margin-bottom: 0.571rem !important;
 }
 
 /* ==========================================
@@ -888,7 +925,7 @@ code {
 }
 
 /* ==========================================
-   17) NUMERED LISTS
+   18) NUMERED LISTS
    ========================================== */
 
 /* === DOCUSAURUS "VitePress-style" numbered steps === */
@@ -992,7 +1029,7 @@ code {
 }
 
 /* ==========================================
-   18) DESIGN SYSTEM SPACING SPECIFICATIONS
+   19) DESIGN SYSTEM SPACING SPECIFICATIONS
    ========================================== */
 
 /* Apply design system spacing to documentation content */
@@ -1020,12 +1057,36 @@ code {
   margin-bottom: var(--space-16px); /* Paragraph → Paragraph: 16px */
 }
 
-/* List spacing */
-.theme-doc-markdown ul,
-.theme-doc-markdown ol {
+/* List spacing - only outermost lists get large indent */
+.theme-doc-markdown > ul,
+.theme-doc-markdown > ol,
+.theme-doc-markdown p + ul,
+.theme-doc-markdown p + ol,
+.theme-doc-markdown h1 + ul,
+.theme-doc-markdown h1 + ol,
+.theme-doc-markdown h2 + ul,
+.theme-doc-markdown h2 + ol,
+.theme-doc-markdown h3 + ul,
+.theme-doc-markdown h3 + ol,
+.theme-doc-markdown h4 + ul,
+.theme-doc-markdown h4 + ol,
+.theme-doc-markdown h5 + ul,
+.theme-doc-markdown h5 + ol,
+.theme-doc-markdown h6 + ul,
+.theme-doc-markdown h6 + ol {
   margin-top: var(--space-16px); /* Paragraph → List: 16px */
   margin-bottom: var(--space-16px); /* List → Next Paragraph: 16px */
-  padding-left: var(--space-24px); /* List indent: 24px */
+  padding-left: var(--space-24px); /* Large indent for outermost lists: 24px */
+}
+
+/* Nested lists get enhanced indent and padding for better differentiation */
+.theme-doc-markdown ul ul,
+.theme-doc-markdown ul ol,
+.theme-doc-markdown ol ul,
+.theme-doc-markdown ol ol {
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  padding-left: 1.5rem; /* Increased from 1.5rem for better visual differentiation */
 }
 
 /* H2 to large components (images, tables, diagrams) */

@@ -1,8 +1,8 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
+use miden_libcore::CoreLibrary;
 use miden_processor::{AdviceInputs, fast::FastProcessor};
-use miden_stdlib::StdLibrary;
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -48,8 +48,8 @@ fn program_execution_for_trace(c: &mut Criterion) {
                 group.bench_function(file_stem, |bench| {
                     let mut assembler = Assembler::default();
                     assembler
-                        .link_dynamic_library(StdLibrary::default())
-                        .expect("failed to load stdlib");
+                        .link_dynamic_library(CoreLibrary::default())
+                        .expect("failed to load libcore");
 
                     let program = assembler
                         .assemble_program(&source)
@@ -58,7 +58,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
                             let host = DefaultHost::default()
-                                .with_library(&StdLibrary::default())
+                                .with_library(&CoreLibrary::default())
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_advice_inputs(

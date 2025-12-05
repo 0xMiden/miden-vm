@@ -117,7 +117,7 @@ impl Serializable for MastForest {
 
         // decorator & node counts
         target.write_usize(self.nodes.len());
-        target.write_usize(self.decorators.len());
+        target.write_usize(self.debug_info.num_decorators());
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
@@ -133,12 +133,12 @@ impl Serializable for MastForest {
                 let node_id = MastNodeId::new_unchecked(mast_node_id as u32);
 
                 // Use centralized NodeToDecoratorIds for node-level decorators
-                let before_decorators = self.node_decorator_storage.get_before_decorators(node_id);
+                let before_decorators = self.before_enter_decorators(node_id);
                 if !before_decorators.is_empty() {
                     before_enter_decorators.push((mast_node_id, before_decorators.to_vec()));
                 }
 
-                let after_decorators = self.node_decorator_storage.get_after_decorators(node_id);
+                let after_decorators = self.after_exit_decorators(node_id);
                 if !after_decorators.is_empty() {
                     after_exit_decorators.push((mast_node_id, after_decorators.to_vec()));
                 }
@@ -168,13 +168,13 @@ impl Serializable for MastForest {
 
         self.advice_map.write_into(target);
         let error_codes: BTreeMap<u64, String> =
-            self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
+            self.debug_info.error_codes().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
         // write all decorator data below
 
         let mut decorator_data_builder = DecoratorDataBuilder::new();
-        for decorator in &self.decorators {
+        for decorator in self.debug_info.decorators() {
             decorator_data_builder.add_decorator(decorator)
         }
 
@@ -251,7 +251,7 @@ impl Deserializable for MastForest {
                 .collect::<Result<Vec<_>, _>>()?;
 
             let basic_block_decorators: Vec<(usize, DecoratorList)> =
-                read_block_decorators(source, mast_forest.decorators.len())?;
+                read_block_decorators(source, mast_forest.debug_info.num_decorators())?;
             for (node_id, decorator_list) in basic_block_decorators {
                 match &mut mast_builders[node_id] {
                     MastNodeBuilder::BasicBlock(basic_block) => {
@@ -267,13 +267,13 @@ impl Deserializable for MastForest {
 
             // read "before enter" and "after exit" decorators, and update the corresponding nodes
             let before_enter_decorators: Vec<(usize, Vec<DecoratorId>)> =
-                read_before_after_decorators(source, mast_forest.decorators.len())?;
+                read_before_after_decorators(source, mast_forest.debug_info.num_decorators())?;
             for (node_id, decorator_ids) in before_enter_decorators {
                 mast_builders[node_id].append_before_enter(decorator_ids);
             }
 
             let after_exit_decorators: Vec<(usize, Vec<DecoratorId>)> =
-                read_before_after_decorators(source, mast_forest.decorators.len())?;
+                read_before_after_decorators(source, mast_forest.debug_info.num_decorators())?;
             for (node_id, decorator_ids) in after_exit_decorators {
                 mast_builders[node_id].append_after_exit(decorator_ids);
             }
@@ -298,7 +298,10 @@ impl Deserializable for MastForest {
             mast_forest
         };
 
-        mast_forest.error_codes = error_codes;
+        mast_forest.debug_info.clear_error_codes();
+        mast_forest
+            .debug_info
+            .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
 
         Ok(mast_forest)
     }

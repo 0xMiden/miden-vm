@@ -10,7 +10,10 @@ use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    mast::{
+        DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
+        MastNodeId,
+    },
 };
 
 // LOOP NODE
@@ -153,17 +156,16 @@ impl MastNodeExt for LoopNode {
 
     /// Returns the decorators to be executed before this node is executed.
     fn before_enter<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.before_enter(forest)
     }
 
     /// Returns the decorators to be executed after this node is executed.
     fn after_exit<'a>(&'a self, forest: &'a MastForest) -> &'a [DecoratorId] {
+        #[cfg(debug_assertions)]
+        self.verify_node_in_forest(forest);
         self.decorator_store.after_exit(forest)
-    }
-
-    /// Removes all decorators from this node.
-    fn remove_decorators(&mut self) {
-        self.decorator_store.remove_decorators();
     }
 
     fn to_display<'a>(&'a self, mast_forest: &'a MastForest) -> Box<dyn fmt::Display + 'a> {
@@ -205,12 +207,31 @@ impl MastNodeExt for LoopNode {
             },
             DecoratorStore::Linked { id } => {
                 // Extract decorators from forest storage when in Linked state
-                let before_enter = forest.node_decorator_storage.get_before_decorators(id).to_vec();
-                let after_exit = forest.node_decorator_storage.get_after_decorators(id).to_vec();
+                let before_enter = forest.before_enter_decorators(id).to_vec();
+                let after_exit = forest.after_exit_decorators(id).to_vec();
                 let mut builder = LoopNodeBuilder::new(self.body);
                 builder = builder.with_before_enter(before_enter).with_after_exit(after_exit);
                 builder
             },
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn verify_node_in_forest(&self, forest: &MastForest) {
+        if let Some(id) = self.decorator_store.linked_id() {
+            // Verify that this node is the one stored at the given ID in the forest
+            let self_ptr = self as *const Self;
+            let forest_node = &forest.nodes[id];
+            let forest_node_ptr = match forest_node {
+                MastNode::Loop(loop_node) => loop_node as *const LoopNode as *const (),
+                _ => panic!("Node type mismatch at {:?}", id),
+            };
+            let self_as_void = self_ptr as *const ();
+            debug_assert_eq!(
+                self_as_void, forest_node_ptr,
+                "Node pointer mismatch: expected node at {:?} to be self",
+                id
+            );
         }
     }
 }
@@ -310,11 +331,9 @@ impl MastForestContributor for LoopNodeBuilder {
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &before_enter,
-            &after_exit,
-        );
+        forest
+            .debug_info
+            .register_node_decorators(future_node_id, &before_enter, &after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -418,17 +437,13 @@ impl LoopNodeBuilder {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
         let Some(digest) = self.digest else {
-            panic!("Digest is required for deserialization")
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.node_decorator_storage.add_node_decorators(
-            future_node_id,
-            &self.before_enter,
-            &self.after_exit,
-        );
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning

@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1531
 expression: program
 ---
 begin
@@ -13,17 +14,31 @@ begin
                 noop
                 trace(0)
             end
+            asmOp(if.true, 0)
             if.true
-                basic_block trace(1) push(42) noop trace(2) end
+                basic_block
+                    trace(1)
+                    asmOp(push.42, 1)
+                    push(42)
+                    noop
+                    trace(2)
+                end
             else
-                basic_block trace(3) push(22) noop trace(3) end
+                basic_block
+                    trace(3)
+                    asmOp(push.22, 1)
+                    push(22)
+                    noop
+                    trace(3)
+                end
             end
             trace(4)
         end
+        asmOp(if.true, 0)
         if.true
-            basic_block trace(1) push(42) noop trace(2) end
+            basic_block trace(1) asmOp(push.42, 1) push(42) noop trace(2) end
         else
-            basic_block trace(3) push(22) noop trace(3) end
+            basic_block trace(3) asmOp(push.22, 1) push(22) noop trace(3) end
         end
         trace(4)
     end

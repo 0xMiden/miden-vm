@@ -266,6 +266,7 @@ impl PrettyPrint for Instruction {
             Self::MTreeVerifyWithError(err_code) => flatten(
                 const_text("mtree_verify.err") + const_text("=") + text(format!("\"{err_code}\"")),
             ),
+            Self::CryptoStream => const_text("crypto_stream"),
 
             // ----- STARK proof verification -----------------------------------------------------
             Self::FriExt2Fold4 => const_text("fri_ext2fold4"),
@@ -409,11 +410,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Rpo256::hash(b"std::math::u64::add");
+        let digest = Rpo256::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x90b3926941061b28638b6cc0bbdb3bcb335e834dc9ab8044250875055202d2fe",
+            "exec.0x6998a9e7f13f7e81edcabdbc895ec0141f8ce3e7abd061f1370852c082a028fa",
             instruction
         );
     }

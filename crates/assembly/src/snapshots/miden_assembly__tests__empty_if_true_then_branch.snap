@@ -1,14 +1,16 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 117
 expression: program
 ---
 begin
     join
         basic_block push(2147483648) push(4294967294) mstore drop noop end
+        asmOp(if.true, 0)
         if.true
-            basic_block noop end
+            basic_block asmOp(nop, 1) noop end
         else
-            basic_block noop end
+            basic_block asmOp(nop, 1) noop end
         end
     end
 end

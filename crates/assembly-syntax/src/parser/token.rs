@@ -441,6 +441,7 @@ pub enum Token<'input> {
     AdvPush,
     AdvStack,
     PushMapval,
+    PushMapvalCount,
     PushMapvaln,
     PushMtnode,
     And,
@@ -458,6 +459,7 @@ pub enum Token<'input> {
     Cdropw,
     Clk,
     Const,
+    CryptoStream,
     Cswap,
     Cswapw,
     Debug,
@@ -666,6 +668,7 @@ impl fmt::Display for Token<'_> {
             Token::AdvPipe => write!(f, "adv_pipe"),
             Token::AdvPush => write!(f, "adv_push"),
             Token::PushMapval => write!(f, "push_mapval"),
+            Token::PushMapvalCount => write!(f, "push_mapval_count"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
             Token::And => write!(f, "and"),
@@ -683,6 +686,7 @@ impl fmt::Display for Token<'_> {
             Token::Cdropw => write!(f, "cdropw"),
             Token::Clk => write!(f, "clk"),
             Token::Const => write!(f, "const"),
+            Token::CryptoStream => write!(f, "crypto_stream"),
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
@@ -897,6 +901,7 @@ impl<'input> Token<'input> {
                 | Token::AdvPush
                 | Token::AdvStack
                 | Token::PushMapval
+                | Token::PushMapvalCount
                 | Token::PushMapvaln
                 | Token::PushMtnode
                 | Token::And
@@ -911,6 +916,7 @@ impl<'input> Token<'input> {
                 | Token::Cdrop
                 | Token::Cdropw
                 | Token::Clk
+                | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
@@ -941,6 +947,7 @@ impl<'input> Token<'input> {
                 | Token::Hmerge
                 | Token::HornerBase
                 | Token::HornerExt
+                | Token::LogPrecompile
                 | Token::ILog2
                 | Token::Inv
                 | Token::IsOdd
@@ -1058,6 +1065,8 @@ impl<'input> Token<'input> {
                 | Token::U32
                 | Token::U64
                 | Token::U128
+                | Token::Felt
+                | Token::Word
                 | Token::Struct
         )
     }
@@ -1078,6 +1087,7 @@ impl<'input> Token<'input> {
         ("adv_push", Token::AdvPush),
         ("adv_stack", Token::AdvStack),
         ("push_mapval", Token::PushMapval),
+        ("push_mapval_count", Token::PushMapvalCount),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
         ("and", Token::And),
@@ -1094,6 +1104,7 @@ impl<'input> Token<'input> {
         ("cdropw", Token::Cdropw),
         ("clk", Token::Clk),
         ("const", Token::Const),
+        ("crypto_stream", Token::CryptoStream),
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),

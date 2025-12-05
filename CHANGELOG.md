@@ -1,11 +1,22 @@
 # Changelog
 
 ## 0.20.0 (TBD)
+- Added AEAD implementation in the VM using `crypto_stream` instruction ([#2322](https://github.com/0xMiden/miden-vm/pull/2322)).
 
 #### Enhancements
 
+- Added SHA512 hash precompile in `miden::core::crypto::hashes::sha512` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
+- Added EdDSA (Ed25519) signature verification precompile in `miden::core::crypto::dsa::eddsa_ed25519` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
+- Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
+- Added new `memcopy_elements` procedure for the `std::mem` module ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
+- Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
+- Added new `pad_and_hash_elements` procedure to the `std::crypto::hashes::rpo` module ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
+- Add padding option for the `adv.push_mapvaln` instruction ([#2398](https://github.com/0xMiden/miden-vm/pull/2398)).
+- Added missing modules to libcore documentation ([#2416](https://github.com/0xMiden/miden-vm/pull/2416)).
+
 #### Changes
 
+- Fixed `locaddr` alignment when procedure local count is not a multiple of 4 ([#2350](https://github.com/0xMiden/miden-vm/pull/2350)).
 - Added missing implementations of `proptest::Arbitrary` for non-`BasicBlockNode` variants of `MastNode` ([#2335](https://github.com/0xMiden/miden-vm/pull/2335)).
 - [BREAKING] Added builder patterns for all `MastNode` types, made naked constructors module-private ([#2259](https://github.com/0xMiden/miden-vm/pull/2259)).
 - Extend builder patterns for all `MastNode` types ([#2274](https://github.com/0xMiden/miden-vm/pull/2274)).
@@ -15,6 +26,19 @@
 - [BREAKING] hoist before_enter and after_exit decorators to MastForest ([#2323](https://github.com/0xMiden/miden-vm/pull/2323)).
 - [BREAKING] Make argument order of `Assembler::compile_and_statically_link_from_dir` consistent with `Assembler::assemble_library_from_dir`
 - [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
+- Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
+- [BREAKING] Host debug and trace handlers return dynamic errors ([#2367](https://github.com/0xMiden/miden-vm/pull/2367)).
+- [BREAKING] Standardized hash function naming: renamed `hash_2to1` → `merge` and `hash_1to1` → `hash` across all hash modules (blake3, sha256, keccak256, rpo) ([#2381](https://github.com/0xMiden/miden-vm/pull/2381)).
+- Consolidate debug information into `DebugInfo` struct ([#2366](https://github.com/0xMiden/miden-vm/issues/2366)).
+- Wrapped `hperm` instruction in `rpo::permute` procedure ([#2392](https://github.com/0xMiden/miden-vm/pull/2392)).
+- `hash_memory_with_state`, `hash_memory_words`, and `hash_memory_double_words` procedures from the `std::crypto::hashes::rpo` module were renamed to the `hash_elements_with_state`, `hash_words`, and `hash_double_words` respectively ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
+- [BREAKING] Updgrade `miden-crypto` to 0.19 ([#2399](https://github.com/0xMiden/miden-vm/pull/2399)).
+- Pre-allocate main trace buffer in trace generation ([#2345](https://github.com/0xMiden/miden-vm/pull/2345)).
+- Rename the MASM standard library to "miden::core", the crate to `miden-libcore`, and various other MASM module refactors ([#2260](https://github.com/0xMiden/miden-vm/issues/2260))
+- Add a compaction function for achieving maximal sharing out of a `MastForest` with stripped decorators ([#2408](https://github.com/0xMiden/miden-vm/pull/2408)).
+- Refactor and remove tech debt from parallel trace generation ([#2382](https://github.com/0xMiden/miden-vm/pull/2382))
+- [BREAKING] Added `kind` field to `Package` struct to indicate package type (Executable, AccountComponent, NoteScript, TxScript, AuthComponent) ([#2403](https://github.com/0xMiden/miden-vm/pull/2403)).
+- [BREAKING] Make the Assembler work in debug mode, remove optionality ([#2396](https://github.com/0xMiden/miden-vm/pull/2396)).
 
 ## 0.19.1 (2025-11-6)
 
@@ -28,6 +52,9 @@
 - Added support for leaves with multiple pairs in `std::collections::smt::get` ([#2048](https://github.com/0xMiden/miden-vm/pull/2048)).
 - Added support for leaves with multiple pairs in `std::collections::smt::set` ([#2248](https://github.com/0xMiden/miden-vm/pull/2248)).
 - Made `miden-vm analyze` output analysis even if execution ultimately errored. ([#2204](https://github.com/0xMiden/miden-vm/pull/2204)).
+- Allow `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296))
+- Remove operations `FmpUpdate` and `FmpAdd`, as well as columns `fmp` and `in_syscall` ([#2308](https://github.com/0xMiden/miden-vm/pull/2308))
+- Reduce the constraints degree of `HORNERBASE` ([#2328](https://github.com/0xMiden/miden-vm/pull/2328))
 - [BREAKING] Implement ECDSA precompile ([#2277](https://github.com/0xMiden/miden-vm/pull/2277)).
 - Allowed `CALL` and `DYNCALL` from a syscall context ([#2296](https://github.com/0xMiden/miden-vm/pull/2296)).
 - Implemented `AdviceProvider::has_merkle_path()` method.

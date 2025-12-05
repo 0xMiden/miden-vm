@@ -1,3 +1,4 @@
+use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
     Felt, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
@@ -256,4 +257,259 @@ fn mtree_update() {
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store.clone());
     test.expect_stack(&final_stack);
+}
+
+#[test]
+fn crypto_stream_basic() {
+    // Test crypto_stream instruction by setting up plaintext in memory,
+    // a keystream on stack, and verifying encryption works correctly
+
+    let asm_op = "
+        # Initialize memory with plaintext [1,2,3,4,5,6,7,8] at address 1000
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        # Rate is keystream [1,2,3,4,5,6,7,8]
+        push.2000           # dst_ptr
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+
+        # Verify ciphertext written to memory
+        padw push.1000 mem_loadw_be
+        push.2000 mem_loadw_be
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let stack = test.get_last_stack_state();
+
+    // Expected: plaintext + keystream
+    // [1,2,3,4] + [1,2,3,4] = [2,4,6,8]
+    // [5,6,7,8] + [5,6,7,8] = [10,12,14,16]
+
+    let c2 = [stack[3], stack[2], stack[1], stack[0]];
+    let c1 = [stack[7], stack[6], stack[5], stack[4]];
+
+    assert_eq!(c2, [Felt::new(2), Felt::new(4), Felt::new(6), Felt::new(8)]);
+    assert_eq!(c1, [Felt::new(10), Felt::new(12), Felt::new(14), Felt::new(16)]);
+}
+
+#[test]
+fn crypto_stream_rejects_in_place() {
+    let asm_op = "
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        push.1000           # dst_ptr (in-place)
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject in-place encryption");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_rejects_partial_overlap() {
+    // Test that crypto_stream rejects partial overlaps between source and destination
+    //
+    // crypto_stream reads 2 words (8 elements) from [src, src+8) and writes 2 words to [dst, dst+8)
+    // and we need to make sure that we are not reading and writing to the same word at the same
+    // cycle
+
+    // Test case 1: dst starts within src range (src=1000, dst=1004)
+    // src: [1000..1008), dst: [1004..1012) - overlaps by 1 word
+    let asm_op_case1 = "
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        push.1004           # dst_ptr (partial overlap)
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op_case1, &[]);
+    let err = test
+        .execute()
+        .expect_err("crypto_stream should reject partial overlap (dst within src)");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+    ));
+
+    // Test case 2: src starts within dst range (src=1004, dst=1000)
+    // src: [1004..1012), dst: [1000..1008) - overlaps by 1 word
+    let asm_op_case2 = "
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        push.1000           # dst_ptr
+        push.1004           # src_ptr (partial overlap)
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op_case2, &[]);
+    let err = test
+        .execute()
+        .expect_err("crypto_stream should reject partial overlap (src within dst)");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_rejects_src_range_overflow() {
+    // src_end = src + 8 overflows u32 when src = 0xFFFF_FFFC (4294967292)
+    // Expect AddressOutOfBounds before any memory access occurs.
+    let asm_op = "
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        push.0               # dst_ptr (valid)
+        push.4294967292      # src_ptr (u32::MAX - 3, aligned), src+8 overflows
+        push.0.0.0.0         # capacity
+        push.1.2.3.4         # rate[0-3]
+        push.5.6.7.8         # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject when src+8 overflows");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::AddressOutOfBounds { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_rejects_dst_range_overflow() {
+    // dst_end = dst + 8 overflows u32 when dst = 0xFFFF_FFFC (4294967292)
+    // Expect AddressOutOfBounds before any memory access occurs.
+    let asm_op = "
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        push.4294967292      # dst_ptr (u32::MAX - 3, aligned), dst+8 overflows
+        push.0               # src_ptr (valid)
+        push.0.0.0.0         # capacity
+        push.1.2.3.4         # rate[0-3]
+        push.5.6.7.8         # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject when dst+8 overflows");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::AddressOutOfBounds { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_rejects_unaligned_src() {
+    // Unaligned src pointer should be rejected with UnalignedWordAccess
+    let asm_op = "
+        push.2000           # dst_ptr (aligned)
+        push.1002           # src_ptr (unaligned)
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject unaligned src");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_rejects_unaligned_dst() {
+    // Unaligned dst pointer should be rejected with UnalignedWordAccess
+    let asm_op = "
+        push.2002           # dst_ptr (unaligned)
+        push.1000           # src_ptr (aligned)
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    let err = test.execute().expect_err("crypto_stream should reject unaligned dst");
+    assert!(matches!(
+        err,
+        ExecutionError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+    ));
+}
+
+#[test]
+fn crypto_stream_allows_adjacent_after() {
+    // Adjacent ranges should be allowed (no overlap): dst = src + 8
+    // src: [1000..1008), dst: [1008..1016)
+    let asm_op = "
+        # Plaintext at src
+        push.1.2.3.4 push.1000 mem_storew_be dropw
+        push.5.6.7.8 push.1004 mem_storew_be dropw
+
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        push.1008           # dst_ptr (adjacent after)
+        push.1000           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    // Should execute without error
+    test.execute().unwrap();
+}
+
+#[test]
+fn crypto_stream_allows_adjacent_before() {
+    // Adjacent ranges should be allowed (no overlap): dst = src - 8
+    // src: [1008..1016), dst: [1000..1008)
+    let asm_op = "
+        # Plaintext at src
+        push.1.2.3.4 push.1008 mem_storew_be dropw
+        push.5.6.7.8 push.1012 mem_storew_be dropw
+
+        # Setup stack: [rate(8), capacity(4), src, dst]
+        push.1000           # dst_ptr (adjacent before)
+        push.1008           # src_ptr
+        push.0.0.0.0        # capacity
+        push.1.2.3.4        # rate[0-3]
+        push.5.6.7.8        # rate[4-7]
+
+        crypto_stream
+    ";
+
+    let test = build_op_test!(asm_op, &[]);
+    // Should execute without error
+    test.execute().unwrap();
 }

@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1507
 expression: program
 ---
 begin
@@ -9,10 +10,14 @@ begin
         mstore
         drop
         trace(0)
+        asmOp(add, 1)
         add
+        asmOp(add, 1)
         add
         trace(1)
+        asmOp(mul, 1)
         mul
+        asmOp(mul, 1)
         mul
         noop
         trace(2)

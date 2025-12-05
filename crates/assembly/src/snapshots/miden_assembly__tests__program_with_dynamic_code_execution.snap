@@ -1,10 +1,11 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2111
 expression: program
 ---
 begin
     join
         basic_block push(2147483648) push(4294967294) mstore drop noop end
-        dyn
+        asmOp(dynexec, 1) dyn
     end
 end

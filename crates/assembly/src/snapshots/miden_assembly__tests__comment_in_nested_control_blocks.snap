@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2724
 expression: program
 ---
 begin
@@ -10,29 +11,51 @@ begin
                 push(4294967294)
                 mstore
                 drop
+                asmOp(push.1, 2)
                 pad
                 incr
+                asmOp(push.2, 1)
                 push(2)
                 noop
             end
+            asmOp(if.true, 0)
             if.true
                 join
-                    basic_block add end
+                    basic_block asmOp(add, 1) add end
+                    asmOp(while.true, 0)
                     while.true
-                        basic_block push(7) push(11) add noop end
+                        basic_block
+                            asmOp(push.7, 1)
+                            push(7)
+                            asmOp(push.11, 1)
+                            push(11)
+                            asmOp(add, 1)
+                            add
+                            noop
+                        end
                     end
                 end
             else
                 join
-                    basic_block mul push(8) push(8) noop noop end
+                    basic_block
+                        asmOp(mul, 1)
+                        mul
+                        asmOp(push.8, 1)
+                        push(8)
+                        asmOp(push.8, 1)
+                        push(8)
+                        noop
+                        noop
+                    end
+                    asmOp(if.true, 0)
                     if.true
-                        basic_block mul end
+                        basic_block asmOp(mul, 1) mul end
                     else
-                        basic_block noop end
+                        basic_block asmOp(nop, 1) noop end
                     end
                 end
             end
         end
-        basic_block push(3) add end
+        basic_block asmOp(push.3, 1) push(3) asmOp(add, 1) add end
     end
 end

@@ -1,0 +1,584 @@
+pub type u256 = struct { hi: u128, lo: u128 }
+
+pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
+    swapw.3
+    movup.3
+    movup.7
+    u32overflowing_add
+    movup.4
+    movup.7
+    u32overflowing_add3
+    movup.4
+    movup.6
+    u32overflowing_add3
+    movup.4
+    movup.5
+    u32overflowing_add3
+    movdn.12
+    swapw.2
+    movup.12
+    movup.4
+    movup.8
+    u32overflowing_add3
+    movup.4
+    movup.7
+    u32overflowing_add3
+    movup.4
+    movup.6
+    u32overflowing_add3
+    movup.4
+    movup.5
+    u32overflowing_add3
+    drop
+end
+
+pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
+    swapw.3
+    movup.3
+    movup.7
+    u32overflowing_sub
+    movup.7
+    u32overflowing_add
+    movup.5
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movup.6
+    u32overflowing_add
+    movup.5
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movup.5
+    u32overflowing_add
+    movup.5
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movdn.12
+    swapw.2
+    movup.12
+    movup.4
+    u32overflowing_add
+    movup.8
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movup.4
+    u32overflowing_add
+    movup.7
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movup.4
+    u32overflowing_add
+    movup.6
+    movup.2
+    u32overflowing_sub
+    movup.2
+    add
+    movup.5
+    movup.5
+    movup.2
+    u32overflowing_add
+    drop
+    u32overflowing_sub
+    drop
+end
+
+pub proc and(rhs: u256, lhs: u256) -> u256
+    swapw.3
+    movup.3
+    movup.7
+    u32and
+    movup.3
+    movup.6
+    u32and
+    movup.3
+    movup.5
+    u32and
+    movup.3
+    movup.4
+    u32and
+    swapw.2
+    movup.3
+    movup.7
+    u32and
+    movup.3
+    movup.6
+    u32and
+    movup.3
+    movup.5
+    u32and
+    movup.3
+    movup.4
+    u32and
+end
+
+pub proc or(rhs: u256, lhs: u256) -> u256
+    swapw.3
+    movup.3
+    movup.7
+    u32or
+    movup.3
+    movup.6
+    u32or
+    movup.3
+    movup.5
+    u32or
+    movup.3
+    movup.4
+    u32or
+    swapw.2
+    movup.3
+    movup.7
+    u32or
+    movup.3
+    movup.6
+    u32or
+    movup.3
+    movup.5
+    u32or
+    movup.3
+    movup.4
+    u32or
+end
+
+pub proc xor(rhs: u256, lhs: u256) -> u256
+    swapw.3
+    movup.3
+    movup.7
+    u32xor
+    movup.3
+    movup.6
+    u32xor
+    movup.3
+    movup.5
+    u32xor
+    movup.3
+    movup.4
+    u32xor
+    swapw.2
+    movup.3
+    movup.7
+    u32xor
+    movup.3
+    movup.6
+    u32xor
+    movup.3
+    movup.5
+    u32xor
+    movup.3
+    movup.4
+    u32xor
+end
+
+pub proc eqz(rhs: u256, lhs: u256) -> i1
+    eq.0
+    repeat.7
+        swap
+        eq.0
+        and
+    end
+end
+
+pub proc eq(rhs: u256, lhs: u256) -> i1
+    swapw.3
+    eqw
+    movdn.8
+    dropw
+    dropw
+    movdn.8
+    eqw
+    movdn.8
+    dropw
+    dropw
+    and
+end
+
+# ===== MULTIPLICATION ============================================================================
+
+proc mulstep
+    movdn.2
+    u32overflowing_madd
+    movdn.2
+    u32overflowing_add
+    movup.2
+    add
+end
+
+proc mulstep4
+    movup.12
+    dup.1
+    movup.10
+    push.0 # start k at 0
+    exec.mulstep
+    swap
+    movdn.9
+    dup.1
+    movup.9
+    movup.13
+    swap.3
+    exec.mulstep
+    swap
+    movdn.8
+    dup.1
+    movup.8
+    movup.12
+    swap.3
+    exec.mulstep
+    swap
+    movdn.7
+    dup.1
+    movup.7
+    movup.11
+    swap.3
+    exec.mulstep
+    swap
+    movdn.6
+end
+
+#! Performs multiplication of two unsigned 256 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...] -> [c7, c6, c5, c4, c3, c2, c1, c0, ...]
+#! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
+@locals(24)
+pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
+    # Memory storing setup
+    loc_storew_be.0
+    dropw
+    # b[5-8] at 0
+    loc_storew_be.4
+    # b[0-4] at 1
+    push.0 dropw
+    # b[0] at top of stack, followed by a[0-7]
+    movdn.8
+    loc_storew_be.8
+    # a[0-4] at 2
+    swapw
+    loc_storew_be.12
+    # a[5-8] at 3
+    padw
+    loc_storew_be.16
+    loc_storew_be.20
+    # p at 4 and 5
+
+    # b[0]
+    dropw
+    swapw
+    push.0.0.0.0
+    loc_loadw_be.16
+    movdnw.2
+    movup.12
+
+    exec.mulstep4
+
+    movdn.9
+    movdn.9
+    swapw
+    loc_storew_be.16
+    dropw
+    push.0.0.0.0
+    loc_loadw_be.20
+    swapw
+    movup.9
+    movup.9
+
+    dup.1
+    movup.6
+    movup.10
+    swap.3
+    exec.mulstep
+    swap
+    movdn.5
+    dup.1
+    movup.5
+    movup.9
+    swap.3
+    exec.mulstep
+    swap
+    movdn.4
+    dup.1
+    movup.4
+    movup.8
+    swap.3
+    exec.mulstep
+    swap
+    movdn.3
+    swap
+    movup.2
+    movup.6
+    swap.3
+    exec.mulstep
+
+    drop
+    loc_storew_be.20
+    dropw
+
+    # b[1]
+    push.0.0.0.0
+    loc_loadw_be.16
+    push.0.0.0.0
+    loc_loadw_be.20
+    movup.7
+    dropw
+    push.0.0.0.0
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
+    push.0.0.0.0
+    loc_loadw_be.4
+    movup.2
+    movdn.3
+    push.0 dropw # only need b[1]
+
+    exec.mulstep4
+
+    movdn.9
+    movdn.9
+    swapw
+    movdn.3
+    push.0.0.0.0
+    loc_loadw_be.16
+    push.0 dropw # only need p[0]
+    movdn.3
+    # save p[0-3] to memory, not needed any more
+    loc_storew_be.16
+    dropw
+
+    push.0.0.0.0
+    loc_loadw_be.20
+    movup.3
+    drop
+    swapw
+    movup.9
+    movup.9
+
+    dup.1
+    movup.6
+    movup.9
+    swap.3
+    exec.mulstep
+    swap
+    movdn.7
+    dup.1
+    movup.5
+    movup.7
+    swap.3
+    exec.mulstep
+    swap
+    movdn.5
+    swap
+    movup.3
+    movup.4
+    swap.3
+    exec.mulstep
+
+    drop
+    swap
+    drop
+    loc_storew_be.20
+    dropw
+
+    # b[2]
+    push.0.0.0.0
+    loc_loadw_be.16
+    push.0.0.0.0
+    loc_loadw_be.20
+    movup.7
+    movup.7
+    dropw
+    push.0.0.0.0
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
+    push.0.0.0.0
+    loc_loadw_be.4
+    swap
+    movdn.3
+    push.0 dropw # only need b[1]
+
+    exec.mulstep4
+
+    movdn.9
+    movdn.9
+    swapw
+    movdn.3
+    movdn.3
+    push.0.0.0.0
+    loc_loadw_be.16
+    drop drop
+    movdn.3
+    movdn.3
+    loc_storew_be.16
+    dropw
+
+    push.0.0.0.0
+    loc_loadw_be.20
+    movup.3
+    movup.3
+    drop
+    drop
+    swapw
+    movup.9
+    movup.9
+
+    dup.1
+    movup.6
+    movup.8
+    swap.3
+    exec.mulstep
+    swap
+    movdn.6
+    dup.1
+    movup.5
+    movup.6
+    swap.3
+    exec.mulstep
+    swap
+    swap drop
+    movdn.3
+    drop drop drop
+    loc_storew_be.20
+    dropw
+
+    # b[3]
+    push.0.0.0.0
+    loc_loadw_be.16
+    push.0.0.0.0
+    loc_loadw_be.20
+
+    movup.7 movup.7 movup.7
+    dropw
+    push.0.0.0.0
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8
+
+    push.0.0.0.0
+    loc_loadw_be.4
+    movdn.3
+    push.0 dropw
+
+    exec.mulstep4
+
+    movdn.9
+    movdn.9
+
+    swapw
+    movup.3
+    push.0.0.0.0
+    loc_loadw_be.16
+    drop
+    movup.3
+
+    loc_storew_be.16
+    dropw
+    push.0.0.0.0
+    loc_loadw_be.20
+    movdn.3
+    push.0 dropw
+    swapw
+    movup.9
+    movup.9
+
+    swap
+    movup.5
+    movup.6
+    swap.3
+    exec.mulstep
+
+    drop
+    movdn.3
+    push.0 dropw
+
+    # b[4]
+    push.0.0.0.0
+    loc_loadw_be.12 push.0.0.0.0
+    loc_loadw_be.8 # load the xs
+    # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
+
+    push.0.0.0.0
+    loc_loadw_be.0
+    push.0 dropw # b[4]
+
+    exec.mulstep4
+    dropw drop drop # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
+
+    # b[5]
+    push.0.0.0.0
+    loc_loadw_be.12
+    push.0.0.0.0
+    loc_loadw_be.0
+    movup.2 movdn.3
+    push.0 dropw
+    movup.7
+    dup.1
+    movup.6
+    push.0
+    exec.mulstep
+    swap
+    movdn.7
+    movup.4
+    dup.2
+    movup.7
+    swap.3
+    exec.mulstep
+    swap
+    movdn.5
+    swap
+    movup.3
+    movup.4
+    swap.3
+    exec.mulstep
+    drop
+    swap
+    drop
+
+    # b[6]
+    push.0.0.0.0
+    loc_loadw_be.12
+    push.0.0.0.0
+    loc_loadw_be.0
+    swap
+    movdn.3
+    push.0 dropw
+    movup.6
+    dup.1
+    movup.6
+    push.0
+    exec.mulstep
+    swap
+    movdn.6
+    swap
+    movup.4
+    movup.5
+    swap.3
+    exec.mulstep
+    drop
+    movdn.2
+    drop drop
+
+    # b[7]
+    push.0.0.0.0
+    loc_loadw_be.12
+    push.0.0.0.0
+    loc_loadw_be.0
+
+    movdn.3 push.0 dropw
+    movup.4
+    movup.5
+    movdn.2
+    push.0
+    exec.mulstep
+    drop
+    movdn.3
+    drop drop drop
+
+    push.0.0.0.0
+    loc_loadw_be.16
+    swapw
+end

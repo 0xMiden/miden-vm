@@ -27,7 +27,7 @@ const config: Config = {
           sidebarPath: "./sidebars.ts",
           versions: {
             current: {
-              label: `unstable`,
+              label: "VM",
             },
           },
           remarkPlugins: [remarkMath],
