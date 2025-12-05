@@ -1061,7 +1061,8 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     assert!(result_with_none.is_some());
     assert_eq!(result_with_none.unwrap(), &asm_op_before);
 
-    // Test 7: Verify that target index with operation-indexed decorators still works alongside before/after
+    // Test 7: Verify that target index with operation-indexed decorators still works alongside
+    // before/after
     let operations_with_target = vec![Operation::Push(Felt::new(5)), Operation::Add];
     let op_indexed_asm =
         AssemblyOp::new(None, "op_indexed".into(), 1, "op_indexed_name".into(), false);

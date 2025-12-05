@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
     vec::Vec,
@@ -509,43 +510,26 @@ impl MastForest {
 
         // Replicate the behavior of the original MastNodeErrorContext::decorators method
         // by collecting all decorators in the correct order for each node type
-        let decorator_links = match node {
+        let decorator_links: Box<dyn Iterator<Item = (usize, DecoratorId)>> = match node {
             MastNode::Block(block_node) => {
-                // For BasicBlockNode: before_enter at index 0, operation-indexed at their indices, after_exit at num_operations
-                let mut decorators = Vec::new();
+                let num_ops: usize = block_node.num_operations() as usize;
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
+                let op_iter = self
+                    .decorator_links_for_node(node_id)
+                    .expect("Block node must have some valid set of decorator links");
+                let after_iter =
+                    self.after_exit_decorators(node_id).iter().map(move |&id| (num_ops, id));
 
-                // Add before_enter decorators at index 0
-                for &decorator_id in self.before_enter_decorators(node_id) {
-                    decorators.push((0, decorator_id));
-                }
-
-                // Add operation-indexed decorators
-                decorators.extend(block_node.raw_op_indexed_decorators(self));
-
-                // Add after_exit decorators at num_operations index
-                let num_ops = block_node.num_operations() as usize;
-                for &decorator_id in self.after_exit_decorators(node_id) {
-                    decorators.push((num_ops, decorator_id));
-                }
-
-                decorators
+                Box::new(before_iter.chain(op_iter).chain(after_iter))
             },
             _ => {
                 // For all other node types: before_enter at index 0, after_exit at index 1
-                let mut decorators = Vec::new();
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
 
-                // Add before_enter decorators at index 0
-                for &decorator_id in self.before_enter_decorators(node_id) {
-                    decorators.push((0, decorator_id));
-                }
+                let after_iter = self.after_exit_decorators(node_id).iter().map(|&id| (1, id));
 
-                // Add after_exit decorators at index 1
-                for &decorator_id in self.after_exit_decorators(node_id) {
-                    decorators.push((1, decorator_id));
-                }
-
-                decorators
-            }
+                Box::new(before_iter.chain(after_iter))
+            },
         };
 
         match target_op_idx {
@@ -553,7 +537,8 @@ impl MastForest {
             // operation.
             Some(target_op_idx) => {
                 for (op_idx, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
                         // when an instruction compiles down to multiple operations, only the first
                         // operation is associated with the assembly op. We need to check if the
                         // target operation index falls within the range of operations associated
@@ -569,7 +554,8 @@ impl MastForest {
             // If no target operation index is provided, return the first assembly op found.
             None => {
                 for (_, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
                         return Some(assembly_op);
                     }
                 }
