@@ -206,8 +206,9 @@ pub proc set
     end
 end
 
-#! Emits the "core::collections::smt::smt_peek" event, which pushes onto the advice stack the
-#! value associated with the specified key in a Sparse Merkle Tree defined by the specified root.
+#! Emits the "miden::core::collections::smt::smt_peek" event, which pushes onto the advice stack
+#! the value associated with the specified key in a Sparse Merkle Tree defined by the specified
+#! root.
 #!
 #! If no value was previously associated with the specified key, [ZERO; 4] is pushed onto the advice
 #! stack.

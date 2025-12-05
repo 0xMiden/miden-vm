@@ -4,8 +4,8 @@
 
 #### Enhancements
 
-- Added EdDSA (Ed25519) signature verification precompile in `miden::core::crypto::dsa::eddsa_ed25519`.
-- Added SHA512 hash precompile in `miden::core::crypto::hashes::sha512`.
+- Added SHA512 hash precompile in `miden::core::crypto::hashes::sha512` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
+- Added EdDSA (Ed25519) signature verification precompile in `miden::core::crypto::dsa::eddsa_ed25519` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
 - Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
 - Added new `memcopy_elements` procedure for the `std::mem` module ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
