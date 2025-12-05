@@ -13,16 +13,16 @@ use miden_core::{
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable},
 };
-use miden_crypto::{
-    dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
-    hash::rpo::Rpo256,
-};
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,
     handlers::{
         bytes_to_packed_u32_felts,
         eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
     },
+};
+use miden_crypto::{
+    dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
+    hash::rpo::Rpo256,
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use rand::{SeedableRng, rngs::StdRng};
