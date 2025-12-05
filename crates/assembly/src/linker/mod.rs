@@ -1,3 +1,40 @@
+//! Assembly of a Miden Assembly project is comprised of four phases:
+//!
+//! 1. _Parsing_, where MASM sources are parsed into the AST data structure. Some light validation
+//!    is done in this phase, to catch invalid syntax, invalid immediate values (e.g. overflow), and
+//!    other simple checks that require little to no reasoning about surrounding context.
+//! 2. _Semantic analysis_, where initial validation of the AST is performed. This step catches
+//!    unused imports, references to undefined local symbols, orphaned doc comments, and other
+//!    checks that only require minimal module-local context. Initial symbol resolution is performed
+//!    here based on module-local context, as well as constant folding of expressions that can be
+//!    resolved locally. Symbols which refer to external items are unable to be fully processed as
+//!    part of this phase, and is instead left to the linking phase.
+//! 3. _Linking_, the most critical phase of compilation. During this phase, the assembler has the
+//!    full compilation graph available to it, and so this is where inter-module symbol references
+//!    are finally able to be resolved (or not, in which case appropriate errors are raised). This
+//!    is the phase where we catch cyclic references, references to undefined symbols, references to
+//!    non-public symbols from other modules, etc. Once all symbols are linked, the assembler is
+//!    free to compile all of the procedures to MAST, and generate a [crate::Library].
+//! 4. _Assembly_, the final phase, where all of the linked items provided to the assembler are
+//!    lowered to MAST, or to their final representations in the [crate::Library] produced as the
+//!    output of assembly. During this phase, it is expected that the compilation graph has been
+//!    validated by the linker, and we're simply processing the conversion to MAST.
+//!
+//! This module provides the implementation of the linker and its associated data structures. There
+//! are three primary parts:
+//!
+//! 1. The _call graph_, this is what tracks dependencies between procedures in the compilation
+//!    graph, and is used to ensure that all procedure references can be resolved to a MAST root
+//!    during final assembly.
+//! 2. The _symbol resolver_, this is what is responsible for computing symbol resolutions using
+//!    context-sensitive details about how a symbol is referenced. This context sensitivity is how
+//!    we are able to provide better diagnostics when invalid references are found. The resolver
+//!    shares part of it's implementation with the same infrastructure used for symbol resolution
+//!    that is performed during semantic analysis - the difference is that at link-time, we are
+//!    stricter about what happens when a symbol cannot be resolved correctly.
+//! 3. A set of _rewrites_, applied to symbols/modules at link-time, which rewrite the AST so that
+//!    all symbol references and constant expressions are fully resolved/folded. This is where any
+//!    final issues are discovered, and the AST is prepared for lowering to MAST.
 mod callgraph;
 mod debug;
 mod errors;
