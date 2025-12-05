@@ -512,12 +512,6 @@ impl MastForest {
         self.debug_info.insert_error_code(code.as_int(), msg);
         code
     }
-
-    /// Given an error code as a Felt, resolves it to its corresponding error message.
-    pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        let key = code.as_int();
-        self.error_codes.get(&key).cloned()
-    }
 }
 
 // MAST FOREST INDEXING
