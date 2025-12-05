@@ -249,9 +249,13 @@ fn generate_core_trace_columns(
         ),
     );
 
-    // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    // Run batch inversion on stack's H0 helper column concurrently, per fragment
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]
+        .par_chunks_mut(fragment_size)
+        .for_each(|chunk| {
+            let inverted = batch_inversion(chunk);
+            chunk.copy_from_slice(&inverted);
+        });
 
     core_trace_columns
 }
