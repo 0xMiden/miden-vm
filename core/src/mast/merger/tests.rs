@@ -432,52 +432,17 @@ fn mast_forest_merge_decorators() {
     assert_eq!(merged.nodes.len(), 3);
 
     let merged_foo_block = merged.nodes.iter().find(|node| node.is_basic_block()).unwrap();
-    let MastNode::Block(_merged_foo_block) = merged_foo_block else {
+    let MastNode::Block(merged_foo_block) = merged_foo_block else {
         panic!("expected basic block node");
     };
 
     // Test basic block decorators using new MastForest API
     // The basic block should have Trace(1) and Trace(2) as before-enter decorators at index 0
-    let merged_foo_block_id = merged
-        .nodes
-        .iter()
-        .find_map(|node| {
-            if node.is_basic_block() {
-                // Find the ID of this node by searching the forest
-                for (id, forest_node) in merged.nodes.iter().enumerate() {
-                    if core::ptr::eq(node, forest_node) {
-                        return Some(MastNodeId::from_u32_safe(id as u32, &merged).unwrap());
-                    }
-                }
-                None
-            } else {
-                None
-            }
-        })
-        .unwrap();
+    let merged_foo_block_id = merged_foo_block.linked_id().unwrap();
 
     // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
-    // decorators
-    let before_enter_decorators: Vec<_> = merged
-        .before_enter_decorators(merged_foo_block_id)
-        .iter()
-        .map(|&deco_id| (0, deco_id))
-        .collect();
-
-    let op_indexed_decorators: Vec<_> = merged
-        .decorator_links_for_node(merged_foo_block_id)
-        .unwrap()
-        .into_iter()
-        .collect();
-
-    let after_exit_decorators: Vec<_> = merged.after_exit_decorators(merged_foo_block_id)
-        .iter()
-        .enumerate()
-        .map(|(i, &deco_id)| (1 + i, deco_id)) // after_exit at index 1
-        .collect();
-
-    let all_decorators =
-        [before_enter_decorators, op_indexed_decorators, after_exit_decorators].concat();
+    // decorators using the helper method
+    let all_decorators = merged.all_decorators(merged_foo_block_id);
     assert_eq!(all_decorators, vec![(0, merged_deco1), (0, merged_deco2)]);
 
     // Asserts that there exists exactly one Loop Node with the given decorators.

@@ -585,6 +585,64 @@ impl MastForest {
     }
 }
 
+// TEST HELPERS
+// ================================================================================================
+
+#[cfg(test)]
+impl MastForest {
+    /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
+    ///
+    /// This helper method combines before_enter, operation-indexed, and after_exit decorators
+    /// into a single collection, which is useful for testing decorator positions and ordering.
+    ///
+    /// **Performance Warning**: This method performs multiple allocations through collect() calls
+    /// and should not be relied upon for performance-critical code. It is intended for testing
+    /// only.
+    pub fn all_decorators(&self, node_id: MastNodeId) -> Vec<(usize, DecoratorId)> {
+        let node = &self[node_id];
+
+        // For non-basic blocks, just get before_enter and after_exit decorators at position 0
+        if !node.is_basic_block() {
+            let before_enter_decorators: Vec<_> = self
+                .before_enter_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (0, deco_id))
+                .collect();
+
+            let after_exit_decorators: Vec<_> = self
+                .after_exit_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (1, deco_id))
+                .collect();
+
+            return [before_enter_decorators, after_exit_decorators].concat();
+        }
+
+        // For basic blocks, we need to handle operation-indexed decorators with proper positioning
+        let block = node.unwrap_basic_block();
+
+        // Before-enter decorators are at position 0
+        let before_enter_decorators: Vec<_> = self
+            .before_enter_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (0, deco_id))
+            .collect();
+
+        // Operation-indexed decorators with their actual positions
+        let op_indexed_decorators: Vec<_> =
+            self.decorator_links_for_node(node_id).unwrap().into_iter().collect();
+
+        // After-exit decorators are positioned after all operations
+        let after_exit_decorators: Vec<_> = self
+            .after_exit_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (block.num_operations() as usize, deco_id))
+            .collect();
+
+        [before_enter_decorators, op_indexed_decorators, after_exit_decorators].concat()
+    }
+}
+
 // MAST FOREST INDEXING
 // ------------------------------------------------------------------------------------------------
 

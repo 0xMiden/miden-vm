@@ -1104,9 +1104,6 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     let result_mixed_target = forest.get_assembly_op(bb_mixed, Some(1));
     assert!(result_mixed_target.is_some());
     assert_eq!(result_mixed_target.unwrap(), &op_indexed_asm);
-
-    // Note: The behavior with target index 0 is implementation-dependent and may change
-    // The important part is that target index 1 correctly finds the operation-indexed decorator
 }
 
 #[test]
