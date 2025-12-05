@@ -1,9 +1,9 @@
 use miden::core::crypto::hashes::blake3
 
 begin
-    # hash_2to1 pops top 16 elements (64 bytes) from the stack, compute their hash and puts the
+    # merge pops top 16 elements (64 bytes) from the stack, compute their hash and puts the
     # resulting 8 elements (32 bytes) back to the stack.
-    exec.blake3::hash_2to1
+    exec.blake3::merge
 
     # Check the correctness of the hashing result by comparing it with precomputed correct values.
     # This hash is a result of applying a blake3 hashing function to the binary value consisting of

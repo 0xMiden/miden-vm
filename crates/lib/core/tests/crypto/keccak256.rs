@@ -177,7 +177,7 @@ fn test_keccak_hash_bytes(input_u8: &[u8]) {
 }
 
 #[test]
-fn test_keccak_hash_1to1() {
+fn test_keccak_hash() {
     let input_u8: Vec<u8> = (0..32).collect();
     let preimage = KeccakPreimage::new(input_u8);
 
@@ -208,7 +208,7 @@ fn test_keccak_hash_1to1() {
 }
 
 #[test]
-fn test_keccak_hash_2to1() {
+fn test_keccak_merge() {
     let input_u8: Vec<u8> = (0..64).collect();
     let preimage = KeccakPreimage::new(input_u8);
 
