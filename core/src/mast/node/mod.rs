@@ -39,7 +39,6 @@ pub use decorator_store::DecoratorStore;
 
 use super::DecoratorId;
 use crate::{
-    AssemblyOp, Decorator,
     mast::{MastForest, MastNodeId},
 };
 
@@ -208,90 +207,11 @@ impl MastNode {
 // MAST INNER NODE EXT
 // ===============================================================================================
 
-/// A trait for extending the functionality of all [`MastNode`]s.
-pub trait MastNodeErrorContext: Send + Sync {
-    // REQUIRED METHODS
-    // -------------------------------------------------------------------------------------------
-
-    /// The list of decorators tied to this node, along with their associated index.
-    ///
-    /// The index is only meaningful for [`BasicBlockNode`]s, where it corresponds to the index of
-    /// the operation in the basic block to which the decorator is attached.
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a;
-
-    // PROVIDED METHODS
-    // -------------------------------------------------------------------------------------------
-
-    /// Returns the [`AssemblyOp`] associated with this node and operation (if provided), if any.
-    ///
-    /// If the `target_op_idx` is provided, the method treats the wrapped node as a basic block will
-    /// return the assembly op associated with the operation at the corresponding index in the basic
-    /// block. If no `target_op_idx` is provided, the method will return the first assembly op found
-    /// (effectively assuming that the node has at most one associated [`AssemblyOp`]).
-    fn get_assembly_op<'m>(
-        &self,
-        mast_forest: &'m MastForest,
-        target_op_idx: Option<usize>,
-    ) -> Option<&'m AssemblyOp> {
-        match target_op_idx {
-            // If a target operation index is provided, return the assembly op associated with that
-            // operation.
-            Some(target_op_idx) => {
-                for (op_idx, decorator_id) in self.decorators(mast_forest) {
-                    if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.decorator_by_id(decorator_id)
-                    {
-                        // when an instruction compiles down to multiple operations, only the first
-                        // operation is associated with the assembly op. We need to check if the
-                        // target operation index falls within the range of operations associated
-                        // with the assembly op.
-                        if target_op_idx >= op_idx
-                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
-                        {
-                            return Some(assembly_op);
-                        }
-                    }
-                }
-            },
-            // If no target operation index is provided, return the first assembly op found.
-            None => {
-                for (_, decorator_id) in self.decorators(mast_forest) {
-                    if let Some(Decorator::AsmOp(assembly_op)) =
-                        mast_forest.decorator_by_id(decorator_id)
-                    {
-                        return Some(assembly_op);
-                    }
-                }
-            },
-        }
-
-        None
-    }
-}
 
 // Links an operation index in a block to a decoratorid, to be executed right before this
 // operation's position
 pub type DecoratedOpLink = (usize, DecoratorId);
 
-impl MastNodeErrorContext for MastNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> Box<dyn Iterator<Item = DecoratedOpLink> + 'a> {
-        match self {
-            MastNode::Block(node) => Box::new(node.decorators(forest)),
-            MastNode::Join(node) => Box::new(node.decorators(forest)),
-            MastNode::Split(node) => Box::new(node.decorators(forest)),
-            MastNode::Loop(node) => Box::new(node.decorators(forest)),
-            MastNode::Call(node) => Box::new(node.decorators(forest)),
-            MastNode::Dyn(node) => Box::new(node.decorators(forest)),
-            MastNode::External(node) => Box::new(node.decorators(forest)),
-        }
-    }
-}
 
 // HELPERS
 // ===============================================================================================

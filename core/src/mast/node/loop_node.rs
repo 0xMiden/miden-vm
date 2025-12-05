@@ -6,12 +6,12 @@ use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
     mast::{
-        DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
         MastNodeId,
     },
 };
@@ -47,22 +47,6 @@ impl LoopNode {
     }
 }
 
-impl MastNodeErrorContext for LoopNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
-    }
-}
 
 // PRETTY PRINTING
 // ================================================================================================

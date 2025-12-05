@@ -19,7 +19,7 @@ pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
     ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt,
     OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
@@ -505,40 +505,71 @@ impl MastForest {
         node_id: MastNodeId,
         target_op_idx: Option<usize>,
     ) -> Option<&AssemblyOp> {
-        let node = &self[node_id];
-        let mut decorator_links = node.decorators(self).collect::<Vec<_>>();
-
-        // Add operation-indexed decorators if the node supports them
-        if let Ok(op_decorator_links) = self.decorator_links_for_node(node_id) {
-            decorator_links.extend(op_decorator_links);
-        }
-
         match target_op_idx {
-            // If a target operation index is provided, return the assembly op associated with that
-            // operation.
+            // If a target operation index is provided, check operation-indexed decorators first
             Some(target_op_idx) => {
-                for (op_idx, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
-                        // when an instruction compiles down to multiple operations, only the first
-                        // operation is associated with the assembly op. We need to check if the
-                        // target operation index falls within the range of operations associated
-                        // with the assembly op.
-                        if target_op_idx >= op_idx
-                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
-                        {
-                            return Some(assembly_op);
+                if let Ok(decorator_links) = self.decorator_links_for_node(node_id) {
+                    for (op_idx, decorator_id) in decorator_links {
+                        if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                            // when an instruction compiles down to multiple operations, only the first
+                            // operation is associated with the assembly op. We need to check if the
+                            // target operation index falls within the range of operations associated
+                            // with the assembly op.
+                            if target_op_idx >= op_idx
+                                && target_op_idx < op_idx + assembly_op.num_cycles() as usize
+                            {
+                                return Some(assembly_op);
+                            }
                         }
                     }
                 }
             },
-            // If no target operation index is provided, return the first assembly op found.
+            // If no target operation index is provided, check all decorators in order
             None => {
-                for (_, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                // Check before_enter decorators first
+                let before_enter = self.before_enter_decorators(node_id);
+                for decorator_id in before_enter {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(*decorator_id) {
+                        return Some(assembly_op);
+                    }
+                }
+
+                // Then check operation-indexed decorators
+                if let Ok(decorator_links) = self.decorator_links_for_node(node_id) {
+                    for (_, decorator_id) in decorator_links {
+                        if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                            return Some(assembly_op);
+                        }
+                    }
+                }
+
+                // Then check after_exit decorators
+                let after_exit = self.after_exit_decorators(node_id);
+                for decorator_id in after_exit {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(*decorator_id) {
                         return Some(assembly_op);
                     }
                 }
             },
+        }
+
+        // For target_op_idx case, also check node-level decorators if no operation-indexed match
+        if target_op_idx.is_some() {
+            // Check before_enter decorators
+            let before_enter = self.before_enter_decorators(node_id);
+            for decorator_id in before_enter {
+                if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(*decorator_id) {
+                    return Some(assembly_op);
+                }
+            }
+
+            // Check after_exit decorators
+            let after_exit = self.after_exit_decorators(node_id);
+            for decorator_id in after_exit {
+                if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(*decorator_id) {
+                    return Some(assembly_op);
+                }
+            }
         }
 
         None

@@ -20,7 +20,7 @@ mod op_batch;
 pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::mast::DecoratorStore;
 
 #[cfg(any(test, feature = "arbitrary"))]
@@ -428,41 +428,6 @@ impl BasicBlockNode {
     }
 }
 
-impl MastNodeErrorContext for BasicBlockNode {
-    /// Returns all decorators in program order: before_enter, op-indexed, after_exit.
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        match &self.decorators {
-            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
-                DecoratorOpLinkIterator::from_slice_iters(
-                    before_enter,
-                    decorators,
-                    after_exit,
-                    self.num_operations() as usize,
-                )
-            },
-            DecoratorStore::Linked { id } => {
-                // For linked nodes, borrow from forest storage
-                let view = forest.decorator_links_for_node(*id).expect(
-                    "linked node decorators should be available; forest may be inconsistent",
-                );
-
-                // Get node-level decorators from NodeToDecoratorIds
-                let before_enter = forest.before_enter_decorators(*id);
-                let after_exit = forest.after_exit_decorators(*id);
-
-                DecoratorOpLinkIterator::from_linked(
-                    before_enter,
-                    view.into_iter(),
-                    after_exit,
-                    self.num_operations() as usize,
-                )
-            },
-        }
-    }
-}
 
 // PRETTY PRINTING
 // ================================================================================================
