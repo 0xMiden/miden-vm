@@ -51,7 +51,7 @@ pub struct RunCmd {
     #[arg(short = 'r', long = "release")]
     release: bool,
 
-    /// Path to a kernel file (.masm or .masp) to compile/load and configure for the VM
+    /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
     #[arg(long = "kernel", value_parser)]
     kernel_file: Option<PathBuf>,
 }
