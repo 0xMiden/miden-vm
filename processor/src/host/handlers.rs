@@ -70,6 +70,27 @@ impl EventHandler for NoopEventHandler {
 /// ```
 pub type EventError = Box<dyn Error + Send + Sync + 'static>;
 
+// DEBUG AND TRACE ERRORS
+// ================================================================================================
+
+/// A generic [`Error`] wrapper for debug handler errors.
+///
+/// Debug handlers can define their own [`Error`] type which can be seamlessly converted
+/// into this type since it is a [`Box`].
+pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
+
+/// A generic [`Error`] wrapper for trace handler errors.
+///
+/// Trace handlers can define their own [`Error`] type which can be seamlessly converted
+/// into this type since it is a [`Box`].
+pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
+
+/// A generic [`Error`] wrapper for assertion handler errors.
+///
+/// Assertion handlers can define their own [`Error`] type which can be seamlessly converted
+/// into this type since it is a [`Box`].
+pub type AssertError = Box<dyn Error + Send + Sync + 'static>;
+
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 
@@ -183,13 +204,13 @@ pub trait DebugHandler: Sync {
         &mut self,
         process: &ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), DebugError> {
         let mut handler = crate::host::debug::DefaultDebugHandler::default();
         handler.on_debug(process, options)
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
         let _ = (&process, trace_id);
         #[cfg(feature = "std")]
         std::println!(

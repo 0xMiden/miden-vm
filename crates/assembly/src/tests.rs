@@ -14,7 +14,9 @@ use miden_core::{
     },
     utils::{Deserializable, Serializable},
 };
-use miden_mast_package::{MastArtifact, MastForest, Package, PackageExport, PackageManifest};
+use miden_mast_package::{
+    MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
+};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -3466,7 +3468,12 @@ prop_compose! {
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        Package { name, version: None, description: None, mast, manifest, sections: Default::default() }
+        let kind = match &mast {
+            MastArtifact::Executable(_) => PackageKind::Executable,
+            MastArtifact::Library(_) => PackageKind::Library,
+        };
+
+        Package { name, version: None, description: None, kind, mast, manifest, sections: Default::default() }
     }
 }
 

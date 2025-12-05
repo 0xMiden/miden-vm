@@ -1,9 +1,12 @@
 # Changelog
 
 ## 0.20.0 (TBD)
+- Added AEAD implementation in the VM using `crypto_stream` instruction ([#2322](https://github.com/0xMiden/miden-vm/pull/2322)).
 
 #### Enhancements
 
+- Added SHA512 hash precompile in `miden::core::crypto::hashes::sha512` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
+- Added EdDSA (Ed25519) signature verification precompile in `miden::core::crypto::dsa::eddsa_ed25519` ([#2312](https://github.com/0xMiden/miden-vm/pull/2312)).
 - Added new `adv.push_mapval_count` instruction ([#2349](https://github.com/0xMiden/miden-vm/pull/2349)).
 - Added new `memcopy_elements` procedure for the `std::mem` module ([#2352](https://github.com/0xMiden/miden-vm/pull/2352)).
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
@@ -23,6 +26,7 @@
 - [BREAKING] Make argument order of `Assembler::compile_and_statically_link_from_dir` consistent with `Assembler::assemble_library_from_dir`
 - [BREAKING] Renamed `Library::get_procedure_root_by_name` to `Library::get_procedure_root_by_path`
 - Streamline MastNode APIs and remove redundant parameters from `execute_op_batch` functions ([#2360](https://github.com/0xMiden/miden-vm/pull/2360)).
+- [BREAKING] Host debug and trace handlers return dynamic errors ([#2367](https://github.com/0xMiden/miden-vm/pull/2367)).
 - [BREAKING] Standardized hash function naming: renamed `hash_2to1` → `merge` and `hash_1to1` → `hash` across all hash modules (blake3, sha256, keccak256, rpo) ([#2381](https://github.com/0xMiden/miden-vm/pull/2381)).
 - Consolidate debug information into `DebugInfo` struct ([#2366](https://github.com/0xMiden/miden-vm/issues/2366)).
 - Wrapped `hperm` instruction in `rpo::permute` procedure ([#2392](https://github.com/0xMiden/miden-vm/pull/2392)).
@@ -30,6 +34,9 @@
 - [BREAKING] Updgrade `miden-crypto` to 0.19 ([#2399](https://github.com/0xMiden/miden-vm/pull/2399)).
 - Pre-allocate main trace buffer in trace generation ([#2345](https://github.com/0xMiden/miden-vm/pull/2345)).
 - Rename the MASM standard library to "miden::core", the crate to `miden-libcore`, and various other MASM module refactors ([#2260](https://github.com/0xMiden/miden-vm/issues/2260))
+- Add a compaction function for achieving maximal sharing out of a `MastForest` with stripped decorators ([#2408](https://github.com/0xMiden/miden-vm/pull/2408)).
+- Refactor and remove tech debt from parallel trace generation ([#2382](https://github.com/0xMiden/miden-vm/pull/2382))
+- [BREAKING] Added `kind` field to `Package` struct to indicate package type (Executable, AccountComponent, NoteScript, TxScript, AuthComponent) ([#2403](https://github.com/0xMiden/miden-vm/pull/2403)).
 
 ## 0.19.1 (2025-11-6)
 

@@ -29,12 +29,8 @@ use crate::{
     },
     stack::OverflowTable,
     system::ContextId,
-    utils::split_u32_into_u16,
+    utils::{HASH_CYCLE_LEN_FELT, split_u32_into_u16},
 };
-
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized.
-const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
 #[derive(Debug)]
@@ -355,7 +351,7 @@ impl ExecutionTracer {
 
         let block_addr = self.hasher_chiplet_shim.record_hash_control_block();
         let parent_addr = self.block_stack.push(block_addr, block_type, ctx_info);
-        self.block_stack_replay.record_node_start(parent_addr);
+        self.block_stack_replay.record_node_start_parent_addr(parent_addr);
     }
 
     /// Records the block address and flags for an END operation based on the block being popped.
@@ -473,14 +469,14 @@ impl Tracer for ExecutionTracer {
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
                     let parent_addr =
                         self.block_stack.push(block_addr, BlockType::BasicBlock, None);
-                    self.block_stack_replay.record_node_start(parent_addr);
+                    self.block_stack_replay.record_node_start_parent_addr(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(
                     "start_clock_cycle is guaranteed not to be called on external nodes"
                 ),
             },
             NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN;
+                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
             NodeExecutionState::LoopRepeat(_) => {
                 // do nothing, REPEAT doesn't affect the block stack

@@ -266,6 +266,7 @@ impl PrettyPrint for Instruction {
             Self::MTreeVerifyWithError(err_code) => flatten(
                 const_text("mtree_verify.err") + const_text("=") + text(format!("\"{err_code}\"")),
             ),
+            Self::CryptoStream => const_text("crypto_stream"),
 
             // ----- STARK proof verification -----------------------------------------------------
             Self::FriExt2Fold4 => const_text("fri_ext2fold4"),

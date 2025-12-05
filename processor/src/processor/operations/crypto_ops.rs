@@ -3,13 +3,14 @@ use miden_air::trace::{
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 use miden_core::{
-    Felt, ONE, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
     stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, ONE,
     fast::Tracer,
+    operations::utils::validate_dual_word_stream_addrs,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
         Processor, StackInterface, SystemInterface,
@@ -142,6 +143,9 @@ pub(super) fn op_mrupdate<P: Processor>(
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
 }
+
+// HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
+// ================================================================================================
 
 /// Evaluates a polynomial using Horner's method (base field).
 ///
@@ -341,77 +345,101 @@ pub(super) fn op_log_precompile<P: Processor>(
     P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
 }
 
-#[cfg(test)]
-mod tests {
-    use alloc::vec::Vec;
+// STREAM CIPHER OPERATION
+// ================================================================================================
 
-    use miden_core::{
-        Felt, Operation, StackInputs as CoreStackInputs, Word, ZERO,
-        crypto::merkle::{MerkleStore, MerkleTree},
-        mast::MastForest,
-    };
+/// Encrypts data from source memory to destination memory using RPO.
+///
+/// Stack transition:
+/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]
+#[inline(always)]
+pub(super) fn op_crypto_stream<P: Processor>(
+    processor: &mut P,
+    err_ctx: &impl ErrorContext,
+    tracer: &mut impl Tracer,
+) -> Result<(), ExecutionError> {
+    use miden_core::Felt;
 
-    use crate::{AdviceInputs, Process};
+    const WORD_SIZE_FELT: Felt = Felt::new(4);
+    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 
-    // Helper function to initialize leaves (copied from the original test)
-    fn init_leaves(values: &[u64]) -> Vec<Word> {
-        values.iter().map(|&v| init_node(v)).collect()
-    }
+    // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+    const SRC_PTR_IDX: usize = 12;
+    const DST_PTR_IDX: usize = 13;
 
-    fn init_node(value: u64) -> Word {
-        [Felt::new(value), ZERO, ZERO, ZERO].into()
-    }
+    let ctx = processor.system().ctx();
+    let clk = processor.system().clk();
 
-    #[test]
-    fn op_mrupdate_invalid_path_length() {
-        // This test validates that the MrUpdate operation works correctly in the new processor.
-        // It's a simplified version of the original test from the legacy processor.
+    // Get source and destination pointers
+    let src_addr = processor.stack().get(SRC_PTR_IDX);
+    let dst_addr = processor.stack().get(DST_PTR_IDX);
 
-        // Create a simple test case with Merkle tree
-        let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
-        let leaf_index = 5usize;
-        let new_leaf = init_node(9);
-        let tree = MerkleTree::new(leaves.clone()).unwrap();
+    // Validate address ranges and check for overlap using half-open intervals.
+    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
 
-        // Set up the test with normal inputs
-        let tree_depth = tree.depth() as u64;
-        let stack_inputs_ints = [
-            new_leaf[0].as_int(),
-            new_leaf[1].as_int(),
-            new_leaf[2].as_int(),
-            new_leaf[3].as_int(),
-            tree.root()[0].as_int(),
-            tree.root()[1].as_int(),
-            tree.root()[2].as_int(),
-            tree.root()[3].as_int(),
-            leaf_index as u64,
-            tree_depth, // Normal depth first
-            leaves[leaf_index][0].as_int(),
-            leaves[leaf_index][1].as_int(),
-            leaves[leaf_index][2].as_int(),
-            leaves[leaf_index][3].as_int(),
-        ];
+    // Load plaintext from source memory (2 words = 8 elements)
+    let src_addr_word2 = src_addr + WORD_SIZE_FELT;
+    let plaintext_word1 = processor
+        .memory()
+        .read_word(ctx, src_addr, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
 
-        let _stack_inputs: Vec<Felt> = stack_inputs_ints.iter().map(|&x| Felt::new(x)).collect();
+    let plaintext_word2 = processor
+        .memory()
+        .read_word(ctx, src_addr_word2, clk, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
-        let store = MerkleStore::from(&tree);
-        let advice_inputs = AdviceInputs::default().with_merkle_store(store);
-        let core_stack_inputs = CoreStackInputs::try_from_ints(stack_inputs_ints).unwrap();
+    // Get rate (keystream) from stack[0..7] in stack order
+    let rate = [
+        processor.stack().get(7),
+        processor.stack().get(6),
+        processor.stack().get(5),
+        processor.stack().get(4),
+        processor.stack().get(3),
+        processor.stack().get(2),
+        processor.stack().get(1),
+        processor.stack().get(0),
+    ];
 
-        // Test new processor
-        {
-            let (mut process, mut host) = Process::new_dummy_with_inputs_and_decoder_helpers(
-                core_stack_inputs,
-                advice_inputs,
-            );
-            let program = &MastForest::default();
-            let result = process.execute_op(Operation::MrUpdate, program, &mut host);
+    // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+    let ciphertext_word1 = [
+        plaintext_word1[0] + rate[0],
+        plaintext_word1[1] + rate[1],
+        plaintext_word1[2] + rate[2],
+        plaintext_word1[3] + rate[3],
+    ]
+    .into();
+    let ciphertext_word2 = [
+        plaintext_word2[0] + rate[4],
+        plaintext_word2[1] + rate[5],
+        plaintext_word2[2] + rate[6],
+        plaintext_word2[3] + rate[7],
+    ]
+    .into();
 
-            // With valid inputs, this should succeed
-            assert!(result.is_ok(), "Valid MrUpdate operation should succeed");
+    // Write ciphertext to destination memory
+    let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+    processor
+        .memory()
+        .write_word(ctx, dst_addr, clk, ciphertext_word1, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
 
-            // Verify the new root is in the advice provider
-            assert!(process.advice.has_merkle_root(tree.root()));
-        }
-    }
+    processor
+        .memory()
+        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2, err_ctx)
+        .map_err(ExecutionError::MemoryError)?;
+    tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
+
+    // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+    processor.stack().set_word(0, &ciphertext_word2);
+    processor.stack().set_word(4, &ciphertext_word1);
+
+    // Increment pointers by 8 (2 words)
+    processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+    processor.stack().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+
+    Ok(())
 }

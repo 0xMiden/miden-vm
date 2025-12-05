@@ -1,7 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
@@ -14,7 +14,11 @@ use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 use winter_prover::ProverError;
 
-use crate::{BaseHost, EventError, MemoryError, host::advice::AdviceError};
+use crate::{
+    AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
+    host::advice::AdviceError,
+};
+
 // EXECUTION ERROR
 // ================================================================================================
 
@@ -38,6 +42,19 @@ pub enum ExecutionError {
     CycleLimitExceeded(u32),
     #[error("decorator id {decorator_id} does not exist in MAST forest")]
     DecoratorNotFoundInForest { decorator_id: DecoratorId },
+    #[error("debug handler error at clock cycle {clk}: {err}")]
+    DebugHandlerError {
+        clk: RowIndex,
+        #[source]
+        err: DebugError,
+    },
+    #[error("trace handler error at clock cycle {clk} for trace ID {trace_id}: {err}")]
+    TraceHandlerError {
+        clk: RowIndex,
+        trace_id: u32,
+        #[source]
+        err: TraceError,
+    },
     #[error("division by zero at clock cycle {clk}")]
     #[diagnostic()]
     DivideByZero {
@@ -77,10 +94,14 @@ pub enum ExecutionError {
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error("assertion failed at clock cycle {clk} with error {}",
+    #[error("assertion failed at clock cycle {clk} with error {}{}",
       match err_msg {
         Some(msg) => format!("message: {msg}"),
         None => format!("code: {err_code}"),
+      },
+      match err {
+        Some(err) => format!(" (host error: {err})"),
+        None => String::new(),
       }
     )]
     #[diagnostic()]
@@ -92,6 +113,8 @@ pub enum ExecutionError {
         clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
+        #[source]
+        err: Option<AssertError>,
     },
     #[error("failed to execute the program for internal reason: {0}")]
     FailedToExecuteProgram(&'static str),
@@ -328,6 +351,7 @@ impl ExecutionError {
         clk: RowIndex,
         err_code: Felt,
         err_msg: Option<Arc<str>>,
+        err: Option<AssertError>,
         err_ctx: &impl ErrorContext,
     ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
@@ -338,6 +362,7 @@ impl ExecutionError {
             clk,
             err_code,
             err_msg,
+            err,
         }
     }
 

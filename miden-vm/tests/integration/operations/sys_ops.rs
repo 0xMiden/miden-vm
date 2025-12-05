@@ -1,5 +1,5 @@
-use miden_core::{EventName, mast};
-use miden_processor::{ExecutionError, NoopEventHandler, RowIndex, ZERO};
+use miden_core::{EventName, ZERO, mast};
+use miden_processor::{ExecutionError, NoopEventHandler, RowIndex};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
@@ -20,15 +20,15 @@ fn assert_with_code() {
     let test = build_op_test!(asm_op, &[1]);
     test.expect_stack(&[]);
 
-    // triggered assertion captures both the VM cycle and error code
+    // triggered assertion captures both the VM cycle and resolved message
     let test = build_op_test!(asm_op, &[0]);
 
     let code = mast::error_code_from_msg("123");
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(6) && err_code == code
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(6) && err_code == code && err_msg.as_deref() == Some("123")
     );
 }
 
@@ -64,7 +64,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
         if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 
@@ -72,7 +72,7 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
         if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 }

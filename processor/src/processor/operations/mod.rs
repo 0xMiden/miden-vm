@@ -206,6 +206,7 @@ pub(super) fn execute_sync_op(
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
             user_op_helpers = Some(log_precompile_helpers);
         },
+        Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, err_ctx, tracer)?,
     }
 
     Ok(user_op_helpers)

@@ -8,6 +8,7 @@
 //! - `name` (`String`)
 //! - `version` (optional, [`miden_assembly_syntax::Version`] serialized as a `String`)
 //! - `description` (optional, `String`)
+//! - `kind` (`u8`, see [`crate::PackageKind`])
 //!
 //! #### Code
 //! - `mast` (see [`crate::MastArtifact`])
@@ -36,7 +37,7 @@ use miden_core::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::{ConstantExport, ProcedureExport, TypeExport};
+use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};
 use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
@@ -54,7 +55,7 @@ const MAGIC_LIBRARY: &[u8; 4] = b"LIB\0";
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1.
-const VERSION: [u8; 3] = [2, 0, 0];
+const VERSION: [u8; 3] = [3, 0, 0];
 
 // PACKAGE SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -73,6 +74,9 @@ impl Serializable for Package {
 
         // Write package description
         self.description.write_into(target);
+
+        // Write package kind
+        target.write_u8(self.kind.into());
 
         // Write MAST artifact
         self.mast.write_into(target);
@@ -121,6 +125,11 @@ impl Deserializable for Package {
         // Read package description
         let description = Option::<String>::read_from(source)?;
 
+        // Read package kind
+        let kind_tag = source.read_u8()?;
+        let kind = PackageKind::try_from(kind_tag)
+            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+
         // Read MAST artifact
         let mast = MastArtifact::read_from(source)?;
 
@@ -139,6 +148,7 @@ impl Deserializable for Package {
             name,
             version,
             description,
+            kind,
             mast,
             manifest,
             sections,

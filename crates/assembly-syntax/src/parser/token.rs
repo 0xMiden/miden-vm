@@ -459,6 +459,7 @@ pub enum Token<'input> {
     Cdropw,
     Clk,
     Const,
+    CryptoStream,
     Cswap,
     Cswapw,
     Debug,
@@ -685,6 +686,7 @@ impl fmt::Display for Token<'_> {
             Token::Cdropw => write!(f, "cdropw"),
             Token::Clk => write!(f, "clk"),
             Token::Const => write!(f, "const"),
+            Token::CryptoStream => write!(f, "crypto_stream"),
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
@@ -914,6 +916,7 @@ impl<'input> Token<'input> {
                 | Token::Cdrop
                 | Token::Cdropw
                 | Token::Clk
+                | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
@@ -1101,6 +1104,7 @@ impl<'input> Token<'input> {
         ("cdropw", Token::Cdropw),
         ("clk", Token::Clk),
         ("const", Token::Const),
+        ("crypto_stream", Token::CryptoStream),
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),

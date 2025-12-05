@@ -24,7 +24,7 @@ use miden_core::{
 use super::{
     EMPTY_WORD, ExecutionError, Felt, MIN_TRACE_LEN, ONE, OpBatch, Operation, Process, Word, ZERO,
 };
-use crate::{SyncHost, errors::ErrorContext};
+use crate::{SyncHost, errors::ErrorContext, utils::HASH_CYCLE_LEN_FELT};
 
 mod trace;
 use trace::DecoderTrace;
@@ -41,11 +41,6 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 
 #[cfg(test)]
 mod tests;
-
-// CONSTANTS
-// ================================================================================================
-
-const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 // DECODER PROCESS EXTENSION
 // ================================================================================================
@@ -799,7 +794,7 @@ impl Decoder {
         // we also need to increment block address by 8 because hashing every additional operation
         // batch requires 8 rows of the hasher trace.
         let block_info = self.block_stack.peek_mut();
-        block_info.addr += HASH_CYCLE_LEN;
+        block_info.addr += HASH_CYCLE_LEN_FELT;
 
         let ctx = self.basic_block_context.as_mut().expect("not in basic block");
 

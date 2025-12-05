@@ -133,9 +133,64 @@ impl MastForest {
     }
 
     /// Removes all decorators from this MAST forest.
+    ///
+    /// This method modifies the forest in-place, removing all decorator information
+    /// including operation-indexed decorators, before-enter decorators, after-exit
+    /// decorators, and error codes.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use miden_core::mast::MastForest;
+    ///
+    /// let mut forest = MastForest::new();
+    /// // Add decorators and nodes to the forest
+    /// forest.strip_decorators(); // forest is now stripped
+    /// ```
     pub fn strip_decorators(&mut self) {
         // Clear all debug info (decorators and error codes)
         self.debug_info.clear();
+    }
+
+    /// Compacts the forest by merging duplicate nodes.
+    ///
+    /// This operation performs node deduplication by merging the forest with itself.
+    /// The method assumes that decorators have already been stripped if that is desired.
+    /// The operation modifies the forest in-place, updating all node references as needed.
+    ///
+    /// The process works by:
+    /// 1. Merging the forest with itself to deduplicate identical nodes
+    /// 2. Updating internal node references and remappings
+    /// 3. Modifying the forest in-place with the compacted result
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use miden_core::mast::MastForest;
+    ///
+    /// let mut forest = MastForest::new();
+    /// // Add nodes to the forest
+    ///
+    /// // First strip decorators if needed
+    /// forest.strip_decorators();
+    ///
+    /// // Then compact the forest
+    /// let root_map = forest.compact();
+    ///
+    /// // Forest is now compacted with duplicate nodes merged
+    /// ```
+    pub fn compact(&mut self) -> MastForestRootMap {
+        // Merge with itself to deduplicate nodes
+        // Note: This cannot fail for a self-merge under normal conditions.
+        // The only possible failures (TooManyNodes, TooManyDecorators) would require the
+        // original forest to be at capacity limits, at which point compaction wouldn't help.
+        let (compacted_forest, root_map) = MastForest::merge([&*self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge");
+
+        // Replace current forest with compacted version
+        *self = compacted_forest;
+
+        root_map
     }
 
     /// Merges all `forests` into a new [`MastForest`].
