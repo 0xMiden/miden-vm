@@ -489,7 +489,7 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .unwrap();
 
     // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
-    // decorators using the helper method
+    // decorators
     let all_decorators = forest.all_decorators(node_id);
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit

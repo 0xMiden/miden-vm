@@ -2,6 +2,12 @@
 
 ## 0.21.0 (TBD)
 
+#### Enhancements
+
+#### Changes
+
+- [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).
+
 ## 0.20.0 (2025-12-05)
 
 #### Enhancements
