@@ -26,9 +26,9 @@
 //! ## Data Format
 //! - **Public Key**: 33 bytes (compressed secp256k1 point)
 //! - **Message Digest**: 32 bytes (Keccak256 hash of the message)
-//! - **Signature**: 66 bytes (implementation‑defined serialization used by
+//! - **Signature**: 65 bytes (implementation‑defined serialization used by
 //!   `miden_crypto::dsa::ecdsa_k256_keccak::Signature`). When packed into u32 elements for VM
-//!   memory, the final word contains 2 zero padding bytes (since 66 ≡ 2 mod 4).
+//!   memory, the final word contains 3 zero padding bytes (since 65 ≡ 1 mod 4).
 
 use alloc::{vec, vec::Vec};
 
@@ -139,7 +139,7 @@ pub struct EcdsaRequest {
     pk: PublicKey,
     /// Message digest (32 bytes, typically Keccak256 hash)
     digest: [u8; MESSAGE_DIGEST_LEN_BYTES],
-    /// ECDSA signature (serialized by the implementation; 66 bytes in this crate)
+    /// ECDSA signature (serialized by the implementation; 65 bytes in this crate)
     sig: Signature,
 }
 
