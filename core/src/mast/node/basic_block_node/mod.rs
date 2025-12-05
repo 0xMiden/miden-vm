@@ -1314,11 +1314,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
-        forest.debug_info.register_node_decorators(
-            future_node_id,
-            &self.before_enter,
-            &self.after_exit,
-        );
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         let node_id = forest
