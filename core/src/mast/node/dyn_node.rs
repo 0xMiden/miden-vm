@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, PrimeCharacteristicRing, Word};
+use miden_crypto::{Felt, Word};
 use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

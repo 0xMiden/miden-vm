@@ -5,7 +5,7 @@ use proptest::prelude::*;
 use winter_rand_utils::prng_array;
 
 use crate::{
-    DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
+    DebugOptions, Decorator, Kernel, Operation, ProgramInfo, Word,
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, DynNode, DynNodeBuilder, MastForest, MastForestContributor,
