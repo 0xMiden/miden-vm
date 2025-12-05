@@ -27,7 +27,7 @@ pub use miden_core::{
 use miden_core::{
     Decorator, FieldElement,
     mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
+        BasicBlockNode, ExternalNode, OpBatch,
     },
 };
 use miden_debug_types::SourceSpan;
@@ -348,21 +348,21 @@ impl Process {
         }
 
         match node {
-            MastNode::Block(node) => self.execute_basic_block_node(node_id, node, program, host)?,
-            MastNode::Join(node) => self.execute_join_node(node, program, host)?,
-            MastNode::Split(node) => self.execute_split_node(node, program, host)?,
-            MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
-            MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+            MastNode::Block(node) => self.execute_basic_block_node(node, program, host)?,
+            MastNode::Join(_) => self.execute_join_node(node_id, program, host)?,
+            MastNode::Split(_) => self.execute_split_node(node_id, program, host)?,
+            MastNode::Loop(_) => self.execute_loop_node(node_id, program, host)?,
+            MastNode::Call(_) => {
+                let err_ctx = err_ctx!(program, node_id, host);
                 add_error_ctx_to_external_error(
-                    self.execute_call_node(node, program, host),
+                    self.execute_call_node(node_id, program, host),
                     err_ctx,
                 )?
             },
-            MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+            MastNode::Dyn(_) => {
+                let err_ctx = err_ctx!(program, node_id, host);
                 add_error_ctx_to_external_error(
-                    self.execute_dyn_node(node, program, host),
+                    self.execute_dyn_node(node_id, program, host),
                     err_ctx,
                 )?
             },
@@ -384,10 +384,17 @@ impl Process {
     #[inline(always)]
     fn execute_join_node(
         &mut self,
-        node: &JoinNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let node = program
+            .get_node_by_id(node_id)
+            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
+        let MastNode::Join(node) = node else {
+            return Err(ExecutionError::MastNodeNotFoundInForest { node_id });
+        };
+
         self.start_join_node(node, program, host)?;
 
         // execute first and then second child of the join block
@@ -401,10 +408,17 @@ impl Process {
     #[inline(always)]
     fn execute_split_node(
         &mut self,
-        node: &SplitNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let node = program
+            .get_node_by_id(node_id)
+            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
+        let MastNode::Split(node) = node else {
+            return Err(ExecutionError::MastNodeNotFoundInForest { node_id });
+        };
+
         // start the SPLIT block; this also pops the stack and returns the popped element
         let condition = self.start_split_node(node, program, host)?;
 
@@ -414,7 +428,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node_id, host);
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         }
 
@@ -425,10 +439,17 @@ impl Process {
     #[inline(always)]
     fn execute_loop_node(
         &mut self,
-        node: &LoopNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let node = program
+            .get_node_by_id(node_id)
+            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
+        let MastNode::Loop(node) = node else {
+            return Err(ExecutionError::MastNodeNotFoundInForest { node_id });
+        };
+
         // start the LOOP block; this also pops the stack and returns the popped element
         let condition = self.start_loop_node(node, program, host)?;
 
@@ -447,7 +468,7 @@ impl Process {
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node_id, host);
                 return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
             }
 
@@ -458,7 +479,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host)
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node_id, host);
             Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
         }
     }
@@ -467,19 +488,26 @@ impl Process {
     #[inline(always)]
     fn execute_call_node(
         &mut self,
-        call_node: &CallNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
+        let node = program
+            .get_node_by_id(node_id)
+            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
+        let MastNode::Call(call_node) = node else {
+            return Err(ExecutionError::MastNodeNotFoundInForest { node_id });
+        };
+
         // if this is a syscall, make sure the call target exists in the kernel
         if call_node.is_syscall() {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, host);
+            let err_ctx = err_ctx!(program, call_node.callee(), host);
             self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
         }
-        let err_ctx = err_ctx!(program, call_node, host);
+        let err_ctx = err_ctx!(program, call_node.callee(), host);
 
         self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
@@ -493,11 +521,18 @@ impl Process {
     #[inline(always)]
     fn execute_dyn_node(
         &mut self,
-        node: &DynNode,
+        node_id: MastNodeId,
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
+        let node = program
+            .get_node_by_id(node_id)
+            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
+        let MastNode::Dyn(node) = node else {
+            return Err(ExecutionError::MastNodeNotFoundInForest { node_id });
+        };
+
+        let err_ctx = err_ctx!(program, node_id, host);
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
@@ -559,7 +594,7 @@ impl Process {
         let mut op_offset = 0;
 
         // execute the first operation batch
-        self.execute_op_batch(basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
+        self.execute_op_batch(node_id, basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
         op_offset += basic_block.op_batches()[0].ops().len();
 
         // if the span contains more operation batches, execute them. each additional batch is
@@ -596,6 +631,7 @@ impl Process {
     #[inline(always)]
     fn execute_op_batch(
         &mut self,
+        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
         op_offset: usize,
@@ -626,7 +662,7 @@ impl Process {
             }
 
             // decode and execute the operation
-            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
+            let err_ctx = err_ctx!(program, node_id, host, i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
 
