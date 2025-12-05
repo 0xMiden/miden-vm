@@ -41,20 +41,6 @@ impl LoopNode {
 }
 
 impl LoopNode {
-    /// Returns a commitment to this Loop node.
-    ///
-    /// The commitment is computed as a hash of the loop body and an empty word ([ZERO; 4]) in
-    /// the domain defined by [Self::domain()] - i..e,:
-    /// ```
-    /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{hash::rpo::{Word as Digest, Rpo256 as Hasher}};
-    /// # let body_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[body_digest, Digest::default()], LoopNode::domain());
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
         self.body

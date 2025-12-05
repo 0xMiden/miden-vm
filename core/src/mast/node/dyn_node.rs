@@ -68,45 +68,6 @@ impl DynNode {
             Self::DYN_DOMAIN
         }
     }
-
-    /// Returns a commitment to a Dyn node.
-    ///
-    /// The commitment is computed by hashing two empty words ([ZERO; 4]) in the domain defined
-    /// by [Self::DYN_DOMAIN] or [Self::DYNCALL_DOMAIN], i.e.:
-    ///
-    /// ```
-    /// # use miden_core::mast::DynNode;
-    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
-    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyn_domain());
-    /// Hasher::merge_in_domain(&[Digest::default(), Digest::default()], DynNode::dyncall_domain());
-    /// ```
-    pub fn digest(&self) -> Word {
-        if self.is_dyncall {
-            Word::new([
-                Felt::from_u64(8751004906421739448),
-                Felt::from_u64(13469709002495534233),
-                Felt::from_u64(12584249374630430826),
-                Felt::from_u64(7624899870831503004),
-            ])
-        } else {
-            Word::new([
-                Felt::from_u64(8115106948140260551),
-                Felt::from_u64(13491227816952616836),
-                Felt::from_u64(15015806788322198710),
-                Felt::from_u64(16575543461540527115),
-            ])
-        }
-    }
-
-    /// Returns the decorators to be executed before this node is executed.
-    pub fn before_enter(&self) -> &[DecoratorId] {
-        &self.before_enter
-    }
-
-    /// Returns the decorators to be executed after this node is executed.
-    pub fn after_exit(&self) -> &[DecoratorId] {
-        &self.after_exit
-    }
 }
 
 impl MastNodeErrorContext for DynNode {

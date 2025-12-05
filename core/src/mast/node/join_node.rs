@@ -38,21 +38,6 @@ impl JoinNode {
 
 /// Public accessors
 impl JoinNode {
-    /// Returns a commitment to this Join node.
-    ///
-    /// The commitment is computed as a hash of the `first` and `second` child node in the domain
-    /// defined by [Self::join_domain()] - i.e.,:
-    /// ```
-    /// # use miden_core::mast::JoinNode;
-    /// # use miden_crypto::{hash::rpo::{Word as Digest, Rpo256 as Hasher}};
-    /// # let first_child_digest = Digest::default();
-    /// # let second_child_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[first_child_digest, second_child_digest], JoinNode::join_domain());
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node that is to be executed first.
     pub fn first(&self) -> MastNodeId {
         self.children[0]

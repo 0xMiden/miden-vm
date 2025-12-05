@@ -48,28 +48,6 @@ impl CallNode {
 //-------------------------------------------------------------------------------------------------
 /// Public accessors
 impl CallNode {
-    /// Returns a commitment to this Call node.
-    ///
-    /// The commitment is computed as a hash of the callee and an empty word ([ZERO; 4]) in the
-    /// domain defined by either [Self::call_domain()] or [Self::syscall_domain()], depending on
-    /// whether the node represents a simple call or a syscall - i.e.,:
-    /// ```
-    /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
-    /// # let callee_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::call_domain());
-    /// ```
-    /// or
-    /// ```
-    /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{hash::rpo::{RpoDigest as Digest, Rpo256 as Hasher}};
-    /// # let callee_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[callee_digest, Digest::default()], CallNode::SYSCALL_DOMAIN);
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node to be invoked by this call node.
     pub fn callee(&self) -> MastNodeId {
         self.callee

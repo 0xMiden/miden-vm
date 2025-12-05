@@ -1,5 +1,5 @@
 //! TODO: add docs
-use miden_crypto::{AlgebraicSponge, Word as Digest};
+use miden_crypto::Word as Digest;
 
 use super::Felt;
 pub use crate::crypto::hash::Rpo256 as Hasher;

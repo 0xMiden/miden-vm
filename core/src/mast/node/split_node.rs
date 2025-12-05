@@ -42,21 +42,6 @@ impl SplitNode {
 
 /// Public accessors
 impl SplitNode {
-    /// Returns a commitment to this Split node.
-    ///
-    /// The commitment is computed as a hash of the `on_true` and `on_false` child nodes in the
-    /// domain defined by [Self::domain()] - i..e,:
-    /// ```
-    /// # use miden_core::mast::SplitNode;
-    /// # use miden_crypto::{hash::rpo::{Word as Digest, Rpo256 as Hasher}};
-    /// # let on_true_digest = Digest::default();
-    /// # let on_false_digest = Digest::default();
-    /// Hasher::merge_in_domain(&[on_true_digest, on_false_digest], SplitNode::domain());
-    /// ```
-    pub fn digest(&self) -> Word {
-        self.digest
-    }
-
     /// Returns the ID of the node which is to be executed if the top of the stack is `1`.
     pub fn on_true(&self) -> MastNodeId {
         self.branches[0]
