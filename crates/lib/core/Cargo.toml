@@ -1,0 +1,67 @@
+[package]
+name = "miden-core-lib"
+version.workspace = true
+description = "Miden VM core library"
+documentation = "https://docs.rs/miden-core-lib"
+readme = "README.md"
+categories = ["cryptography", "mathematics"]
+keywords = ["miden", "program", "core-lib"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[lib]
+bench = false
+doctest = false
+
+[[bench]]
+name = "compilation"
+harness = false
+
+[[test]]
+name = "core-lib"
+path = "tests/main.rs"
+
+[features]
+default = ["std"]
+std = ["miden-assembly/std", "miden-utils-sync/std"]
+with-debug-info = []
+
+[dependencies]
+# Miden dependencies
+miden-assembly.workspace = true
+miden-core.workspace = true
+miden-crypto.workspace = true
+miden-processor.workspace = true
+miden-utils-sync.workspace = true
+
+# External dependencies
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+blake3.workspace = true
+criterion.workspace = true
+miden-air.workspace = true
+miden-processor = { workspace = true, features = ["testing"] }
+miden-utils-testing.workspace = true
+miden-verifier.workspace = true
+num = { version = "0.4" }
+num-bigint = { version = "0.4" }
+pretty_assertions = { version = "1.4" }
+rand = { version = "0.9", default-features = false }
+rand_chacha = { version = "0.9", default-features = false }
+rstest = { version = "0.26" }
+serde_json.workspace = true
+sha2 = { version = "0.10" }
+sha3 = { version = "0.10" }
+winter-air.workspace = true
+winter-fri.workspace = true
+
+[build-dependencies]
+env_logger.workspace = true
+fs-err = { version = "3.1" }
+miden-assembly = { workspace = true, features = ["std"] }

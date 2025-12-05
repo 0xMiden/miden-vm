@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{AdviceInputs, fast::FastProcessor};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
@@ -49,7 +49,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
                     let mut assembler = Assembler::default();
                     assembler
                         .link_dynamic_library(CoreLibrary::default())
-                        .expect("failed to load libcore");
+                        .expect("failed to load core library");
 
                     let program = assembler
                         .assemble_program(&source)

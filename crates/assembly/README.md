@@ -61,7 +61,7 @@ for the full set of APIs and how to use them.
 The first use case that you are likely to encounter is the desire to factor out
 some shared code into a _library_. A library is a set of modules which belong
 to a common namespace, and which are packaged together. The
-[core library](../../libcore) is an example of this.
+[core library](../../crates/lib/core) is an example of this.
 
 To call code in this library from your program entrypoint, you must add the
 library to the instance of the assembler you will compile the program with,
@@ -75,7 +75,7 @@ core library in our own program, we would add it like so:
 ```rust
 # use miden_assembly::Assembler;
 # use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-# use miden_libcore::CoreLibrary;
+# use miden_core_lib::CoreLibrary;
 # use std::sync::Arc;
 #
 let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()))
@@ -190,33 +190,34 @@ together, let's look at one last example:
 ```rust
 use miden_assembly::Assembler;
 use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use std::sync::Arc;
 
-// Source code of the kernel module
-let kernel = "pub proc foo add end";
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Source code of the kernel module
+    let kernel = "pub proc foo add end";
 
-// Create a source manager
-let source_manager = Arc::new(DefaultSourceManager::default());
+    // Create a source manager
+    let source_manager = Arc::new(DefaultSourceManager::default());
 
-// First, assemble the kernel library
-let kernel_lib = Assembler::new(source_manager.clone())
-    .assemble_kernel(kernel)
-    .unwrap();
+    // First, assemble the kernel library
+    let kernel_lib = Assembler::new(source_manager.clone())
+        .assemble_kernel(kernel)?;
 
-// Instantiate the assembler with multiple options at once
-let assembler = Assembler::with_kernel(source_manager, kernel_lib)
-    .with_dynamic_library(&CoreLibrary::default())    .with_dynamic_library(&StdLibrary::default())
->>>>>>> 1d3ff0866 (Improve tests for always-enabled debug mode after issue #1821)
-    .unwrap();
+    // Instantiate the assembler with multiple options at once
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib)
+        .with_dynamic_library(&CoreLibrary::default())?;
 
-// Assemble our program
-let program = assembler.assemble_program("
+    // Assemble our program
+    let program = assembler.assemble_program("
 begin
     push.1.2
     syscall.foo
 end
-").unwrap();
+")?;
+
+    Ok(())
+}
 ```
 
 ## License
