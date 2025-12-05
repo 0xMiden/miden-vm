@@ -26,9 +26,7 @@ pub use miden_core::{
 };
 use miden_core::{
     Decorator, FieldElement,
-    mast::{
-        BasicBlockNode, ExternalNode, OpBatch,
-    },
+    mast::{BasicBlockNode, ExternalNode, OpBatch},
 };
 use miden_debug_types::SourceSpan;
 pub use winter_prover::matrix::ColMatrix;
@@ -504,10 +502,10 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node.callee(), host);
+            let err_ctx = err_ctx!(program, node_id, host);
             self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
         }
-        let err_ctx = err_ctx!(program, call_node.callee(), host);
+        let err_ctx = err_ctx!(program, node_id, host);
 
         self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
@@ -594,7 +592,7 @@ impl Process {
         let mut op_offset = 0;
 
         // execute the first operation batch
-        self.execute_op_batch(node_id, basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
+        self.execute_op_batch(basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
         op_offset += basic_block.op_batches()[0].ops().len();
 
         // if the span contains more operation batches, execute them. each additional batch is
@@ -631,7 +629,6 @@ impl Process {
     #[inline(always)]
     fn execute_op_batch(
         &mut self,
-        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         batch: &OpBatch,
         op_offset: usize,

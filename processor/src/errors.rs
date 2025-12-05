@@ -563,11 +563,7 @@ pub struct ErrorContextImpl {
 }
 
 impl ErrorContextImpl {
-    pub fn new(
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Self {
+    pub fn new(mast_forest: &MastForest, node_id: MastNodeId, host: &impl BaseHost) -> Self {
         let (label, source_file) =
             Self::precalc_label_and_source_file(None, mast_forest, node_id, host);
         Self { label, source_file }
@@ -591,7 +587,8 @@ impl ErrorContextImpl {
         node_id: MastNodeId,
         host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        mast_forest.get_assembly_op(node_id, op_idx)
+        mast_forest
+            .get_assembly_op(node_id, op_idx)
             .and_then(|assembly_op| assembly_op.location())
             .map_or_else(
                 || (SourceSpan::UNKNOWN, None),

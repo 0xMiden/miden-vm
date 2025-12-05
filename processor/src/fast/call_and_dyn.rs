@@ -43,10 +43,7 @@ impl FastProcessor {
 
         let err_ctx = err_ctx!(current_forest, current_node_id, host);
 
-        let callee_hash = current_forest
-            .get_node_by_id(call_node.callee())
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
-            .digest();
+        let callee_hash = current_forest[call_node.callee()].digest();
 
         self.save_context_and_truncate_stack(tracer);
 
