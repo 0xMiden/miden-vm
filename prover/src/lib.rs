@@ -14,8 +14,8 @@ use miden_gpu::HashFn;
 use miden_processor::{
     ExecutionTrace, Program,
     crypto::{
-        Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
-        Rpx256, RpxRandomCoin, WinterRandomCoin,
+        Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin, Rpx256,
+        RpxRandomCoin, WinterRandomCoin,
     },
     math::{Felt, FieldElement},
 };
@@ -93,14 +93,6 @@ pub fn prove(
 
     // generate STARK proof
     let proof = match hash_fn {
-        HashFunction::Blake3_192 => {
-            let prover = ExecutionProver::<Blake3_192, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
-        },
         HashFunction::Blake3_256 => {
             let prover = ExecutionProver::<Blake3_256, WinterRandomCoin<_>>::new(
                 options,

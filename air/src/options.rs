@@ -101,7 +101,7 @@ impl ProvingOptions {
     /// settings that are well-suited for recursive verification.
     pub fn with_96_bit_security(hash_fn: HashFunction) -> Self {
         let proof_options = match hash_fn {
-            HashFunction::Blake3_192 | HashFunction::Blake3_256 => Self::REGULAR_96_BITS,
+            HashFunction::Blake3_256 => Self::REGULAR_96_BITS,
             HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
                 Self::RECURSIVE_96_BITS
             },
@@ -120,7 +120,7 @@ impl ProvingOptions {
     /// settings that are well-suited for recursive verification.
     pub fn with_128_bit_security(hash_fn: HashFunction) -> Self {
         let proof_options = match hash_fn {
-            HashFunction::Blake3_192 | HashFunction::Blake3_256 => Self::REGULAR_128_BITS,
+            HashFunction::Blake3_256 => Self::REGULAR_128_BITS,
             HashFunction::Rpo256 | HashFunction::Rpx256 | HashFunction::Poseidon2 => {
                 Self::RECURSIVE_128_BITS
             },
@@ -157,7 +157,7 @@ impl ProvingOptions {
 
 impl Default for ProvingOptions {
     fn default() -> Self {
-        Self::with_96_bit_security(HashFunction::Blake3_192)
+        Self::with_96_bit_security(HashFunction::Blake3_256)
     }
 }
 

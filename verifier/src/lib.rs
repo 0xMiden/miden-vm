@@ -9,7 +9,7 @@ use alloc::vec;
 
 use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
 use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+    hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
 };
 use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
@@ -123,14 +123,11 @@ pub fn verify_with_precompiles(
         PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
 
     match hash_fn {
-        HashFunction::Blake3_192 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
-            verify_proof::<ProcessorAir, Blake3_192, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
         HashFunction::Blake3_256 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_128_BITS]);
+            let opts = AcceptableOptions::OptionSet(vec![
+                ProvingOptions::REGULAR_96_BITS,
+                ProvingOptions::REGULAR_128_BITS,
+            ]);
             verify_proof::<ProcessorAir, Blake3_256, WinterRandomCoin<_>, MerkleTree<_>>(
                 proof, pub_inputs, &opts,
             )

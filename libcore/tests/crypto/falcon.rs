@@ -288,7 +288,7 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
     let (stack_outputs, proof) = miden_utils_testing::prove(
         &program,
         stack_inputs.clone(),
