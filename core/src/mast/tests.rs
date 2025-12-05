@@ -980,6 +980,160 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
 }
 
 #[test]
+fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
+    let mut forest = MastForest::new();
+
+    // Test 1: Node with no assembly decorators should return None
+    let trace_deco = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let debug_deco = forest.add_decorator(Decorator::Debug(DebugOptions::StackTop(10))).unwrap();
+
+    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let decorators = vec![(0, trace_deco), (1, debug_deco)];
+    let node_id = BasicBlockNodeBuilder::new(operations, decorators)
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let result = forest.get_assembly_op(node_id, None);
+    assert!(result.is_none(), "Node with no AssemblyOp decorators should return None");
+
+    // Test 2: BasicBlock with before_enter AssemblyOp decorator
+    let asm_op_before = AssemblyOp::new(
+        None,
+        "before_context".into(),
+        1,
+        "before_op".into(),
+        false,
+    );
+    let asm_before_id = forest.add_decorator(Decorator::AsmOp(asm_op_before.clone())).unwrap();
+
+    let bb_before = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![])
+        .with_before_enter(vec![asm_before_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let result_before = forest.get_assembly_op(bb_before, None);
+    assert!(result_before.is_some());
+    assert_eq!(result_before.unwrap(), &asm_op_before);
+
+    // Test 3: BasicBlock with after_exit AssemblyOp decorator
+    let asm_op_after = AssemblyOp::new(
+        None,
+        "after_context".into(),
+        2, // 2 cycles
+        "after_op".into(),
+        false,
+    );
+    let asm_after_id = forest.add_decorator(Decorator::AsmOp(asm_op_after.clone())).unwrap();
+
+    let bb_after = BasicBlockNodeBuilder::new(vec![Operation::Neg], vec![])
+        .with_after_exit(vec![asm_after_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let result_after = forest.get_assembly_op(bb_after, None);
+    assert!(result_after.is_some());
+    assert_eq!(result_after.unwrap(), &asm_op_after);
+
+    // Test 4: BasicBlock with both before_enter and after_exit AssemblyOp decorators
+    // Should return the first one found (before_enter in this case)
+    let asm_op_first = AssemblyOp::new(
+        None,
+        "first_context".into(),
+        1,
+        "first_op".into(),
+        false,
+    );
+    let asm_op_second = AssemblyOp::new(
+        None,
+        "second_context".into(),
+        1,
+        "second_op".into(),
+        false,
+    );
+    let asm_first_id = forest.add_decorator(Decorator::AsmOp(asm_op_first.clone())).unwrap();
+    let asm_second_id = forest.add_decorator(Decorator::AsmOp(asm_op_second.clone())).unwrap();
+
+    let bb_both = BasicBlockNodeBuilder::new(vec![Operation::Eq], vec![])
+        .with_before_enter(vec![asm_first_id])
+        .with_after_exit(vec![asm_second_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let result_both = forest.get_assembly_op(bb_both, None);
+    assert!(result_both.is_some());
+    assert_eq!(result_both.unwrap(), &asm_op_first, "Should return first AssemblyOp found");
+
+    // Test 5: Multiple AssemblyOp decorators - should still return the first one
+    let asm_op1 = AssemblyOp::new(None, "op1".into(), 1, "op1_name".into(), false);
+    let asm_op2 = AssemblyOp::new(None, "op2".into(), 1, "op2_name".into(), false);
+    let asm_op3 = AssemblyOp::new(None, "op3".into(), 1, "op3_name".into(), false);
+    let asm1_id = forest.add_decorator(Decorator::AsmOp(asm_op1.clone())).unwrap();
+    let asm2_id = forest.add_decorator(Decorator::AsmOp(asm_op2.clone())).unwrap();
+    let asm3_id = forest.add_decorator(Decorator::AsmOp(asm_op3.clone())).unwrap();
+
+    let bb_multiple = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Mul],
+        vec![(0, asm2_id), (2, asm3_id)]
+    )
+    .with_before_enter(vec![asm1_id])
+    .with_after_exit(vec![asm3_id])
+    .add_to_forest(&mut forest)
+    .unwrap();
+
+    let result_multiple = forest.get_assembly_op(bb_multiple, None);
+    assert!(result_multiple.is_some());
+    assert_eq!(result_multiple.unwrap(), &asm_op1, "Should return first AssemblyOp encountered");
+
+    // Test 6: Verify that target index None works with before/after decorators
+    let result_with_none = forest.get_assembly_op(bb_before, None);
+    assert!(result_with_none.is_some());
+    assert_eq!(result_with_none.unwrap(), &asm_op_before);
+
+    // Test 7: Verify that target index with operation-indexed decorators still works alongside before/after
+    let operations_with_target = vec![Operation::Push(Felt::new(5)), Operation::Add];
+    let op_indexed_asm = AssemblyOp::new(None, "op_indexed".into(), 1, "op_indexed_name".into(), false);
+    let op_indexed_id = forest.add_decorator(Decorator::AsmOp(op_indexed_asm.clone())).unwrap();
+
+    // Create a BasicBlock with only operation-indexed decorator (no before/after)
+    let bb_op_only = BasicBlockNodeBuilder::new(operations_with_target.clone(), vec![(1, op_indexed_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // With no target, should still find the operation-indexed assembly op (since it's the only one)
+    let result_op_only_none = forest.get_assembly_op(bb_op_only, None);
+    assert!(result_op_only_none.is_some());
+    assert_eq!(result_op_only_none.unwrap(), &op_indexed_asm);
+
+    // With target index 1, should find the operation-indexed assembly op
+    let result_op_only_target = forest.get_assembly_op(bb_op_only, Some(1));
+    assert!(result_op_only_target.is_some());
+    assert_eq!(result_op_only_target.unwrap(), &op_indexed_asm);
+
+    // With target index 0, should find none (no operation-indexed decorator at index 0)
+    let result_op_only_no_target = forest.get_assembly_op(bb_op_only, Some(0));
+    assert!(result_op_only_no_target.is_none());
+
+    // Test 8: Mixed decorators - BasicBlock with both before and operation-indexed
+    let bb_mixed = BasicBlockNodeBuilder::new(operations_with_target.clone(), vec![(1, op_indexed_id)])
+        .with_before_enter(vec![asm_before_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // With no target, should find the first assembly op (before_enter since it's checked first)
+    let result_mixed_none = forest.get_assembly_op(bb_mixed, None);
+    assert!(result_mixed_none.is_some());
+    assert_eq!(result_mixed_none.unwrap(), &asm_op_before);
+
+    // With target index 1, should find the operation-indexed assembly op
+    let result_mixed_target = forest.get_assembly_op(bb_mixed, Some(1));
+    assert!(result_mixed_target.is_some());
+    assert_eq!(result_mixed_target.unwrap(), &op_indexed_asm);
+
+    // Note: The behavior with target index 0 is implementation-dependent and may change
+    // The important part is that target index 1 correctly finds the operation-indexed decorator
+}
+
+#[test]
 fn test_decorator_stripping_independent() {
     let mut forest = MastForest::new();
 
