@@ -55,7 +55,7 @@ fn test_ecdsa_verify_cases() {
 
                     # Call verify: [ptr_pk, ptr_digest, ptr_sig]
                     push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                    exec.ecdsa_k256_keccak::verify
+                    exec.ecdsa_k256_keccak::verify_prehash
                     # => [result, ...]
 
                     exec.sys::truncate_stack
@@ -100,7 +100,7 @@ fn test_ecdsa_verify_impl_commitment() {
 
                 # Call verify_impl: [ptr_pk, ptr_digest, ptr_sig]
                 push.{SIG_ADDR}.{DIGEST_ADDR}.{PK_ADDR}
-                exec.ecdsa_k256_keccak::verify_impl
+                exec.ecdsa_k256_keccak::verify_prehash_impl
                 # => [COMM, TAG, result, ...]
 
                 exec.sys::truncate_stack
@@ -195,7 +195,7 @@ fn test_ecdsa_verify_bis_wrapper() {
             push.{message} push.{pk_commitment}
             debug.stack
             emit.event(\"{EVENT_ECDSA_SIG_TO_STACK}\")
-            exec.ecdsa_k256_keccak::verify_ecdsa_k256_keccak
+            exec.ecdsa_k256_keccak::verify
         end
         ",
     );

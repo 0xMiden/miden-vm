@@ -116,7 +116,7 @@ impl Default for CoreLibrary {
 
 /// Signs the provided message with the supplied secret key and encodes this signature and the
 /// associated public key into a vector of field elements in the format expected by
-/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_ecdsa_k256_keccak` procedure.
+/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
 ///
 /// See [encode_ecdsa_signature()] for more info.
 pub fn ecdsa_sign(sk: &ecdsa_k256_keccak::SecretKey, msg: Word) -> Vec<Felt> {
@@ -127,7 +127,7 @@ pub fn ecdsa_sign(sk: &ecdsa_k256_keccak::SecretKey, msg: Word) -> Vec<Felt> {
 
 /// Infers the pubic key from the provided signature and message, and encodes this public key and
 /// signature into a vector of field elements in the format expected by
-/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify_ecdsa_k256_keccak` procedure.
+/// `miden::core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
 ///
 /// See [encode_ecdsa_signature()] for more info.
 ///
@@ -142,13 +142,13 @@ pub fn prepare_ecdsa_signature(
 }
 
 /// Encodes the provided public key and signature into a vector of field elements in the format
-/// expected by `core::crypto::dsa::ecdsa_k256_keccak::verify_ecdsa_k256_keccak` procedure.
+/// expected by `core::crypto::dsa::ecdsa_k256_keccak::verify` procedure.
 ///
 /// 1. The compressed secp256k1 public key encoded as 9 packed-u32 felts (33 bytes total).
 /// 2. The ECDSA signature encoded as 17 packed-u32 felts (66 bytes total).
 ///
 /// The two chunks are concatenated as `[PK[9] || SIG[17]]` so they can be streamed straight to
-/// the advice provider before invoking `secp256k1::verify_ecdsa_k256_keccak`.
+/// the advice provider before invoking `ecdsa_k256_keccak::verify`.
 pub fn encode_ecdsa_signature(
     pk: &ecdsa_k256_keccak::PublicKey,
     sig: &ecdsa_k256_keccak::Signature,
