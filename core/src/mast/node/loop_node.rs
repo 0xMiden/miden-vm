@@ -10,10 +10,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
-        MastNodeId,
-    },
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
 };
 
 // LOOP NODE
@@ -46,7 +43,6 @@ impl LoopNode {
         self.body
     }
 }
-
 
 // PRETTY PRINTING
 // ================================================================================================

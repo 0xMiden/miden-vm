@@ -432,7 +432,7 @@ fn mast_forest_merge_decorators() {
     assert_eq!(merged.nodes.len(), 3);
 
     let merged_foo_block = merged.nodes.iter().find(|node| node.is_basic_block()).unwrap();
-    let MastNode::Block(merged_foo_block) = merged_foo_block else {
+    let MastNode::Block(_merged_foo_block) = merged_foo_block else {
         panic!("expected basic block node");
     };
 

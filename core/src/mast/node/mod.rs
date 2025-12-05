@@ -38,9 +38,7 @@ mod decorator_store;
 pub use decorator_store::DecoratorStore;
 
 use super::DecoratorId;
-use crate::{
-    mast::{MastForest, MastNodeId},
-};
+use crate::mast::{MastForest, MastNodeId};
 
 pub trait MastNodeExt {
     /// Returns a commitment/hash of the node.
@@ -207,11 +205,9 @@ impl MastNode {
 // MAST INNER NODE EXT
 // ===============================================================================================
 
-
 // Links an operation index in a block to a decoratorid, to be executed right before this
 // operation's position
 pub type DecoratedOpLink = (usize, DecoratorId);
-
 
 // HELPERS
 // ===============================================================================================

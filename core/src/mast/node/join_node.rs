@@ -9,10 +9,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
-        MastNodeId,
-    },
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
     prettier::PrettyPrint,
 };
 
@@ -49,7 +46,6 @@ impl JoinNode {
         self.children[1]
     }
 }
-
 
 // PRETTY PRINTING
 // ================================================================================================

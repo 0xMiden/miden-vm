@@ -10,9 +10,7 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
-use crate::mast::{
-    DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId,
-};
+use crate::mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -32,7 +30,6 @@ pub struct ExternalNode {
     digest: Word,
     decorator_store: DecoratorStore,
 }
-
 
 // PRETTY PRINTING
 // ================================================================================================

@@ -10,10 +10,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
-    mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
-        MastNodeId,
-    },
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
 };
 
 // SPLIT NODE
@@ -52,7 +49,6 @@ impl SplitNode {
         self.branches[1]
     }
 }
-
 
 // PRETTY PRINTING
 // ================================================================================================
