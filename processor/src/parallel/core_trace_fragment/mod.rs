@@ -3,8 +3,9 @@ use core::ops::ControlFlow;
 use miden_air::{
     Felt, FieldElement, RowIndex,
     trace::{
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{NUM_OP_BITS, NUM_USER_OP_HELPERS},
+        stack::H0_COL_IDX,
     },
 };
 use miden_core::{
@@ -14,6 +15,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
+use winter_prover::math::batch_inversion;
 
 use crate::{
     ContextId, ErrorContext, ExecutionError, ProcessState,
@@ -79,9 +81,19 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let execution_state = self.context.initial_execution_state.clone();
         // Execute fragment generation and always finalize at the end
         let _ = self.fill_fragment_impl(execution_state);
+
+        // Invert H0 column in the stack trace
+        let num_rows_built = self.num_rows_built();
+        {
+            let inverted_h0 = batch_inversion(
+                &self.fragment.columns[STACK_TRACE_OFFSET + H0_COL_IDX][0..num_rows_built],
+            );
+            self.fragment.columns[STACK_TRACE_OFFSET + H0_COL_IDX][0..num_rows_built]
+                .copy_from_slice(&inverted_h0);
+        }
+
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
         let final_system_rows = self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]);
-        let num_rows_built = self.num_rows_built();
         (final_stack_rows, final_system_rows, num_rows_built)
     }
 

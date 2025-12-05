@@ -20,7 +20,7 @@ use miden_core::{
     Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
-use winter_prover::{crypto::RandomCoin, math::batch_inversion};
+use winter_prover::crypto::RandomCoin;
 
 use crate::{
     ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, TraceLenSummary,
@@ -248,14 +248,6 @@ fn generate_core_trace_columns(
             "stack_rows should not be empty, which indicates that there are no trace fragments",
         ),
     );
-
-    // Run batch inversion on stack's H0 helper column concurrently, per fragment
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]
-        .par_chunks_mut(fragment_size)
-        .for_each(|chunk| {
-            let inverted = batch_inversion(chunk);
-            chunk.copy_from_slice(&inverted);
-        });
 
     core_trace_columns
 }
