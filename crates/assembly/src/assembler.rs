@@ -491,9 +491,7 @@ impl Assembler {
                         path.clone(),
                         &mut mast_forest_builder,
                     )?;
-                    if let Some(export) = export {
-                        exports.insert(path, export);
-                    }
+                    exports.insert(path, export);
                 }
             }
 
@@ -515,13 +513,18 @@ impl Assembler {
         Ok(Library::new(mast_forest.into(), exports)?)
     }
 
+    /// The purpose of this function is, for any given symbol in the set of modules being compiled
+    /// to a [Library], to generate a corresponding [LibraryExport] for that symbol.
+    ///
+    /// For procedures, this function is also responsible for compiling the procedure, and updating
+    /// the provided [MastForestBuilder] accordingly.
     fn export_symbol(
         &mut self,
         gid: GlobalItemIndex,
         module_kind: ModuleKind,
         symbol_path: Arc<Path>,
         mast_forest_builder: &mut MastForestBuilder,
-    ) -> Result<Option<LibraryExport>, Report> {
+    ) -> Result<LibraryExport, Report> {
         log::trace!(target: "assembler::export_symbol", "exporting {} {symbol_path}", match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(_)) => "compiled procedure",
             SymbolItem::Compiled(ItemInfo::Constant(_)) => "compiled constant",
@@ -539,10 +542,8 @@ impl Assembler {
                         node: proc.body_node_id(),
                         signature: proc.signature(),
                     },
-                    // We didn't find the procedure in our current
-                    // MAST forest. We still need to
-                    // check if it exists in one of a library
-                    // dependency.
+                    // We didn't find the procedure in our current MAST forest. We still need to
+                    // check if it exists in one of a library dependency.
                     None => {
                         let node = self.ensure_valid_procedure_mast_root(
                             InvokeKind::ProcRef,
@@ -613,18 +614,16 @@ impl Assembler {
                 LibraryExport::Type(TypeExport { path: symbol_path, ty })
             },
 
-            SymbolItem::Alias { alias, resolved } if alias.visibility().is_public() => {
+            SymbolItem::Alias { alias, resolved } => {
                 // All aliases should've been resolved by now
                 let resolved = resolved.get().unwrap_or_else(|| {
                     panic!("unresolved alias {symbol_path} targeting: {}", alias.target())
                 });
                 return self.export_symbol(resolved, module_kind, symbol_path, mast_forest_builder);
             },
-            // Ignore private re-exports
-            SymbolItem::Alias { .. } => return Ok(None),
         };
 
-        Ok(Some(export))
+        Ok(export)
     }
 
     /// Compiles the provided module into a [`Program`]. The resulting program can be executed on
@@ -784,6 +783,9 @@ impl Assembler {
                         SymbolItem::Constant(_) | SymbolItem::Type(_) | SymbolItem::Compiled(_) => {
                             continue;
                         },
+                        // A resolved alias will always refer to a non-alias item, this is because
+                        // when aliases are resolved, they are resolved recursively. Had the alias
+                        // chain been cyclical, we would have raised an error already.
                         SymbolItem::Alias { .. } => unreachable!(),
                     }
                     let path = module_path.join(alias.name().as_str()).into();
@@ -826,7 +828,8 @@ impl Assembler {
                     mast_forest_builder.insert_procedure(procedure_gid, procedure)?;
                 },
                 SymbolItem::Compiled(_) | SymbolItem::Constant(_) | SymbolItem::Type(_) => {
-                    unreachable!()
+                    // There is nothing to do for other items that might have edges in the graph
+                    continue;
                 },
             }
         }
