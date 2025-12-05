@@ -24,10 +24,6 @@ use miden_core_lib::{
         eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
     },
 };
-use miden_crypto::{
-    dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
-    hash::rpo::Rpo256,
-};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use rand::{SeedableRng, rngs::StdRng};
 use sha2::{Digest, Sha512};
