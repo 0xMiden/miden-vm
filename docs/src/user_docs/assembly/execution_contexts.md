@@ -35,7 +35,7 @@ The manipulations of the stack depth described above have the following implicat
 - The top 16 elements of the stack can be used to pass parameters and return values between the caller and the callee.
 - Caller's stack beyond the top 16 elements is inaccessible to the callee, and thus, is guaranteed not to change as the result of the call.
     - As mentioned above, in the case of `dyncall`, the elements at indices 1 to 17 at the call site will be accessible to the callee (shifted to indices 0 to 16)
-- At the end of its execution, the callee must ensure that stack depth is exactly 16. If this is difficult to ensure manually, the [`truncate_stack`](../libcore/sys.md) procedure can be used to drop all elements from the stack except for the top 16.
+- At the end of its execution, the callee must ensure that stack depth is exactly 16. If this is difficult to ensure manually, the [`truncate_stack`](../core_lib/sys.md) procedure can be used to drop all elements from the stack except for the top 16.
 
 #### Invoking via `exec` instruction
 

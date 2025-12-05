@@ -10,6 +10,6 @@ In the following sections, we provide developer-focused documentation useful to 
 This documentation consists of two high-level sections:
 
 - [Miden assembly](./assembly/index.md) which provides a detailed description of Miden assembly language, which is the native language of Miden VM.
-- [Miden Core Library](./libcore/index.md) which provides descriptions of all procedures available in Miden Core Library.
+- [Miden Core Library](./core_lib/index.md) which provides descriptions of all procedures available in Miden Core Library.
 
 For info on how to run programs on Miden VM, please refer to the [usage](../usage.md) section in the introduction.
