@@ -575,14 +575,9 @@ impl Process {
     }
 
     /// Executes the specified [BasicBlockNode].
-    ///
-    /// # Arguments
-    /// * `node_id` - The ID of this basic block node in the `program` MAST forest. This should
-    ///   match the ID in `basic_block.decorators` when it's `Linked`.
     #[inline(always)]
     fn execute_basic_block_node(
         &mut self,
-        node_id: MastNodeId,
         basic_block: &BasicBlockNode,
         program: &MastForest,
         host: &mut impl SyncHost,
@@ -613,6 +608,9 @@ impl Process {
         // the last clock cycle of the BASIC BLOCK ops.
         // For the linked case, check for decorators at an operation index beyond the last operation
         let num_ops = basic_block.num_operations() as usize;
+        let node_id = basic_block
+            .linked_id()
+            .expect("basic block node should be linked when executing operations");
         for decorator in program.decorators_for_op(node_id, num_ops) {
             self.execute_decorator(decorator, host)?;
         }
