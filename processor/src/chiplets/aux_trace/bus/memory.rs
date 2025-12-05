@@ -13,7 +13,10 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, Felt, ONE, PrimeCharacteristicRing, ZERO};
+use miden_core::{
+    ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, FieldElement, ONE, OPCODE_DYNCALL,
+    PrimeCharacteristicRing, ZERO,
+};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -93,6 +96,64 @@ pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
 
     #[cfg(any(test, feature = "bus-debugger"))]
     _debugger.add_request(alloc::boxed::Box::new(message), alphas);
+
+    value
+}
+
+/// Builds `DYN` and `DYNCALL` read request made to the memory chiplet for the callee hash.
+pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    op_code_felt: Felt,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    let memory_req = MemoryWordMessage {
+        op_label: Felt::from(MEMORY_READ_WORD_LABEL),
+        ctx: main_trace.ctx(row),
+        addr: main_trace.stack_element(0, row),
+        clk: main_trace.clk(row),
+        word: main_trace.decoder_hasher_state_first_half(row).into(),
+        source: if op_code_felt == OPCODE_DYNCALL.into() {
+            "dyncall"
+        } else {
+            "dyn"
+        },
+    };
+
+    let value = memory_req.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    _debugger.add_request(alloc::boxed::Box::new(memory_req), alphas);
+
+    value
+}
+
+/// Builds a write request to initialize the frame pointer in memory when entering a new execution
+/// context.
+///
+/// Currently, this is done with `CALL` and `DYNCALL`.
+pub(super) fn build_fmp_initialization_write_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    // Note that `ctx` is taken from the next row, as the goal of this request is to write the
+    // initial FMP value to memory at the start of a new execution context, which happens
+    // immediately after the current row.
+    let memory_req = MemoryElementMessage {
+        op_label: Felt::from(MEMORY_WRITE_ELEMENT_LABEL),
+        ctx: main_trace.ctx(row + 1),
+        addr: FMP_ADDR,
+        clk: main_trace.clk(row),
+        element: FMP_INIT_VALUE,
+    };
+
+    let value = memory_req.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    _debugger.add_request(alloc::boxed::Box::new(memory_req), alphas);
 
     value
 }
@@ -270,8 +331,49 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     combined_value
 }
 
-/// Builds `HORNERBASE` or `HORNEREXT` requests made to the memory chiplet.
-pub(super) fn build_horner_eval_request<E: ExtensionField<Felt>>(
+/// Builds `HORNERBASE` requests made to the memory chiplet.
+pub(super) fn build_hornerbase_eval_request<E: FieldElement<BaseField = Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    let eval_point_0 = main_trace.helper_register(0, row);
+    let eval_point_1 = main_trace.helper_register(1, row);
+    let eval_point_ptr = main_trace.stack_element(13, row);
+    let op_label = Felt::from(MEMORY_READ_ELEMENT_LABEL);
+
+    let ctx = main_trace.ctx(row);
+    let clk = main_trace.clk(row);
+
+    let mem_req_0 = MemoryElementMessage {
+        op_label,
+        ctx,
+        addr: eval_point_ptr,
+        clk,
+        element: eval_point_0,
+    };
+    let mem_req_1 = MemoryElementMessage {
+        op_label,
+        ctx,
+        addr: eval_point_ptr + ONE,
+        clk,
+        element: eval_point_1,
+    };
+
+    let value = mem_req_0.value(alphas) * mem_req_1.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_0), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(mem_req_1), alphas);
+    }
+
+    value
+}
+
+/// Builds `HORNEREXT` requests made to the memory chiplet.
+pub(super) fn build_hornerext_eval_request<E: FieldElement<BaseField = Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -293,7 +395,7 @@ pub(super) fn build_horner_eval_request<E: ExtensionField<Felt>>(
         addr: eval_point_ptr,
         clk,
         word: [eval_point_0, eval_point_1, mem_junk_0, mem_junk_1],
-        source: "horner_eval_* req",
+        source: "hornerext_eval_* req",
     };
 
     let value = mem_req.value(alphas);

@@ -1,0 +1,298 @@
+# ===== WORD FUNCTIONS ==========================================================================
+
+#! Reverses order of the first four elements on the stack
+#!
+#! Note: This functionality is also available as the `reversew` instruction
+#!
+#! Inputs:  [a, b, c, d, ...]
+#! Outputs: [d, c, b, a, ...]
+#!
+#! Cycles: 3
+pub proc reverse(input: word) -> word
+    reversew
+end
+
+# CONVERSION UTILITIES
+#! Writes the components of a word to memory as eight u32 limbs in little-endian order.
+#!
+#! Inputs:  [w3, w2, w1, w0, out_ptr, ...]
+#! Outputs: [...]
+#!
+#! Where:
+#! - `w*` are the felts of the input word. Each felt is split into a low and high 32-bit limb.
+#! - `out_ptr` is an element address in memory.
+#! - Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.
+#!
+#! Cycles: 8 * (split + store pair) ~= 176
+pub proc store_word_u32s_le
+    reversew
+    # => [w0, w1, w2, w3, out_ptr, ...]
+
+    u32split
+    # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
+
+    movup.2 u32split
+    # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
+
+    # Store w0 and w1 limbs, then drop them from the stack
+    dup.6 mem_storew_be dropw
+    # => [w2, w3, out_ptr, ...]
+
+    u32split
+    # => [w2_hi, w2_lo, w3, out_ptr, ...]
+
+    movup.2 u32split
+    # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
+
+    # Store w2 and w3 limbs at out_ptr+4
+    movup.4 add.4 mem_storew_be dropw
+    # => [...]
+end
+
+# COMPARISON OPERATIONS
+#! Returns a boolean indicating whether the input word is [0, 0, 0, 0].
+#!
+#! Inputs:  [INPUT_WORD]
+#! Outputs: [is_empty_word]
+#!
+#! Where:
+#! - INPUT_WORD is the word to compare against [0, 0, 0, 0].
+#! - is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.
+#!
+#! Cycles: 10
+pub proc eqz(input: word) -> i1
+    eq.0
+    repeat.3
+        swap eq.0 and
+    end
+end
+
+#! Returns a boolean indicating whether the input word is [0, 0, 0, 0]. Unlike eqz, this does not
+#! consume the inputs.
+#!
+#! Inputs:  [INPUT_WORD]
+#! Outputs: [is_empty_word, INPUT_WORD]
+#!
+#! Where:
+#! - INPUT_WORD is the word to compare against [0, 0, 0, 0].
+#! - is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.
+#!
+#! Cycles: 11
+pub proc testz(input: word) -> (i1, word)
+    repeat.4
+        dup.3 eq.0
+    end
+    and and and
+end
+# -------------------------------------------------------------------------------------------------
+
+#! Returns true if LHS is strictly greater than RHS, false otherwise.
+#!
+#! This compares words using the same ordering as Merkle tree key comparisons.
+#!
+#! The implementation avoids branching for performance reasons.
+#!
+#! For reference, this is equivalent to the following Rust function:
+#!
+#! fn is_word_greater(word1: Word, word2: Word) -> bool {
+#!     let mut result = false;
+#!     let mut cont = true;
+#!
+#!     for i in (0..4).rev() {
+#!         let gt = word1[i].as_int() > word2[i].as_int();
+#!         let eq = word1[i].as_int() == word2[i].as_int();
+#!         result |= gt & cont;
+#!         cont &= eq;
+#!     }
+#!
+#!     result
+#! }
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_lhs_greater]
+#!
+#! Cycles: 117
+pub proc gt(rhs: word, lhs: word) -> i1
+    # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
+    exec.arrange_words_adjacent
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+
+    push.1.0
+    # => [is_lhs_less, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+
+    repeat.4
+        movup.3 movup.3
+        # => [l_x, r_x, is_lhs_less, continue, <remaining_felts>]
+
+        # check r_x == l_x; if so, we continue
+        dup dup.2 eq
+        # => [is_felt_eq, l_x, r_x, is_lhs_less, continue, <remaining_felts>]
+
+        movdn.3
+        # => [l_x, r_x, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+
+        # check r_x < l_x
+        lt
+        # => [is_felt_lt, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+
+        dup.3 and
+        # => [is_felt_lt_if_continue, is_lhs_less, is_felt_eq, continue, <remaining_felts>]
+
+        or movdn.2
+        # => [is_felt_eq, continue, is_lhs_less, <remaining_felts>]
+
+        # keeps continue at 1 if the felts are equal
+        # sets continue to 0 if the felts are not equal
+        and
+        # => [continue, is_lhs_less, <remaining_felts>]
+
+        swap
+        # => [is_lhs_less, continue, <remaining_felts>]
+    end
+    # => [is_lhs_less, continue]
+
+    swap drop
+    # => [is_lhs_less]
+end
+
+#! Returns true if LHS is greater than or equal to RHS.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_lhs_greater_or_equal]
+#!
+#! Cycles: 118
+pub proc gte(rhs: word, lhs: word) -> i1
+    exec.lt
+    not
+end
+
+#! Returns true if LHS is strictly less than RHS, false otherwise.
+#!
+#! The implementation avoids branching for performance reasons.
+#!
+#! From an implementation standpoint this is exactly the same as `word::gt` except it uses
+#! `lt` rather than `gt`. See its docs for details.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_lhs_lesser]
+#!
+#! Cycles: 117
+pub proc lt(rhs: word, lhs: word) -> i1
+    exec.arrange_words_adjacent
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+
+    push.1.0
+    # => [is_lhs_greater, continue, l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
+
+    repeat.4
+        movup.3 movup.3
+        # => [l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
+
+        # check r_x == l_x; if so, we continue
+        dup dup.2 eq
+        # => [is_felt_eq, l_x, r_x, is_lhs_greater, continue, <remaining_felts>]
+
+        movdn.3
+        # => [l_x, r_x, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+
+        # check r_x > l_x
+        gt
+        # => [is_felt_gt, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+
+        dup.3 and
+        # => [is_felt_gt_if_continue, is_lhs_greater, is_felt_eq, continue, <remaining_felts>]
+
+        or movdn.2
+        # => [is_felt_eq, continue, is_lhs_greater, <remaining_felts>]
+
+        # keeps continue at 1 if the felts are equal
+        # sets continue to 0 if the felts are not equal
+        and
+        # => [continue, is_lhs_greater, <remaining_felts>]
+
+        swap
+        # => [is_lhs_greater, continue, <remaining_felts>]
+    end
+    # => [is_lhs_greater, continue]
+
+    swap drop
+    # => [is_lhs_greater]
+end
+
+#! Returns true if LHS is less than or equal to RHS, false otherwise.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [is_lhs_less_or_equal]
+#!
+#! Cycles: 118
+pub proc lte(rhs: word, lhs: word) -> i1
+    exec.gt
+    not
+end
+
+#! Returns true if LHS is exactly equal to RHS, false otherwise.
+#!
+#! The implementation does not branch, and always performs the same number of comparisons.
+#!
+#! This is currently equivalent to the eqw instruction.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [lhs_eq_rhs]
+#!
+#! Cycles: 13
+pub proc eq(rhs: word, lhs: word) -> i1
+    # => [l0, l1, l2, l3, r0, r1, r2, r3]
+
+    movup.4 eq swap
+    # => [l1, eq, l2, l3, r1, r2, r3]
+
+    movup.4 eq and swap
+    # => [l2, eq, l3, r2, r3]
+
+    movup.3 eq and
+    # => [eq, l3, r3]
+
+    movdn.2 eq and
+    # => [eq]
+end
+
+#! Returns true if LHS is exactly equal to RHS, false otherwise. Preserves stack inputs.
+#!
+#! Like word::eq, the implementation does not branch, and always performs the same number
+#! of comparisons.
+#!
+#! Inputs:  [RHS, LHS]
+#! Outputs: [lhs_eq_rhs, RHS, LHS]
+#!
+#! Cycles: 15
+pub proc test_eq(rhs: word, lhs: word) -> (i1, word, word)
+    dup.7 dup.4 eq
+    dup.7 dup.4 eq and
+    dup.6 dup.3 eq and
+    dup.5 dup.2 eq and
+end
+
+# HELPER PROCEDURES
+# -------------------------------------------------------------------------------------------------
+
+#! Arranges the given words such that the corresponding elements are next to each other.
+#!
+#! Inputs:  [WORD1, WORD2]
+#! Outputs: [word2_3, word1_3, word2_2, word1_2, word2_1, word1_1, word2_0, word1_0]
+#!
+#! Cycles: 8
+proc arrange_words_adjacent
+    # => [1_3, 1_2, 1_1, 1_0, 2_3, 2_2, 2_1, 2_0]
+
+    movup.3 movup.7
+    # => [2_0, 1_0, 1_3, 1_2, 1_1, 2_3, 2_2, 2_1]
+
+    movup.4 movup.7
+    # => [2_1, 1_1, 2_0, 1_0, 1_3, 1_2, 2_3, 2_2]
+
+    movup.5 movup.7
+    # => [2_2, 1_2, 2_1, 1_1, 2_0, 1_0, 1_3, 2_3]
+
+    movup.6 movup.7
+    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+end

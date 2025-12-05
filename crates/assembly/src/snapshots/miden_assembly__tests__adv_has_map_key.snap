@@ -1,7 +1,19 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 2803
 expression: program
 ---
 begin
-    basic_block push(4) emit drop assert(0) end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(adv.has_mapkey, 3)
+        push(5642583036089175977)
+        emit
+        drop
+        asmOp(assert, 1)
+        assert(0)
+    end
 end

@@ -42,8 +42,6 @@ pub(super) fn execute_sync_op(
         Operation::Assert(err_code) => {
             sys_ops::op_assert(processor, *err_code, host, current_forest, err_ctx, tracer)?
         },
-        Operation::FmpAdd => sys_ops::op_fmpadd(processor),
-        Operation::FmpUpdate => sys_ops::op_fmpupdate(processor, tracer)?,
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
         Operation::Clk => sys_ops::op_clk(processor, tracer)?,
@@ -76,7 +74,7 @@ pub(super) fn execute_sync_op(
         Operation::Or => field_ops::op_or(processor, err_ctx, tracer)?,
         Operation::Not => field_ops::op_not(processor, err_ctx)?,
         Operation::Eq => {
-            let eq_helpers = field_ops::op_eq(processor, tracer);
+            let eq_helpers = field_ops::op_eq(processor, tracer)?;
             user_op_helpers = Some(eq_helpers);
         },
         Operation::Eqz => {
@@ -204,6 +202,11 @@ pub(super) fn execute_sync_op(
         Operation::EvalCircuit => {
             processor.op_eval_circuit(err_ctx, tracer)?;
         },
+        Operation::LogPrecompile => {
+            let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
+            user_op_helpers = Some(log_precompile_helpers);
+        },
+        Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, err_ctx, tracer)?,
     }
 
     Ok(user_op_helpers)

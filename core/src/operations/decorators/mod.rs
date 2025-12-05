@@ -26,7 +26,7 @@ use crate::mast::{DecoratedOpLink, DecoratorFingerprint};
 /// a single VM cycle.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub enum Decorator {
     /// Adds information about the assembly instruction at a particular index (only applicable in
     /// debug mode).

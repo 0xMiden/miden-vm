@@ -4,45 +4,7 @@ use core::fmt;
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
 use super::ProcedureName;
-use crate::ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke};
-
-// PROCEDURE VISIBILITY
-// ================================================================================================
-
-/// Represents the visibility of a procedure globally.
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Visibility {
-    /// The procedure is visible for call/exec.
-    Public = 0,
-    /// The procedure is visible to syscalls only.
-    Syscall = 1,
-    /// The procedure is visible only locally to the exec instruction.
-    #[default]
-    Private = 2,
-}
-
-impl fmt::Display for Visibility {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.is_exported() {
-            f.write_str("pub proc")
-        } else {
-            f.write_str("proc")
-        }
-    }
-}
-
-impl Visibility {
-    /// Returns true if the procedure has been explicitly exported
-    pub fn is_exported(&self) -> bool {
-        matches!(self, Self::Public | Self::Syscall)
-    }
-
-    /// Returns true if the procedure is a syscall export
-    pub fn is_syscall(&self) -> bool {
-        matches!(self, Self::Syscall)
-    }
-}
+use crate::ast::{Attribute, AttributeSet, Block, DocString, FunctionType, Invoke, Visibility};
 
 // PROCEDURE
 // ================================================================================================
@@ -60,6 +22,8 @@ pub struct Procedure {
     name: ProcedureName,
     /// The visibility of this procedure (i.e. whether it is exported or not)
     visibility: Visibility,
+    /// A flag which indicates that this procedure is only syscall-able
+    syscall: bool,
     /// The type signature of this procedure, if known
     ty: Option<FunctionType>,
     /// The number of locals to allocate for this procedure
@@ -67,7 +31,7 @@ pub struct Procedure {
     /// The body of the procedure
     body: Block,
     /// The set of callees for any call-like instruction in the procedure body.
-    pub(super) invoked: BTreeSet<Invoke>,
+    pub(crate) invoked: BTreeSet<Invoke>,
 }
 
 /// Construction
@@ -87,6 +51,28 @@ impl Procedure {
             attrs: Default::default(),
             name,
             visibility,
+            syscall: false,
+            ty: None,
+            num_locals,
+            invoked: Default::default(),
+            body,
+        }
+    }
+
+    /// Same as [Self::new], but marks the procedure as being only visible to `syscall`
+    pub fn new_syscall(
+        span: SourceSpan,
+        name: ProcedureName,
+        num_locals: u16,
+        body: Block,
+    ) -> Self {
+        Self {
+            span,
+            docs: None,
+            attrs: Default::default(),
+            name,
+            visibility: Visibility::Public,
+            syscall: true,
             ty: None,
             num_locals,
             invoked: Default::default(),
@@ -120,9 +106,19 @@ impl Procedure {
         self.visibility = visibility;
     }
 
+    /// Override the syscall-only flag of this procedure.
+    pub fn set_syscall(&mut self, yes: bool) {
+        self.syscall = yes;
+    }
+
     /// Override the type signature of this procedure.
     pub fn set_signature(&mut self, signature: FunctionType) {
         self.ty = Some(signature);
+    }
+
+    /// Override the number of locals allocated by this procedure.
+    pub fn set_num_locals(&mut self, num_locals: u16) {
+        self.num_locals = num_locals;
     }
 }
 
@@ -136,6 +132,11 @@ impl Procedure {
     /// Returns the visibility of this procedure
     pub fn visibility(&self) -> Visibility {
         self.visibility
+    }
+
+    /// Returns whether or not this procedure requires `syscall` to invoke
+    pub fn is_syscall(&self) -> bool {
+        self.syscall
     }
 
     /// Get the type signature of this procedure, if known
@@ -279,16 +280,19 @@ impl crate::prettier::PrettyPrint for Procedure {
         if self.is_entrypoint() {
             doc += const_text("begin");
         } else {
+            if self.num_locals > 0 {
+                doc += text(format!("@locals(\"{}\")", &self.num_locals)) + nl();
+            }
             match self.signature() {
                 Some(sig) if sig.cc != crate::ast::types::CallConv::Fast => {
                     doc += text(format!("@callconv(\"{}\")", &sig.cc)) + nl();
                 },
                 _ => (),
             }
-            doc += display(self.visibility) + const_text(" ") + display(&self.name);
-            if self.num_locals > 0 {
-                doc += const_text(".") + display(self.num_locals);
+            if self.visibility.is_public() {
+                doc += display(self.visibility) + const_text(" ");
             }
+            doc += const_text("proc") + const_text(" ") + display(&self.name);
             if let Some(sig) = self.signature() {
                 doc += sig.render();
             }
@@ -305,6 +309,7 @@ impl fmt::Debug for Procedure {
             .field("attrs", &self.attrs)
             .field("name", &self.name)
             .field("visibility", &self.visibility)
+            .field("syscall", &self.syscall)
             .field("num_locals", &self.num_locals)
             .field("ty", &self.ty)
             .field("body", &self.body)
@@ -319,6 +324,7 @@ impl PartialEq for Procedure {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
             && self.visibility == other.visibility
+            && self.syscall == other.syscall
             && self.num_locals == other.num_locals
             && self.ty == other.ty
             && self.body == other.body

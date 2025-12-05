@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 /// executed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(all(feature = "arbitrary", test), miden_serde_test_macros::serde_test)]
+#[cfg_attr(all(feature = "arbitrary", test), miden_test_serde_macros::serde_test)]
 pub enum DebugOptions {
     /// Print out the entire contents of the stack for the current execution context.
     StackAll,

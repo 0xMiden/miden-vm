@@ -188,8 +188,8 @@ fn div_b() {
         test,
         "invalid constant expression: division by zero",
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "11 |",
-        "12 | begin div.0 exec.truncate_stack end",
+        "12 |",
+        "13 | begin div.0 exec.truncate_stack end",
         "   :       ^^^^^",
         "   `----"
     );
@@ -217,7 +217,7 @@ fn div_fail() {
     let test = build_op_test!(asm_op, &[1, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(2)
+        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
     );
 }
 
@@ -252,8 +252,8 @@ fn neg_fail() {
         test,
         "invalid syntax",
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "11 |",
-        "12 | begin neg.1 exec.truncate_stack end",
+        "12 |",
+        "13 | begin neg.1 exec.truncate_stack end",
         "   :          |",
         "   :          `-- found a . here",
         "   `----",
@@ -284,7 +284,7 @@ fn inv_fail() {
 
     // --- test no inv on 0 -----------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(test, ExecutionError::DivideByZero{clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(2));
+    expect_exec_error_matches!(test, ExecutionError::DivideByZero{clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(6));
 
     let asm_op = "inv.1";
 
@@ -295,8 +295,8 @@ fn inv_fail() {
         test,
         "invalid syntax",
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "11 |",
-        "12 | begin inv.1 exec.truncate_stack end",
+        "12 |",
+        "13 | begin inv.1 exec.truncate_stack end",
         "   :          |",
         "   :          `-- found a . here",
         "   `----",
@@ -326,8 +326,8 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(17) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -358,8 +358,8 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(19) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
     );
 
     //---------------------- exp containing more than 64 bits -------------------------------------
@@ -373,8 +373,8 @@ fn exp_bits_length_fail() {
         test,
         "invalid literal: expected value to be a valid bit size, e.g. 0..63",
         regex!(r#",-\[test[\d]+:[\d]+:[\d]+\]"#),
-        "11 |",
-        "12 | begin exp.u65 exec.truncate_stack end",
+        "12 |",
+        "13 | begin exp.u65 exec.truncate_stack end",
         "   :            ^^",
         "   `----",
         r#" help: expected primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#
@@ -409,7 +409,7 @@ fn ilog2_fail() {
     let test = build_op_test!(asm_op, &[0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::LogArgumentZero{ clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(3)
+        ExecutionError::LogArgumentZero{ clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(7)
     );
 }
 

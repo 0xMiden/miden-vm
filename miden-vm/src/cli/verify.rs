@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
@@ -59,7 +56,7 @@ impl VerifyCmd {
 
         // verify proof
         let stack_outputs = outputs_data.stack_outputs().map_err(Report::msg)?;
-        miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof)
+        miden_vm::verify(program_info, stack_inputs, stack_outputs, proof)
             .into_diagnostic()
             .wrap_err("Program failed verification!")?;
 
@@ -69,23 +66,56 @@ impl VerifyCmd {
     }
 
     fn infer_defaults(&self) -> Result<(PathBuf, PathBuf), Report> {
-        let proof_file = if Path::new(&self.proof_file.as_os_str()).try_exists().is_err() {
+        if !self.proof_file.exists() {
             return Err(Report::msg("Proof file does not exist"));
-        } else {
-            self.proof_file.clone()
+        }
+        let default_path = |ext: &str| self.proof_file.with_extension(ext);
+
+        let input_file =
+            self.input_file.as_ref().map_or_else(|| default_path("inputs"), PathBuf::clone);
+        let output_file = self
+            .output_file
+            .as_ref()
+            .map_or_else(|| default_path("outputs"), PathBuf::clone);
+
+        Ok((input_file, output_file))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{fs, fs::File};
+
+    use super::*;
+
+    #[test]
+    fn infer_defaults_uses_proof_file_basename_for_defaults() {
+        // prepare a unique temp directory
+        let base =
+            std::env::temp_dir().join(format!("miden_vm_verify_test_{}", std::process::id()));
+        fs::create_dir_all(&base).expect("create temp test dir");
+
+        // create a dummy proof file
+        let proof_path = base.join("proof_file");
+        File::create(&proof_path).expect("create proof file");
+
+        // build command with no explicit input/output
+        let cmd = VerifyCmd {
+            input_file: None,
+            output_file: None,
+            proof_file: proof_path.clone(),
+            program_hash: "00".to_string(),
         };
 
-        let input_file = self.input_file.clone().unwrap_or_else(|| {
-            let mut input_path = proof_file.clone();
-            input_path.set_extension("inputs");
-            input_path
-        });
-        let output_file = self.output_file.clone().unwrap_or_else(|| {
-            let mut output_path = proof_file.clone();
-            output_path.set_extension("outputs");
-            output_path
-        });
+        // exercise
+        let (input, output) = cmd.infer_defaults().expect("infer defaults");
 
-        Ok((input_file.to_path_buf(), output_file.to_path_buf()))
+        // verify: defaults are proof file with replaced extensions
+        assert_eq!(input, proof_path.with_extension("inputs"));
+        assert_eq!(output, proof_path.with_extension("outputs"));
+
+        // cleanup best-effort
+        let _ = fs::remove_file(&proof_path);
+        let _ = fs::remove_dir_all(&base);
     }
 }

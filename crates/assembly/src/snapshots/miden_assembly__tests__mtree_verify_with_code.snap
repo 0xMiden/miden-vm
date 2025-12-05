@@ -1,11 +1,20 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 1905
 expression: program
 ---
 begin
     basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(mtree_verify, 1)
         mpverify(0)
+        asmOp(mtree_verify.err="1", 1)
         mpverify(13948122101519563734)
+        asmOp(mtree_verify.err="2", 1)
         mpverify(17575088163785490049)
+        noop
     end
 end

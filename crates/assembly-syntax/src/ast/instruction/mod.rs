@@ -218,25 +218,23 @@ pub enum Instruction {
 
     MemLoad,
     MemLoadImm(ImmU32),
-    MemLoadW,
-    MemLoadWImm(ImmU32),
     MemLoadWBe,
     MemLoadWBeImm(ImmU32),
     MemLoadWLe,
     MemLoadWLeImm(ImmU32),
     LocLoad(ImmU16),
-    LocLoadW(ImmU16),
+    LocLoadWBe(ImmU16),
+    LocLoadWLe(ImmU16),
 
     MemStore,
     MemStoreImm(ImmU32),
-    MemStoreW,
-    MemStoreWImm(ImmU32),
     MemStoreWBe,
     MemStoreWBeImm(ImmU32),
     MemStoreWLe,
     MemStoreWLeImm(ImmU32),
     LocStore(ImmU16),
-    LocStoreW(ImmU16),
+    LocStoreWBe(ImmU16),
+    LocStoreWLe(ImmU16),
 
     MemStream,
     AdvPipe,
@@ -255,12 +253,14 @@ pub enum Instruction {
     MTreeMerge,
     MTreeVerify,
     MTreeVerifyWithError(ErrorMsg),
+    CryptoStream,
 
     // ----- STARK proof verification ------------------------------------------------------------
     FriExt2Fold4,
     HornerBase,
     HornerExt,
     EvalCircuit,
+    LogPrecompile,
 
     // ----- exec / call -------------------------------------------------------------------------
     Exec(InvocationTarget),

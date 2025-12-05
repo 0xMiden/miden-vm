@@ -1,22 +1,39 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
 expression: program
 ---
 begin
     basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
         push(4)
-        fmpupdate
-        asmOp(locaddr.0, 2)
+        push(4294967294)
+        mload
+        add
+        push(4294967294)
+        mstore
+        drop
+        asmOp(locaddr.0, 4)
         push(18446744069414584317)
-        fmpadd
+        noop
+        push(4294967294)
+        mload
+        add
         debug(stack.4)
-        asmOp(locaddr.0, 2)
+        asmOp(locaddr.0, 4)
         push(18446744069414584317)
-        fmpadd
+        push(4294967294)
+        mload
+        add
         debug(stack.4)
-        asmOp(locaddr.0, 2)
+        asmOp(locaddr.0, 4)
         push(18446744069414584317)
-        fmpadd
+        noop
+        push(4294967294)
+        mload
+        add
         debug(stack.4)
         debug(stack.4)
         asmOp(nop, 1)
@@ -27,8 +44,13 @@ begin
         drop
         drop
         drop
-        push(18446744069414584317)
-        fmpupdate
         noop
+        push(18446744069414584317)
+        push(4294967294)
+        mload
+        add
+        push(4294967294)
+        mstore
+        drop
     end
 end

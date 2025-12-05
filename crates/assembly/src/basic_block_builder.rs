@@ -2,7 +2,7 @@ use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, EventId, Felt, Operation,
+    AssemblyOp, Decorator, DecoratorList, Felt, Operation,
     mast::{DecoratorId, MastNodeId},
     sys_events::SystemEvent,
 };
@@ -98,7 +98,7 @@ impl BasicBlockBuilder<'_> {
     /// Converts the system event into its corresponding event ID, and adds an `Emit` operation
     /// to the list of basic block operations.
     pub fn push_system_event(&mut self, sys_event: SystemEvent) {
-        let event_id: EventId = sys_event.into();
+        let event_id = sys_event.event_id();
         self.push_ops([Operation::Push(event_id.as_felt()), Operation::Emit, Operation::Drop]);
     }
 }
@@ -124,7 +124,7 @@ impl BasicBlockBuilder<'_> {
     ) -> Result<(), Report> {
         let span = instruction.span();
         let location = proc_ctx.source_manager().location(span).ok();
-        let context_name = proc_ctx.name().to_string();
+        let context_name = proc_ctx.path().to_string();
         let num_cycles = 0;
         let op = instruction.to_string();
         let should_break = instruction.should_break();
@@ -166,7 +166,7 @@ impl BasicBlockBuilder<'_> {
     }
 }
 
-/// Span Constructors
+/// Basic Block Constructors
 impl BasicBlockBuilder<'_> {
     /// Creates and returns a new basic block node from the operations and decorators currently in
     /// this builder.
@@ -182,7 +182,8 @@ impl BasicBlockBuilder<'_> {
             let ops = self.ops.drain(..).collect();
             let decorators = self.decorators.drain(..).collect();
 
-            let basic_block_node_id = self.mast_forest_builder.ensure_block(ops, decorators)?;
+            let basic_block_node_id =
+                self.mast_forest_builder.ensure_block(ops, decorators, vec![], vec![])?;
 
             Ok(Some(basic_block_node_id))
         } else {

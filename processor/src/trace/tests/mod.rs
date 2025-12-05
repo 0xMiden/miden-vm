@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_core::{Kernel, ONE, Operation, Program, StackOutputs, Word, ZERO, mast::MastForest};
+use miden_core::{
+    Kernel, ONE, Operation, Program, StackOutputs, Word, ZERO,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+};
 use miden_utils_testing::rand::rand_array;
 
 use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt, NUM_RAND_ROWS, Process};
@@ -34,7 +37,9 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
 pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
 
-    let basic_block_id = mast_forest.add_block(operations, Vec::new()).unwrap();
+    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -55,7 +60,9 @@ pub fn build_trace_from_ops_with_inputs(
         Process::new(Kernel::default(), stack_inputs, advice_inputs, ExecutionOptions::default());
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = mast_forest.add_block(operations, Vec::new()).unwrap();
+    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);

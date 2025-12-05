@@ -1,0 +1,462 @@
+# ===== RPO PROCEDURES ==========================================================================
+
+#! Prepares the top of the stack with the hasher initial state.
+#!
+#! This procedures does not handle padding, therefore, the user is expected to
+#! consume an amount of data which is a multiple of the rate (2 words).
+#!
+#! Input: []
+#! Output: [PERM, PERM, PERM, ...]
+#!
+#! Cycles: 12
+pub proc init_no_padding
+    padw padw padw
+end
+
+#! Given the hasher state, returns the hash output.
+#!
+#! Input: [C, B, A, ...]
+#! Output: [HASH, ...]
+#!
+#! Where:
+#! - `A` is the capacity word that will be used by the hashing function.
+#! - `B` is the hash output.
+#!
+#! Cycles: 9
+pub proc squeeze_digest
+    # drop the first rate word (4 cycles)
+    dropw
+
+    # save the hash result (1 cycles)
+    swapw
+
+    # drop the capacity word (4 cycles)
+    dropw
+end
+
+#! Copies the result of hash permutation to the top of the stack.
+#!
+#! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
+#! execution.
+#!
+#! Input: [C, B, A, ...]
+#! Output: [B, C, B, A, ...]
+#!
+#! Where:
+#! - `A` is the capacity word that will be used by the hashing function.
+#! - `B` is the hash output.
+#! - `C` is the rate word that will be used by the hashing function.
+#!
+#! Cycles: 4
+pub proc copy_digest
+    dupw.1
+end
+
+#! Hashes the memory `start_addr` to `end_addr` given an RPO state specified by 3 words.
+#!
+#! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
+#! will enter an infinite loop.
+#!
+#! Input: [C, B, A, start_addr, end_addr, ...]
+#! Output: [C', B', A', end_addr, end_addr ...]
+#!
+#! Where:
+#! - `A` is the capacity word that will be used by the hashing function.
+#! - `B` is the hash output.
+#!
+#! Cycles: 4 + 3 * words, where `words` is the `start_addr - end_addr`
+pub proc absorb_double_words_from_memory
+    dup.13 dup.13 neq  # (4 cycles )
+    while.true
+        mem_stream exec.permute # (2 cycles)
+        dup.13 dup.13 neq  # (4 cycles )
+    end
+end
+
+#! Hashes the pairs of words in the memory from `start_addr` to `end_addr`.
+#!
+#! This procedure requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...} (i.e. we must
+#! always hash some number of double words), otherwise the procedure will enter an infinite loop.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [HASH, ...]
+#!
+#! Where:
+#! - `HASH` is the cumulative hash of the provided memory values.
+#!
+#! Cycles: 37 + 3 * words, where `words` is the `start_addr - end_addr`
+pub proc hash_double_words
+    # enforce `start_addr ≤ end_addr`
+    dup.1 dup.1 u32assert2
+    u32gte assert.err="start address should be less or equal to the end address"
+    # => [start_addr, end_addr, ...]
+
+    # prepare hasher state
+    padw padw padw
+    # => [C, B, A, start_addr, end_addr, ...]
+
+    exec.absorb_double_words_from_memory
+    # => [C', B', A', end_addr, end_addr, ...]
+
+    exec.squeeze_digest
+    # => [HASH, end_addr, end_addr, ...]
+
+    # drop start_addr and end_addr (4 cycles)
+    movup.4 drop movup.4 drop
+    # => [HASH]
+end
+
+#! Hashes the memory `start_addr` to `end_addr`, handles odd number of elements.
+#!
+#! Requires `start_addr ≤ end_addr`, `end_addr` is not inclusive.
+#! Requires `start_addr` and `end_addr` to be word-aligned.
+#!
+#! Input: [start_addr, end_addr, ...]
+#! Output: [H, ...]
+#!
+#! Cycles:
+#! - even words: 53 cycles + 3 * words
+#! - odd words: 65 cycles + 3 * words
+#! where `words` is the `start_addr - end_addr - 1`
+pub proc hash_words
+    # enforce `start_addr ≤ end_addr`
+    dup.1 dup.1 u32assert2 u32gte assert
+
+    # figure out if the range is for an odd number of words (11 cycles)
+    dup.1 dup.1 sub div.4 is_odd
+    # => [is_odd, start_addr, end_addr, ...]
+
+    # make the start/end range even (6 cycles)
+    movup.2 dup.1 mul.4 sub
+    # => [end_addr, is_odd, start_addr, ...]
+
+    # move start_addr to the right stack position (1 cycles)
+    movup.2
+    # => [start_addr, end_addr, is_odd, ...]
+
+    # prepare hasher state (14 cycles)
+    dup.2 mul.4 push.0.0.0 padw padw
+    # => [C, B, A, start_addr, end_addr, is_odd, ...]
+
+    # (4 + 3 * words cycles)
+    exec.absorb_double_words_from_memory
+    # => [C', B', A', end_addr, end_addr, is_odd, ...]
+
+    # (1 cycles)
+    movup.14
+    # => [is_odd, C', B', A', end_addr, end_addr, ...]
+
+    # handle the odd element, if any (12 cycles)
+    if.true
+        # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both
+        # point to the last element. Load the last word (6 cycles)
+        dropw dup.9 mem_loadw_be
+        # => [D, A', end_addr, end_addr, ...]
+
+        # set the padding and compute the permutation (5 cycles)
+        padw exec.permute
+    end
+
+    exec.squeeze_digest
+    # => [HASH, end_addr, end_addr, ...]
+
+    # drop start_addr/end_addr (4 cycles)
+    movup.4 drop movup.4 drop
+    # => [HASH]
+end
+
+#! Initializes the hasher state required for the `hash_elements_with_state` procedure.
+#!
+#! Depending on the provided pad_inputs_flag, this procedure initializes the hasher state using
+#! different values for capacity element:
+#! - If pad_inputs_flag = 1 the capacity element is set to 0. This will essentially "pad" the
+#!   hashed values with zeroes to the next multiple of 8.
+#! - If pad_inputs_flag = 0 the capacity element is set to the remainder of the division of
+#!   number of hashed elements by 8 (num_elements%8).
+#!
+#! Inputs:  [ptr, num_elements, pad_inputs_flag]
+#! Outputs: [C, B, A, ptr, end_pairs_addr, num_elements%8]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - pad_inputs_flag is the flag which indicates whether the values which will be hashed should be
+#!   padded with zeros to the next multiple of 8.
+#! - C, B, A are three words representing the hasher state.
+#! - end_pairs_addr is the memory address at which the pairs of words end.
+#! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
+#!   hashed separately.
+pub proc prepare_hasher_state
+    # move number of inputs to the top of the stack
+    swap
+    # => [num_elements, ptr, pad_inputs_flag]
+
+    # get the number of double words
+    u32divmod.8 swap
+    # => [num_elements/8, num_elements%8, ptr, pad_inputs_flag]
+
+    # get the end address for absorb_double_words_from_memory procedure (end address for pairs of
+    # words)
+    mul.8 dup.2 add movup.2
+    # => [ptr, end_pairs_addr, num_elements%8, pad_inputs_flag]
+
+    # get the capacity element depending on the pad_inputs_flag value
+    # in case the inputs should be padded (pad_inputs_flag == 1) the capacity element should be
+    # equal 0, num_elements%8 otherwise
+    dup.2 push.0 movup.5
+    # => [pad_inputs_flag, 0, num_elements%8, ptr, end_pairs_addr, num_elements%8]
+
+    cdrop
+    # => [capacity, ptr, end_pairs_addr, num_elements%8]
+
+    # prepare hasher state for RPO permutation
+    push.0.0.0 padw padw
+    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+end
+
+#! Computes hash of Felt values starting at the specified memory address using the provided hasher
+#! state.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
+#!
+#! Inputs:  [C, B, A, ptr, end_pairs_addr, num_elements%8]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - C, B, A are three words representing the hasher state.
+#! - end_pairs_addr is the memory address at which the pairs of words end.
+#! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
+#!   hashed separately.
+#! - HASH is the resulting hash of the provided memory values.
+pub proc hash_elements_with_state
+    # hash every pair of words
+    exec.absorb_double_words_from_memory
+    # => [C', B', A', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
+
+    # hash remaining input values if there are any left
+    # if num_elements%8 is ZERO and there are no elements to hash
+    dup.14 eq.0
+    if.true
+        # clean the stack
+        exec.squeeze_digest
+        swapw drop drop drop movdn.4
+        # => [B']
+    else
+        # load the remaining double word
+        mem_stream
+        # => [E, D, A', ptr'+2, end_pairs_addr, num_elements%8]
+
+        # clean the stack
+        movup.12 drop movup.12 drop
+        # => [E, D, A', num_elements%8]
+
+        # get the number of elements we need to drop
+        # notice that drop_counter could be any number from 1 to 7
+        push.8 movup.13 sub movdn.12
+        # => [E, D, A', drop_counter]
+
+        ### 0th value ########################################################
+
+        # we need to drop first value anyway, since number of values is not divisible by 8
+        # push the padding 0 on to the stack and move it down to the 6th position
+        drop push.0 movdn.6
+        # => [e_2, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+
+        ### 1st value ########################################################
+
+        # prepare the second element of the E Word for cdrop instruction
+        push.0 swap
+        # => [e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+
+        # push latch variable onto the stack; this will be the control for the cdrop instruction
+        push.0
+        # => [latch = 0, e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+
+        # get the flag whether the drop counter is equal 1
+        dup.14 eq.1
+        # => [drop_counter == 1, latch = 0, e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+
+        # update the latch: if drop_counter == 1, latch will become 1
+        or
+        # => [latch', e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+
+        # save the latch value
+        dup movdn.14
+        # => [latch', e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', latch', drop_counter]
+
+        # if latch == 1, drop 0; otherwise drop e_1
+        cdrop
+        # => [e_2_or_0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', latch', drop_counter]
+
+        # move the calculated value down the stack
+        movdn.6
+        # => [e_1, e_0, d_3, d_2, d_1, 0, e_2_or_0, d_0, A', latch', drop_counter]
+
+        ### 2nd value ########################################################
+
+        # repeat the above process but now compare drop_counter to 2
+        push.0 swap
+        movup.13 dup.14 eq.2 or
+        dup movdn.14
+        cdrop movdn.6
+        # => [e_0, d_3, d_2, d_1, 0, e_2_or_0, e_1_or_0, d_0, A', latch', drop_counter]
+
+        ### 3rd value ########################################################
+
+        # repeat the above process but now compare drop_counter to 3
+        push.0 swap
+        movup.13 dup.14 eq.3 or
+        dup movdn.14
+        cdrop movdn.6
+        # => [d_3, d_2, d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_0, A', latch', drop_counter]
+
+        ### 4th value ########################################################
+
+        # repeat the above process but now compare drop_counter to 4
+        push.0 swap
+        movup.13 dup.14 eq.4 or
+        dup movdn.14
+        cdrop movdn.6
+        # => [d_2, d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_0, A', latch', drop_counter]
+
+        ### 5th value ########################################################
+
+        # repeat the above process but now compare drop_counter to 5
+        push.0 swap
+        movup.13 dup.14 eq.5 or
+        dup movdn.14
+        cdrop movdn.6
+        # => [d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_2_or_0, d_0, A', latch', drop_counter]
+
+        ### 6th value ########################################################
+
+        # repeat the above process but now compare drop_counter to 6
+        push.0 swap
+        movup.13 movup.14 eq.6 or
+        cdrop movdn.6
+        # => [0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_2_or_0, d_1_or_0, d_0, A']
+        # or in other words
+        # => [C, B, A', ... ]
+        # notice that we don't need to check the d_0 value: entering the else branch means that
+        # we have number of elements not divisible by 8, so we will have at least one element to
+        # hash here (which turns out to be d_0)
+
+        exec.permute
+        # => [F, E, D]
+
+        exec.squeeze_digest
+        # => [E]
+    end
+end
+
+#! Computes hash of Felt values starting at the specified memory address.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
+#!
+#! Inputs:  [ptr, num_elements]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
+#!
+#! Cycles:
+#! - If number of elements divides by 8: 52 cycles + 3 * words
+#! - Else: 185 cycles + 3 * words
+#! where `words` is the number of quads of input values.
+pub proc hash_elements
+    # push the 0 as the pad_inputs flag: in the general case we should not pad the inputs
+    push.0 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag = 0]
+
+    exec.prepare_hasher_state
+    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+
+    exec.hash_elements_with_state
+    # => [HASH]
+end
+
+#! Computes hash of Felt values starting at the specified memory address.
+#!
+#! Notice that this procedure essentially pads the elements to be hashed to the next multiple of 8
+#! by setting the capacity element to 0.
+#!
+#! This procedure divides the hashing process into two parts: hashing pairs of words using
+#! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
+#! procedure.
+#!
+#! Inputs:  [ptr, num_elements]
+#! Outputs: [HASH]
+#!
+#! Where:
+#! - ptr is the  memory address of the first element to be hashed. This address must be
+#!   word-aligned - i.e., divisible by 4.
+#! - num_elements is the number of elements to be hashed.
+#! - HASH is the resulting hash of the provided memory values.
+#!
+#! Cycles:
+#! - If number of elements divides by 8: 52 cycles + 3 * words
+#! - Else: 185 cycles + 3 * words
+#! where `words` is the number of quads of input values.
+pub proc pad_and_hash_elements
+    # push the 1 as the pad_inputs flag: this procedure should pad its inputs
+    push.1 movdn.2
+    # => [ptr, num_elements, pad_inputs_flag = 1]
+
+    exec.prepare_hasher_state
+    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+
+    exec.hash_elements_with_state
+    # => [HASH]
+end
+
+#! Computes RPO hash of a single word (256-bit input).
+#!
+#! Inputs:  [A]
+#! Outputs: [B]
+#!
+#! Where:
+#! - A is the word to be hashed.
+#! - B is the resulting hash, computed as `RPO256(A)`.
+#!
+#! Cycles: 20
+pub proc hash
+    hash
+end
+
+#! Merges two words (256-bit digests) via RPO hash.
+#!
+#! Inputs:  [B, A]
+#! Outputs: [C]
+#!
+#! Where:
+#! - A and B are the words to be merged.
+#! - C is the resulting hash, computed as `RPO256(A || B)`.
+#!
+#! Cycles: 16
+pub proc merge
+    hmerge
+end
+
+#! Performs RPO permutation on the hasher state.
+#!
+#! Inputs:  [C, B, A]
+#! Outputs: [C', B', A']
+#!
+#! Where:
+#! - C, B, A are three words representing the hasher state.
+#! - C', B', A' are the permuted state words.
+#!
+#! Cycles: 1
+pub proc permute
+    hperm
+end

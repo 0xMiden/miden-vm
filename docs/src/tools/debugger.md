@@ -1,3 +1,8 @@
+---
+title: "Miden Debugger"
+sidebar_position: 2
+---
+
 # Miden Debugger
 
 The Miden debugger is a command-line interface (CLI) application, inspired by [GNU gdb](https://sourceware.org/gdb/), which allows debugging of Miden assembly (MASM) programs. The debugger allows the user to step through the execution of the program, both forward and backward, either per clock cycle tick, or via breakpoints.
@@ -43,7 +48,7 @@ In order to add a breakpoint, the user should insert a `breakpoint` instruction 
 The following example will halt on the third instruction of `foo`:
 
 ```
-proc.foo
+proc foo
     dup
     dup.2
     breakpoint

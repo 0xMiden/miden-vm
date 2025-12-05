@@ -73,7 +73,8 @@ impl AnalysisContext {
         let constants = self.constants.keys().cloned().collect::<Vec<_>>();
 
         for constant in constants.iter() {
-            let expr = ConstantExpr::Var(constant.clone());
+            let expr =
+                ConstantExpr::Var(Span::new(constant.span(), PathBuf::from(constant.clone())));
             match self.const_eval(&expr) {
                 Ok(value) => {
                     self.constants.get_mut(constant).unwrap().value = value;
@@ -121,17 +122,21 @@ impl AnalysisContext {
                 ) => {
                     stack.push(expr);
                 },
-                Cont::Eval(ConstantExpr::Var(name)) => {
-                    if evaluating.contains(&name) {
+                Cont::Eval(ConstantExpr::Var(path)) => {
+                    if evaluating.contains(&path) {
                         return Err(SemanticAnalysisError::ConstEvalCycle {
                             start: evaluating[0].span(),
-                            detected: name.span(),
+                            detected: path.span(),
                         });
-                    } else {
-                        evaluating.push(name.clone());
                     }
-                    continuations.push(Cont::Return(name.clone()));
-                    continuations.push(Cont::Eval(self.get_constant(&name)?.clone()));
+                    if let Some(name) = path.as_ident() {
+                        let name = name.with_span(path.span());
+                        evaluating.push(path.clone());
+                        continuations.push(Cont::Return(name.clone()));
+                        continuations.push(Cont::Eval(self.get_constant(&name)?.clone()));
+                    } else {
+                        stack.push(ConstantExpr::Var(path));
+                    }
                 },
                 Cont::Eval(ConstantExpr::BinaryOp { span, op, lhs, rhs, .. }) => {
                     continuations.push(Cont::Apply(Span::new(span, op)));
@@ -139,16 +144,45 @@ impl AnalysisContext {
                     continuations.push(Cont::Eval(*rhs));
                 },
                 Cont::Apply(op) => {
-                    let lhs = stack.pop().unwrap().expect_int();
-                    let rhs = stack.pop().unwrap().expect_int();
+                    let lhs = stack.pop().unwrap();
+                    let rhs = stack.pop().unwrap();
                     let (span, op) = op.into_parts();
-                    let result = match op {
-                        ConstantOp::Add => lhs + rhs,
-                        ConstantOp::Sub => lhs - rhs,
-                        ConstantOp::Mul => lhs * rhs,
-                        ConstantOp::Div | ConstantOp::IntDiv => lhs / rhs,
-                    };
-                    stack.push(ConstantExpr::Int(Span::new(span, result)));
+                    match (lhs, rhs) {
+                        (ConstantExpr::Int(lhs), ConstantExpr::Int(rhs)) => {
+                            let lhs = lhs.into_inner();
+                            let rhs = rhs.into_inner();
+                            let result = match op {
+                                ConstantOp::Add => lhs + rhs,
+                                ConstantOp::Sub => lhs - rhs,
+                                ConstantOp::Mul => lhs * rhs,
+                                ConstantOp::Div | ConstantOp::IntDiv => lhs / rhs,
+                            };
+                            stack.push(ConstantExpr::Int(Span::new(span, result)));
+                        },
+                        operands @ ((ConstantExpr::Int(_), ConstantExpr::Var(_))
+                        | (ConstantExpr::Var(_), ConstantExpr::Int(_))
+                        | (ConstantExpr::Var(_), ConstantExpr::Var(_))) => {
+                            let (lhs, rhs) = operands;
+                            stack.push(ConstantExpr::BinaryOp {
+                                span,
+                                op,
+                                lhs: lhs.into(),
+                                rhs: rhs.into(),
+                            });
+                        },
+                        (ConstantExpr::Int(_) | ConstantExpr::Var(_), rhs) => {
+                            return Err(SemanticAnalysisError::InvalidConstExprOperand {
+                                span,
+                                operand: rhs.span(),
+                            });
+                        },
+                        (lhs, _) => {
+                            return Err(SemanticAnalysisError::InvalidConstExprOperand {
+                                span,
+                                operand: lhs.span(),
+                            });
+                        },
+                    }
                 },
                 Cont::Return(from) => {
                     debug_assert!(
@@ -189,7 +223,7 @@ impl AnalysisContext {
         if let Some(expr) = self.constants.get(name) {
             Ok(&expr.value)
         } else {
-            Err(SemanticAnalysisError::SymbolUndefined { span })
+            Err(SemanticAnalysisError::SymbolUndefined { span, symbol: name.clone() })
         }
     }
 
@@ -201,7 +235,7 @@ impl AnalysisContext {
         if let Some(expr) = self.constants.get(name) {
             Ok(expr.value.expect_string())
         } else {
-            Err(SemanticAnalysisError::SymbolUndefined { span })
+            Err(SemanticAnalysisError::SymbolUndefined { span, symbol: name.clone() })
         }
     }
 

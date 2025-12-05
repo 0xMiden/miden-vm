@@ -1,7 +1,25 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 150
 expression: program
 ---
 begin
-    basic_block mul add add add add add end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(mul, 1)
+        mul
+        asmOp(add, 1)
+        add
+        asmOp(add, 1)
+        add
+        asmOp(add, 1)
+        add
+        asmOp(add, 1)
+        add
+        asmOp(add, 1)
+        add
+    end
 end

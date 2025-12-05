@@ -1,9 +1,11 @@
 use miden_core::{
-    Operation,
-    mast::{CallNode, MastForest, MastNode, MastNodeExt},
+    FMP_INIT_VALUE, Operation,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
+        MastNodeExt,
+    },
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_processor::FMP_MIN;
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
 
 use super::TRUNCATE_STACK_PROC;
@@ -47,9 +49,12 @@ fn sdepth() {
 
 #[test]
 fn locaddr() {
+    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
-        proc.foo.5
+        @locals(5)
+        proc foo
             locaddr.0
             locaddr.4
         end
@@ -61,19 +66,22 @@ fn locaddr() {
     let test = build_test!(source, &[10]);
     // Note: internally, we round 5 up to 8 for word-aligned purposes, so the local addresses are
     // offset from 8 rather than 5.
-    test.expect_stack(&[FMP_MIN + 7, FMP_MIN + 3, 10]);
+    // locaddr.0 → fmp - (8 - 0) = fmp - 8 → FMP_INIT_VALUE
+    // locaddr.4 → fmp - (8 - 4) = fmp - 4 → FMP_INIT_VALUE + 4
+    test.expect_stack(&[FMP_INIT_VALUE_U64 + 4, FMP_INIT_VALUE_U64, 10]);
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
-            mem_storew
+            mem_storew_be
             dropw
             loc_load.0
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
         end
         begin
             exec.foo
@@ -88,12 +96,14 @@ fn locaddr() {
         "
         {TRUNCATE_STACK_PROC}
 
-        proc.foo.12
+        @locals(12)
+        proc foo
             locaddr.0
             locaddr.4
             locaddr.8
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             exec.foo
             locaddr.4
@@ -108,30 +118,32 @@ fn locaddr() {
 
     let test = build_test!(source, &[10]);
     test.expect_stack(&[
-        FMP_MIN + 8,
-        FMP_MIN + 4,
-        FMP_MIN,
-        FMP_MIN + 4,
-        FMP_MIN + 16,
-        FMP_MIN + 12,
-        FMP_MIN + 8,
-        FMP_MIN,
+        FMP_INIT_VALUE_U64 + 8,
+        FMP_INIT_VALUE_U64 + 4,
+        FMP_INIT_VALUE_U64,
+        FMP_INIT_VALUE_U64 + 4,
+        FMP_INIT_VALUE_U64 + 16,
+        FMP_INIT_VALUE_U64 + 12,
+        FMP_INIT_VALUE_U64 + 8,
+        FMP_INIT_VALUE_U64,
         10,
     ]);
 
     // --- accessing mem via locaddr in nested procedures updates the correct variables -----------
     let source = "
-        proc.foo.8
+        @locals(8)
+        proc foo
             locaddr.0
             mem_store
             locaddr.4
-            mem_storew
+            mem_storew_be
             dropw
             push.0.0.0.0
-            loc_loadw.4
+            loc_loadw_be.4
             loc_load.0
         end
-        proc.bar.8
+        @locals(8)
+        proc bar
             locaddr.0
             mem_store
             loc_store.4
@@ -156,13 +168,13 @@ fn locaddr() {
 #[ignore = "fix-prover"]
 fn caller() {
     let kernel_source = "
-        export.foo
+        pub proc foo
             caller
         end
     ";
 
     let program_source = "
-        proc.bar
+        proc bar
             syscall.foo
         end
 
@@ -190,9 +202,12 @@ fn caller() {
 fn build_bar_hash() -> [u64; 4] {
     let mut mast_forest = MastForest::new();
 
-    let foo_root_id = mast_forest.add_block(vec![Operation::Caller], Vec::new()).unwrap();
+    let foo_root_id = BasicBlockNodeBuilder::new(vec![Operation::Caller], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
 
-    let bar_root: MastNode = CallNode::new_syscall(foo_root_id, &mast_forest).unwrap().into();
+    let bar_root: MastNode =
+        CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
         bar_hash[0].as_int(),
@@ -208,10 +223,10 @@ fn build_bar_hash() -> [u64; 4] {
 #[test]
 fn clk() {
     let test = build_op_test!("clk");
-    test.expect_stack(&[2]);
+    test.expect_stack(&[6]);
 
     let source = "
-        proc.foo
+        proc foo
             push.5
             push.4
             clk
@@ -223,5 +238,5 @@ fn clk() {
         end";
 
     let test = build_test!(source, &[]);
-    test.expect_stack(&[3, 4, 5]);
+    test.expect_stack(&[7, 4, 5]);
 }

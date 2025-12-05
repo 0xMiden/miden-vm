@@ -5,7 +5,6 @@ use miden_utils_testing::{build_op_test, build_test};
 mod air;
 mod cli;
 mod exec;
-mod exec_iters;
 mod flow_control;
 mod operations;
 

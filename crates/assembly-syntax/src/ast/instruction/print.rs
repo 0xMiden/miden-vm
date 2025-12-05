@@ -229,25 +229,23 @@ impl PrettyPrint for Instruction {
 
             Self::MemLoad => const_text("mem_load"),
             Self::MemLoadImm(value) => inst_with_imm("mem_load", value),
-            Self::MemLoadW => const_text("mem_loadw"),
-            Self::MemLoadWImm(value) => inst_with_imm("mem_loadw", value),
             Self::MemLoadWBe => const_text("mem_loadw_be"),
             Self::MemLoadWBeImm(value) => inst_with_imm("mem_loadw_be", value),
             Self::MemLoadWLe => const_text("mem_loadw_le"),
             Self::MemLoadWLeImm(value) => inst_with_imm("mem_loadw_le", value),
             Self::LocLoad(value) => inst_with_imm("loc_load", value),
-            Self::LocLoadW(value) => inst_with_imm("loc_loadw", value),
+            Self::LocLoadWBe(value) => inst_with_imm("loc_loadw_be", value),
+            Self::LocLoadWLe(value) => inst_with_imm("loc_loadw_le", value),
 
             Self::MemStore => const_text("mem_store"),
             Self::MemStoreImm(value) => inst_with_imm("mem_store", value),
-            Self::MemStoreW => const_text("mem_storew"),
-            Self::MemStoreWImm(value) => inst_with_imm("mem_storew", value),
             Self::MemStoreWBe => const_text("mem_storew_be"),
             Self::MemStoreWBeImm(value) => inst_with_imm("mem_storew_be", value),
             Self::MemStoreWLe => const_text("mem_storew_le"),
             Self::MemStoreWLeImm(value) => inst_with_imm("mem_storew_le", value),
             Self::LocStore(value) => inst_with_imm("loc_store", value),
-            Self::LocStoreW(value) => inst_with_imm("loc_storew", value),
+            Self::LocStoreWBe(value) => inst_with_imm("loc_storew_be", value),
+            Self::LocStoreWLe(value) => inst_with_imm("loc_storew_le", value),
 
             Self::MemStream => const_text("mem_stream"),
             Self::AdvPipe => const_text("adv_pipe"),
@@ -268,12 +266,14 @@ impl PrettyPrint for Instruction {
             Self::MTreeVerifyWithError(err_code) => flatten(
                 const_text("mtree_verify.err") + const_text("=") + text(format!("\"{err_code}\"")),
             ),
+            Self::CryptoStream => const_text("crypto_stream"),
 
             // ----- STARK proof verification -----------------------------------------------------
             Self::FriExt2Fold4 => const_text("fri_ext2fold4"),
             Self::HornerBase => const_text("horner_eval_base"),
             Self::HornerExt => const_text("horner_eval_ext"),
             Self::EvalCircuit => const_text("eval_circuit"),
+            Self::LogPrecompile => const_text("log_precompile"),
 
             // ----- exec / call ------------------------------------------------------------------
             Self::Exec(InvocationTarget::MastRoot(root)) => flatten(
@@ -281,56 +281,44 @@ impl PrettyPrint for Instruction {
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice()))),
             ),
-            Self::Exec(InvocationTarget::ProcedureName(name)) => {
+            Self::Exec(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("exec") + const_text(".") + text(name))
             },
-            Self::Exec(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("exec") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::Exec(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("exec") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::Exec(InvocationTarget::Path(path)) => {
+                const_text("exec") + const_text(".") + display(path)
             },
             Self::Call(InvocationTarget::MastRoot(root)) => {
                 const_text("call")
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice())))
             },
-            Self::Call(InvocationTarget::ProcedureName(name)) => {
+            Self::Call(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("call") + const_text(".") + text(name))
             },
-            Self::Call(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("call") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::Call(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("call") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::Call(InvocationTarget::Path(path)) => {
+                const_text("call") + const_text(".") + display(path)
             },
             Self::SysCall(InvocationTarget::MastRoot(root)) => {
                 const_text("syscall")
                     + const_text(".")
                     + text(format!("{:#x}", DisplayHex(root.as_bytes().as_slice())))
             },
-            Self::SysCall(InvocationTarget::ProcedureName(name)) => {
+            Self::SysCall(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("syscall") + const_text(".") + text(format!("{name}")))
             },
-            Self::SysCall(InvocationTarget::ProcedurePath { name, module }) => {
-                const_text("syscall") + const_text(".") + text(format!("{module}::{name}"))
-            },
-            Self::SysCall(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                const_text("syscall") + const_text(".") + text(format!("::{path}::{name}"))
+            Self::SysCall(InvocationTarget::Path(path)) => {
+                const_text("syscall") + const_text(".") + display(path)
             },
             Self::DynExec => const_text("dynexec"),
             Self::DynCall => const_text("dyncall"),
             Self::ProcRef(InvocationTarget::MastRoot(_)) => {
                 panic!("invalid procref instruction: expected name not MAST root")
             },
-            Self::ProcRef(InvocationTarget::ProcedureName(name)) => {
+            Self::ProcRef(InvocationTarget::Symbol(name)) => {
                 flatten(const_text("procref") + const_text(".") + text(name))
             },
-            Self::ProcRef(InvocationTarget::ProcedurePath { name, module }) => {
-                flatten(const_text("procref") + const_text(".") + text(format!("{module}::{name}")))
-            },
-            Self::ProcRef(InvocationTarget::AbsoluteProcedurePath { name, path }) => {
-                flatten(const_text("procref") + const_text(".") + text(format!("::{path}::{name}")))
+            Self::ProcRef(InvocationTarget::Path(path)) => {
+                flatten(const_text("procref") + const_text(".") + display(path))
             },
 
             // ----- debug decorators -------------------------------------------------------------
@@ -427,11 +415,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Rpo256::hash(b"std::math::u64::add");
+        let digest = Rpo256::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x90b3926941061b28638b6cc0bbdb3bcb335e834dc9ab8044250875055202d2fe",
+            "exec.0x6998a9e7f13f7e81edcabdbc895ec0141f8ce3e7abd061f1370852c082a028fa",
             instruction
         );
     }

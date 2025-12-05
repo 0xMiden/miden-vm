@@ -1,5 +1,5 @@
-use miden_core::{EventId, mast};
-use miden_processor::{ExecutionError, NoopEventHandler, RowIndex, ZERO};
+use miden_core::{EventName, ZERO, mast};
+use miden_processor::{ExecutionError, NoopEventHandler, RowIndex};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
@@ -20,15 +20,15 @@ fn assert_with_code() {
     let test = build_op_test!(asm_op, &[1]);
     test.expect_stack(&[]);
 
-    // triggered assertion captures both the VM cycle and error code
+    // triggered assertion captures both the VM cycle and resolved message
     let test = build_op_test!(asm_op, &[0]);
 
     let code = mast::error_code_from_msg("123");
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(2) && err_code == code
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(6) && err_code == code && err_msg.as_deref() == Some("123")
     );
 }
 
@@ -41,7 +41,7 @@ fn assert_fail() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(2) && err_code == ZERO
+        if clk == RowIndex::from(6) && err_code == ZERO
     );
 }
 
@@ -64,16 +64,16 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, label: _, source_file: _ }
-        if clk == RowIndex::from(3) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
+        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -83,8 +83,12 @@ fn assert_eq_fail() {
 #[test]
 #[ignore = "fix-prover"]
 fn emit() {
-    // Use stack-provided event id form to avoid immediate parsing constraints
-    let mut test = build_op_test!("push.4242 emit drop", &[0, 0, 0, 0]);
-    test.add_event_handler(EventId::from_u64(4242), NoopEventHandler);
+    // Compute the event ID from the event name
+    let event_name = EventName::new("test::emit");
+    let event_id = event_name.to_event_id().as_felt();
+
+    let source = format!("push.{event_id} emit drop");
+    let mut test = build_op_test!(&source, &[0, 0, 0, 0]);
+    test.add_event_handler(event_name, NoopEventHandler);
     test.prove_and_verify(vec![], false);
 }

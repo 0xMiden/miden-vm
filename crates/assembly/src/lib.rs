@@ -11,7 +11,7 @@ use miden_core::{ONE, ZERO};
 
 mod assembler;
 mod basic_block_builder;
-mod id;
+mod fmp;
 mod instruction;
 pub mod linker;
 mod mast_forest_builder;
@@ -26,7 +26,8 @@ mod tests;
 
 // Re-exported for downstream crates
 pub use miden_assembly_syntax::{
-    KernelLibrary, Library, LibraryNamespace, LibraryPath, ModuleParser, Parse, ParseOptions, ast,
+    KernelLibrary, Library, ModuleParser, Parse, ParseOptions, Path, PathBuf, ast,
+    ast::{GlobalItemIndex, ModuleIndex},
     debuginfo::{
         self, DefaultSourceManager, SourceFile, SourceId, SourceManager, SourceSpan, Span, Spanned,
     },
@@ -42,7 +43,6 @@ pub use miden_core::{mast, utils};
 pub use self::linker::{LinkLibraryKind, LinkerError};
 pub use self::{
     assembler::Assembler,
-    id::{GlobalProcedureIndex, ModuleIndex},
     procedure::{Procedure, ProcedureContext},
 };
 
@@ -61,3 +61,19 @@ const MAX_U32_ROTATE_VALUE: u8 = 31;
 
 /// The maximum number of bits allowed for the exponent parameter for exponentiation instructions.
 const MAX_EXP_BITS: u8 = 64;
+
+// HELPERS
+// ================================================================================================
+
+/// Pushes the provided value onto the stack using the most optimal sequence of operations.
+fn push_value_ops(value: miden_core::Felt) -> alloc::vec::Vec<miden_core::Operation> {
+    use miden_core::Operation::*;
+
+    if value == ZERO {
+        vec![Pad]
+    } else if value == ONE {
+        vec![Pad, Incr]
+    } else {
+        vec![Push(value)]
+    }
+}

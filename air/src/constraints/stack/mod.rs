@@ -280,12 +280,6 @@ trait EvaluationFrameExt<E: FieldElement> {
     #[allow(dead_code)]
     fn clk_next(&self) -> E;
 
-    /// Gets the current element of the fmp register in the trace.
-    fn fmp(&self) -> E;
-
-    /// Gets the next element of the fmp register in the trace.
-    fn fmp_next(&self) -> E;
-
     /// Gets the current value of user op helper register located at the specified index.
     fn user_op_helper(&self, index: usize) -> E;
 
@@ -342,16 +336,6 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
     #[inline(always)]
     fn clk_next(&self) -> E {
         self.next()[CLK_COL_IDX]
-    }
-
-    #[inline(always)]
-    fn fmp(&self) -> E {
-        self.current()[FMP_COL_IDX]
-    }
-
-    #[inline(always)]
-    fn fmp_next(&self) -> E {
-        self.next()[FMP_COL_IDX]
     }
 
     #[inline(always)]

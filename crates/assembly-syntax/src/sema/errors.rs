@@ -1,8 +1,13 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
+
+use crate::ast::Ident;
 
 /// The high-level error type for all semantic analysis errors.
 ///
@@ -97,11 +102,15 @@ pub enum SemanticAnalysisError {
         #[label("previously defined here")]
         prev_span: SourceSpan,
     },
-    #[error("symbol undefined: no such name found in scope")]
+    #[error("invalid symbol reference")]
+    #[diagnostic()]
+    SymbolResolutionError(#[from] crate::ast::LocalSymbolResolutionError),
+    #[error("symbol undefined: '{symbol}' not in scope")]
     #[diagnostic(help("are you missing an import?"))]
     SymbolUndefined {
         #[label]
         span: SourceSpan,
+        symbol: Ident,
     },
     #[error("unused import")]
     #[diagnostic(severity(Warning), help("this import is never used and can be safely removed"))]
@@ -134,20 +143,6 @@ pub enum SemanticAnalysisError {
         #[label]
         span: SourceSpan,
     },
-    #[error("invalid syscall: cannot make a syscall from within the kernel")]
-    #[diagnostic(help("syscalls are only valid outside the kernel, you should use exec instead"))]
-    SyscallInKernel {
-        #[label]
-        span: SourceSpan,
-    },
-    #[error("invalid call: kernel modules cannot make calls to external procedures")]
-    #[diagnostic(help(
-        "this call is being made from a kernel module, and may only refer to local procedures"
-    ))]
-    CallInKernel {
-        #[label]
-        span: SourceSpan,
-    },
     #[error("invalid instruction usage: 'caller' is only valid in kernel modules")]
     #[diagnostic()]
     CallerInKernel {
@@ -159,6 +154,14 @@ pub enum SemanticAnalysisError {
     InvalidSyscallTarget {
         #[label]
         span: SourceSpan,
+    },
+    #[error("invalid procedure path: not an item")]
+    #[diagnostic()]
+    InvalidInvokeTargetViaImport {
+        #[label("call occurs here")]
+        span: SourceSpan,
+        #[label("expected this to resolve to a module, but got a module item")]
+        import: SourceSpan,
     },
     #[error("invalid recursive procedure call")]
     #[diagnostic(help(
@@ -215,6 +218,14 @@ pub enum SemanticAnalysisError {
     InvalidConstant {
         #[label]
         span: SourceSpan,
+    },
+    #[error("constant evaluation failed")]
+    #[diagnostic(help("this constant cannot be evaluated, due to operands of incorrect type"))]
+    InvalidConstExprOperand {
+        #[label]
+        span: SourceSpan,
+        #[label("expected this operand to produce an integer value, but it does not")]
+        operand: SourceSpan,
     },
     #[error("constant evaluation terminated due to infinite recursion")]
     #[diagnostic(help("dependencies between constants must form an acyclic graph"))]

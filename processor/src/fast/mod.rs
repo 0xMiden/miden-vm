@@ -6,13 +6,13 @@ use miden_air::{Felt, RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, FMP_MIN,
-    ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
@@ -21,6 +21,7 @@ use crate::{
 pub mod execution_tracer;
 mod memory;
 mod operation;
+pub use operation::eval_circuit_fast_;
 pub mod trace_state;
 mod tracer;
 pub use tracer::{NoopTracer, Tracer};
@@ -38,11 +39,11 @@ mod tests;
 /// The size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some
-/// existing programs need it (e.g. `std::math::secp256k1::group::gen_mul`), so we're forced to push
-/// it up. At this high a value, we're starting to see some performance degradation on benchmarks.
-/// For example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a
-/// better solution would be to make this value much smaller (~1000), and then fallback to a `Vec`
-/// if the stack overflows.
+/// existing programs need it, so we're forced to push it up (though this should be double-checked).
+/// At this high a value, we're starting to see some performance degradation on benchmarks. For
+/// example, the blake3 benchmark went from 285 MHz to 250 MHz (~10% degradation). Perhaps a better
+/// solution would be to make this value much smaller (~1000), and then fallback to a `Vec` if the
+/// stack overflows.
 const STACK_BUFFER_SIZE: usize = 6850;
 
 /// The initial position of the top of the stack in the stack buffer.
@@ -99,12 +100,6 @@ pub struct FastProcessor {
     /// The current context ID.
     pub(super) ctx: ContextId,
 
-    /// The free memory pointer.
-    pub(super) fmp: Felt,
-
-    /// Whether we are currently in a syscall.
-    in_syscall: bool,
-
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
     /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
     pub(super) caller_hash: Word,
@@ -125,6 +120,10 @@ pub struct FastProcessor {
 
     /// Whether to enable debug statements and tracing.
     in_debug_mode: bool,
+
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
+    /// sponge).
+    pc_transcript: PrecompileTranscript,
 }
 
 impl FastProcessor {
@@ -184,13 +183,12 @@ impl FastProcessor {
             stack_bot_idx: stack_top_idx - MIN_STACK_DEPTH,
             clk: 0_u32.into(),
             ctx: 0_u32.into(),
-            fmp: Felt::new(FMP_MIN),
-            in_syscall: false,
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
             in_debug_mode,
+            pc_transcript: PrecompileTranscript::new(),
         }
     }
 
@@ -320,7 +318,11 @@ impl FastProcessor {
         let mut tracer = ExecutionTracer::new(fragment_size);
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
-        Ok((execution_output, tracer.into_trace_generation_context()))
+        // Pass the final precompile transcript from execution output to the trace generation
+        // context
+        let context = tracer.into_trace_generation_context(execution_output.final_pc_transcript);
+
+        Ok((execution_output, context))
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
@@ -337,6 +339,7 @@ impl FastProcessor {
             stack: stack_outputs,
             advice: self.advice,
             memory: self.memory,
+            final_pc_transcript: self.pc_transcript,
         })
     }
 
@@ -467,6 +470,11 @@ impl FastProcessor {
                     host,
                     tracer,
                 )?,
+                Continuation::FinishExternal(node_id) => {
+                    // Execute after_exit decorators when returning from an external node
+                    // Note: current_forest should already be restored by EnterForest continuation
+                    self.execute_after_exit_decorators(node_id, &current_forest, host)?;
+                },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
@@ -502,7 +510,7 @@ impl FastProcessor {
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
 
-        for &decorator_id in node.before_enter() {
+        for &decorator_id in node.before_enter(current_forest) {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
@@ -520,7 +528,7 @@ impl FastProcessor {
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
 
-        for &decorator_id in node.after_exit() {
+        for &decorator_id in node.after_exit(current_forest) {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
@@ -536,16 +544,23 @@ impl FastProcessor {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode {
+                    let clk = self.clk;
                     let process = &mut self.state();
-                    host.on_debug(process, options)?;
+                    host.on_debug(process, options)
+                        .map_err(|err| ExecutionError::DebugHandlerError { clk, err })?;
                 }
             },
             Decorator::AsmOp(_assembly_op) => {
                 // do nothing
             },
             Decorator::Trace(id) => {
+                let clk = self.clk;
                 let process = &mut self.state();
-                host.on_trace(process, *id)?;
+                host.on_trace(process, *id).map_err(|err| ExecutionError::TraceHandlerError {
+                    clk,
+                    trace_id: *id,
+                    err,
+                })?;
             },
         };
         Ok(())
@@ -698,13 +713,14 @@ impl FastProcessor {
 // EXECUTION OUTPUT
 // ===============================================================================================
 
-/// The output of a program execution, containing the state of the stack, advice provider, and
-/// memory at the end of the execution.
+/// The output of a program execution, containing the state of the stack, advice provider,
+/// memory, and final precompile transcript at the end of execution.
 #[derive(Debug)]
 pub struct ExecutionOutput {
     pub stack: StackOutputs,
     pub advice: AdviceProvider,
     pub memory: Memory,
+    pub final_pc_transcript: PrecompileTranscript,
 }
 
 // FAST PROCESS STATE
@@ -736,5 +752,4 @@ struct ExecutionContextInfo {
     overflow_stack: Vec<Felt>,
     ctx: ContextId,
     fn_hash: Word,
-    fmp: Felt,
 }

@@ -5,6 +5,7 @@ use miden_air::{
 use miden_core::{
     PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
+    precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
 use crate::{
@@ -13,7 +14,8 @@ use crate::{
     errors::AceError,
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
-        HasherInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
+        HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
+        SystemInterface,
     },
 };
 
@@ -53,6 +55,16 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn system(&mut self) -> &mut Self::System {
         self
+    }
+
+    #[inline(always)]
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
+        self.pc_transcript.state()
+    }
+
+    #[inline(always)]
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
+        self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
@@ -160,11 +172,6 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn in_syscall(&self) -> bool {
-        self.in_syscall
-    }
-
-    #[inline(always)]
     fn clk(&self) -> RowIndex {
         self.clk
     }
@@ -172,16 +179,6 @@ impl SystemInterface for FastProcessor {
     #[inline(always)]
     fn ctx(&self) -> ContextId {
         self.ctx
-    }
-
-    #[inline(always)]
-    fn fmp(&self) -> Felt {
-        self.fmp
-    }
-
-    #[inline(always)]
-    fn set_fmp(&mut self, new_fmp: Felt) {
-        self.fmp = new_fmp;
     }
 }
 
@@ -366,12 +363,26 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
+    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
     fn op_merkle_path_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
     #[inline(always)]
-    fn op_horner_eval_registers(
+    fn op_horner_eval_base_registers(
+        _alpha: QuadFelt,
+        _tmp0: QuadFelt,
+        _tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS] {
+        DEFAULT_HELPERS
+    }
+
+    #[inline(always)]
+    fn op_horner_eval_ext_registers(
         _alpha: QuadFelt,
         _k0: Felt,
         _k1: Felt,
@@ -386,13 +397,13 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
 #[allow(clippy::too_many_arguments)]
-fn eval_circuit_fast_(
+pub fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
     num_vars: Felt,
     num_eval: Felt,
-    mem: &mut Memory,
+    mem: &mut impl MemoryInterface,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {

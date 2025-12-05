@@ -46,14 +46,14 @@ fn mem_store() {
 #[test]
 fn mem_loadw() {
     let addr = 4;
-    let asm_op = "mem_loadw";
+    let asm_op = "mem_loadw_be";
 
     // --- read from uninitialized memory - address provided via the stack ------------------------
     let test = build_op_test!(asm_op, &[addr, 5, 6, 7, 8]);
     test.expect_stack(&[0, 0, 0, 0]);
 
     // --- read from uninitialized memory - address provided as a parameter -----------------------
-    let asm_op = format!("{asm_op}.{addr}");
+    let asm_op = format!("mem_loadw_be.{addr}");
 
     let test = build_op_test!(asm_op, &[5, 6, 7, 8]);
     test.expect_stack(&[0, 0, 0, 0]);
@@ -69,7 +69,7 @@ fn mem_loadw() {
 
 #[test]
 fn mem_storew() {
-    let asm_op = "mem_storew";
+    let asm_op = "mem_storew_be";
     let addr = 0_u32;
 
     // --- address provided via the stack ---------------------------------------------------------
@@ -77,7 +77,7 @@ fn mem_storew() {
     test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
 
     // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("{asm_op}.{addr}");
+    let asm_op = format!("mem_storew_be.{addr}");
     let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
     test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
 
@@ -99,11 +99,11 @@ fn mem_loadw_be_le() {
 
     // Classic
     {
-        let asm_op = "mem_loadw";
+        let asm_op = "mem_loadw_be";
         let test = build_op_test!(asm_op, &INPUT_BE);
         test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
 
-        let asm_op = format!("mem_loadw.{ADDR}");
+        let asm_op = format!("mem_loadw_be.{ADDR}");
         let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
         test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
     }
@@ -143,13 +143,13 @@ fn mem_storew_be_le() {
     const MEM_BE: [u64; 8] = [0, 0, 0, 0, 4, 3, 2, 1];
     const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
 
-    // mem_storew
+    // mem_storew_be
     {
-        let asm_op = "mem_storew";
+        let asm_op = "mem_storew_be";
         let test = build_op_test!(asm_op, &INPUT_BE);
         test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
-        let asm_op = format!("mem_storew.{ADDR}");
+        let asm_op = format!("mem_storew_be.{ADDR}");
         let test = build_op_test!(asm_op, &INPUT_BE_IMM);
         test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
     }
@@ -199,7 +199,7 @@ fn mem_endianness_roundtrip() {
     // Round trip with same ordering only affects memory
     {
         // Classic
-        let ops = format!("mem_storew.{ADDR} mem_loadw.{ADDR}");
+        let ops = format!("mem_storew_be.{ADDR} mem_loadw_be.{ADDR}");
         let test = build_op_test!(ops, &INPUT_BE);
         test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
 
@@ -237,10 +237,10 @@ fn mem_stream() {
 
         begin
             push.4
-            mem_storew
+            mem_storew_be
             dropw
             push.0
-            mem_storew
+            mem_storew_be
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
             mem_stream
@@ -276,10 +276,10 @@ fn mem_stream_with_hperm() {
 
         begin
             push.4
-            mem_storew
+            mem_storew_be
             dropw
             push.0
-            mem_storew
+            mem_storew_be
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
             mem_stream hperm
@@ -339,11 +339,11 @@ fn inverse_operations() {
     let source = "
         begin
             push.0
-            mem_storew
-            mem_storew.4
+            mem_storew_be
+            mem_storew_be.4
             push.4
-            mem_loadw
-            mem_loadw.0
+            mem_loadw_be
+            mem_loadw_be.0
         end";
 
     let inputs = [0, 1, 2, 3, 4];
@@ -357,14 +357,14 @@ fn inverse_operations() {
 #[test]
 fn read_after_write() {
     // --- write to memory first, then test read with push --------------------------------------
-    let test = build_op_test!("mem_storew.0 mem_load.0", &[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_be.0 mem_load.0", &[1, 2, 3, 4]);
     test.expect_stack(&[1, 4, 3, 2, 1]);
 
     // --- write to memory first, then test read with pushw --------------------------------------
-    let test = build_op_test!("mem_storew.0 push.0.0.0.0 mem_loadw.0", &[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_be.0 push.0.0.0.0 mem_loadw_be.0", &[1, 2, 3, 4]);
     test.expect_stack(&[4, 3, 2, 1, 4, 3, 2, 1]);
 
     // --- write to memory first, then test read with loadw --------------------------------------
-    let test = build_op_test!("mem_storew.0 dropw mem_loadw.0", &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let test = build_op_test!("mem_storew_be.0 dropw mem_loadw_be.0", &[1, 2, 3, 4, 5, 6, 7, 8]);
     test.expect_stack(&[8, 7, 6, 5]);
 }

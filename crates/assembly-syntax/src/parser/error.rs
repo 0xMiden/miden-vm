@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{
     string::{String, ToString},
     vec::Vec,
@@ -248,7 +251,7 @@ pub enum ParsingError {
         span: SourceSpan,
     },
     #[error(
-        "re-exporting a procedure identified by digest requires giving it a name, e.g. `export.DIGEST->foo`"
+        "re-exporting a procedure identified by digest requires giving it a name, e.g. `pub use DIGEST->foo`"
     )]
     UnnamedReexportOfMastRoot {
         #[label]
@@ -320,6 +323,28 @@ pub enum ParsingError {
         #[label("{message}")]
         span: SourceSpan,
         message: String,
+    },
+    #[error("deprecated instruction: `{instruction}` has been removed")]
+    #[diagnostic(help("use `{}` instead", replacement))]
+    DeprecatedInstruction {
+        #[label("this instruction is no longer supported")]
+        span: SourceSpan,
+        instruction: String,
+        replacement: String,
+    },
+    #[error("invalid procedure @locals attribute")]
+    #[diagnostic()]
+    InvalidLocalsAttr {
+        #[label("{message}")]
+        span: SourceSpan,
+        message: String,
+    },
+    #[error("invalid padding value for the `adv.push_mapvaln` instruction: {padding}")]
+    #[diagnostic(help("valid padding values are 0, 4, and 8"))]
+    InvalidPadValue {
+        #[label]
+        span: SourceSpan,
+        padding: u8,
     },
 }
 

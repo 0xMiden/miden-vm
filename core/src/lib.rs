@@ -66,9 +66,11 @@ pub use miden_crypto::{
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
-            EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
-            MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SMT_DEPTH, SimpleSmt, Smt,
-            SmtProof, SmtProofError, StoreNode,
+            EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
+            PartialMerkleTree,
+            mmr::{Mmr, MmrPeaks},
+            smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
+            store::{MerkleStore, StoreNode},
         };
     }
 
@@ -89,7 +91,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::rpo_falcon512;
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_rpo};
     }
 }
 
@@ -125,16 +127,27 @@ pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
 mod event_id;
-pub use event_id::EventId;
+pub use event_id::{EventId, EventName};
 
 pub mod sys_events;
 
 mod advice;
 pub use advice::map::AdviceMap;
 
+pub mod precompile;
 pub mod utils;
 
 // Re-export indexing functionality from the new standalone crate
 pub use miden_utils_indexing::{
     DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
 };
+
+// CONSTANTS
+// ================================================================================================
+
+/// The initial value for the frame pointer, corresponding to the start address for procedure
+/// locals.
+pub const FMP_INIT_VALUE: Felt = Felt::new(2_u64.pow(31));
+
+/// The address where the frame pointer is stored in memory.
+pub const FMP_ADDR: Felt = Felt::new(u32::MAX as u64 - 1_u64);

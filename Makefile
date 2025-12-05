@@ -17,21 +17,22 @@ help:
 	@printf "  make test-miden-vm               # Test miden-vm crate\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
-	@printf "  make test-stdlib                 # Test stdlib crate\n"
+	@printf "  make test-libcore                # Test libcore crate\n"
 	@printf "  make test-verifier               # Test verifier crate\n"
 	@printf "\nExamples:\n"
 	@printf "  make test-air test=\"some_test\"   # Test specific function\n"
 	@printf "  make test-fast                   # Fast tests (no proptests/CLI)\n"
-	@printf "  make test-skip-proptests         # All tests except proptests\n\n"
+	@printf "  make test-skip-proptests         # All tests except proptests\n"
+	@printf "  make check-features              # Check all feature combinations with cargo-hack\n\n"
 
 
 # -- environment toggles --------------------------------------------------------------------------
 BACKTRACE                := RUST_BACKTRACE=1
 WARNINGS                 := RUSTDOCFLAGS="-D warnings"
-BUILDDOCS                := MIDEN_BUILD_STDLIB_DOCS=1
+BUILDDOCS                := MIDEN_BUILD_LIBCORE_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,with-debug-info,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
@@ -45,13 +46,12 @@ FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 # Per-crate default features
 FEATURES_air             := testing
 FEATURES_assembly        := testing
-FEATURES_assembly-syntax := testing
+FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_miden-vm        := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_prover          := concurrent,metal
-FEATURES_stdlib          := with-debug-info
-FEATURES_verifier        :=
+FEATURES_libcore         :=FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
@@ -84,9 +84,9 @@ lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, forma
 doc: ## Generates & checks documentation
 	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES_BUT_ASYNC} --keep-going --release
 
-.PHONY: book
-book: ## Builds the book & serves documentation site
-	mdbook serve --open docs
+.PHONY: serve-docs
+serve-docs: ## Serves the docs
+	mkdir -p docs/external && cd docs/external && npm run start:dev
 
 # -- core knobs (overridable from CLI or by caller targets) --------------------
 # Advanced usage (most users should use pattern rules like 'make test-air'):
@@ -174,6 +174,10 @@ test-loom: ## Runs all loom-based tests
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
 	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
+
+.PHONY: check-features
+check-features: ## Checks all feature combinations compile without warnings using cargo-hack
+	@scripts/check-features.sh
 
 # --- building ------------------------------------------------------------------------------------
 

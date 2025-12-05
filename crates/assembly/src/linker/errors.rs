@@ -1,11 +1,15 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    Felt, LibraryPath,
-    ast::QualifiedProcedureName,
+    Felt, Path,
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedLabel, miette},
 };
+
+use super::name_resolver::SymbolResolutionError;
 
 // LINKER ERROR
 // ================================================================================================
@@ -17,6 +21,9 @@ pub enum LinkerError {
     #[error("there are no modules to analyze")]
     #[diagnostic()]
     Empty,
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    SymbolResolution(#[from] Box<SymbolResolutionError>),
     #[error("linking failed")]
     #[diagnostic(help("see diagnostics for details"))]
     Failed {
@@ -28,7 +35,7 @@ pub enum LinkerError {
     Cycle { nodes: Box<[String]> },
     #[error("duplicate definition found for module '{path}'")]
     #[diagnostic()]
-    DuplicateModule { path: LibraryPath },
+    DuplicateModule { path: Arc<Path> },
     #[error("undefined module '{path}'")]
     #[diagnostic()]
     UndefinedModule {
@@ -36,7 +43,18 @@ pub enum LinkerError {
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        path: LibraryPath,
+        path: Arc<Path>,
+    },
+    #[error("undefined item '{path}'")]
+    #[diagnostic(help(
+        "you might be missing an import, or the containing library has not been linked"
+    ))]
+    UndefinedSymbol {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
     },
     #[error("invalid syscall: '{callee}' is not an exported kernel procedure")]
     #[diagnostic()]
@@ -45,7 +63,16 @@ pub enum LinkerError {
         span: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        callee: Box<QualifiedProcedureName>,
+        callee: Arc<Path>,
+    },
+    #[error("invalid procedure reference: path refers to a non-procedure item")]
+    #[diagnostic()]
+    InvalidInvokeTarget {
+        #[label("this path resolves to {path}, which is not a procedure")]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        path: Arc<Path>,
     },
     // FIXME: print key in the error message
     #[error("value for key already present in the advice map")]
@@ -60,6 +87,14 @@ pub enum LinkerError {
     #[error("undefined type alias")]
     #[diagnostic()]
     UndefinedType {
+        #[label]
+        span: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+    },
+    #[error("invalid type reference")]
+    #[diagnostic(help("the item this path resolves to is not a type definition"))]
+    InvalidTypeRef {
         #[label]
         span: SourceSpan,
         #[source_code]

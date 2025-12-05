@@ -1,7 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
-use miden_core::{Kernel, PrimeCharacteristicRing, mast::OpBatch};
+use miden_core::{
+    Kernel, PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+};
 
 use super::{
     CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, ONE, RangeChecker,
@@ -214,7 +216,12 @@ impl Chiplets {
     ///
     /// `num_rand_rows` indicates the number of rows at the end of the trace which will be
     /// overwritten with random values.
-    pub fn into_trace(self, trace_len: usize, num_rand_rows: usize) -> ChipletsTrace {
+    pub fn into_trace(
+        self,
+        trace_len: usize,
+        num_rand_rows: usize,
+        pc_transcript_state: PrecompileTranscriptState,
+    ) -> ChipletsTrace {
         // make sure that only padding rows will be overwritten by random values
         assert!(self.trace_len() + num_rand_rows <= trace_len, "target trace length too small");
 
@@ -230,7 +237,7 @@ impl Chiplets {
 
         ChipletsTrace {
             trace,
-            aux_builder: AuxTraceBuilder::new(kernel, ace_hint),
+            aux_builder: AuxTraceBuilder::new(kernel, ace_hint, pc_transcript_state),
         }
     }
 
@@ -327,12 +334,28 @@ impl Chiplets {
             }
         }
 
-        // fill the fragments with the execution trace from each chiplet
-        // TODO: this can be parallelized to fill the traces in multiple threads
-        hasher.fill_trace(&mut hasher_fragment);
-        bitwise.fill_trace(&mut bitwise_fragment);
-        memory.fill_trace(&mut memory_fragment);
-        kernel_rom.fill_trace(&mut kernel_rom_fragment);
+        // fill the fragments with the execution trace from each chiplet in parallel
+        // The chiplets are independent and can be processed concurrently
+
+        // Fill independent chiplets in parallel: hasher, bitwise, memory, kernel_rom
+        // Note: ACE must be processed separately since it returns a value
+        // Use ThreadPool::install() to prevent nested parallelism from column operations
+        rayon::scope(|s| {
+            s.spawn(move |_| {
+                hasher.fill_trace(&mut hasher_fragment);
+            });
+            s.spawn(move |_| {
+                bitwise.fill_trace(&mut bitwise_fragment);
+            });
+            s.spawn(move |_| {
+                memory.fill_trace(&mut memory_fragment);
+            });
+            s.spawn(move |_| {
+                kernel_rom.fill_trace(&mut kernel_rom_fragment);
+            });
+        });
+
+        // Process ACE chiplet separately as it returns ace_sections
         let ace_sections = ace.fill_trace(&mut ace_fragment);
         AceHints::new(ace_start, ace_sections)
     }

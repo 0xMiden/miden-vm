@@ -25,8 +25,8 @@ use crate::{
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
 #[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true), serde_test(false))
+    all(feature = "arbitrary", feature = "std", test),
+    miden_test_serde_macros::serde_test(winter_serde(true), serde_test(false))
 )]
 pub struct DecoratorInfo {
     variant: EncodedDecoratorVariant,
@@ -155,8 +155,8 @@ impl Deserializable for DecoratorInfo {
 #[derive(Debug, FromPrimitive, ToPrimitive, PartialEq, Eq)]
 #[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
 #[cfg_attr(
-    all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true), serde_test(false))
+    all(feature = "arbitrary", feature = "std", test),
+    miden_test_serde_macros::serde_test(winter_serde(true), serde_test(false))
 )]
 #[repr(u8)]
 pub enum EncodedDecoratorVariant {

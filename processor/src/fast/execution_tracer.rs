@@ -8,6 +8,7 @@ use miden_core::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,
     },
+    precompile::PrecompileTranscript,
     stack::MIN_STACK_DEPTH,
 };
 
@@ -28,12 +29,8 @@ use crate::{
     },
     stack::OverflowTable,
     system::ContextId,
-    utils::split_u32_into_u16,
+    utils::{HASH_CYCLE_LEN_FELT, split_u32_into_u16},
 };
-
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized.
-const HASH_CYCLE_LEN: Felt = Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
 #[derive(Debug)]
@@ -56,6 +53,9 @@ pub struct TraceGenerationContext {
     pub hasher_for_chiplet: HasherRequestReplay,
     pub kernel_replay: KernelReplay,
     pub ace_replay: AceReplay,
+
+    /// The final precompile transcript at the end of execution.
+    pub final_pc_transcript: PrecompileTranscript,
 
     /// The number of rows per core trace fragment, except for the last fragment which may be
     /// shorter.
@@ -138,7 +138,13 @@ impl ExecutionTracer {
 
     /// Convert the `ExecutionTracer` into a [TraceGenerationContext] using the data accumulated
     /// during execution.
-    pub fn into_trace_generation_context(mut self) -> TraceGenerationContext {
+    ///
+    /// The `final_pc_transcript` parameter represents the final precompile transcript at
+    /// the end of execution, which is needed for the auxiliary trace column builder.
+    pub fn into_trace_generation_context(
+        mut self,
+        final_pc_transcript: PrecompileTranscript,
+    ) -> TraceGenerationContext {
         // If there is an ongoing trace state being built, finish it
         self.finish_current_fragment_context();
 
@@ -150,6 +156,7 @@ impl ExecutionTracer {
             kernel_replay: self.kernel,
             hasher_for_chiplet: self.hasher_for_chiplet,
             ace_replay: self.ace,
+            final_pc_transcript,
             fragment_size: self.fragment_size,
         }
     }
@@ -290,7 +297,6 @@ impl ExecutionTracer {
                     ExecutionContextInfo::new(
                         processor.ctx,
                         processor.caller_hash,
-                        processor.fmp,
                         processor.stack_depth(),
                         overflow_addr,
                     )
@@ -326,7 +332,6 @@ impl ExecutionTracer {
                         ExecutionContextInfo::new(
                             processor.ctx,
                             processor.caller_hash,
-                            processor.fmp,
                             stack_depth_after_drop,
                             overflow_addr,
                         )
@@ -346,7 +351,7 @@ impl ExecutionTracer {
 
         let block_addr = self.hasher_chiplet_shim.record_hash_control_block();
         let parent_addr = self.block_stack.push(block_addr, block_type, ctx_info);
-        self.block_stack_replay.record_node_start(parent_addr);
+        self.block_stack_replay.record_node_start_parent_addr(parent_addr);
     }
 
     /// Records the block address and flags for an END operation based on the block being popped.
@@ -464,14 +469,14 @@ impl Tracer for ExecutionTracer {
                         self.hasher_chiplet_shim.record_hash_basic_block(basic_block_node);
                     let parent_addr =
                         self.block_stack.push(block_addr, BlockType::BasicBlock, None);
-                    self.block_stack_replay.record_node_start(parent_addr);
+                    self.block_stack_replay.record_node_start_parent_addr(parent_addr);
                 },
                 MastNode::External(_) => unreachable!(
                     "start_clock_cycle is guaranteed not to be called on external nodes"
                 ),
             },
             NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
-                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN;
+                self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
             NodeExecutionState::LoopRepeat(_) => {
                 // do nothing, REPEAT doesn't affect the block stack
@@ -484,7 +489,6 @@ impl Tracer for ExecutionTracer {
                     self.record_execution_context(ExecutionContextSystemInfo {
                         parent_ctx: ctx_info.parent_ctx,
                         parent_fn_hash: ctx_info.parent_fn_hash,
-                        parent_fmp: ctx_info.parent_fmp,
                     });
                 }
             },

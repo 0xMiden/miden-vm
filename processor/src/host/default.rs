@@ -1,13 +1,14 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, EventId, Felt, Word, mast::MastForest};
+use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventHandler, EventHandlerRegistry,
-    ExecutionError, MastForestStore, MemMastForestStore, ProcessState, SyncHost,
+    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventHandler,
+    EventHandlerRegistry, ExecutionError, MastForestStore, MemMastForestStore, ProcessState,
+    SyncHost, TraceError,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
@@ -61,8 +62,8 @@ where
         let library = library.into();
         self.store.insert(library.mast_forest);
 
-        for (id, handler) in library.handlers {
-            self.event_handlers.register(id, handler)?;
+        for (event, handler) in library.handlers {
+            self.event_handlers.register(event, handler)?;
         }
         Ok(())
     }
@@ -80,10 +81,10 @@ where
     /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
     pub fn register_handler(
         &mut self,
-        id: EventId,
+        event: EventName,
         handler: Arc<dyn EventHandler>,
     ) -> Result<(), ExecutionError> {
-        self.event_handlers.register(id, handler)
+        self.event_handlers.register(event, handler)
     }
 
     /// Un-registers a handler with the given id, returning a flag indicating whether a handler
@@ -92,11 +93,12 @@ where
         self.event_handlers.unregister(id)
     }
 
-    /// Replaces a handler with the given id, returning a flag indicating whether a handler
-    /// was previously registered with this id.
-    pub fn replace_handler(&mut self, id: EventId, handler: Arc<dyn EventHandler>) -> bool {
-        let existed = self.event_handlers.unregister(id);
-        self.register_handler(id, handler).unwrap();
+    /// Replaces a handler with the given event, returning a flag indicating whether a handler
+    /// was previously registered with this event ID.
+    pub fn replace_handler(&mut self, event: EventName, handler: Arc<dyn EventHandler>) -> bool {
+        let event_id = event.to_event_id();
+        let existed = self.event_handlers.unregister(event_id);
+        self.register_handler(event, handler).unwrap();
         existed
     }
 
@@ -135,20 +137,17 @@ where
         &mut self,
         process: &mut ProcessState,
         options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
-    /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: Felt) {}
+    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
+        self.event_handlers.resolve_event(event_id)
+    }
 }
 
 impl<D, S> SyncHost for DefaultHost<D, S>
@@ -167,9 +166,9 @@ where
             return Ok(mutations);
         }
 
-        // EventError is a `Box` so we can define the error anonymously.
+        // EventError is a `Box<dyn Error>` so we can define the error anonymously.
         #[derive(Debug, thiserror::Error)]
-        #[error("no event handler was registered with given id")]
+        #[error("no event handler registered")]
         struct UnhandledEvent;
 
         Err(UnhandledEvent.into())
@@ -250,8 +249,8 @@ impl AsyncHost for NoopHost {
 pub struct HostLibrary {
     /// A `MastForest` with procedures exposed by this library.
     pub mast_forest: Arc<MastForest>,
-    /// List of handlers along with an event id to call them with `emit`.
-    pub handlers: Vec<(EventId, Arc<dyn EventHandler>)>,
+    /// List of handlers along with their event names to call them with `emit`.
+    pub handlers: Vec<(EventName, Arc<dyn EventHandler>)>,
 }
 
 impl From<Arc<MastForest>> for HostLibrary {

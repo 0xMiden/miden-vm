@@ -108,7 +108,7 @@ impl crate::prettier::PrettyPrint for PushValue {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -170,8 +170,9 @@ impl proptest::arbitrary::Arbitrary for WordValue {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{array::uniform4, strategy::Strategy};
-        uniform4((0..=crate::FIELD_MODULUS).prop_map(Felt::new))
+        uniform4((0..crate::FIELD_MODULUS).prop_map(Felt::new))
             .prop_map(WordValue)
+            .no_shrink()  // Pure random values, no meaningful shrinking pattern
             .boxed()
     }
 
@@ -207,7 +208,7 @@ impl Deserializable for WordValue {
 #[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_serde_test_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(winter_serde(true))
 )]
 pub enum IntValue {
     /// A tiny value
@@ -382,12 +383,23 @@ impl proptest::arbitrary::Arbitrary for IntValue {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::{num, prop_oneof, strategy::Strategy};
         prop_oneof![
+            // U8 values - full range
             num::u8::ANY.prop_map(IntValue::U8),
-            ((u8::MAX as u16 + 1)..=u16::MAX).prop_map(IntValue::U16),
-            ((u16::MAX as u32 + 1)..=u32::MAX).prop_map(IntValue::U32),
-            ((u32::MAX as u64 + 1)..=crate::FIELD_MODULUS)
-                .prop_map(|n| IntValue::Felt(Felt::new(n))),
+            // U16 values that don't overlap with U8 to preserve variant during serialization
+            (u8::MAX as u16 + 1..=u16::MAX).prop_map(IntValue::U16),
+            // U32 values - full range
+            num::u32::ANY.prop_map(IntValue::U32),
+            // Felt values - values that don't fit in u32 but are within field modulus
+            (num::u64::ANY)
+                .prop_filter_map("valid felt value", |n| {
+                    if n > u32::MAX as u64 && n < crate::FIELD_MODULUS {
+                        Some(IntValue::Felt(Felt::new(n)))
+                    } else {
+                        None
+                    }
+                }),
         ]
+        .no_shrink()  // Pure random values, no meaningful shrinking pattern
         .boxed()
     }
 
@@ -429,6 +441,7 @@ pub enum Token<'input> {
     AdvPush,
     AdvStack,
     PushMapval,
+    PushMapvalCount,
     PushMapvaln,
     PushMtnode,
     And,
@@ -446,6 +459,7 @@ pub enum Token<'input> {
     Cdropw,
     Clk,
     Const,
+    CryptoStream,
     Cswap,
     Cswapw,
     Debug,
@@ -482,6 +496,7 @@ pub enum Token<'input> {
     HasMapkey,
     HornerBase,
     HornerExt,
+    LogPrecompile,
     Hperm,
     Hmerge,
     I1,
@@ -498,8 +513,12 @@ pub enum Token<'input> {
     Locaddr,
     LocLoad,
     LocLoadw,
+    LocLoadwBe,
+    LocLoadwLe,
     LocStore,
     LocStorew,
+    LocStorewBe,
+    LocStorewLe,
     Lt,
     Lte,
     Mem,
@@ -649,6 +668,7 @@ impl fmt::Display for Token<'_> {
             Token::AdvPipe => write!(f, "adv_pipe"),
             Token::AdvPush => write!(f, "adv_push"),
             Token::PushMapval => write!(f, "push_mapval"),
+            Token::PushMapvalCount => write!(f, "push_mapval_count"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
             Token::And => write!(f, "and"),
@@ -666,6 +686,7 @@ impl fmt::Display for Token<'_> {
             Token::Cdropw => write!(f, "cdropw"),
             Token::Clk => write!(f, "clk"),
             Token::Const => write!(f, "const"),
+            Token::CryptoStream => write!(f, "crypto_stream"),
             Token::Cswap => write!(f, "cswap"),
             Token::Cswapw => write!(f, "cswapw"),
             Token::Debug => write!(f, "debug"),
@@ -716,8 +737,12 @@ impl fmt::Display for Token<'_> {
             Token::Locaddr => write!(f, "locaddr"),
             Token::LocLoad => write!(f, "loc_load"),
             Token::LocLoadw => write!(f, "loc_loadw"),
+            Token::LocLoadwBe => write!(f, "loc_loadw_be"),
+            Token::LocLoadwLe => write!(f, "loc_loadw_le"),
             Token::LocStore => write!(f, "loc_store"),
             Token::LocStorew => write!(f, "loc_storew"),
+            Token::LocStorewBe => write!(f, "loc_storew_be"),
+            Token::LocStorewLe => write!(f, "loc_storew_le"),
             Token::Lt => write!(f, "lt"),
             Token::Lte => write!(f, "lte"),
             Token::Mem => write!(f, "mem"),
@@ -753,6 +778,7 @@ impl fmt::Display for Token<'_> {
             Token::Push => write!(f, "push"),
             Token::HornerBase => write!(f, "horner_eval_base"),
             Token::HornerExt => write!(f, "horner_eval_ext"),
+            Token::LogPrecompile => write!(f, "log_precompile"),
             Token::Repeat => write!(f, "repeat"),
             Token::Reversew => write!(f, "reversew"),
             Token::Reversedw => write!(f, "reversedw"),
@@ -875,6 +901,7 @@ impl<'input> Token<'input> {
                 | Token::AdvPush
                 | Token::AdvStack
                 | Token::PushMapval
+                | Token::PushMapvalCount
                 | Token::PushMapvaln
                 | Token::PushMtnode
                 | Token::And
@@ -889,6 +916,7 @@ impl<'input> Token<'input> {
                 | Token::Cdrop
                 | Token::Cdropw
                 | Token::Clk
+                | Token::CryptoStream
                 | Token::Cswap
                 | Token::Cswapw
                 | Token::Debug
@@ -919,6 +947,7 @@ impl<'input> Token<'input> {
                 | Token::Hmerge
                 | Token::HornerBase
                 | Token::HornerExt
+                | Token::LogPrecompile
                 | Token::ILog2
                 | Token::Inv
                 | Token::IsOdd
@@ -926,8 +955,12 @@ impl<'input> Token<'input> {
                 | Token::Locaddr
                 | Token::LocLoad
                 | Token::LocLoadw
+                | Token::LocLoadwBe
+                | Token::LocLoadwLe
                 | Token::LocStore
                 | Token::LocStorew
+                | Token::LocStorewBe
+                | Token::LocStorewLe
                 | Token::Lt
                 | Token::Lte
                 | Token::Mem
@@ -1032,6 +1065,8 @@ impl<'input> Token<'input> {
                 | Token::U32
                 | Token::U64
                 | Token::U128
+                | Token::Felt
+                | Token::Word
                 | Token::Struct
         )
     }
@@ -1052,6 +1087,7 @@ impl<'input> Token<'input> {
         ("adv_push", Token::AdvPush),
         ("adv_stack", Token::AdvStack),
         ("push_mapval", Token::PushMapval),
+        ("push_mapval_count", Token::PushMapvalCount),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
         ("and", Token::And),
@@ -1068,6 +1104,7 @@ impl<'input> Token<'input> {
         ("cdropw", Token::Cdropw),
         ("clk", Token::Clk),
         ("const", Token::Const),
+        ("crypto_stream", Token::CryptoStream),
         ("cswap", Token::Cswap),
         ("cswapw", Token::Cswapw),
         ("debug", Token::Debug),
@@ -1118,8 +1155,12 @@ impl<'input> Token<'input> {
         ("locaddr", Token::Locaddr),
         ("loc_load", Token::LocLoad),
         ("loc_loadw", Token::LocLoadw),
+        ("loc_loadw_be", Token::LocLoadwBe),
+        ("loc_loadw_le", Token::LocLoadwLe),
         ("loc_store", Token::LocStore),
         ("loc_storew", Token::LocStorew),
+        ("loc_storew_be", Token::LocStorewBe),
+        ("loc_storew_le", Token::LocStorewLe),
         ("lt", Token::Lt),
         ("lte", Token::Lte),
         ("mem", Token::Mem),
@@ -1155,6 +1196,7 @@ impl<'input> Token<'input> {
         ("pub", Token::Pub),
         ("horner_eval_base", Token::HornerBase),
         ("horner_eval_ext", Token::HornerExt),
+        ("log_precompile", Token::LogPrecompile),
         ("repeat", Token::Repeat),
         ("reversew", Token::Reversew),
         ("reversedw", Token::Reversedw),

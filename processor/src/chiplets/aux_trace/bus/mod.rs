@@ -2,12 +2,13 @@ use ace::{build_ace_chiplet_requests, build_ace_chiplet_responses};
 use bitwise::{build_bitwise_chiplet_responses, build_bitwise_request};
 use hasher::{
     ControlBlockRequestMessage, build_control_block_request, build_end_block_request,
-    build_hasher_chiplet_responses, build_hperm_request, build_mpverify_request,
-    build_mrupdate_request, build_respan_block_request, build_span_block_request,
+    build_hasher_chiplet_responses, build_hperm_request, build_log_precompile_request,
+    build_mpverify_request, build_mrupdate_request, build_respan_block_request,
+    build_span_block_request,
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
-    MemoryWordMessage, build_horner_eval_request, build_mem_mload_mstore_request,
+    build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
     build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
     build_pipe_request,
 };
@@ -27,13 +28,17 @@ use miden_air::{
 use miden_core::{
     ExtensionField, Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END,
     OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN,
-    OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
-    OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
-    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, PrimeCharacteristicRing, ZERO,
+    OPCODE_LOGPRECOMPILE, OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY,
+    OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN,
+    OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR,
+    PrimeCharacteristicRing, ZERO,
 };
 
 use super::Felt;
 use crate::{
+    chiplets::aux_trace::bus::memory::{
+        build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
+    },
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
 };
@@ -75,7 +80,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
         let op_code = op_code_felt.as_int() as u8;
 
         match op_code {
-            OPCODE_JOIN | OPCODE_SPLIT | OPCODE_LOOP | OPCODE_CALL => build_control_block_request(
+            OPCODE_JOIN | OPCODE_SPLIT | OPCODE_LOOP => build_control_block_request(
                 main_trace,
                 main_trace.decoder_hasher_state(row),
                 op_code_felt,
@@ -83,8 +88,10 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
                 row,
                 debugger,
             ),
-            OPCODE_DYN | OPCODE_DYNCALL => {
-                build_dyn_block_request(main_trace, op_code_felt, alphas, row, debugger)
+            OPCODE_CALL => build_call_request(main_trace, op_code_felt, alphas, row, debugger),
+            OPCODE_DYN => build_dyn_request(main_trace, op_code_felt, alphas, row, debugger),
+            OPCODE_DYNCALL => {
+                build_dyncall_request(main_trace, op_code_felt, alphas, row, debugger)
             },
             OPCODE_SYSCALL => {
                 build_syscall_block_request(main_trace, op_code_felt, alphas, row, debugger)
@@ -122,10 +129,11 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
                 row,
                 debugger,
             ),
-            OPCODE_HORNERBASE => build_horner_eval_request(main_trace, alphas, row, debugger),
-            OPCODE_HORNEREXT => build_horner_eval_request(main_trace, alphas, row, debugger),
+            OPCODE_HORNERBASE => build_hornerbase_eval_request(main_trace, alphas, row, debugger),
+            OPCODE_HORNEREXT => build_hornerext_eval_request(main_trace, alphas, row, debugger),
             OPCODE_MSTREAM => build_mstream_request(main_trace, alphas, row, debugger),
             OPCODE_HPERM => build_hperm_request(main_trace, alphas, row, debugger),
+            OPCODE_LOGPRECOMPILE => build_log_precompile_request(main_trace, alphas, row, debugger),
             OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
             OPCODE_MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
             OPCODE_PIPE => build_pipe_request(main_trace, alphas, row, debugger),
@@ -170,8 +178,8 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BusColumnBuilder<'_> {
 // CHIPLETS REQUESTS TO MORE THAN ONE CHIPLET
 // ================================================================================================
 
-/// Builds requests made on a `DYN` or `DYNCALL` operation.
-fn build_dyn_block_request<E: ExtensionField<Felt>>(
+/// Builds requests made on a `DYN` operation.
+fn build_dyn_request<E>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
     alphas: &[E],
@@ -181,35 +189,71 @@ fn build_dyn_block_request<E: ExtensionField<Felt>>(
 where
     E: ExtensionField<Felt>,
 {
-    let control_block_req = ControlBlockRequestMessage {
-        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
-        addr_next: main_trace.addr(row + 1),
-        op_code: op_code_felt,
-        decoder_hasher_state: [ZERO; 8],
-    };
+    let control_block_req_value =
+        build_control_block_request(main_trace, [ZERO; 8], op_code_felt, alphas, row, _debugger);
 
-    let memory_req = MemoryWordMessage {
-        op_label: Felt::from_u8(MEMORY_READ_WORD_LABEL),
-        ctx: main_trace.ctx(row),
-        addr: main_trace.stack_element(0, row),
-        clk: main_trace.clk(row),
-        word: main_trace.decoder_hasher_state_first_half(row).into(),
-        source: if op_code_felt == OPCODE_DYNCALL.into() {
-            "dyncall"
-        } else {
-            "dyn"
-        },
-    };
+    let callee_hash_read_req_value = build_dyn_dyncall_callee_hash_read_request(
+        main_trace,
+        op_code_felt,
+        alphas,
+        row,
+        _debugger,
+    );
 
-    let combined_value = control_block_req.value(alphas) * memory_req.value(alphas);
-    #[cfg(any(test, feature = "bus-debugger"))]
-    {
-        use alloc::boxed::Box;
-        _debugger.add_request(Box::new(control_block_req), alphas);
-        _debugger.add_request(Box::new(memory_req), alphas);
-    }
+    control_block_req_value * callee_hash_read_req_value
+}
 
-    combined_value
+/// Builds requests made on a `DYNCALL` operation.
+fn build_dyncall_request<E>(
+    main_trace: &MainTrace,
+    op_code_felt: Felt,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E
+where
+    E: FieldElement<BaseField = Felt>,
+{
+    let control_block_req_value =
+        build_control_block_request(main_trace, [ZERO; 8], op_code_felt, alphas, row, _debugger);
+
+    let callee_hash_read_req_value = build_dyn_dyncall_callee_hash_read_request(
+        main_trace,
+        op_code_felt,
+        alphas,
+        row,
+        _debugger,
+    );
+
+    let fmp_write_req_value =
+        build_fmp_initialization_write_request(main_trace, alphas, row, _debugger);
+
+    control_block_req_value * callee_hash_read_req_value * fmp_write_req_value
+}
+
+fn build_call_request<E>(
+    main_trace: &MainTrace,
+    op_code_felt: Felt,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E
+where
+    E: FieldElement<BaseField = Felt>,
+{
+    let control_block_req_value = build_control_block_request(
+        main_trace,
+        main_trace.decoder_hasher_state(row),
+        op_code_felt,
+        alphas,
+        row,
+        _debugger,
+    );
+
+    let fmp_write_req_value =
+        build_fmp_initialization_write_request(main_trace, alphas, row, _debugger);
+
+    control_block_req_value * fmp_write_req_value
 }
 
 /// Builds requests made to kernel ROM chiplet when initializing a syscall block.

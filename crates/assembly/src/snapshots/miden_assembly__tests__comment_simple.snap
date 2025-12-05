@@ -1,7 +1,20 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 2700
 expression: program
 ---
 begin
-    basic_block pad incr push(2) add end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(push.1, 2)
+        pad
+        incr
+        asmOp(push.2, 1)
+        push(2)
+        asmOp(add, 1)
+        add
+    end
 end

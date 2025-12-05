@@ -1,3 +1,8 @@
+---
+title: "ACE Chiplet"
+sidebar_position: 5
+---
+
 # ACE chiplet
 
 The following note describes the design and functionality of the Arithmetic Circuit Evaluation (ACE) chiplet.
@@ -27,7 +32,7 @@ $$
 s \in \{0,1\}, \quad
 \text{output} =
 \begin{cases}
-\text{input}, &s = 0,\\
+\text{input}, &s = 0,
 42, &s = 1.
 \end{cases}
 $$
@@ -80,7 +85,6 @@ flowchart BT
     input --> sub4
 ```
 
-
 The chiplet constructs and verifies the correctness of such a DAG by using a logUp argument, which we interpret as a _wiring bus_.
 In each row, the chiplet can either insert a new node with the next fresh identifier and desired value or request a node’s value by providing the identifier of a previously inserted node.
 Whenever we create a new node in the DAG (when loading a variable or evaluating an operation), we “insert” it onto the wiring bus by emitting a tuple $(id,v)$ together with its final fan‐out count $m$.
@@ -94,8 +98,8 @@ By the time we finish inserting and consuming all nodes, two things must hold:
 ## Trace layout
 
 The ACE chiplet produces a trace with 16 internal columns.
-Each *section* of the trace corresponds to exactly one circuit evaluation.  
-Within each section, there are two ordered *blocks*:
+Each _section_ of the trace corresponds to exactly one circuit evaluation.  
+Within each section, there are two ordered _blocks_:
 
 1. A READ block, which loads inputs/constants from memory and inserts them into the DAG.
 2. An EVAL block, which executes each instruction — fetching two existing DAG nodes, computing $v_{out}$, and inserting a new node.
@@ -107,7 +111,7 @@ In what follows, we'll refer to READ/EVAL blocks depending on which operation is
 The following table describes the 16 columns used by the chiplet, and their interpretation in each block.
 
 | **BLOCK** | $s_{start}$ | $s_{block}$ | $ctx$ | $ptr$ | $clk$ |      | $id_0$ | $v_{0,0}$ | $v_{0,1}$ | $id_1$ | $v_{1,0}$ | $v_{1,1}$ |            |           |           | $m_0$ |
-|-----------|-------------|-------------|-------|-------|-------|------|--------|-----------|-----------|--------|-----------|-----------|------------|-----------|-----------|-------|
+| --------- | ----------- | ----------- | ----- | ----- | ----- | ---- | ------ | --------- | --------- | ------ | --------- | --------- | ---------- | --------- | --------- | ----- |
 | **READ**  | =           | =           | =     | =     | =     |      | =      | =         | =         | =      | =         | =         | $n_{eval}$ |           | $m_1$     | =     |
 | **EVAL**  | =           | =           | =     | =     | =     | $op$ | =      | =         | =         | =      | =         | =         | $id_2$     | $v_{2,0}$ | $v_{2,1}$ | =     |
 
@@ -134,10 +138,12 @@ Within a section, the chiplet reads through a contiguous, word‐aligned memory 
 
 The caller is responsible for writing the inputs and circuit into memory before invoking the chiplet.  
 If the same circuit is evaluated multiple times, the caller must overwrite the input region with the new inputs for each evaluation.  
-To start a circuit evaluation, the caller pushes one chiplet‐bus message:  
+To start a circuit evaluation, the caller pushes one chiplet‐bus message:
+
 $$
 (\mathsf{ACE\_LABEL},ctx,ptr,clk,n_{read},n_{eval}),
 $$
+
 where:
 
 - $(ctx,clk)$ identifies the memory‐access context that every row will use.
@@ -175,12 +181,12 @@ In every row, the chiplet the following actions in each block:
 - Reads a single field-element $instr$ (an encoded instruction) from memory at $(ctx,ptr,clk)$.
 - Decodes $(op,id_1,id_2)$ from $instr$.
 - Fetches the two input nodes $(id_1,v_1), (id_2, v_2)$ from the wiring bus, consuming one fan-out from each (i.e., with multiplicity $m_i = -1$).
-- Computes  
+- Computes
   $$
   v_{0} =
   \begin{cases}
-  v_1 - v_2, & op = -1,\\
-  v_1 \times v_2, & op = 0,\\
+  v_1 - v_2, & op = -1,
+  v_1 \times v_2, & op = 0,
   v_1 + v_2, & op = 1.
   \end{cases}
   $$
@@ -203,10 +209,10 @@ We start by assigning values to both the inputs and constants nodes, stored in m
 
 $$
 \begin{aligned}
-v_{14} &= \alpha, & v_{10} &= 42, \\
-v_{13} &= \text{output}, & v_{9} &= 1. \\
-v_{12} &= s, \\
-v_{11} &= \text{input}, \\
+v_{14} &= \alpha, & v_{10} &= 42, 
+v_{13} &= \text{output}, & v_{9} &= 1. 
+v_{12} &= s, 
+v_{11} &= \text{input}, 
 \end{aligned}
 $$
 
@@ -215,24 +221,24 @@ Their instructions are stored in the memory region `0x0006 - 0x00014`
 
 $$
 \begin{aligned}
-v_{8} &= v_{12} - v_{9} &&|\ s - 1 \\
-v_{7} &= v_{12} \times v_8 &&|\ c_0 = s \times (s - 1) \\
-v_{6} &= v_{13} - v_{10} &&|\ \text{case}_{s=1} = \text{output} - 42 \\
-v_{5} &= v_{13} - v_{11} &&|\ \text{case}_{s=0} = \text{output} - \text{input} \\
-v_{4} &= v_{12} \times v_{6} &&|\ s \times \text{case}_{s=1} \\
-v_{3} &= v_{8} \times v_{5} &&|\ (s-1) \times \text{case}_{s=0} \\
-v_{2} &= v_{4} + v_{3} &&|\ c_1 = s × \text{case}_{s=1} + (s - 1) \times \text{case}_{s=0} \\
-v_{1} &= v_{14} \times v_{2} &&|\ \alpha \times c_1 \\
-v_{0} &= v_{7} + v_1 &&|\ \text{result} = c_0 + \alpha × c_1 \\
+v_{8} &= v_{12} - v_{9} &&|\ s - 1 
+v_{7} &= v_{12} \times v_8 &&|\ c_0 = s \times (s - 1) 
+v_{6} &= v_{13} - v_{10} &&|\ \text{case}_{s=1} = \text{output} - 42 
+v_{5} &= v_{13} - v_{11} &&|\ \text{case}_{s=0} = \text{output} - \text{input} 
+v_{4} &= v_{12} \times v_{6} &&|\ s \times \text{case}_{s=1} 
+v_{3} &= v_{8} \times v_{5} &&|\ (s-1) \times \text{case}_{s=0} 
+v_{2} &= v_{4} + v_{3} &&|\ c_1 = s × \text{case}_{s=1} + (s - 1) \times \text{case}_{s=0} 
+v_{1} &= v_{14} \times v_{2} &&|\ \alpha \times c_1 
+v_{0} &= v_{7} + v_1 &&|\ \text{result} = c_0 + \alpha × c_1 
 \end{aligned}
 $$
 
 | $s_{start}$ | $s_{block}$ | $ctx$ | $ptr$  | $clk$ | $op$     | $id_0$ | $v_{0}$                       | $id_1$ | $v_{1}$                  | $n_{eval}$/$id_{2}$ | $m_1$/$v_2$             | $m_0$        |
-|-------------|-------------|-------|--------|-------|----------|--------|-------------------------------|--------|--------------------------|---------------------|-------------------------|--------------|
+| ----------- | ----------- | ----- | ------ | ----- | -------- | ------ | ----------------------------- | ------ | ------------------------ | ------------------- | ----------------------- | ------------ |
 | 1           | 0           | ctx   | 0x0000 | clk   |          | 14     | $v_{14} = \alpha$             | 13     | $v_{13} = \text{input}$  | 8                   | $m_{13} = 2$            | $m_{14} = 1$ |
 | 0           | 0           | ctx   | 0x0004 | clk   |          | 12     | $v_{12} = s$                  | 11     | $v_{11} = \text{output}$ | 8                   | $m_{11} = 1$            | $m_{12} = 3$ |
 | 0           | 0           | ctx   | 0x0008 | clk   |          | 10     | $v_{10} = 42$                 | 9      | $v_{9} = 1$              | 8                   | $m_{9} = 1$             | $m_{10} = 1$ |
-| 0           | 1           | ctx   | 0x000c | clk   | $-$      | 8      | $v_{8} = v_{12} - v_{9} $     | 12     | $v_{12} = s$             | 9                   | $v_{9}$                 | 2            |
+| 0           | 1           | ctx   | 0x000c | clk   | $-$      | 8      | $v*{8} = v*{12} - v\_{9} $    | 12     | $v_{12} = s$             | 9                   | $v_{9}$                 | 2            |
 | 0           | 1           | ctx   | 0x000d | clk   | $\times$ | 7      | $v_{7} = v_{12} \times v_8$   | 12     | $v_{12} = s$             | 8                   | $v_{8}$                 | 1            |
 | 0           | 1           | ctx   | 0x000e | clk   | $-$      | 6      | $v_{6} = v_{13} - v_{10}$     | 13     | $v_{13} = \text{output}$ | 10                  | $v_{10} = 42$           | 1            |
 | 0           | 1           | ctx   | 0x000f | clk   | $-$      | 5      | $v_{5} = v_{13} - v_{11}$     | 13     | $v_{13} = \text{output}$ | 11                  | $v_{11} = \text{input}$ | 1            |
@@ -256,7 +262,7 @@ Accounting for this degree allows us to evaluate whether we need a separate degr
 The layout of the chiplet trace will look something like the following.
 
 | Chiplet  | $s_1, \ldots, s_{d-1}$ | $s_{d}$       | ...           |
-|----------|------------------------|---------------|---------------|
+| -------- | ---------------------- | ------------- | ------------- |
 | Previous | $[1, ..., 1, 0]$       | $cols_{prev}$ | $cols_{prev}$ |
 | ACE      | $[1, ..., 1, 1]$       | $0$           | $cols_{ace}$  |
 | Next     | $[1, ..., 1, 1]$       | $1$           | $0$           |
@@ -270,14 +276,14 @@ From these common selectors, we derive the following binary flags which indicate
 - $f_{ace, last}$: Last row in ACE chiplet.
 
 > $$
-\begin{aligned}
-f_{prev} &\gets (1 - s_{d-1}) \cdot \prod_{i=1}^{d-2} s_{i} && | \deg = d-1\\
-f_{ace} &\gets (1 - s_{d}) \cdot \prod_{i=1}^{d-1} s_{i} && | \deg = d\\
-f_{ace, first}' &\gets f_{prev} \cdot (1 - s_{d-1}') && | \deg = d \\
-f_{ace, next} &\gets f_{ace} \cdot (1 - s_{d}') && | \deg = d + 1\\
-f_{ace, last} &\gets f_{ace} \cdot s_{d}' && | \deg = d + 1\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{prev} &\gets (1 - s_{d-1}) \cdot \prod_{i=1}^{d-2} s_{i} && | \deg = d-1
+> f_{ace} &\gets (1 - s_{d}) \cdot \prod_{i=1}^{d-1} s_{i} && | \deg = d
+> f_{ace, first}' &\gets f_{prev} \cdot (1 - s_{d-1}') && | \deg = d 
+> f_{ace, next} &\gets f_{ace} \cdot (1 - s_{d}') && | \deg = d + 1
+> f_{ace, last} &\gets f_{ace} \cdot s_{d}' && | \deg = d + 1
+> \end{aligned}
+> $$
 
 ### Section and block flags
 
@@ -288,12 +294,12 @@ The selector $s_{start}$ indicates the start of a new section, from which we can
 - $f_{end}$: the current row finalizes the section.
 
 > $$
-\begin{aligned}
-f_{start} &\gets f_{ace} \cdot s_{start} && | \deg = d+1\\
-f_{next} &\gets f_{ace, next} \cdot (1 - s_{start}')  && | \deg = d+2\\
-f_{end} &\gets f_{ace, next} \cdot s_{start}' + f_{ace,last} && | \deg = d+2\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{start} &\gets f_{ace} \cdot s_{start} && | \deg = d+1
+> f_{next} &\gets f_{ace, next} \cdot (1 - s_{start}')  && | \deg = d+2
+> f_{end} &\gets f_{ace, next} \cdot s_{start}' + f_{ace,last} && | \deg = d+2
+> \end{aligned}
+> $$
 
 These flags require the following constraints on $s_{start}$.
 
@@ -303,25 +309,26 @@ These flags require the following constraints on $s_{start}$.
 - two consecutive rows cannot initialize a section, so a section contains at least two rows.
 
 > $$
-\begin{aligned}
-f_{ace} \cdot s_{start} \cdot (1 - s_{start}) &= 0 && | \deg = d + 2\\
-f_{ace, first}' \cdot (1 - s_{start}') &= 0 && | \deg = d + 1\\
-f_{ace, last} \cdot s_{start} &= 0 && | \deg = d + 2\\
-f_{ace, next} \cdot s_{start} \cdot s_{start}' &= 0 && | \deg = d + 2.\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{ace} \cdot s_{start} \cdot (1 - s_{start}) &= 0 && | \deg = d + 2
+> f_{ace, first}' \cdot (1 - s_{start}') &= 0 && | \deg = d + 1
+> f_{ace, last} \cdot s_{start} &= 0 && | \deg = d + 2
+> f_{ace, next} \cdot s_{start} \cdot s_{start}' &= 0 && | \deg = d + 2.
+> \end{aligned}
+> $$
 
 A section is composed of a READ block followed by an EVAL block.
 The flag indicating which block is active is derived from the binary selector $s_{block}$.
 These constraints ensure they are mutually exclusive
+
 > $$
-\begin{aligned}
-f_{read} \gets (1-s_{block}) & &&| \deg = 1\\
-f_{eval} \gets s_{block} & &&| \deg = 1\\
-\\
-f_{ace} \cdot (1-s_{block}) \cdot s_{block} = 0 && &| \deg = d + 2\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{read} \gets (1-s_{block}) & &&| \deg = 1
+> f_{eval} \gets s_{block} & &&| \deg = 1
+> 
+> f_{ace} \cdot (1-s_{block}) \cdot s_{block} = 0 && &| \deg = d + 2
+> \end{aligned}
+> $$
 
 The following constraints ensure the proper layout of the trace. In particular, it contains one or more sections each with consecutive READ and EVAL blocks.
 
@@ -330,12 +337,12 @@ The following constraints ensure the proper layout of the trace. In particular, 
 - The last row cannot be READ, so it must be EVAL.
 
 > $$
-\begin{aligned}
-f_{start} \cdot f_{eval} &= 0 && | \deg = d + 2\\
-f_{next} \cdot f_{eval} \cdot f_{read}' &= 0 && | \deg = d + 4\\
-f_{end} \cdot f_{read} &= 0 && | \deg = d + 3\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{start} \cdot f_{eval} &= 0 && | \deg = d + 2
+> f_{next} \cdot f_{eval} \cdot f_{read}' &= 0 && | \deg = d + 4
+> f_{end} \cdot f_{read} &= 0 && | \deg = d + 3
+> \end{aligned}
+> $$
 
 In particular, we can infer from the above that
 
@@ -345,10 +352,11 @@ In particular, we can infer from the above that
 A READ row checks whether $id_0'$ in the next row is equal to $n_{eval} - 1$ provided by the caller at initialization,
 in which case we ensure the following row is an EVAL.
 Otherwise, $n_{eval}$ remains the same.
+
 > $$
-f_{ace} \cdot f_{read} \cdot
-\big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot (id_0' + 1) - n_{eval}\big] = 0 \quad | \deg = d + 3.
-$$
+> f_{ace} \cdot f_{read} \cdot
+> \big[f_{read}' \cdot n_{eval}' + f_{eval}' \cdot (id_0' + 1) - n_{eval}\big] = 0 \quad | \deg = d + 3.
+> $$
 
 ### Section constraints
 
@@ -359,13 +367,13 @@ These constraints apply to all rows within the same section/
 - A READ/EVAL block adds 2/1 new nodes to the evaluation graph, so $id_0$ decreases by that amount in the next row.
 
 > $$
-\begin{aligned}
-f_{next} \cdot (ctx' - ctx) &= 0 && | \deg = d + 3\\
-f_{next} \cdot (clk' - clk) &= 0 && | \deg = d + 3\\
-f_{next} \cdot \big[ptr' - ptr + 4 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3\\
-f_{next} \cdot \big[id_0 - id_0' + 2 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{next} \cdot (ctx' - ctx) &= 0 && | \deg = d + 3
+> f_{next} \cdot (clk' - clk) &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[ptr' - ptr + 4 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
+> f_{next} \cdot \big[id_0 - id_0' + 2 \cdot f_{read} + f_{eval}\big] &= 0 && | \deg = d + 3
+> \end{aligned}
+> $$
 
 ### READ constraints
 
@@ -375,23 +383,24 @@ The [wire bus section](#wire-bus) describes how both of these nodes are inserted
 The only constraint we enforce is that $id_0$ and $id_1$ are consecutive
 
 > $$
-\begin{aligned}
-f_{ace} \cdot f_{read} \cdot (id_1 - id_0 + 1)  &= 0 && | \deg = d + 2\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{ace} \cdot f_{read} \cdot (id_1 - id_0 + 1)  &= 0 && | \deg = d + 2
+> \end{aligned}
+> $$
 
 ### EVAL constraints
 
 An EVAL block checks that the arithmetic operation $op$ was correctly applied to inputs $v_1, v_2$ and results in $v_0$.
 The result is given by the degree-4 expression
+
 > $$
-v_{out} \gets op^2 \cdot \big[ v_1 + op\cdot v_2 \big] + (1 - op^2)  \cdot \big[ v_1 \cdot v_2 \big]
-= \begin{cases}
-v_1 - v_2, & op = -1, \\
-v_1 \times v_2, & op = 0, \\
-v_1 + v_2, & op = 1. \\
-\end{cases}
-$$
+> v_{out} \gets op^2 \cdot \big[ v_1 + op\cdot v_2 \big] + (1 - op^2)  \cdot \big[ v_1 \cdot v_2 \big]
+> = \begin{cases}
+> v_1 - v_2, & op = -1, 
+> v_1 \times v_2, & op = 0, 
+> v_1 + v_2, & op = 1. 
+> \end{cases}
+> $$
 
 The output node is correctly evaluated when:
 
@@ -399,19 +408,19 @@ The output node is correctly evaluated when:
 - $v_0$ is equal to $v_{out}$.
 
 > $$
-\begin{aligned}
-f_{ace} \cdot f_{eval} \cdot op \cdot (op^2 - 1) &= 0 && | \deg = d + 4\\
-f_{ace} \cdot f_{eval} \cdot (v_0 - v_{out}) &= 0 && | \deg = d + 5\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{ace} \cdot f_{eval} \cdot op \cdot (op^2 - 1) &= 0 && | \deg = d + 4
+> f_{ace} \cdot f_{eval} \cdot (v_0 - v_{out}) &= 0 && | \deg = d + 5
+> \end{aligned}
+> $$
 
 The actual instruction is given by the field element $instr$ read from memory. It encodes
 
 - the operation $op$ using 2 bits
 - the ids of $v_1$ and $v_2$ using 30 bits each and are packed as
   > $$
-  instr \gets id_0 + id_1 \cdot 2^{30} + (op+1)\cdot 2^{60}.
-  $$
+  > instr \gets id_0 + id_1 \cdot 2^{30} + (op+1)\cdot 2^{60}.
+  > $$
 
 It is clear from the constraint on $op$ that $op+1$ will always require 2 bits, and that range constraints on $id_1, id_2$ are unnecessary.
 These ids are sent as-is to the wire bus with multiplicity $-1$.
@@ -421,12 +430,13 @@ This is ensured by the pointers given by the chiplet bus message initializing th
 Therefore, as long as the trusted circuit contains fewer than $2^{30}$ ids, the $id_1$ and $id_2$ values can never overflow this bound.
 
 To ensure the circuit has finished evaluating and that the final output value is 0, we enforce that the node with $id_0 = 0$ has value $v_0 = 0$ in the last row of the section.
+
 > $$
-\begin{aligned}
-f_{end} \cdot id_0 &= 0 && | \deg = d + 3\\
-f_{end} \cdot v_0 &= 0 && | \deg = d + 3\\
-\end{aligned}
-$$
+> \begin{aligned}
+> f_{end} \cdot id_0 &= 0 && | \deg = d + 3
+> f_{end} \cdot v_0 &= 0 && | \deg = d + 3
+> \end{aligned}
+> $$
 
 ### Wire bus
 
@@ -434,48 +444,48 @@ Each row of the chip makes up to 3 requests to the circuit's wire bus.
 For $i = 0, 1, 2$, each request has the form $(ctx, clk, id_i, v_{i,0}, v_{i,1})$, which uniquely identifies a node in the DAG representing the evaluation of the circuit.
 Sending this message to the bus can be viewed as updating the total degree of the node in the graph.
 When performing a READ operation, a node is added to the graph, and we set its degree update $e_i$ to be equal to its final fan-out degree at the end of the evaluation.
-This value is also referred to as the *multiplicity* $m_i$.
+This value is also referred to as the _multiplicity_ $m_i$.
 When a node is used as an input of an arithmetic operation, we set $e_i = - 1$.
 
 The expression $e_i$ is derived from $m_i$ and the operation flag, so that the wire bus update is uniform across all rows of the chiplet's trace.
 
 - $v_0$ always defines a new node, and each operation defines its identifier $id_0$ and multiplicity $m_0$ using the same columns.
   > $$
-  e_0 \gets  m_0 \quad \text{| degree} = 1
-  $$
+  > e_0 \gets  m_0 \quad \text{| degree} = 1
+  > $$
 - $v_1$ defines a new node when the operation is a READ, but is an input during an EVAL. Again, the columns for these values are identical.
   > $$
-  e_1 \gets  f_{read} \cdot m_1 - f_{eval} \quad \text{| degree} = 2
-  $$
+  > e_1 \gets  f_{read} \cdot m_1 - f_{eval} \quad \text{| degree} = 2
+  > $$
 - $v_2$ is unused during a READ, and an input during EVAL
   > $$
-  e_2 \gets - f_{eval} \quad \text{| degree} = 1
-  $$
+  > e_2 \gets - f_{eval} \quad \text{| degree} = 1
+  > $$
 
 The auxiliary logUp bus column $b_{wire}$ is updated as follows.
 Given random challenges $\alpha_j$ for $j = 0, ..., 5$, let $w_i = \alpha_0 + \alpha_1 \cdot ctx + \alpha_2 \cdot clk + \alpha_3 \cdot id_i + \alpha_4 \cdot v_{i,0} + \alpha_5 \cdot v_{i,1}$ be the randomized node value.
 The value of the bus in the next column is given by
+
 > $$
-b_{wire}' = b_{wire} + \sum_{i=0}^2 \frac{e_i}{w_i},
-$$
+> b_{wire}' = b_{wire} + \sum_{i=0}^2 \frac{e_i}{w_i},
+> $$
 
 The actual constraint is given by normalizing the denominator
+
 > $$
-f_{ace}\cdot \left( (b_{wire} - b_{wire}') \cdot \prod_{i=0}^{2}w_i + \left(e_0 \cdot w_1 \cdot w_2 + e_1 \cdot w_0 \cdot w_2 + e_2 \cdot w_0 \cdot w_1\right)\right) = 0 \quad \text{| degree} = d + 4.
-$$
+> f_{ace}\cdot \left( (b_{wire} - b_{wire}') \cdot \prod_{i=0}^{2}w_i + \left(e_0 \cdot w_1 \cdot w_2 + e_1 \cdot w_0 \cdot w_2 + e_2 \cdot w_0 \cdot w_1\right)\right) = 0 \quad \text{| degree} = d + 4.
+> $$
 
 ### Chiplet and Virtual table bus
 
-The ACE chiplet initializes a circuit evaluation by responding to a request made by the decoder, through the [chiplet bus](./main.md#chiplets-bus) $b_{chip}$.
+The ACE chiplet initializes a circuit evaluation by responding to a request made by the decoder, through the [chiplet bus](./index.md#chiplets-bus) $b_{chip}$.
 As mentioned earlier, the message corresponds to the tuple, which is sent to the bus only when $f_{start} = 1$.
-$$
-(\mathsf{ACE\_LABEL}, ctx, ptr, clk, n_{read}, n_{eval}).
-$$
+$$(\mathsf{ACE_LABEL}, ctx, ptr, clk, n_\text{read}, n_\text{eval}).$$
 The value $n_{read}$ is computed as $id_0 - 1 - n_{eval}$, since in the first row, $id_0$ is expected to be equal to the total number of nodes inserted (subtracting 1 since identifiers are indexed from zero).
-We refer to the [chiplet bus constraints](./main.md#chiplets-bus-constraints) which describes the constraints for chiplet bus responses.
+We refer to the [chiplet bus constraints](./index.md#chiplets-bus-constraints) which describes the constraints for chiplet bus responses.
 
 The requests sent to the memory chiplet cannot use the same chiplet bus, as the decoder requests saturate the degree of constraint over its auxiliary column.
-Instead, we use the [virtual table bus](./main.md#chiplets-virtual-table) $v_{table}$ which extends the chiplet bus.
+Instead, we use the [virtual table bus](./index.md#chiplets-virtual-table) $v_{table}$ which extends the chiplet bus.
 
 In each row, the chiplet makes one of the two following requests to the memory chiplet depending on which block it is in:
 
@@ -483,15 +493,18 @@ In each row, the chiplet makes one of the two following requests to the memory c
 - $(\mathsf{MEMORY\_READ\_ELEMENT\_LABEL}, ctx, ptr, clk, instr)$, when $f_{eval} = 1$.
 
 The values are obtained as-is from the current row, except for the instruction which is given by
+
 $$
 instr \gets id_0 + id_1 \cdot 2^{30} + (op+1)\cdot 2^{60}.
 $$
+
 As mentioned earlier, it encodes a circuit instruction applying the arithmetic operation $op \in \{- ,\times, +\}$ (mapped to the range $[0,1,2]$) to the nodes with identifiers $id_1, id_2 \in [0, 2^{30}[$.
 
 As usual, the messages are randomly reduced using by challenges $\alpha_0, \alpha_1, \ldots$, resulting in the degree-1 expressions
 $u_{mem, read}$ and $u_{mem, eval}$, respectively.
 
 Since the virtual table bus is used exclusively by the chiplets trace, it must be constrained in this chiplet:
+
 > $$
-f_{ace} \cdot \Big( v_{table}' \cdot \big( f_{read}\cdot w_{mem,read} + f_{eval}\cdot w_{mem,eval} \big) - v_{table}\Big) = 0 \quad | \deg = d+3.
-$$
+> f_{ace} \cdot \Big( v_{table}' \cdot \big( f_{read}\cdot w_{mem,read} + f_{eval}\cdot w_{mem,eval} \big) - v_{table}\Big) = 0 \quad | \deg = d+3.
+> $$

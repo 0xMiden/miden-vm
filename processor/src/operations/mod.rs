@@ -56,9 +56,6 @@ impl Process {
             Operation::Noop => self.stack.copy_state(0),
             Operation::Assert(err_code) => self.op_assert(err_code, program, host, err_ctx)?,
 
-            Operation::FmpAdd => self.op_fmpadd()?,
-            Operation::FmpUpdate => self.op_fmpupdate()?,
-
             Operation::SDepth => self.op_sdepth()?,
             Operation::Caller => self.op_caller()?,
 
@@ -168,6 +165,7 @@ impl Process {
 
             Operation::MStream => self.op_mstream(err_ctx)?,
             Operation::Pipe => self.op_pipe(err_ctx)?,
+            Operation::CryptoStream => self.op_crypto_stream(err_ctx)?,
 
             // ----- cryptographic operations -----------------------------------------------------
             Operation::HPerm => self.op_hperm()?,
@@ -177,6 +175,7 @@ impl Process {
             Operation::HornerBase => self.op_horner_eval_base(err_ctx)?,
             Operation::HornerExt => self.op_horner_eval_ext(err_ctx)?,
             Operation::EvalCircuit => self.op_eval_circuit(err_ctx)?,
+            Operation::LogPrecompile => self.op_log_precompile()?,
         }
 
         self.advance_clock()?;

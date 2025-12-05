@@ -184,11 +184,6 @@ impl MainTrace {
         self.columns.get_column(CLK_COL_IDX)[i]
     }
 
-    /// Returns the value of the fmp column at row i.
-    pub fn fmp(&self, i: RowIndex) -> Felt {
-        self.columns.get_column(FMP_COL_IDX)[i]
-    }
-
     /// Returns the value of the ctx column at row i.
     pub fn ctx(&self, i: RowIndex) -> Felt {
         self.columns.get_column(CTX_COL_IDX)[i]

@@ -2,12 +2,18 @@ use alloc::{string::ToString, sync::Arc};
 
 use miden_air::ExecutionOptions;
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{Kernel, ONE, Operation, StackInputs, assert_matches};
+use miden_core::{
+    Kernel, ONE, Operation, StackInputs, assert_matches,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
+        MastForestContributor,
+    },
+};
 use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{DefaultHost, Process, system::FMP_MAX};
+use crate::{DefaultHost, Process};
 
 mod advice_provider;
 mod all_ops;
@@ -60,7 +66,7 @@ fn test_reset_stack_in_buffer_from_restore_context() {
 
     let asm = format!(
         "
-        proc.fn_in_new_context
+        proc fn_in_new_context
             repeat.{NUM_DROPS_IN_NEW_CONTEXT} drop end
         end
 
@@ -91,78 +97,6 @@ fn test_reset_stack_in_buffer_from_restore_context() {
     test.expect_stack(&final_stack);
 }
 
-#[test]
-fn test_fmp_add() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a different value than the default
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![1_u32.into(), 2_u32.into(), 3_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpAdd]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
-
-    // Check that the top of the stack is the sum of the initial FMP and the top of the stack input
-    let expected_top = initial_fmp + stack_inputs[2];
-    assert_eq!(stack_outputs.stack_truncated(1)[0], expected_top);
-}
-
-#[test]
-fn test_fmp_update() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a different value than the default
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![5_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
-
-    // Check that the FMP is updated correctly
-    let expected_fmp = initial_fmp + stack_inputs[0];
-    assert_eq!(processor.fmp, expected_fmp);
-
-    // Check that the top of the stack is popped correctly
-    assert_eq!(stack_outputs.stack_truncated(0).len(), 0);
-}
-
-#[test]
-fn test_fmp_update_fail() {
-    let mut host = DefaultHost::default();
-
-    // set the initial FMP to a value close to FMP_MAX
-    let initial_fmp = Felt::new(FMP_MAX - 4);
-    let stack_inputs = vec![5_u32.into()];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
-
-    // Check that the error is due to the FMP exceeding FMP_MAX
-    assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
-
-    // set the initial FMP to a value close to FMP_MIN
-    let initial_fmp = Felt::new(FMP_MIN + 4);
-    let stack_inputs = vec![-Felt::new(5_u64)];
-    let program = simple_program_with_ops(vec![Operation::FmpUpdate]);
-
-    let mut processor = FastProcessor::new(&stack_inputs);
-    processor.fmp = initial_fmp;
-
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
-
-    // Check that the error is due to the FMP being less than FMP_MIN
-    assert_matches!(err, ExecutionError::InvalidFmpValue(_, _));
-}
-
 /// Tests that a syscall fails when the syscall target is not in the kernel.
 #[test]
 fn test_syscall_fail() {
@@ -172,8 +106,12 @@ fn test_syscall_fail() {
     let stack_inputs = vec![5_u32.into()];
     let program = {
         let mut program = MastForest::new();
-        let basic_block_id = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
-        let root_id = program.add_syscall(basic_block_id).unwrap();
+        let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut program)
+            .unwrap();
+        let root_id = CallNodeBuilder::new_syscall(basic_block_id)
+            .add_to_forest(&mut program)
+            .unwrap();
         program.make_root(root_id);
 
         Program::new(program.into(), root_id)
@@ -308,7 +246,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     let mut host = DefaultHost::default();
 
     // equivalent to:
-    // proc.foo
+    // proc foo
     //   add
     // end
     //
@@ -324,29 +262,35 @@ fn test_call_node_preserves_stack_overflow_table() {
     let program = {
         let mut program = MastForest::new();
         // foo proc
-        let foo_id = program.add_block(vec![Operation::Add], Vec::new()).unwrap();
+        let foo_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut program)
+            .unwrap();
 
         // before call
-        let push10_push20_id = program
-            .add_block(
-                vec![Operation::Push(10_u32.into()), Operation::Push(20_u32.into())],
-                Vec::new(),
-            )
-            .unwrap();
+        let push10_push20_id = BasicBlockNodeBuilder::new(
+            vec![Operation::Push(10_u32.into()), Operation::Push(20_u32.into())],
+            Vec::new(),
+        )
+        .add_to_forest(&mut program)
+        .unwrap();
 
         // call
-        let call_node_id = program.add_call(foo_id).unwrap();
+        let call_node_id = CallNodeBuilder::new(foo_id).add_to_forest(&mut program).unwrap();
         // after call
-        let swap_drop_swap_drop = program
-            .add_block(
-                vec![Operation::Swap, Operation::Drop, Operation::Swap, Operation::Drop],
-                Vec::new(),
-            )
-            .unwrap();
+        let swap_drop_swap_drop = BasicBlockNodeBuilder::new(
+            vec![Operation::Swap, Operation::Drop, Operation::Swap, Operation::Drop],
+            Vec::new(),
+        )
+        .add_to_forest(&mut program)
+        .unwrap();
 
         // joins
-        let join_call_swap = program.add_join(call_node_id, swap_drop_swap_drop).unwrap();
-        let root_id = program.add_join(push10_push20_id, join_call_swap).unwrap();
+        let join_call_swap = JoinNodeBuilder::new([call_node_id, swap_drop_swap_drop])
+            .add_to_forest(&mut program)
+            .unwrap();
+        let root_id = JoinNodeBuilder::new([push10_push20_id, join_call_swap])
+            .add_to_forest(&mut program)
+            .unwrap();
 
         program.make_root(root_id);
 
@@ -403,13 +347,83 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 }
 
+// EXTERNAL NODE TESTS
+// -----------------------------------------------------------------------------------------------
+
+#[test]
+fn test_external_node_decorator_sequencing() {
+    let mut lib_forest = MastForest::new();
+
+    // Add a decorator to the lib forest to track execution inside the external node
+    let lib_decorator = Decorator::Trace(2);
+    let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
+
+    let lib_operations = [Operation::Push(1_u32.into()), Operation::Add];
+    // Attach the decorator to the first operation (index 0)
+    let lib_block_id =
+        BasicBlockNodeBuilder::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)])
+            .add_to_forest(&mut lib_forest)
+            .unwrap();
+    lib_forest.make_root(lib_block_id);
+
+    let mut main_forest = MastForest::new();
+    let before_decorator = Decorator::Trace(1);
+    let after_decorator = Decorator::Trace(3);
+    let before_id = main_forest.add_decorator(before_decorator.clone()).unwrap();
+    let after_id = main_forest.add_decorator(after_decorator.clone()).unwrap();
+
+    let external_id = ExternalNodeBuilder::new(lib_forest[lib_block_id].digest())
+        .with_before_enter([before_id])
+        .with_after_exit([after_id])
+        .add_to_forest(&mut main_forest)
+        .unwrap();
+    main_forest.make_root(external_id);
+
+    let program = Program::new(main_forest.into(), external_id);
+    let mut host =
+        crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
+            Arc::new(lib_forest),
+        );
+    let processor = FastProcessor::new(&alloc::vec::Vec::new());
+
+    let result = processor.execute_sync(&program, &mut host);
+    assert!(result.is_ok(), "Execution failed: {:?}", result);
+
+    // Verify all decorators executed
+    assert_eq!(host.get_trace_count(1), 1, "before_enter decorator should execute exactly once");
+    assert_eq!(
+        host.get_trace_count(2),
+        1,
+        "external node decorator should execute exactly once"
+    );
+    assert_eq!(host.get_trace_count(3), 1, "after_exit decorator should execute exactly once");
+
+    // More importantly, verify the complete execution order
+    let execution_order = host.get_execution_order();
+    assert_eq!(execution_order.len(), 3, "Should have exactly 3 trace events");
+    assert_eq!(execution_order[0].0, 1, "before_enter should execute first");
+    assert_eq!(execution_order[1].0, 2, "external node decorator should execute second");
+    assert_eq!(execution_order[2].0, 3, "after_exit should execute last");
+
+    // Verify that clock cycles are in strictly increasing order
+    assert!(
+        execution_order[1].1 > execution_order[0].1,
+        "external node should execute after before_enter"
+    );
+    assert!(
+        execution_order[2].1 > execution_order[1].1,
+        "after_exit should execute after external node operations"
+    );
+}
+
 // TEST HELPERS
 // -----------------------------------------------------------------------------------------------
 
 fn simple_program_with_ops(ops: Vec<Operation>) -> Program {
     let program: Program = {
         let mut program = MastForest::new();
-        let root_id = program.add_block(ops, Vec::new()).unwrap();
+        let root_id =
+            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut program).unwrap();
         program.make_root(root_id);
 
         Program::new(program.into(), root_id)

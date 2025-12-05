@@ -1,3 +1,8 @@
+---
+title: "Debugging"
+sidebar_position: 11
+---
+
 # Debugging
 
 To support basic debugging capabilities, Miden assembly provides a `debug` instruction. This instruction prints out the state of the VM at the time when the `debug` instruction is executed. The instruction can be parameterized as follows:

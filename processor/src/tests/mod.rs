@@ -2,17 +2,18 @@
 use alloc::string::ToString;
 
 use miden_assembly::{
-    Assembler, DefaultSourceManager, LibraryPath,
+    Assembler, DefaultSourceManager, PathBuf,
     ast::Module,
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
-    build_test, build_test_by_mode,
+    build_debug_test, build_test, build_test_by_mode,
     crypto::{init_merkle_leaves, init_merkle_store},
 };
 
@@ -27,7 +28,7 @@ mod decorator_execution_tests;
 #[test]
 fn test_advice_map_inline() {
     let source = "\
-adv_map.A=[0x01]
+adv_map A = [0x01]
 
 begin
   push.A
@@ -53,10 +54,8 @@ fn test_diagnostic_advice_map_key_already_present() {
     let test_context = TestContext::new();
 
     let (lib_1, lib_2) = {
-        let dummy_library_source = source_file!(&test_context, "export.foo add end");
-        let module = test_context
-            .parse_module_with_path("foo::bar".parse().unwrap(), dummy_library_source)
-            .unwrap();
+        let dummy_library_source = source_file!(&test_context, "pub proc foo add end");
+        let module = test_context.parse_module_with_path("foo::bar", dummy_library_source).unwrap();
         let lib = test_context.assemble_library(std::iter::once(module)).unwrap();
         let lib_1 = lib
             .clone()
@@ -71,7 +70,9 @@ fn test_diagnostic_advice_map_key_already_present() {
     host.load_library(lib_2.mast_forest()).unwrap();
 
     let mut mast_forest = MastForest::new();
-    let basic_block_id = mast_forest.add_block(vec![Operation::Noop], Vec::new()).unwrap();
+    let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Noop], Vec::new())
+        .add_to_forest(&mut mast_forest)
+        .unwrap();
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
@@ -107,7 +108,7 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -129,7 +130,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 4",
+        "advice provider error at clock cycle 8",
         "value for key 0x0000000000000000000000000000000001000000000000000200000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
@@ -154,7 +155,7 @@ fn test_diagnostic_advice_stack_read_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
@@ -179,7 +180,7 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 div",
@@ -200,7 +201,7 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "division by zero at clock cycle 1",
+        "division by zero at clock cycle 5",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 u32div",
@@ -272,7 +273,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error code: 0",
+        "assertion failed at clock cycle 9",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -293,7 +294,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
@@ -304,7 +305,7 @@ fn test_diagnostic_failed_assertion() {
 
     // With error message as constant
     let source = "
-        const.ERR_MSG=\"some error message\"
+        const ERR_MSG = \"some error message\"
         begin
             push.1.2
             assertz.err=ERR_MSG
@@ -315,7 +316,7 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 5 with error message: some error message",
+        "assertion failed at clock cycle 9 with error message: some error message",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
@@ -421,7 +422,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "provided node index 16 is out of bounds for a merkle tree node at depth 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
@@ -442,7 +443,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     // returning from a function with non-empty overflow table should result in an error
     // Note: we add the `trace.2` to ensure that asm ops co-exist well with other decorators.
     let source = "
-        proc.foo
+        proc foo
             push.1
         end
 
@@ -471,12 +472,12 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
 fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     // returning from a function with non-empty overflow table should result in an error
     let source = "
-        proc.foo
+        proc foo
             push.1
         end
 
         begin
-            procref.foo mem_storew.100 dropw push.100
+            procref.foo mem_storew_be.100 dropw push.100
             dyncall
         end";
 
@@ -486,7 +487,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
         err,
         "when returning from a call or dyncall, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:8:13\]"#),
-        " 7 |             procref.foo mem_storew.100 dropw push.100",
+        " 7 |             procref.foo mem_storew_be.100 dropw push.100",
         " 8 |             dyncall",
         "   :             ^^^|^^^",
         "   :                `-- when returning from this call site",
@@ -510,7 +511,7 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "attempted to calculate integer logarithm with zero argument at clock cycle 2",
+        "attempted to calculate integer logarithm with zero argument at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
@@ -525,11 +526,11 @@ fn test_diagnostic_log_argument_zero() {
 
 #[test]
 fn test_diagnostic_unaligned_word_access() {
-    // mem_storew
+    // mem_storew_be
     let source = "
-        proc.foo add end
+        proc foo add end
         begin
-            exec.foo mem_storew.3
+            exec.foo mem_storew_be.3
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2, 3, 4]);
@@ -537,21 +538,21 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 3",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 7",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
-        " 4 |             exec.foo mem_storew.3",
-        "   :                      ^^^^^^|^^^^^",
-        "   :                            `-- tried to access memory address 3",
+        " 4 |             exec.foo mem_storew_be.3",
+        "   :                      ^^^^^^^|^^^^^^^",
+        "   :                             `-- tried to access memory address 3",
         " 5 |         end",
         "   `----",
         "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     );
 
-    // mem_loadw
+    // mem_loadw_be
     let source = "
         begin
-            mem_loadw.3
+            mem_loadw_be.3
         end";
 
     let build_test = build_test_by_mode!(true, source, &[1, 2, 3, 4]);
@@ -559,12 +560,12 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 2",
+        "word memory access at address 3 in context 0 is unaligned at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             mem_loadw.3",
-        "   :             ^^^^^|^^^^^",
-        "   :                  `-- tried to access memory address 3",
+        " 3 |             mem_loadw_be.3",
+        "   :             ^^^^^^^|^^^^^^",
+        "   :                    `-- tried to access memory address 3",
         " 4 |         end",
         "   `----",
         "  help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
@@ -593,10 +594,10 @@ fn test_diagnostic_address_out_of_bounds() {
         "   `----"
     );
 
-    // mem_storew
+    // mem_storew_be
     let source = "
         begin
-            mem_storew
+            mem_storew_be
         end";
 
     let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
@@ -607,7 +608,7 @@ fn test_diagnostic_address_out_of_bounds() {
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
-        " 3 |             mem_storew",
+        " 3 |             mem_storew_be",
         "   :             ^^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -633,10 +634,10 @@ fn test_diagnostic_address_out_of_bounds() {
         "   `----"
     );
 
-    // mem_loadw
+    // mem_loadw_be
     let source = "
         begin
-            swap swap mem_loadw push.1 drop
+            swap swap mem_loadw_be push.1 drop
         end";
 
     let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
@@ -647,7 +648,7 @@ fn test_diagnostic_address_out_of_bounds() {
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
-        " 3 |             swap swap mem_loadw push.1 drop",
+        " 3 |             swap swap mem_loadw_be push.1 drop",
         "   :                       ^^^^^^^^^",
         " 4 |         end",
         "   `----"
@@ -689,7 +690,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 2",
+        "advice provider error at clock cycle 6",
         "failed to lookup value in Merkle store",
         "|",
         "`-> node Word([1, 0, 0, 0]) with index `depth=10, value=0` not found",
@@ -712,7 +713,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     let lib_module = {
         let module_name = "foo::bar";
         let src = "
-        export.dummy_proc
+        pub proc dummy_proc
             push.1
         end
     ";
@@ -720,7 +721,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
         let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
         let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
         Module::parse(
-            LibraryPath::new(module_name).unwrap(),
+            PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
             source_file,
         )
@@ -728,20 +729,16 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     };
 
     let program_source = "
-        use.foo::bar
+        use foo::bar
 
         begin
             call.bar::dummy_proc
         end
     ";
 
-    let library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_library([lib_module])
-        .unwrap();
+    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
     let program = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
         .with_dynamic_library(&library)
         .unwrap()
         .assemble_program(program_source)
@@ -759,7 +756,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x1b0a6d4b3976737badf180f3df558f45e06e6d1803ea5ad3b95fa7428caccd02",
-        regex!(r#",-\[\$exec:5:13\]"#),
+        regex!(r#",-\[::\$exec:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^^^",
@@ -950,7 +947,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let kernel_source = "
-        export.dummy_proc
+        pub proc dummy_proc
             push.1 drop
         end
     ";
@@ -961,13 +958,10 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         end
     ";
 
-    let kernel_library = Assembler::new(source_manager.clone())
-        .with_debug_mode(true)
-        .assemble_kernel(kernel_source)
-        .unwrap();
+    let kernel_library =
+        Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
 
     let program = Assembler::with_kernel(source_manager.clone(), kernel_library)
-        .with_debug_mode(true)
         .assemble_program(program_source)
         .unwrap();
 
@@ -984,7 +978,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root d754f5422c74afd0b094889be6b288f9ffd2cc630e3c44d412b1408b2be3b99c was not found in the kernel",
-        regex!(r#",-\[\$exec:3:13\]"#),
+        regex!(r#",-\[::\$exec:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^",
@@ -998,7 +992,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 #[test]
 fn test_assert_messages() {
     let source = "
-        const.NONZERO = \"Value is not zero\"
+        const NONZERO = \"Value is not zero\"
         begin
             push.1
             assertz.err=NONZERO
@@ -1016,5 +1010,129 @@ fn test_assert_messages() {
         "  :             ^^^^^^^^^^^^^^^^^^^",
         "6 |         end",
         "  `----"
+    );
+}
+
+// Test the original issue with debug.stack.12 to see if it shows all items
+//
+// Updated in 2296: removed the 4 initial instructions, which are now inserted by the assembler for
+// initializing the FMP.
+#[test]
+fn test_debug_stack_issue_2295_original_repeat() {
+    let source = "
+    begin
+        repeat.12
+            push.42
+        end
+
+        debug.stack.12  # <=== should show first 12 elements as 42
+        dropw dropw dropw dropw
+    end";
+
+    // Execute with debug buffer
+    let test = build_debug_test!(source);
+    let (_stack, output) = test.execute_with_debug_buffer().expect("execution failed");
+
+    // Test if debug.stack.12 shows all 12 push.42 items correctly
+    insta::assert_snapshot!(output, @r"
+    Stack state in interval [0, 11] before step 22:
+    ├──  0: 42
+    ├──  1: 42
+    ├──  2: 42
+    ├──  3: 42
+    ├──  4: 42
+    ├──  5: 42
+    ├──  6: 42
+    ├──  7: 42
+    ├──  8: 42
+    ├──  9: 42
+    ├── 10: 42
+    ├── 11: 42
+    └── (16 more items)
+    ");
+}
+
+// Debug Mode Flag Propagation Test
+// ------------------------------------------------------------------------------------------------
+
+#[test]
+fn test_debug_mode_flag_propagation() {
+    use miden_core::stack::StackInputs;
+
+    use crate::{AdviceInputs, ExecutionOptions, Kernel};
+
+    // Test case 1: Both debugging and tracing disabled
+    let exec_options_disabled = ExecutionOptions::default();
+    let kernel = Kernel::new(&[]).expect("Failed to create kernel");
+    let stack_inputs = StackInputs::default();
+    let advice_inputs = AdviceInputs::default();
+
+    let process_disabled = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_disabled,
+    );
+
+    // Test case 2: Only tracing enabled
+    let exec_options_tracing = ExecutionOptions::default().with_tracing();
+    let process_tracing = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_tracing,
+    );
+
+    // Test case 3: Only debugging enabled
+    let exec_options_debugging = ExecutionOptions::default().with_debugging(true);
+    let process_debugging = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_debugging,
+    );
+
+    // Test case 4: Both tracing and debugging enabled
+    let exec_options_both = ExecutionOptions::default().with_tracing().with_debugging(true);
+    let process_both = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_both,
+    );
+
+    // Test case 5: Process::new_debug() method
+    let process_new_debug = Process::new_debug(kernel, stack_inputs, advice_inputs);
+
+    // Verify that in_debug_mode is false when neither is enabled
+    assert!(
+        !process_disabled.decoder.in_debug_mode(),
+        "Debug mode should be disabled when neither debugging nor tracing is enabled"
+    );
+
+    // According to the task description, in_debug_mode should be true when tracing is enabled
+    // But currently this will fail because the logic is incorrect
+    // This test will help us verify our fix
+    assert!(
+        process_tracing.decoder.in_debug_mode(),
+        "Debug mode should be enabled when tracing is enabled"
+    );
+
+    // Verify that in_debug_mode is true when debugging is enabled
+    assert!(
+        process_debugging.decoder.in_debug_mode(),
+        "Debug mode should be enabled when debugging is enabled"
+    );
+
+    // Verify that in_debug_mode is true when both are enabled
+    assert!(
+        process_both.decoder.in_debug_mode(),
+        "Debug mode should be enabled when both debugging and tracing are enabled"
+    );
+
+    // Verify that Process::new_debug() correctly enables debug mode
+    assert!(
+        process_new_debug.decoder.in_debug_mode(),
+        "Debug mode should be enabled when using Process::new_debug()"
     );
 }

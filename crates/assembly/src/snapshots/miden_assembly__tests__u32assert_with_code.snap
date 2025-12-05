@@ -1,15 +1,23 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 1761
 expression: program
 ---
 begin
     basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(u32assert, 3)
         pad
         u32assert2(0)
         drop
+        asmOp(u32assert.err="Oh no", 3)
         pad
         u32assert2(15491226248792286710)
         drop
+        asmOp(u32assert.err="Oh no", 3)
         pad
         u32assert2(15491226248792286710)
         drop

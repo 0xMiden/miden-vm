@@ -1,22 +1,30 @@
+---
+title: "REPL"
+sidebar_position: 3
+---
+
 # Miden REPL
 
 The Miden Read–eval–print loop (REPL) is a Miden shell that allows for quick and easy debugging of Miden assembly. After the REPL gets initialized, you can execute any Miden instruction, undo executed instructions, check the state of the stack and memory at a given point, and do many other useful things! When the REPL is exited, a `history.txt` file is saved. One thing to note is that all the REPL native commands start with an `!` to differentiate them from regular assembly instructions.
 
-Miden REPL can be started via the CLI [repl](../intro/usage.md#cli-interface) command like so:
+Miden REPL can be started via the CLI [repl](../usage.md#cli-interface) command like so:
+
 ```Shell
 ./target/optimized/miden-vm repl
 ```
 
-It is also possible to initialize REPL with libraries. To create it with Miden standard library you need to specify `-s` or `--stdlib` subcommand, it is also possible to add a third-party library by specifying `-l` or `--libraries` subcommand with paths to `.masl` library files. For example:
+It is also possible to initialize REPL with libraries. To create it with Miden core library you need to specify `-c` or `--libcore` subcommand, it is also possible to add a third-party library by specifying `-l` or `--libraries` subcommand with paths to `.masl` library files. For example:
+
 ```Shell
 ./target/optimized/miden-vm repl -s -l example/library.masl
 ```
 
 ### Miden assembly instruction
 
-All Miden instructions mentioned in the [Miden Assembly sections](../user_docs/assembly/main.md) are valid. One can either input instructions one by one or multiple instructions in one input.
+All Miden instructions mentioned in the [Miden Assembly sections](../user_docs/assembly/index.md) are valid. One can either input instructions one by one or multiple instructions in one input.
 
 For example, the below two commands will result in the same output.
+
 ```
 >> push.1
 >> push.2
@@ -124,24 +132,26 @@ Memory at address 87 is empty
 
 The `!use` command prints out the list of all modules available for import.
 
-If the stdlib was added to the available libraries list `!use` command will print all its modules:
+If the libcore was added to the available libraries list `!use` command will print all its modules:
+
 ```
 >> !use
 Modules available for importing:
-std::collections::mmr
-std::collections::smt
+miden::core::collections::mmr
+miden::core::collections::smt
 ...
-std::mem
-std::sys
-std::utils
+miden::core::mem
+miden::core::sys
+miden::core::utils
 ```
 
 Using the `!use` command with a module name will add the specified module to the program imports:
+
 ```
->> !use std::math::u64
+>> !use miden::core::math::u64
 
 >> !program
-use.std::math::u64
+use miden::core::math::u64
 
 begin
 

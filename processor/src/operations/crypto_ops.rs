@@ -1,7 +1,11 @@
+use miden_air::trace::{
+    chiplets::hasher::{HasherState, STATE_WIDTH},
+    log_precompile::STATE_CAP_RANGE,
+};
 use miden_core::mast::MastForest;
 
 use super::{ExecutionError, Operation, Process};
-use crate::{ErrorContext, Felt};
+use crate::{ErrorContext, Felt, Word, operations::utils::validate_dual_word_stream_addrs};
 
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
@@ -83,7 +87,7 @@ impl Process {
         // the path is expected to be of the specified depth.
         let path = self
             .advice
-            .get_merkle_path(root, &depth, &index)
+            .get_merkle_path(root, depth, index)
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
 
         // use hasher to compute the Merkle root of the path
@@ -160,7 +164,7 @@ impl Process {
         // whole sub-tree to this node.
         let (path, _) = self
             .advice
-            .update_merkle_node(old_root, &depth, &index, new_node)
+            .update_merkle_node(old_root, depth, index, new_node)
             .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), err_ctx))?;
 
         assert_eq!(path.len(), depth.as_int() as usize);
@@ -183,6 +187,177 @@ impl Process {
             self.stack.set(i, value);
         }
         self.stack.copy_state(4);
+
+        Ok(())
+    }
+
+    // STREAM CIPHER OPERATIONS
+    // --------------------------------------------------------------------------------------------
+
+    /// Encrypts data from source memory to destination memory using RPO sponge keystream.
+    ///
+    /// This operation performs AEAD encryption by:
+    /// 1. Loading 8 elements (2 words) from source memory at stack[12]
+    /// 2. Adding each element to the corresponding rate element (stack[0..7])
+    /// 3. Writing the resulting ciphertext to destination memory at stack[13]
+    /// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next hperm)
+    /// 5. Preserving capacity (stack[8..11])
+    /// 6. Incrementing both source and destination pointers by 8
+    ///
+    /// Stack transition:
+    /// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
+    /// ...]
+    pub(super) fn op_crypto_stream(
+        &mut self,
+        err_ctx: &impl ErrorContext,
+    ) -> Result<(), ExecutionError> {
+        const WORD_SIZE_FELT: Felt = Felt::new(4);
+        const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+        // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
+        const SRC_PTR_IDX: usize = 12;
+        const DST_PTR_IDX: usize = 13;
+
+        let ctx = self.system.ctx();
+        let clk = self.system.clk();
+
+        // Get source and destination pointers
+        let src_addr = self.stack.get(SRC_PTR_IDX);
+        let dst_addr = self.stack.get(DST_PTR_IDX);
+
+        // Validate address ranges and check for overlap
+        validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
+
+        // Load plaintext from source memory (2 words = 8 elements)
+        let src_addr_word2 = src_addr + WORD_SIZE_FELT;
+        let plaintext_word1 = self
+            .chiplets
+            .memory
+            .read_word(ctx, src_addr, clk, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        let plaintext_word2 = self
+            .chiplets
+            .memory
+            .read_word(ctx, src_addr_word2, clk, err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+
+        // Get rate (keystream) from stack[0..7]
+        let rate = [
+            self.stack.get(7),
+            self.stack.get(6),
+            self.stack.get(5),
+            self.stack.get(4),
+            self.stack.get(3),
+            self.stack.get(2),
+            self.stack.get(1),
+            self.stack.get(0),
+        ];
+
+        // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
+        let ciphertext_word1 = [
+            plaintext_word1[0] + rate[0],
+            plaintext_word1[1] + rate[1],
+            plaintext_word1[2] + rate[2],
+            plaintext_word1[3] + rate[3],
+        ];
+        let ciphertext_word2 = [
+            plaintext_word2[0] + rate[4],
+            plaintext_word2[1] + rate[5],
+            plaintext_word2[2] + rate[6],
+            plaintext_word2[3] + rate[7],
+        ];
+
+        // Write ciphertext to destination memory
+        let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
+        self.chiplets
+            .memory
+            .write_word(ctx, dst_addr, clk, ciphertext_word1.into(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+        self.chiplets
+            .memory
+            .write_word(ctx, dst_addr_word2, clk, ciphertext_word2.into(), err_ctx)
+            .map_err(ExecutionError::MemoryError)?;
+
+        // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
+        // Stack order is reversed: stack[0] = top
+        // Word 2 goes to stack[0..3]
+        self.stack.set(0, ciphertext_word2[3]);
+        self.stack.set(1, ciphertext_word2[2]);
+        self.stack.set(2, ciphertext_word2[1]);
+        self.stack.set(3, ciphertext_word2[0]);
+        // Word 1 goes to stack[4..7]
+        self.stack.set(4, ciphertext_word1[3]);
+        self.stack.set(5, ciphertext_word1[2]);
+        self.stack.set(6, ciphertext_word1[1]);
+        self.stack.set(7, ciphertext_word1[0]);
+
+        // Copy capacity elements (stack[8..11]) to preserve them
+        for i in 8..SRC_PTR_IDX {
+            let value = self.stack.get(i);
+            self.stack.set(i, value);
+        }
+
+        // Increment pointers by 8 (2 words)
+        self.stack.set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+        self.stack.set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+
+        // Copy the rest of the stack (position 14 onwards)
+        self.stack.copy_state(14);
+
+        Ok(())
+    }
+
+    /// Logs a precompile event by absorbing TAG and COMM into the precompile sponge
+    /// capacity.
+    ///
+    /// Stack transition:
+    /// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+    ///
+    /// Where:
+    /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
+    /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
+    ///   registers.
+    /// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
+    ///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
+    pub(super) fn op_log_precompile(&mut self) -> Result<(), ExecutionError> {
+        // Read TAG and COMM from stack, and CAP_PREV from the processor state
+        let comm = self.stack.get_word(0);
+        let tag = self.stack.get_word(4);
+        let cap_prev = self.pc_transcript_state;
+
+        let input_state: HasherState = {
+            let input_state_words = [cap_prev, tag, comm];
+            Word::words_as_elements(&input_state_words).try_into().unwrap()
+        };
+
+        // Perform the RPO permutation, with output state [CAP_NEXT, R0, R1]
+        let (addr, output_state) = self.chiplets.hasher.permute(input_state);
+
+        // Save the hasher address and CAP_PREV in helper registers
+        self.decoder.set_user_op_helpers(
+            Operation::LogPrecompile,
+            &[addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3]],
+        );
+
+        // Update the processor's precompile sponge capacity with CAP_NEXT
+        let cap_next = Word::from([
+            output_state[STATE_CAP_RANGE.start],
+            output_state[STATE_CAP_RANGE.start + 1],
+            output_state[STATE_CAP_RANGE.start + 2],
+            output_state[STATE_CAP_RANGE.start + 3],
+        ]);
+        self.pc_transcript_state = cap_next;
+
+        // The output state is represented as 3 words [CAP_NEXT[0..3], R0[0..3], R1[0..3]].
+        // In the next row, we overwrite the top 3 words with [R1[3..0], R0[3..0], CAP_NEXT[3..0]],
+        // which is just the reversal of the original output state.
+        // This matches the semantics of hperm when writing the next hasher to the stack.
+        for i in 0..STATE_WIDTH {
+            self.stack.set(i, output_state[STATE_WIDTH - 1 - i]);
+        }
+
+        // Copy state for the rest of the stack
+        self.stack.copy_state(STATE_WIDTH);
 
         Ok(())
     }

@@ -2,7 +2,8 @@ use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
     AdviceMap, Felt, Word,
-    crypto::merkle::{InnerNodeInfo, MerklePath, MerkleStore, NodeIndex},
+    crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
+    precompile::PrecompileRequest,
 };
 
 mod inputs;
@@ -29,6 +30,14 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// 3. Merkle store, which contains structured data reducible to Merkle paths. The VM can request
 ///    Merkle paths from the store, as well as mutate it by updating or merging nodes contained in
 ///    the store.
+/// 4. Deferred precompile requests containing the calldata of any precompile requests made by the
+///    VM. The VM computes a commitment to the calldata of all the precompiles it requests. When
+///    verifying each call, this commitment must be recomputed and should match the one computed by
+///    the VM. After executing a program, the data in these requests can either
+///    - be included in the proof of the VM execution and verified natively alongside the VM proof,
+///      or,
+///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
+///      the program.
 ///
 /// Advice data is store in-memory using [`BTreeMap`](alloc::collections::btree_map::BTreeMap)s as
 /// its backing storage.
@@ -37,10 +46,11 @@ pub struct AdviceProvider {
     stack: Vec<Felt>,
     map: AdviceMap,
     store: MerkleStore,
+    pc_requests: Vec<PrecompileRequest>,
 }
 
 impl AdviceProvider {
-    /// Apply the mutations given in order to the `AdviceProvider`.
+    /// Applies the mutations given in order to the `AdviceProvider`.
     pub fn apply_mutations(
         &mut self,
         mutations: impl IntoIterator<Item = AdviceMutation>,
@@ -58,6 +68,9 @@ impl AdviceProvider {
             },
             AdviceMutation::ExtendMerkleStore { infos } => {
                 self.extend_merkle_store(infos);
+            },
+            AdviceMutation::ExtendPrecompileRequests { data } => {
+                self.extend_precompile_requests(data);
             },
         }
         Ok(())
@@ -126,28 +139,50 @@ impl AdviceProvider {
     /// If `include_len` is set to true, this also pushes the number of elements onto the advice
     /// stack.
     ///
+    /// If `pad_to` is not equal to 0, the elements list obtained from the advice map will be padded
+    /// with zeros, increasing its length to the next multiple of `pad_to`.
+    ///
     /// Note: this operation doesn't consume the map element so it can be called multiple times
     /// for the same key.
     ///
     /// # Example
     /// Given an advice stack `[a, b, c, ...]`, and a map `x |-> [d, e, f]`:
     ///
-    /// A call `push_stack(AdviceSource::Map { key: x, include_len: false })` will result in
-    /// advice stack: `[d, e, f, a, b, c, ...]`.
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: false, pad_to: 0 })` will result
+    /// in advice stack: `[d, e, f, a, b, c, ...]`.
     ///
-    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true })` will result in
-    /// advice stack: `[3, d, e, f, a, b, c, ...]`.
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true, pad_to: 0 })` will result
+    /// in advice stack: `[3, d, e, f, a, b, c, ...]`.
+    ///
+    /// A call `push_stack(AdviceSource::Map { key: x, include_len: true, pad_to: 4 })` will result
+    /// in advice stack: `[3, d, e, f, 0, a, b, c, ...]`.
     ///
     /// # Errors
     /// Returns an error if the key was not found in the key-value map.
-    pub fn push_from_map(&mut self, key: Word, include_len: bool) -> Result<(), AdviceError> {
-        let values = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
+    pub fn push_from_map(
+        &mut self,
+        key: Word,
+        include_len: bool,
+        pad_to: u8,
+    ) -> Result<(), AdviceError> {
+        // get the advice map value
+        let map_value = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
 
-        self.stack.extend(values.iter().rev());
+        // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
+        // final (padded) elements list length will be the next multiple of pad_to
+        if pad_to != 0 {
+            let num_pad_elements =
+                map_value.len().next_multiple_of(pad_to as usize) - map_value.len();
+            self.stack.extend(core::iter::repeat_n(Felt::default(), num_pad_elements));
+        }
+
+        // push the reversed map_value list and its initial length to the advice stack
+        self.stack.extend(map_value.iter().rev());
         if include_len {
             self.stack
-                .push(Felt::try_from(values.len() as u64).expect("value length too big"));
+                .push(Felt::try_from(map_value.len() as u64).expect("value length too big"));
         }
+
         Ok(())
     }
 
@@ -232,16 +267,33 @@ impl AdviceProvider {
     /// - The specified depth is either zero or greater than the depth of the Merkle tree identified
     ///   by the specified root.
     /// - Value of the node at the specified depth and index is not known to this advice provider.
-    pub fn get_tree_node(
+    pub fn get_tree_node(&self, root: Word, depth: Felt, index: Felt) -> Result<Word, AdviceError> {
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
+        self.store.get_node(root, index).map_err(AdviceError::MerkleStoreLookupFailed)
+    }
+
+    /// Returns true if a path to a node at the specified depth and index in a Merkle tree with the
+    /// specified root exists in this Merkle store.
+    ///
+    /// # Errors
+    /// Returns an error if accessing the Merkle store fails.
+    pub fn has_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
-    ) -> Result<Word, AdviceError> {
-        let index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
-        self.store.get_node(root, index).map_err(AdviceError::MerkleStoreLookupFailed)
+        depth: Felt,
+        index: Felt,
+    ) -> Result<bool, AdviceError> {
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
+
+        // TODO: switch to `MerkleStore::has_path()` once this method is implemented
+        match self.store.get_path(root, index) {
+            Ok(_) => Ok(true),
+            Err(MerkleError::RootNotInStore(..)) => Ok(false),
+            Err(MerkleError::NodeIndexNotFoundInStore(..)) => Ok(false),
+            Err(err) => Err(AdviceError::MerkleStoreLookupFailed(err)),
+        }
     }
 
     /// Returns a path to a node at the specified depth and index in a Merkle tree with the
@@ -256,12 +308,11 @@ impl AdviceProvider {
     pub fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<MerklePath, AdviceError> {
-        let index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
+        let index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
         self.store
             .get_path(root, index)
             .map(|value| value.path)
@@ -284,13 +335,12 @@ impl AdviceProvider {
     pub fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<(MerklePath, Word), AdviceError> {
-        let node_index = NodeIndex::from_elements(depth, index).map_err(|_| {
-            AdviceError::InvalidMerkleTreeNodeIndex { depth: *depth, index: *index }
-        })?;
+        let node_index = NodeIndex::from_elements(&depth, &index)
+            .map_err(|_| AdviceError::InvalidMerkleTreeNodeIndex { depth, index })?;
         self.store
             .set_node(root, node_index, value)
             .map(|root| (root.path, root.root))
@@ -322,6 +372,33 @@ impl AdviceProvider {
         self.store.extend(iter);
     }
 
+    // PRECOMPILE REQUESTS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns a reference to the precompile requests.
+    ///
+    /// Ordering is the same as the order in which requests are issued during execution. This
+    /// ordering is relied upon when recomputing the precompile sponge during verification.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.pc_requests
+    }
+
+    /// Extends the precompile requests with the given entries.
+    pub fn extend_precompile_requests<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = PrecompileRequest>,
+    {
+        self.pc_requests.extend(iter);
+    }
+
+    /// Moves all accumulated precompile requests out of this provider, leaving it empty.
+    ///
+    /// Intended for proof packaging, where requests are serialized into the proof and no longer
+    /// needed in the provider after consumption.
+    pub fn take_precompile_requests(&mut self) -> Vec<PrecompileRequest> {
+        core::mem::take(&mut self.pc_requests)
+    }
+
     // MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -332,12 +409,12 @@ impl AdviceProvider {
         self.extend_map(&inputs.map)
     }
 
-    /// Consumes `self` and return its parts (stack, map, store).
+    /// Consumes `self` and return its parts (stack, map, store, precompile_requests).
     ///
     /// Note that the order of the stack is such that the element at the top of the stack is at the
     /// end of the returned vector.
-    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore) {
-        (self.stack, self.map, self.store)
+    pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<PrecompileRequest>) {
+        (self.stack, self.map, self.store, self.pc_requests)
     }
 }
 
@@ -345,7 +422,12 @@ impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
         let AdviceInputs { mut stack, map, store } = inputs;
         stack.reverse();
-        Self { stack, map, store }
+        Self {
+            stack,
+            map,
+            store,
+            pc_requests: Vec::new(),
+        }
     }
 }
 
@@ -369,8 +451,8 @@ impl AdviceProviderInterface for AdviceProvider {
     fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.get_merkle_path(root, depth, index).map(Some)
     }
@@ -379,8 +461,8 @@ impl AdviceProviderInterface for AdviceProvider {
     fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError> {
         self.update_merkle_node(root, depth, index, value).map(|(path, _)| Some(path))

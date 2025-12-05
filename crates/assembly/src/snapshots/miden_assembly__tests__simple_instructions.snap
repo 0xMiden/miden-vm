@@ -1,7 +1,19 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 71
 expression: program
 ---
 begin
-    basic_block pad eqz assert(0) end
+    basic_block
+        push(2147483648)
+        push(4294967294)
+        mstore
+        drop
+        asmOp(push.0, 1)
+        pad
+        asmOp(assertz, 2)
+        eqz
+        assert(0)
+        noop
+    end
 end

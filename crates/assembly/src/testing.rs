@@ -1,18 +1,21 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
+#[cfg(any(test, feature = "testing"))]
+pub use miden_assembly_syntax::parser;
 use miden_assembly_syntax::{
-    Library, LibraryPath, Parse, ParseOptions, Word,
-    ast::{Form, Module, ModuleKind},
-    debuginfo::{DefaultSourceManager, SourceFile, SourceManager},
+    Library, Parse, ParseOptions, Path, Word,
+    ast::{Module, ModuleKind},
+    debuginfo::{DefaultSourceManager, SourceManager},
     diagnostics::{
         Report,
         reporting::{ReportHandlerOpts, set_hook},
     },
 };
 pub use miden_assembly_syntax::{
-    assert_diagnostic, assert_diagnostic_lines, parse_module, parser, regex, source_file,
-    testing::Pattern,
+    assert_diagnostic, assert_diagnostic_lines, parse_module, regex, source_file, testing::Pattern,
 };
+#[cfg(feature = "testing")]
+use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
 use miden_core::Program;
 
 use crate::assembler::Assembler;
@@ -59,15 +62,8 @@ impl TestContext {
             let _ = set_hook(Box::new(|_| Box::new(ReportHandlerOpts::new().build())));
         }
         let source_manager = Arc::new(DefaultSourceManager::default());
-        // Note: we do not set debug mode by default because we do not want AsmOp decorators to be
-        // inserted in our programs
         let assembler = Assembler::new(source_manager.clone()).with_warnings_as_errors(true);
         Self { source_manager, assembler }
-    }
-
-    pub fn with_debug_info(mut self, yes: bool) -> Self {
-        self.assembler.set_debug_mode(yes);
-        self
     }
 
     #[inline(always)]
@@ -79,6 +75,7 @@ impl TestContext {
     ///
     /// This does not run semantic analysis, or construct a [Module] from the parsed
     /// forms, and is largely intended for low-level testing of the parser.
+    #[cfg(feature = "testing")]
     #[track_caller]
     pub fn parse_forms(&self, source: Arc<SourceFile>) -> Result<Vec<Form>, Report> {
         parser::parse_forms(source.clone()).map_err(|err| Report::new(err).with_source_code(source))
@@ -134,14 +131,14 @@ impl TestContext {
     #[track_caller]
     pub fn parse_module_with_path(
         &self,
-        path: LibraryPath,
+        path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<Box<Module>, Report> {
         source.parse_with_options(
             self.source_manager.as_ref(),
             ParseOptions {
                 warnings_as_errors: self.assembler.warnings_as_errors(),
-                ..ParseOptions::new(ModuleKind::Library, path).unwrap()
+                ..ParseOptions::new(ModuleKind::Library, path.as_ref().to_absolute())
             },
         )
     }
@@ -161,13 +158,13 @@ impl TestContext {
     #[track_caller]
     pub fn add_module_from_source(
         &mut self,
-        path: LibraryPath,
+        path: impl AsRef<Path>,
         source: impl Parse,
     ) -> Result<(), Report> {
         let module = source.parse_with_options(
             &self.source_manager,
             ParseOptions {
-                path: Some(path),
+                path: Some(path.as_ref().into()),
                 ..ParseOptions::for_library()
             },
         )?;
@@ -206,7 +203,7 @@ impl TestContext {
     #[track_caller]
     pub fn assemble_module(
         &self,
-        _path: LibraryPath,
+        _path: impl AsRef<Path>,
         _module: impl Parse,
     ) -> Result<Vec<Word>, Report> {
         // This API will change after we implement `Assembler::add_library()`

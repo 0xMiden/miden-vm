@@ -2,7 +2,10 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
-use miden_core::{Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest};
+use miden_core::{
+    Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest,
+    precompile::PrecompileTranscriptState,
+};
 
 use crate::{
     AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
@@ -42,16 +45,46 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
 
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    /// Returns the current precompile transcript state (sponge capacity).
+    ///
+    /// Used by `log_precompile` to thread the transcript across invocations.
+    fn precompile_transcript_state(&self) -> PrecompileTranscriptState;
+
+    /// Sets the precompile transcript state (sponge capacity) to a new value.
+    ///
+    /// Called by `log_precompile` after recording a new commitment.
+    fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
 
     // -------------------------------------------------------------------------------------------
     // PROVIDED METHODS
     // -------------------------------------------------------------------------------------------
+
+    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
+    ///
+    /// The inputs are composed of:
+    ///
+    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
+    ///    itself is arranged as:
+    ///
+    ///    a. `Read` section:
+    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
+    ///       2. Constants of the circuit which are elements in the quadratic extension field,
+    ///
+    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
+    ///    where each gate is encoded as a single base field element.
+    /// 2. the number of quadratic extension field elements read in the `READ` section,
+    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
+    ///
+    /// Stack transition:
+    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
+    ///
+    /// # Note
+    /// All processors need to support this operation.
+    fn op_eval_circuit(
+        &mut self,
+        _err_ctx: &impl ErrorContext,
+        _tracer: &mut impl Tracer,
+    ) -> Result<(), ExecutionError>;
 
     /// Executes the provided synchronous operation.
     ///
@@ -80,20 +113,11 @@ pub trait SystemInterface {
     /// called the currently executing procedure.
     fn caller_hash(&self) -> Word;
 
-    /// Returns true if the processor is currently executing a syscall, false otherwise.
-    fn in_syscall(&self) -> bool;
-
     /// Returns the current clock cycle.
     fn clk(&self) -> RowIndex;
 
     /// Returns the current context ID.
     fn ctx(&self) -> ContextId;
-
-    /// Returns the current value of the FMP register.
-    fn fmp(&self) -> Felt;
-
-    /// Sets the FMP register to a new value.
-    fn set_fmp(&mut self, new_fmp: Felt);
 }
 
 /// We model the stack as a slice of `Felt` values, where the top of the stack is at the last index
@@ -225,8 +249,8 @@ pub trait AdviceProviderInterface {
     fn get_merkle_path(
         &self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
     ) -> Result<Option<MerklePath>, AdviceError>;
 
     /// Updates a node at the specified depth and index in a Merkle tree with the specified root;
@@ -239,8 +263,8 @@ pub trait AdviceProviderInterface {
     fn update_merkle_node(
         &mut self,
         root: Word,
-        depth: &Felt,
-        index: &Felt,
+        depth: Felt,
+        index: Felt,
         value: Word,
     ) -> Result<Option<MerklePath>, AdviceError>;
 }
@@ -391,11 +415,26 @@ pub trait OperationHelperRegisters {
     /// The helper registers for the HPerm operation.
     fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
+    /// The helper registers for the LogPrecompile operation.
+    /// Contains the hasher address and the previous capacity (CAP_PREV).
+    ///
+    /// Layout:
+    /// - `h0` = hasher trace row address at which the permutation starts
+    /// - `h1..h4` = `CAP_PREV[0..3]` (capacity elements in sequential order)
+    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS];
+
     /// The helper registers for the MPVerify and MrUpdate operation.
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
-    /// The helper registers for the HornerEvalBase and HornerEvalExt operations.
-    fn op_horner_eval_registers(
+    /// The helper registers for HornerEvalBase operations.
+    fn op_horner_eval_base_registers(
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    ) -> [Felt; NUM_USER_OP_HELPERS];
+
+    /// The helper registers for HornerEvalExt operations.
+    fn op_horner_eval_ext_registers(
         alpha: QuadFelt,
         k0: Felt,
         k1: Felt,

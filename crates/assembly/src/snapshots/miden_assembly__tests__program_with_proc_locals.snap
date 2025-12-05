@@ -1,24 +1,52 @@
 ---
-source: assembly/src/tests.rs
+source: crates/assembly/src/tests.rs
+assertion_line: 2038
 expression: program
 ---
 begin
     basic_block
-        push(10)
-        push(9)
-        push(8)
-        push(4)
-        fmpupdate
-        push(18446744069414584317)
-        fmpadd
+        push(2147483648)
+        push(4294967294)
         mstore
         drop
-        add
-        push(18446744069414584317)
-        fmpadd
+        asmOp(push.10, 1)
+        push(10)
+        asmOp(push.9, 1)
+        push(9)
+        asmOp(push.8, 1)
+        push(8)
+        push(4)
+        noop
+        noop
+        push(4294967294)
         mload
+        add
+        push(4294967294)
+        mstore
+        drop
+        asmOp(loc_store.0, 6)
+        push(18446744069414584317)
+        push(4294967294)
+        mload
+        add
+        mstore
+        drop
+        asmOp(add, 1)
+        add
+        asmOp(loc_load.0, 5)
+        push(18446744069414584317)
+        push(4294967294)
+        mload
+        add
+        mload
+        asmOp(mul, 1)
         mul
         push(18446744069414584317)
-        fmpupdate
+        push(4294967294)
+        mload
+        add
+        push(4294967294)
+        mstore
+        drop
     end
 end

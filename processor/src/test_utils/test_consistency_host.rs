@@ -6,8 +6,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugHandler, EventError, ExecutionError, FutureMaybeSend,
-    MastForest, MastForestStore, MemMastForestStore, ProcessState, SyncHost, Word,
+    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventError, FutureMaybeSend,
+    MastForest, MastForestStore, MemMastForestStore, ProcessState, SyncHost, TraceError, Word,
 };
 
 /// A snapshot of the process state for consistency checking between processors.
@@ -15,7 +15,6 @@ use crate::{
 pub struct ProcessStateSnapshot {
     clk: u32,
     ctx: u32,
-    fmp: u64,
     stack_state: Vec<Felt>,
     stack_words: [Word; 4],
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
@@ -26,13 +25,12 @@ impl From<&ProcessState<'_>> for ProcessStateSnapshot {
         ProcessStateSnapshot {
             clk: state.clk().into(),
             ctx: state.ctx().into(),
-            fmp: state.fmp(),
             stack_state: state.get_stack_state(),
             stack_words: [
-                state.get_stack_word(0),
-                state.get_stack_word(4),
-                state.get_stack_word(8),
-                state.get_stack_word(12),
+                state.get_stack_word_be(0),
+                state.get_stack_word_be(4),
+                state.get_stack_word_be(8),
+                state.get_stack_word_be(12),
             ],
             mem_state: state.get_mem_state(state.ctx()),
         }
@@ -66,7 +64,7 @@ impl TraceCollector {
 }
 
 impl DebugHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
         // Count the trace event
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
@@ -155,15 +153,11 @@ where
         &mut self,
         _process: &mut ProcessState,
         _options: &DebugOptions,
-    ) -> Result<(), ExecutionError> {
+    ) -> Result<(), DebugError> {
         Ok(())
     }
 
-    fn on_trace(
-        &mut self,
-        process: &mut ProcessState,
-        trace_id: u32,
-    ) -> Result<(), ExecutionError> {
+    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
@@ -172,10 +166,6 @@ where
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
-    }
-
-    fn on_assert_failed(&mut self, _process: &ProcessState, _err_code: crate::Felt) {
-        // For testing, do nothing
     }
 }
 

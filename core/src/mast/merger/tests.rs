@@ -1,27 +1,57 @@
 use miden_crypto::{Felt, ONE, PrimeCharacteristicRing, Word};
+use miden_utils_indexing::Idx;
 
 use super::*;
 use crate::{
-    Decorator, Idx, IndexVec, Operation,
-    mast::{BasicBlockNode, MastNode, MastNodeErrorContext},
+    Decorator, Operation,
+    mast::{
+        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
+        MastNodeErrorContext, node::MastForestContributor,
+    },
 };
 
-fn block_foo() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Mul, Operation::Add], Vec::new())
-        .unwrap()
-        .into()
+fn block_foo() -> BasicBlockNodeBuilder {
+    BasicBlockNodeBuilder::new(vec![Operation::Mul, Operation::Add], Vec::new())
 }
 
-fn block_bar() -> MastNode {
-    BasicBlockNode::new(vec![Operation::And, Operation::Eq], Vec::new())
-        .unwrap()
-        .into()
+fn block_foo_with_decorators(
+    before_enter: &[DecoratorId],
+    after_exit: &[DecoratorId],
+) -> BasicBlockNodeBuilder {
+    BasicBlockNodeBuilder::new(vec![Operation::Mul, Operation::Add], Vec::new())
+        .with_before_enter(before_enter.to_vec())
+        .with_after_exit(after_exit.to_vec())
 }
 
-fn block_qux() -> MastNode {
-    BasicBlockNode::new(vec![Operation::Swap, Operation::Push(ONE), Operation::Eq], Vec::new())
-        .unwrap()
-        .into()
+fn block_bar() -> BasicBlockNodeBuilder {
+    BasicBlockNodeBuilder::new(vec![Operation::And, Operation::Eq], Vec::new())
+}
+
+fn block_qux() -> BasicBlockNodeBuilder {
+    BasicBlockNodeBuilder::new(
+        vec![Operation::Swap, Operation::Push(ONE), Operation::Eq],
+        Vec::new(),
+    )
+}
+
+fn loop_with_decorators(
+    body_id: MastNodeId,
+    before_enter: &[DecoratorId],
+    after_exit: &[DecoratorId],
+) -> LoopNodeBuilder {
+    LoopNodeBuilder::new(body_id)
+        .with_before_enter(before_enter.to_vec())
+        .with_after_exit(after_exit.to_vec())
+}
+
+fn external_with_decorators(
+    procedure_hash: Word,
+    before_enter: &[DecoratorId],
+    after_exit: &[DecoratorId],
+) -> ExternalNodeBuilder {
+    ExternalNodeBuilder::new(procedure_hash)
+        .with_before_enter(before_enter.to_vec())
+        .with_after_exit(after_exit.to_vec())
 }
 
 /// Asserts that the given forest contains exactly one node with the given digest.
@@ -65,37 +95,11 @@ fn assert_root_mapping(
 /// this assertion fails it'll be clear which exact call failed.
 fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
     for (mast_node_id, node) in forest.nodes().iter().enumerate() {
-        match node {
-            MastNode::Join(join_node) => {
-                if join_node.first().to_usize() >= mast_node_id {
-                    return Err("join node first child id is not < parent id");
-                };
-                if join_node.second().to_usize() >= mast_node_id {
-                    return Err("join node second child id is not < parent id");
-                }
-            },
-            MastNode::Split(split_node) => {
-                if split_node.on_true().to_usize() >= mast_node_id {
-                    return Err("split node on true id is not < parent id");
-                }
-                if split_node.on_false().to_usize() >= mast_node_id {
-                    return Err("split node on false id is not < parent id");
-                }
-            },
-            MastNode::Loop(loop_node) => {
-                if loop_node.body().to_usize() >= mast_node_id {
-                    return Err("loop node body id is not < parent id");
-                }
-            },
-            MastNode::Call(call_node) => {
-                if call_node.callee().to_usize() >= mast_node_id {
-                    return Err("call node callee id is not < parent id");
-                }
-            },
-            MastNode::Block(_) => (),
-            MastNode::Dyn(_) => (),
-            MastNode::External(_) => (),
-        }
+        node.for_each_child(|child_id| {
+            if child_id.to_usize() >= mast_node_id {
+                panic!("child id {} is not < parent id {}", child_id.to_usize(), mast_node_id);
+            }
+        });
     }
 
     Ok(())
@@ -111,21 +115,33 @@ fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
 #[test]
 fn mast_forest_merge_remap() {
     let mut forest_a = MastForest::new();
-    let id_foo = forest_a.add_node(block_foo()).unwrap();
-    let id_call_a = forest_a.add_call(id_foo).unwrap();
+    let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let id_call_a = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
 
     let mut forest_b = MastForest::new();
-    let id_bar = forest_b.add_node(block_bar()).unwrap();
-    let id_call_b = forest_b.add_call(id_bar).unwrap();
+    let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
 
-    let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+    let (mut merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     assert_eq!(merged.nodes().len(), 4);
-    assert_eq!(merged.nodes()[0], block_foo());
+
+    // Check that the first node is semantically equal to the expected foo block
+    // Build expected nodes in the merged forest for proper semantic comparison
+    let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+    let expected_foo_block = merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
+    assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(expected_foo_block, &merged));
+
     assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
-    assert_eq!(merged.nodes()[2], block_bar());
+
+    // Check that the third node is semantically equal to the expected bar block
+    let expected_bar_id = block_bar().add_to_forest(&mut merged).unwrap();
+    let expected_bar_block = merged.get_node_by_id(expected_bar_id).unwrap().unwrap_basic_block();
+    assert_matches!(&merged.nodes()[2], MastNode::Block(merged_block)
+        if merged_block.semantic_eq(expected_bar_block, &merged));
     assert_matches!(&merged.nodes()[3], MastNode::Call(call_node) if 2u32 == u32::from(call_node.callee()));
 
     assert_eq!(u32::from(root_maps.map_root(0, &id_call_a).unwrap()), 1u32);
@@ -141,10 +157,14 @@ fn mast_forest_merge_duplicate() {
     forest_a.add_decorator(Decorator::Debug(crate::DebugOptions::MemAll)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
-    let id_external = forest_a.add_external(block_bar().digest()).unwrap();
-    let id_foo = forest_a.add_node(block_foo()).unwrap();
-    let id_call = forest_a.add_call(id_foo).unwrap();
-    let id_loop = forest_a.add_loop(id_external).unwrap();
+    let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();
+    let bar_block = forest_a.get_node_by_id(bar_block_id).unwrap().unwrap_basic_block();
+    let id_external = ExternalNodeBuilder::new(bar_block.digest())
+        .add_to_forest(&mut forest_a)
+        .unwrap();
+    let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let id_call = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
+    let id_loop = LoopNodeBuilder::new(id_external).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call);
     forest_a.make_root(id_loop);
 
@@ -163,8 +183,8 @@ fn mast_forest_merge_duplicate() {
         forest_a.nodes.iter().find(|node| node.digest() == merged_node).unwrap();
     }
 
-    for merged_decorator in merged.decorators.iter() {
-        assert!(forest_a.decorators.contains(merged_decorator));
+    for merged_decorator in merged.decorators().iter() {
+        assert!(forest_a.decorators().contains(merged_decorator));
     }
 
     assert_child_id_lt_parent_id(&merged).unwrap();
@@ -185,21 +205,32 @@ fn mast_forest_merge_duplicate() {
 #[test]
 fn mast_forest_merge_replace_external() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = forest_a.add_external(block_foo().digest()).unwrap();
-    let id_call_a = forest_a.add_call(id_foo_a).unwrap();
+    let foo_block_a = block_foo().build().unwrap();
+    let id_foo_a = ExternalNodeBuilder::new(foo_block_a.digest())
+        .add_to_forest(&mut forest_a)
+        .unwrap();
+    let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
 
     let mut forest_b = MastForest::new();
-    let id_foo_b = forest_b.add_node(block_foo()).unwrap();
-    let id_call_b = forest_b.add_call(id_foo_b).unwrap();
+    let id_foo_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    let id_call_b = CallNodeBuilder::new(id_foo_b).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
 
     let (merged_ab, root_maps_ab) = MastForest::merge([&forest_a, &forest_b]).unwrap();
     let (merged_ba, root_maps_ba) = MastForest::merge([&forest_b, &forest_a]).unwrap();
 
-    for (merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
+    for (mut merged, root_map) in [(merged_ab, root_maps_ab), (merged_ba, root_maps_ba)] {
         assert_eq!(merged.nodes().len(), 2);
-        assert_eq!(merged.nodes()[0], block_foo());
+
+        // Check that the first node is semantically equal to the expected foo block
+        // Build expected node in the merged forest for proper semantic comparison
+        let expected_foo_id = block_foo().add_to_forest(&mut merged).unwrap();
+        let expected_foo_block =
+            merged.get_node_by_id(expected_foo_id).unwrap().unwrap_basic_block();
+        assert_matches!(&merged.nodes()[0], MastNode::Block(merged_block)
+            if merged_block.semantic_eq(expected_foo_block, &merged));
+
         assert_matches!(&merged.nodes()[1], MastNode::Call(call_node) if 0u32 == u32::from(call_node.callee()));
         // The only root node should be the call node.
         assert_eq!(merged.roots.len(), 1);
@@ -222,14 +253,14 @@ fn mast_forest_merge_replace_external() {
 #[test]
 fn mast_forest_merge_roots() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = forest_a.add_node(block_foo()).unwrap();
-    let call_a = forest_a.add_call(id_foo_a).unwrap();
+    let id_foo_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(call_a);
 
     let mut forest_b = MastForest::new();
-    let id_foo_b = forest_b.add_node(block_foo()).unwrap();
-    let id_bar_b = forest_b.add_node(block_bar()).unwrap();
-    let call_b = forest_b.add_call(id_foo_b).unwrap();
+    let id_foo_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    let id_bar_b = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let call_b = CallNodeBuilder::new(id_foo_b).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_bar_b);
     forest_b.make_root(call_b);
 
@@ -270,21 +301,21 @@ fn mast_forest_merge_roots() {
 #[test]
 fn mast_forest_merge_multiple() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = forest_a.add_node(block_foo()).unwrap();
-    let call_a = forest_a.add_call(id_foo_a).unwrap();
+    let id_foo_a = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(call_a);
 
     let mut forest_b = MastForest::new();
-    let id_foo_b = forest_b.add_node(block_foo()).unwrap();
-    let id_bar_b = forest_b.add_node(block_bar()).unwrap();
-    let call_b = forest_b.add_call(id_foo_b).unwrap();
+    let id_foo_b = block_foo().add_to_forest(&mut forest_b).unwrap();
+    let id_bar_b = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let call_b = CallNodeBuilder::new(id_foo_b).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_bar_b);
     forest_b.make_root(call_b);
 
     let mut forest_c = MastForest::new();
-    let id_foo_c = forest_c.add_node(block_foo()).unwrap();
-    let id_qux_c = forest_c.add_node(block_qux()).unwrap();
-    let call_c = forest_c.add_call(id_foo_c).unwrap();
+    let id_foo_c = block_foo().add_to_forest(&mut forest_c).unwrap();
+    let id_qux_c = block_qux().add_to_forest(&mut forest_c).unwrap();
+    let call_c = CallNodeBuilder::new(id_foo_c).add_to_forest(&mut forest_c).unwrap();
     forest_c.make_root(id_qux_c);
     forest_c.make_root(call_c);
 
@@ -348,13 +379,11 @@ fn mast_forest_merge_decorators() {
     let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
     let deco2_a = forest_a.add_decorator(trace2.clone()).unwrap();
 
-    let mut foo_node_a = block_foo();
-    foo_node_a.append_before_enter(&[deco1_a, deco2_a]);
-    let id_foo_a = forest_a.add_node(foo_node_a).unwrap();
+    let foo_node_a = block_foo_with_decorators(&[deco1_a, deco2_a], &[]);
+    let id_foo_a = foo_node_a.add_to_forest(&mut forest_a).unwrap();
 
-    let mut loop_node_a = LoopNode::new(id_foo_a, &forest_a).unwrap();
-    loop_node_a.append_after_exit(&[deco0_a, deco2_a]);
-    let id_loop_a = forest_a.add_node(loop_node_a).unwrap();
+    let loop_node_a = loop_with_decorators(id_foo_a, &[], &[deco0_a, deco2_a]);
+    let id_loop_a = loop_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_loop_a);
 
@@ -365,29 +394,27 @@ fn mast_forest_merge_decorators() {
     let deco3_b = forest_b.add_decorator(trace3.clone()).unwrap();
 
     // This foo node is identical to the one in A, including its decorators.
-    let mut foo_node_b = block_foo();
-    foo_node_b.append_before_enter(&[deco1_b, deco2_b]);
-    let id_foo_b = forest_b.add_node(foo_node_b).unwrap();
+    let foo_node_b = block_foo_with_decorators(&[deco1_b, deco2_b], &[]);
+    let id_foo_b = foo_node_b.add_to_forest(&mut forest_b).unwrap();
 
     // This loop node's decorators are different from the loop node in a.
-    let mut loop_node_b = LoopNode::new(id_foo_b, &forest_b).unwrap();
-    loop_node_b.append_after_exit(&[deco1_b, deco3_b]);
-    let id_loop_b = forest_b.add_node(loop_node_b).unwrap();
+    let loop_node_b = loop_with_decorators(id_foo_b, &[], &[deco1_b, deco3_b]);
+    let id_loop_b = loop_node_b.add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_loop_b);
 
     let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
 
     // There are 4 unique decorators across both forests.
-    assert_eq!(merged.decorators.len(), 4);
-    assert!(merged.decorators.contains(&trace0));
-    assert!(merged.decorators.contains(&trace1));
-    assert!(merged.decorators.contains(&trace2));
-    assert!(merged.decorators.contains(&trace3));
+    assert_eq!(merged.decorators().len(), 4);
+    assert!(merged.decorators().contains(&trace0));
+    assert!(merged.decorators().contains(&trace1));
+    assert!(merged.decorators().contains(&trace2));
+    assert!(merged.decorators().contains(&trace3));
 
     let find_decorator_id = |deco: &Decorator| {
         let idx = merged
-            .decorators
+            .decorators()
             .iter()
             .enumerate()
             .find_map(
@@ -410,7 +437,7 @@ fn mast_forest_merge_decorators() {
     };
 
     assert_eq!(
-        &merged_foo_block.decorators().collect::<Vec<_>>()[..],
+        &merged_foo_block.decorators(&merged).collect::<Vec<_>>()[..],
         &[(0, merged_deco1), (0, merged_deco2)]
     );
 
@@ -421,7 +448,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco0, merged_deco2]
+                    loop_node.after_exit(&merged) == [merged_deco0, merged_deco2]
                 } else {
                     false
                 }
@@ -437,7 +464,7 @@ fn mast_forest_merge_decorators() {
             .iter()
             .filter(|node| {
                 if let MastNode::Loop(loop_node) = node {
-                    loop_node.after_exit() == [merged_deco1, merged_deco3]
+                    loop_node.after_exit(&merged) == [merged_deco1, merged_deco3]
                 } else {
                     false
                 }
@@ -471,16 +498,16 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
     // Build Forest A
     let deco = forest_a.add_decorator(trace.clone()).unwrap();
 
-    let mut foo_node_a = block_foo();
-    foo_node_a.append_before_enter(&[deco]);
-    let foo_node_digest = foo_node_a.digest();
-    let id_foo_a = forest_a.add_node(foo_node_a).unwrap();
+    let foo_node_a = block_foo_with_decorators(&[deco], &[]);
+    let foo_node_digest = block_foo_with_decorators(&[deco], &[]).build().unwrap().digest();
+    let id_foo_a = foo_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_foo_a);
 
     // Build Forest B
     let mut forest_b = MastForest::new();
-    let id_external_b = forest_b.add_external(foo_node_digest).unwrap();
+    let id_external_b =
+        ExternalNodeBuilder::new(foo_node_digest).add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_external_b);
 
@@ -491,21 +518,11 @@ fn mast_forest_merge_external_node_reference_with_decorator() {
     .into_iter()
     .enumerate()
     {
-        let empty_fingerprints = IndexVec::new();
-        let id_foo_a_fingerprint = MastNodeFingerprint::from_mast_node(
-            &forest_a,
-            &empty_fingerprints,
-            &forest_a[id_foo_a],
-        );
-
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &empty_fingerprints, node))
-            .collect();
+        let id_foo_a_digest = forest_a[id_foo_a].digest();
+        let digests: Vec<_> = merged.nodes().iter().map(|node| node.digest()).collect();
 
         assert_eq!(merged.nodes.len(), 1);
-        assert!(fingerprints.contains(&id_foo_a_fingerprint));
+        assert!(digests.contains(&id_foo_a_digest));
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -541,16 +558,15 @@ fn mast_forest_merge_external_node_with_decorator() {
     let deco1 = forest_a.add_decorator(trace1.clone()).unwrap();
     let deco2 = forest_a.add_decorator(trace2.clone()).unwrap();
 
-    let mut external_node_a = ExternalNode::new(block_foo().digest());
-    external_node_a.append_before_enter(&[deco1]);
-    external_node_a.append_after_exit(&[deco2]);
-    let id_external_a = forest_a.add_node(external_node_a).unwrap();
+    let external_node_a =
+        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1], &[deco2]);
+    let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
 
     // Build Forest B
     let mut forest_b = MastForest::new();
-    let id_foo_b = forest_b.add_node(block_foo()).unwrap();
+    let id_foo_b = block_foo().add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_foo_b);
 
@@ -563,21 +579,11 @@ fn mast_forest_merge_external_node_with_decorator() {
     {
         assert_eq!(merged.nodes.len(), 1);
 
-        let empty_fingerprints = IndexVec::new();
-        let id_foo_b_fingerprint = MastNodeFingerprint::from_mast_node(
-            &forest_a,
-            &empty_fingerprints,
-            &forest_b[id_foo_b],
-        );
-
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &empty_fingerprints, node))
-            .collect();
+        let id_foo_b_digest = forest_b[id_foo_b].digest();
+        let digests: Vec<_> = merged.nodes().iter().map(|node| node.digest()).collect();
 
         // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(digests.contains(&id_foo_b_digest));
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -612,9 +618,9 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
     // Build Forest A
     let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
 
-    let mut external_node_a = ExternalNode::new(block_foo().digest());
-    external_node_a.append_before_enter(&[deco1_a]);
-    let id_external_a = forest_a.add_node(external_node_a).unwrap();
+    let external_node_a =
+        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[]);
+    let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
 
@@ -622,9 +628,8 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
     let mut forest_b = MastForest::new();
     let deco2_b = forest_b.add_decorator(trace2.clone()).unwrap();
 
-    let mut foo_node_b = block_foo();
-    foo_node_b.append_before_enter(&[deco2_b]);
-    let id_foo_b = forest_b.add_node(foo_node_b).unwrap();
+    let foo_node_b = block_foo_with_decorators(&[deco2_b], &[]);
+    let id_foo_b = foo_node_b.add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_foo_b);
 
@@ -637,21 +642,11 @@ fn mast_forest_merge_external_node_and_referenced_node_have_decorators() {
     {
         assert_eq!(merged.nodes.len(), 1);
 
-        let empty_fingerprints = IndexVec::new();
-        let id_foo_b_fingerprint = MastNodeFingerprint::from_mast_node(
-            &forest_b,
-            &empty_fingerprints,
-            &forest_b[id_foo_b],
-        );
-
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &empty_fingerprints, node))
-            .collect();
+        let id_foo_b_digest = forest_b[id_foo_b].digest();
+        let digests: Vec<_> = merged.nodes().iter().map(|node| node.digest()).collect();
 
         // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(digests.contains(&id_foo_b_digest));
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -689,14 +684,13 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
     let deco2_a = forest_a.add_decorator(trace2.clone()).unwrap();
 
-    let mut external_node_a = ExternalNode::new(block_foo().digest());
-    external_node_a.append_before_enter(&[deco1_a]);
-    external_node_a.append_after_exit(&[deco2_a]);
-    let id_external_a = forest_a.add_node(external_node_a).unwrap();
+    let external_node_a =
+        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[deco2_a]);
+    let id_external_a = external_node_a.add_to_forest(&mut forest_a).unwrap();
 
-    let mut external_node_b = ExternalNode::new(block_foo().digest());
-    external_node_b.append_before_enter(&[deco1_a]);
-    let id_external_b = forest_a.add_node(external_node_b).unwrap();
+    let external_node_b =
+        external_with_decorators(block_foo().build().unwrap().digest(), &[deco1_a], &[]);
+    let id_external_b = external_node_b.add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_external_a);
     forest_a.make_root(id_external_b);
@@ -704,9 +698,8 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     // Build Forest B
     let mut forest_b = MastForest::new();
     let deco1_b = forest_b.add_decorator(trace1).unwrap();
-    let mut block_foo_b = block_foo();
-    block_foo_b.append_before_enter(&[deco1_b]);
-    let id_foo_b = forest_b.add_node(block_foo_b).unwrap();
+    let block_foo_b = block_foo_with_decorators(&[deco1_b], &[]);
+    let id_foo_b = block_foo_b.add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_foo_b);
 
@@ -719,21 +712,11 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
     {
         assert_eq!(merged.nodes.len(), 1);
 
-        let empty_fingerprints = IndexVec::new();
-        let id_foo_b_fingerprint = MastNodeFingerprint::from_mast_node(
-            &forest_a,
-            &empty_fingerprints,
-            &forest_b[id_foo_b],
-        );
-
-        let fingerprints: Vec<_> = merged
-            .nodes()
-            .iter()
-            .map(|node| MastNodeFingerprint::from_mast_node(&merged, &empty_fingerprints, node))
-            .collect();
+        let id_foo_b_digest = forest_b[id_foo_b].digest();
+        let digests: Vec<_> = merged.nodes().iter().map(|node| node.digest()).collect();
 
         // Block foo should be unmodified.
-        assert!(fingerprints.contains(&id_foo_b_fingerprint));
+        assert!(digests.contains(&id_foo_b_digest));
 
         if idx == 0 {
             assert_root_mapping(&root_maps, vec![&forest_a.roots, &forest_b.roots], &merged.roots)
@@ -761,14 +744,18 @@ fn mast_forest_merge_multiple_external_nodes_with_decorator() {
 #[test]
 fn mast_forest_merge_external_dependencies() {
     let mut forest_a = MastForest::new();
-    let id_foo_a = forest_a.add_external(block_qux().digest()).unwrap();
-    let id_call_a = forest_a.add_call(id_foo_a).unwrap();
+    let id_foo_a = ExternalNodeBuilder::new(block_qux().build().unwrap().digest())
+        .add_to_forest(&mut forest_a)
+        .unwrap();
+    let id_call_a = CallNodeBuilder::new(id_foo_a).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
 
     let mut forest_b = MastForest::new();
-    let id_ext_b = forest_b.add_external(forest_a[id_call_a].digest()).unwrap();
-    let id_call_b = forest_b.add_call(id_ext_b).unwrap();
-    let id_qux_b = forest_b.add_node(block_qux()).unwrap();
+    let id_ext_b = ExternalNodeBuilder::new(forest_a[id_call_a].digest())
+        .add_to_forest(&mut forest_b)
+        .unwrap();
+    let id_call_b = CallNodeBuilder::new(id_ext_b).add_to_forest(&mut forest_b).unwrap();
+    let id_qux_b = block_qux().add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
     forest_b.make_root(id_qux_b);
 
@@ -802,16 +789,15 @@ fn mast_forest_merge_invalid_decorator_index() {
     let mut forest_a = MastForest::new();
     let deco1_a = forest_a.add_decorator(trace1.clone()).unwrap();
     let deco2_a = forest_a.add_decorator(trace2.clone()).unwrap();
-    let id_bar_a = forest_a.add_node(block_bar()).unwrap();
+    let id_bar_a = block_bar().add_to_forest(&mut forest_a).unwrap();
 
     forest_a.make_root(id_bar_a);
 
     // Build Forest B
     let mut forest_b = MastForest::new();
-    let mut block_b = block_foo();
+    let block_b = block_foo_with_decorators(&[deco1_a, deco2_a], &[]);
     // We're using a DecoratorId from forest A which is invalid.
-    block_b.append_before_enter(&[deco1_a, deco2_a]);
-    let id_foo_b = forest_b.add_node(block_b).unwrap();
+    let id_foo_b = block_b.add_to_forest(&mut forest_b).unwrap();
 
     forest_b.make_root(id_foo_b);
 
@@ -823,16 +809,16 @@ fn mast_forest_merge_invalid_decorator_index() {
 #[test]
 fn mast_forest_merge_advice_maps_merged() {
     let mut forest_a = MastForest::new();
-    let id_foo = forest_a.add_node(block_foo()).unwrap();
-    let id_call_a = forest_a.add_call(id_foo).unwrap();
+    let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let id_call_a = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
     let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
     let mut forest_b = MastForest::new();
-    let id_bar = forest_b.add_node(block_bar()).unwrap();
-    let id_call_b = forest_b.add_call(id_bar).unwrap();
+    let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
     let key_b = Word::new([Felt::new(1), Felt::new(3), Felt::new(2), Felt::new(1)]);
     let value_b = vec![Felt::new(2), Felt::new(2)];
@@ -850,16 +836,16 @@ fn mast_forest_merge_advice_maps_merged() {
 #[test]
 fn mast_forest_merge_advice_maps_collision() {
     let mut forest_a = MastForest::new();
-    let id_foo = forest_a.add_node(block_foo()).unwrap();
-    let id_call_a = forest_a.add_call(id_foo).unwrap();
+    let id_foo = block_foo().add_to_forest(&mut forest_a).unwrap();
+    let id_call_a = CallNodeBuilder::new(id_foo).add_to_forest(&mut forest_a).unwrap();
     forest_a.make_root(id_call_a);
     let key_a = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     let value_a = vec![ONE, ONE];
     forest_a.advice_map_mut().insert(key_a, value_a.clone());
 
     let mut forest_b = MastForest::new();
-    let id_bar = forest_b.add_node(block_bar()).unwrap();
-    let id_call_b = forest_b.add_call(id_bar).unwrap();
+    let id_bar = block_bar().add_to_forest(&mut forest_b).unwrap();
+    let id_call_b = CallNodeBuilder::new(id_bar).add_to_forest(&mut forest_b).unwrap();
     forest_b.make_root(id_call_b);
     // The key collides with key_a in the forest_a.
     let key_b = key_a;
@@ -868,4 +854,228 @@ fn mast_forest_merge_advice_maps_collision() {
 
     let err = MastForest::merge([&forest_a, &forest_b]).unwrap_err();
     assert_matches!(err, MastForestError::AdviceMapKeyCollisionOnMerge(_));
+}
+
+// Forest A:
+//   - Block with op-indexed decorators at operations [0, 1]
+//   - Before-enter and after-exit decorators
+// Forest B:
+//   - Block with op-indexed decorators at operations [0, 2]
+//   - Before-enter and after-exit decorators
+//   - One decorator duplicated from Forest A
+//   - Some decorators unique to B
+#[test]
+fn mast_forest_merge_op_indexed_decorators_preservation() {
+    // Build Forest A with diverse decorators
+    let mut forest_a = MastForest::new();
+
+    // Create decorators for Forest A
+    let before_enter_a = forest_a.add_decorator(Decorator::Trace(0)).unwrap();
+    let op0_a = forest_a.add_decorator(Decorator::Trace(1)).unwrap();
+    let op1_a = forest_a.add_decorator(Decorator::Trace(2)).unwrap();
+    let after_exit_a = forest_a.add_decorator(Decorator::Trace(3)).unwrap();
+    let shared_deco_a = forest_a.add_decorator(Decorator::Trace(99)).unwrap(); // Will be deduped
+
+    // Create a block with multiple operations and op-indexed decorators
+    let ops_a = vec![Operation::Add, Operation::Mul, Operation::Or];
+    let block_id_a = BasicBlockNodeBuilder::new(
+        ops_a.clone(),
+        vec![(0, op0_a), (1, op1_a)], // Op-indexed decorators
+    )
+    .with_before_enter(vec![before_enter_a, shared_deco_a]) // Use shared decorator
+    .with_after_exit(vec![after_exit_a])
+    .add_to_forest(&mut forest_a)
+    .unwrap();
+
+    forest_a.make_root(block_id_a);
+
+    // Build Forest B with some overlapping and some new decorators
+    let mut forest_b = MastForest::new();
+
+    // Create decorators for Forest B (note: Trace(99) matches shared_deco from A)
+    let before_enter_b = forest_b.add_decorator(Decorator::Trace(10)).unwrap();
+    let op0_b = forest_b.add_decorator(Decorator::Trace(11)).unwrap();
+    let op2_b = forest_b.add_decorator(Decorator::Trace(12)).unwrap();
+    let after_exit_b = forest_b.add_decorator(Decorator::Trace(13)).unwrap();
+    let shared_deco_b = forest_b.add_decorator(Decorator::Trace(99)).unwrap(); // Same value as Forest A
+    let unique_b = forest_b.add_decorator(Decorator::Trace(20)).unwrap();
+
+    let ops_b = vec![Operation::Add, Operation::Mul, Operation::Or];
+    let block_id_b = BasicBlockNodeBuilder::new(
+        ops_b.clone(),
+        vec![(0, op0_b), (2, op2_b)], // Op-indexed decorators at different positions
+    )
+    .with_before_enter(vec![before_enter_b, shared_deco_b]) // Use shared decorator
+    .with_after_exit(vec![after_exit_b, unique_b]) // Use unique decorator
+    .add_to_forest(&mut forest_b)
+    .unwrap();
+
+    forest_b.make_root(block_id_b);
+
+    // Perform the merge
+    let (merged, root_maps) = MastForest::merge([&forest_a, &forest_b]).unwrap();
+
+    // Helper to find a decorator's ID in the merged forest
+    let find_decorator = |trace_value: u32| {
+        let idx = merged
+            .decorators()
+            .iter()
+            .enumerate()
+            .find_map(|(id, deco)| {
+                if let Decorator::Trace(v) = deco {
+                    if *v == trace_value { Some(id) } else { None }
+                } else {
+                    None
+                }
+            })
+            .expect("decorator not found");
+        DecoratorId::from_u32_safe(idx as u32, &merged).unwrap()
+    };
+
+    // Find all decorator IDs in merged forest
+    let merged_before_enter_a = find_decorator(0);
+    let merged_op0_a = find_decorator(1);
+    let merged_op1_a = find_decorator(2);
+    let merged_after_exit_a = find_decorator(3);
+    let merged_shared = find_decorator(99);
+    let merged_before_enter_b = find_decorator(10);
+    let merged_op0_b = find_decorator(11);
+    let merged_op2_b = find_decorator(12);
+    let merged_after_exit_b = find_decorator(13);
+    let merged_unique_b = find_decorator(20);
+
+    // Verify that shared decorator appears only once in merged forest
+    assert!(
+        merged
+            .decorators()
+            .iter()
+            .enumerate()
+            .find_map(|(i, deco)| {
+                if let Decorator::Trace(v) = deco
+                    && i > merged_shared.0 as usize
+                {
+                    if *v == 99 { Some(i) } else { None }
+                } else {
+                    None
+                }
+            })
+            .is_none(),
+        "Shared decorator should map to single ID"
+    );
+
+    // Count how many times each decorator appears in the merged forest
+    let mut decorator_ref_counts = alloc::collections::BTreeMap::new();
+
+    // Check all nodes for decorator references
+    for node in &merged.nodes {
+        // Count before_enter decorators
+        for &deco_id in node.before_enter(&merged) {
+            *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+        }
+        // Count after_exit decorators
+        for &deco_id in node.after_exit(&merged) {
+            *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+        }
+        // Count op-indexed decorators if it's a basic block
+        if let MastNode::Block(block) = node {
+            for (_, deco_id) in block.indexed_decorator_iter(&merged) {
+                *decorator_ref_counts.entry(deco_id).or_insert(0) += 1;
+            }
+        }
+    }
+
+    // Verify all decorators are referenced at least once (no orphans)
+    for (i, decorator) in merged.decorators().iter().enumerate() {
+        let deco_id = DecoratorId::from_u32_safe(i as u32, &merged).unwrap();
+        let ref_count = decorator_ref_counts.get(&deco_id).unwrap_or(&0);
+        if ref_count == &0 {
+            panic!(
+                "Decorator at index {} (value: {:?}) is not referenced anywhere in the merged forest (orphan)",
+                i, decorator
+            );
+        }
+    }
+
+    // Verify op-indexed decorators are correctly preserved for Forest A's block
+    let mapped_root_a = root_maps.map_root(0, &block_id_a).unwrap();
+    if let MastNode::Block(block_a) = &merged[mapped_root_a] {
+        // Check before_enter decorators (note: includes both before_enter_a and shared_deco_a)
+        assert_eq!(
+            block_a.before_enter(&merged),
+            &[merged_before_enter_a, merged_shared],
+            "Forest A's before_enter decorators should be preserved (including shared decorator)"
+        );
+
+        // Check op-indexed decorators at correct positions
+        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+            block_a.indexed_decorator_iter(&merged).collect();
+
+        assert_eq!(
+            indexed_decs.get(&0),
+            Some(&merged_op0_a),
+            "Forest A's op[0] decorator should be preserved at position 0"
+        );
+        assert_eq!(
+            indexed_decs.get(&1),
+            Some(&merged_op1_a),
+            "Forest A's op[1] decorator should be preserved at position 1"
+        );
+        assert_eq!(indexed_decs.get(&2), None, "Forest A's block doesn't have op[2] decorator");
+
+        // Check after_exit decorators
+        assert_eq!(
+            block_a.after_exit(&merged),
+            &[merged_after_exit_a],
+            "Forest A's after_exit decorator should be preserved"
+        );
+    } else {
+        panic!("Expected a basic block node");
+    }
+
+    // Verify op-indexed decorators are correctly preserved for Forest B's block
+    let mapped_root_b = root_maps.map_root(1, &block_id_b).unwrap();
+    if let MastNode::Block(block_b) = &merged[mapped_root_b] {
+        // Check before_enter decorators (note: includes both before_enter_b and shared_deco_b)
+        assert_eq!(
+            block_b.before_enter(&merged),
+            &[merged_before_enter_b, merged_shared],
+            "Forest B's before_enter decorators should be preserved (including shared decorator)"
+        );
+
+        // Check op-indexed decorators at correct positions
+        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+            block_b.indexed_decorator_iter(&merged).collect();
+
+        assert_eq!(
+            indexed_decs.get(&0),
+            Some(&merged_op0_b),
+            "Forest B's op[0] decorator should be preserved at position 0"
+        );
+        assert_eq!(indexed_decs.get(&1), None, "Forest B's block doesn't have op[1] decorator");
+        assert_eq!(
+            indexed_decs.get(&2),
+            Some(&merged_op2_b),
+            "Forest B's op[2] decorator should be preserved at position 2"
+        );
+
+        // Check after_exit decorators (note: includes both after_exit_b and unique_b)
+        assert_eq!(
+            block_b.after_exit(&merged),
+            &[merged_after_exit_b, merged_unique_b],
+            "Forest B's after_exit decorators should be preserved (including unique decorator)"
+        );
+    } else {
+        panic!("Expected a basic block node");
+    }
+
+    // Verify the shared decorator (Trace(99)) is deduped and referenced correctly
+    let shared_ref_count = decorator_ref_counts.get(&merged_shared).unwrap_or(&0);
+    assert!(shared_ref_count > &0, "Shared decorator should be referenced at least once");
+
+    // Verify no decorator was lost or orphaned
+    assert_eq!(
+        decorator_ref_counts.len(),
+        merged.decorators().len(),
+        "Every decorator in merged forest should be referenced at least once (no orphans)"
+    );
 }

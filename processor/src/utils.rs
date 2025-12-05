@@ -3,6 +3,11 @@
 pub use miden_core::utils::*;
 use miden_core::{Felt, PrimeCharacteristicRing};
 
+/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
+/// Optimized, represented as a field element.
+pub(crate) const HASH_CYCLE_LEN_FELT: Felt =
+    Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
+
 // HELPER FUNCTIONS
 // ================================================================================================
 
