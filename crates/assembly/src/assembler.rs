@@ -468,10 +468,6 @@ impl Assembler {
             for module_idx in module_indices.iter().copied() {
                 let module = &self.linker[module_idx];
 
-                if module.is_mast() {
-                    continue;
-                }
-
                 if let Some(advice_map) = module.advice_map() {
                     mast_forest_builder.merge_advice_map(advice_map)?;
                 }
