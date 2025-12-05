@@ -2784,7 +2784,7 @@ fn module_alias() -> TestResult {
 }
 
 #[test]
-#[ignore = "disabled until unused import accuracy is improved"]
+//#[ignore = "disabled until unused import accuracy is improved"]
 fn module_alias_unused_import() -> TestResult {
     const MODULE: &str = "dummy::math::u64";
     const PROCEDURE: &str = r#"

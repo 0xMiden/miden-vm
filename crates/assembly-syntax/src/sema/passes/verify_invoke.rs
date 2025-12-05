@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, collections::BTreeSet};
+use alloc::{boxed::Box, collections::BTreeSet, sync::Arc};
 use core::ops::ControlFlow;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -107,6 +107,11 @@ impl VerifyInvokeTargets<'_> {
             Some(InvocationTarget::Path(Span::new(span, path.to_absolute().into_owned().into())))
         }
     }
+    fn track_used_alias(&mut self, name: &Ident) {
+        if let Some(alias) = self.module.aliases_mut().find(|a| a.name() == name) {
+            alias.uses += 1;
+        }
+    }
 }
 
 impl VisitMut for VerifyInvokeTargets<'_> {
@@ -210,5 +215,76 @@ impl VisitMut for VerifyInvokeTargets<'_> {
                 ControlFlow::Continue(())
             },
         }
+    }
+    fn visit_mut_immediate_error_message(&mut self, code: &mut ErrorMsg) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = code {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_felt(
+        &mut self,
+        imm: &mut Immediate<miden_core::Felt>,
+    ) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_u32(&mut self, imm: &mut Immediate<u32>) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_u16(&mut self, imm: &mut Immediate<u16>) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_push_value(
+        &mut self,
+        imm: &mut Immediate<crate::parser::PushValue>,
+    ) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_word_value(
+        &mut self,
+        imm: &mut Immediate<crate::parser::WordValue>,
+    ) -> ControlFlow<()> {
+        if let Immediate::Constant(name) = imm {
+            self.track_used_alias(name);
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_type_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
+        if let Some(name) = path.as_ident() {
+            self.track_used_alias(&name);
+        } else if let Some((module, _)) = path.split_first()
+            && let Some(alias) = self.module.aliases_mut().find(|a| a.name().as_str() == module)
+        {
+            alias.uses += 1;
+        }
+        ControlFlow::Continue(())
+    }
+    fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<()> {
+        if let Some(name) = path.as_ident() {
+            self.track_used_alias(&name);
+        } else if let Some((module, _)) = path.split_first()
+            && let Some(alias) = self.module.aliases_mut().find(|a| a.name().as_str() == module)
+        {
+            alias.uses += 1;
+        }
+        ControlFlow::Continue(())
     }
 }

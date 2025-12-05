@@ -49,6 +49,7 @@
 //! override the methods of those nodes it cares about. Changes to the AST only require modifying
 //! the code in this module, with the exception of visitors whose logic must be updated to reflect
 //! modifications to specific nodes they care about.
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_debug_types::Span;
@@ -93,6 +94,12 @@ pub trait Visit<T = ()> {
     fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
         visit_constant(self, constant)
     }
+    fn visit_constant_expr(&mut self, expr: &ConstantExpr) -> ControlFlow<T> {
+        visit_constant_expr(self, expr)
+    }
+    fn visit_constant_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<T> {
+        visit_constant_ref(self, path)
+    }
     fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
         visit_type_decl(self, ty)
     }
@@ -101,6 +108,9 @@ pub trait Visit<T = ()> {
     }
     fn visit_type_expr(&mut self, ty: &TypeExpr) -> ControlFlow<T> {
         visit_type_expr(self, ty)
+    }
+    fn visit_type_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<T> {
+        visit_type_ref(self, path)
     }
     fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
         visit_enum(self, ty)
@@ -183,6 +193,12 @@ where
     fn visit_constant(&mut self, constant: &Constant) -> ControlFlow<T> {
         (**self).visit_constant(constant)
     }
+    fn visit_constant_expr(&mut self, expr: &ConstantExpr) -> ControlFlow<T> {
+        (**self).visit_constant_expr(expr)
+    }
+    fn visit_constant_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<T> {
+        (**self).visit_constant_ref(path)
+    }
     fn visit_type_decl(&mut self, ty: &TypeDecl) -> ControlFlow<T> {
         (**self).visit_type_decl(ty)
     }
@@ -191,6 +207,9 @@ where
     }
     fn visit_type_expr(&mut self, ty: &TypeExpr) -> ControlFlow<T> {
         (**self).visit_type_expr(ty)
+    }
+    fn visit_type_ref(&mut self, path: &Span<Arc<Path>>) -> ControlFlow<T> {
+        (**self).visit_type_ref(path)
     }
     fn visit_enum(&mut self, ty: &EnumType) -> ControlFlow<T> {
         (**self).visit_enum(ty)
@@ -288,7 +307,32 @@ where
 }
 
 #[inline(always)]
-pub fn visit_constant<V, T>(_visitor: &mut V, _constant: &Constant) -> ControlFlow<T>
+pub fn visit_constant<V, T>(visitor: &mut V, constant: &Constant) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    visitor.visit_constant_expr(&constant.value)
+}
+
+pub fn visit_constant_expr<V, T>(visitor: &mut V, expr: &ConstantExpr) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    match expr {
+        ConstantExpr::Var(path) => visitor.visit_constant_ref(path),
+        ConstantExpr::BinaryOp { lhs, rhs, .. } => {
+            visitor.visit_constant_expr(lhs)?;
+            visitor.visit_constant_expr(rhs)
+        },
+        ConstantExpr::Hash(..)
+        | ConstantExpr::Int(_)
+        | ConstantExpr::String(_)
+        | ConstantExpr::Word(_) => ControlFlow::Continue(()),
+    }
+}
+
+#[inline(always)]
+pub fn visit_constant_ref<V, T>(_visitor: &mut V, _path: &Span<Arc<Path>>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -312,8 +356,26 @@ where
     visitor.visit_type_expr(&ty.ty)
 }
 
+pub fn visit_type_expr<V, T>(visitor: &mut V, ty: &TypeExpr) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    match ty {
+        TypeExpr::Ref(path) => visitor.visit_type_ref(path),
+        TypeExpr::Primitive(_) => ControlFlow::Continue(()),
+        TypeExpr::Array(ty) => visitor.visit_type_expr(&ty.elem),
+        TypeExpr::Ptr(ty) => visitor.visit_type_expr(&ty.pointee),
+        TypeExpr::Struct(ty) => {
+            for field in ty.fields.iter() {
+                visitor.visit_type_expr(&field.ty)?;
+            }
+            ControlFlow::Continue(())
+        },
+    }
+}
+
 #[inline(always)]
-pub fn visit_type_expr<V, T>(_visitor: &mut V, _ty: &TypeExpr) -> ControlFlow<T>
+pub fn visit_type_ref<V, T>(_visitor: &mut V, _path: &Span<Arc<Path>>) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
 {
@@ -330,6 +392,7 @@ where
     ControlFlow::Continue(())
 }
 
+#[inline(always)]
 pub fn visit_enum_variant<V, T>(_visitor: &mut V, _variant: &Variant) -> ControlFlow<T>
 where
     V: ?Sized + Visit<T>,
@@ -616,6 +679,12 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
         visit_mut_constant(self, constant)
     }
+    fn visit_mut_constant_expr(&mut self, expr: &mut ConstantExpr) -> ControlFlow<T> {
+        visit_mut_constant_expr(self, expr)
+    }
+    fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        visit_mut_constant_ref(self, path)
+    }
     fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
         visit_mut_type_decl(self, ty)
     }
@@ -624,6 +693,9 @@ pub trait VisitMut<T = ()> {
     }
     fn visit_mut_type_expr(&mut self, ty: &mut TypeExpr) -> ControlFlow<T> {
         visit_mut_type_expr(self, ty)
+    }
+    fn visit_mut_type_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        visit_mut_type_ref(self, path)
     }
     fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
         visit_mut_enum(self, ty)
@@ -706,6 +778,12 @@ where
     fn visit_mut_constant(&mut self, constant: &mut Constant) -> ControlFlow<T> {
         (**self).visit_mut_constant(constant)
     }
+    fn visit_mut_constant_expr(&mut self, expr: &mut ConstantExpr) -> ControlFlow<T> {
+        (**self).visit_mut_constant_expr(expr)
+    }
+    fn visit_mut_constant_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        (**self).visit_mut_constant_ref(path)
+    }
     fn visit_mut_type_decl(&mut self, ty: &mut TypeDecl) -> ControlFlow<T> {
         (**self).visit_mut_type_decl(ty)
     }
@@ -714,6 +792,9 @@ where
     }
     fn visit_mut_type_expr(&mut self, ty: &mut TypeExpr) -> ControlFlow<T> {
         (**self).visit_mut_type_expr(ty)
+    }
+    fn visit_mut_type_ref(&mut self, path: &mut Span<Arc<Path>>) -> ControlFlow<T> {
+        (**self).visit_mut_type_ref(path)
     }
     fn visit_mut_enum(&mut self, ty: &mut EnumType) -> ControlFlow<T> {
         (**self).visit_mut_enum(ty)
@@ -811,7 +892,32 @@ where
 }
 
 #[inline(always)]
-pub fn visit_mut_constant<V, T>(_visitor: &mut V, _constant: &mut Constant) -> ControlFlow<T>
+pub fn visit_mut_constant<V, T>(visitor: &mut V, constant: &mut Constant) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    visitor.visit_mut_constant_expr(&mut constant.value)
+}
+
+pub fn visit_mut_constant_expr<V, T>(visitor: &mut V, expr: &mut ConstantExpr) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    match expr {
+        ConstantExpr::Var(path) => visitor.visit_mut_constant_ref(path),
+        ConstantExpr::BinaryOp { lhs, rhs, .. } => {
+            visitor.visit_mut_constant_expr(lhs)?;
+            visitor.visit_mut_constant_expr(rhs)
+        },
+        ConstantExpr::Hash(..)
+        | ConstantExpr::Int(_)
+        | ConstantExpr::String(_)
+        | ConstantExpr::Word(_) => ControlFlow::Continue(()),
+    }
+}
+
+#[inline(always)]
+pub fn visit_mut_constant_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {
@@ -835,8 +941,26 @@ where
     visitor.visit_mut_type_expr(&mut ty.ty)
 }
 
+pub fn visit_mut_type_expr<V, T>(visitor: &mut V, ty: &mut TypeExpr) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    match ty {
+        TypeExpr::Ref(path) => visitor.visit_mut_type_ref(path),
+        TypeExpr::Primitive(_) => ControlFlow::Continue(()),
+        TypeExpr::Array(ty) => visitor.visit_mut_type_expr(&mut ty.elem),
+        TypeExpr::Ptr(ty) => visitor.visit_mut_type_expr(&mut ty.pointee),
+        TypeExpr::Struct(ty) => {
+            for field in ty.fields.iter_mut() {
+                visitor.visit_mut_type_expr(&mut field.ty)?;
+            }
+            ControlFlow::Continue(())
+        },
+    }
+}
+
 #[inline(always)]
-pub fn visit_mut_type_expr<V, T>(_visitor: &mut V, _ty: &mut TypeExpr) -> ControlFlow<T>
+pub fn visit_mut_type_ref<V, T>(_visitor: &mut V, _path: &mut Span<Arc<Path>>) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,
 {

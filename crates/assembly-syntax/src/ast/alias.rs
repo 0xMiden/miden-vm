@@ -105,7 +105,7 @@ impl Alias {
 
     /// Returns true if this import has at least one use in its containing module.
     pub fn is_used(&self) -> bool {
-        self.uses > 0
+        self.uses > 0 || self.visibility.is_public()
     }
 }
 

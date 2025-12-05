@@ -156,14 +156,11 @@ pub fn analyze(
     visit_items(&mut module, &mut analyzer)?;
 
     // Check unused imports
-    // TODO(pauls): This warning is temporarily disabled until we rework how symbol usage is tracked
-    /*
     for import in module.aliases() {
         if !import.is_used() {
             analyzer.error(SemanticAnalysisError::UnusedImport { span: import.span() });
         }
     }
-     */
 
     analyzer.into_result().map(move |_| module)
 }
@@ -224,8 +221,21 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 }
                 module.items.push(Export::Alias(alias));
             },
-            item @ (Export::Constant(_) | Export::Type(_)) => {
-                module.items.push(item);
+            Export::Constant(mut constant) => {
+                log::debug!(target: "verify-invoke", "visiting constant {}", constant.name());
+                {
+                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let _ = visitor.visit_mut_constant(&mut constant);
+                }
+                module.items.push(Export::Constant(constant));
+            },
+            Export::Type(mut ty) => {
+                log::debug!(target: "verify-invoke", "visiting type {}", ty.name());
+                {
+                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let _ = visitor.visit_mut_type_decl(&mut ty);
+                }
+                module.items.push(Export::Type(ty));
             },
         }
     }
