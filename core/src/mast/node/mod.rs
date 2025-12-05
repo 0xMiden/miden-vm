@@ -276,6 +276,23 @@ pub trait MastNodeErrorContext: Send + Sync {
 // operation's position
 pub type DecoratedOpLink = (usize, DecoratorId);
 
+impl MastNodeErrorContext for MastNode {
+    fn decorators<'a>(
+        &'a self,
+        forest: &'a MastForest,
+    ) -> Box<dyn Iterator<Item = DecoratedOpLink> + 'a> {
+        match self {
+            MastNode::Block(node) => Box::new(node.decorators(forest)),
+            MastNode::Join(node) => Box::new(node.decorators(forest)),
+            MastNode::Split(node) => Box::new(node.decorators(forest)),
+            MastNode::Loop(node) => Box::new(node.decorators(forest)),
+            MastNode::Call(node) => Box::new(node.decorators(forest)),
+            MastNode::Dyn(node) => Box::new(node.decorators(forest)),
+            MastNode::External(node) => Box::new(node.decorators(forest)),
+        }
+    }
+}
+
 // HELPERS
 // ===============================================================================================
 

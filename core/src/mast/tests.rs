@@ -6,10 +6,11 @@ use winter_math::FieldElement;
 use winter_rand_utils::prng_array;
 
 use crate::{
-    DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
+    AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
     chiplets::hasher,
     mast::{
-        BasicBlockNodeBuilder, DynNode, DynNodeBuilder, MastForest, MastForestContributor,
+        BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, ExternalNodeBuilder,
+        JoinNodeBuilder, LoopNodeBuilder, SplitNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt,
     },
     utils::{Deserializable, Serializable},
@@ -811,6 +812,171 @@ fn test_mast_forest_compaction_comprehensive() {
     assert_eq!(forest.num_nodes(), 13); // 7 main nodes + 6 supporting nodes (children)
     assert!(forest.num_procedures() >= 7);
     assert!(forest.debug_info.is_empty());
+}
+
+#[test]
+fn test_mast_forest_get_assembly_op_basic_block() {
+    let mut forest = MastForest::new();
+
+    // Add a decorator with assembly op
+    let assembly_op = AssemblyOp::new(
+        None,
+        "test_context".into(),
+        1,
+        "add".into(),
+        false,
+    );
+    let decorator_id = forest.add_decorator(Decorator::AsmOp(assembly_op.clone())).unwrap();
+
+    // Add a basic block node with decorators
+    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let decorators = vec![(0, decorator_id)]; // Decorator at operation index 0
+    let node_id = BasicBlockNodeBuilder::new(operations, decorators)
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Test getting first assembly op
+    let result = forest.get_assembly_op(node_id, None);
+    assert!(result.is_some());
+    assert_eq!(result.unwrap(), &assembly_op);
+}
+
+#[test]
+fn test_mast_forest_get_assembly_op_with_target_index() {
+    let mut forest = MastForest::new();
+
+    // Test with target operation index - create assembly op with multiple cycles
+    let assembly_op = AssemblyOp::new(
+        None,
+        "test_context".into(),
+        3, // 3 cycles
+        "complex_op".into(),
+        false,
+    );
+    let decorator_id = forest.add_decorator(Decorator::AsmOp(assembly_op.clone())).unwrap();
+
+    // Add a basic block node with the decorator at index 2
+    let operations = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Mul,
+        Operation::Add,
+    ];
+    let decorators = vec![(2, decorator_id)]; // Decorator at operation index 2
+    let node_id = BasicBlockNodeBuilder::new(operations, decorators)
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Test getting assembly op at different target indices
+    // Should find it at index 2, 3, 4 (since assembly_op has 3 cycles starting at index 2)
+    let result2 = forest.get_assembly_op(node_id, Some(2));
+    assert!(result2.is_some());
+    assert_eq!(result2.unwrap(), &assembly_op);
+
+    let result3 = forest.get_assembly_op(node_id, Some(3));
+    assert!(result3.is_some());
+    assert_eq!(result3.unwrap(), &assembly_op);
+
+    let result4 = forest.get_assembly_op(node_id, Some(4));
+    assert!(result4.is_some());
+    assert_eq!(result4.unwrap(), &assembly_op);
+
+    // Should not find it at index 5 (beyond the 3 cycles)
+    let result5 = forest.get_assembly_op(node_id, Some(5));
+    assert!(result5.is_none());
+}
+
+#[test]
+fn test_mast_forest_get_assembly_op_all_node_types() {
+    let mut forest = MastForest::new();
+    let assembly_op = AssemblyOp::new(
+        None,
+        "test_context".into(),
+        1,
+        "test_op".into(),
+        false,
+    );
+    let decorator_id = forest.add_decorator(Decorator::AsmOp(assembly_op.clone())).unwrap();
+
+    // Create some basic operations for building nodes
+    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+
+    // Test Call node
+    let call_node = CallNodeBuilder::new(
+        BasicBlockNodeBuilder::new(operations.clone(), vec![])
+            .add_to_forest(&mut forest)
+            .unwrap()
+    )
+    .with_before_enter(vec![decorator_id])
+    .add_to_forest(&mut forest)
+    .unwrap();
+    let call_result = forest.get_assembly_op(call_node, None);
+    assert!(call_result.is_some());
+    assert_eq!(call_result.unwrap(), &assembly_op);
+
+    // Test Join node
+    let child1 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(1))], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let child2 = BasicBlockNodeBuilder::new(vec![Operation::Push(Felt::new(2))], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_node = JoinNodeBuilder::new([child1, child2])
+        .with_after_exit(vec![decorator_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_result = forest.get_assembly_op(join_node, None);
+    assert!(join_result.is_some());
+    assert_eq!(join_result.unwrap(), &assembly_op);
+
+    // Test Split node
+    let split_child1 = BasicBlockNodeBuilder::new(vec![Operation::Eq], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let split_child2 = BasicBlockNodeBuilder::new(vec![Operation::Assert(Felt::new(1))], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let split_node = SplitNodeBuilder::new([split_child1, split_child2])
+        .with_before_enter(vec![decorator_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let split_result = forest.get_assembly_op(split_node, None);
+    assert!(split_result.is_some());
+    assert_eq!(split_result.unwrap(), &assembly_op);
+
+    // Test Loop node
+    let loop_body = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Add], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let loop_node = LoopNodeBuilder::new(loop_body)
+        .with_after_exit(vec![decorator_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let loop_result = forest.get_assembly_op(loop_node, None);
+    assert!(loop_result.is_some());
+    assert_eq!(loop_result.unwrap(), &assembly_op);
+
+    // Test Dyn node
+    let dyn_node = DynNodeBuilder::new_dyn()
+        .with_before_enter(vec![decorator_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let dyn_result = forest.get_assembly_op(dyn_node, None);
+    assert!(dyn_result.is_some());
+    assert_eq!(dyn_result.unwrap(), &assembly_op);
+
+    // Test External node
+    let external_digest = BasicBlockNodeBuilder::new(vec![Operation::Neg], vec![])
+        .build()
+        .unwrap()
+        .digest();
+    let external_node = ExternalNodeBuilder::new(external_digest)
+        .with_after_exit(vec![decorator_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let external_result = forest.get_assembly_op(external_node, None);
+    assert!(external_result.is_some());
+    assert_eq!(external_result.unwrap(), &assembly_op);
 }
 
 #[test]

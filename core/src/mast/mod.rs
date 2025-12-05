@@ -24,7 +24,7 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
+    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
@@ -492,6 +492,56 @@ impl MastForest {
         after_exit: &[DecoratorId],
     ) {
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
+    }
+
+    /// Returns the [`AssemblyOp`] associated with this node and operation (if provided), if any.
+    ///
+    /// If the `target_op_idx` is provided, the method treats the node as having operations and will
+    /// return the assembly op associated with the operation at the corresponding index. If no
+    /// `target_op_idx` is provided, the method will return the first assembly op found
+    /// (effectively assuming that the node has at most one associated [`AssemblyOp`]).
+    pub fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        let node = &self[node_id];
+        let mut decorator_links = node.decorators(self).collect::<Vec<_>>();
+
+        // Add operation-indexed decorators if the node supports them
+        if let Ok(op_decorator_links) = self.decorator_links_for_node(node_id) {
+            decorator_links.extend(op_decorator_links);
+        }
+
+        match target_op_idx {
+            // If a target operation index is provided, return the assembly op associated with that
+            // operation.
+            Some(target_op_idx) => {
+                for (op_idx, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                        // when an instruction compiles down to multiple operations, only the first
+                        // operation is associated with the assembly op. We need to check if the
+                        // target operation index falls within the range of operations associated
+                        // with the assembly op.
+                        if target_op_idx >= op_idx
+                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
+                        {
+                            return Some(assembly_op);
+                        }
+                    }
+                }
+            },
+            // If no target operation index is provided, return the first assembly op found.
+            None => {
+                for (_, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                        return Some(assembly_op);
+                    }
+                }
+            },
+        }
+
+        None
     }
 }
 
