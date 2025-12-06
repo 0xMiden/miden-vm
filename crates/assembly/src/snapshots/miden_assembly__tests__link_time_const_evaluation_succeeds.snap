@@ -1,0 +1,22 @@
+---
+source: crates/assembly/src/tests.rs
+expression: program
+---
+begin
+    join
+        join
+            basic_block
+                push(2147483648)
+                push(4294967294)
+                mstore
+                drop
+                asmOp(push.1, 2)
+                pad
+                incr
+                noop
+            end
+            external.0x1b0a6d4b3976737badf180f3df558f45e06e6d1803ea5ad3b95fa7428caccd02
+        end
+        basic_block asmOp(add, 1) add asmOp(add, 1) add end
+    end
+end

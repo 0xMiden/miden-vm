@@ -33,7 +33,7 @@ External inputs can be provided to Miden VM in two ways:
 1. Public inputs can be supplied to the VM by initializing the stack with desired values before a program starts executing. At most 16 values can be initialized in this way, so providing more than 16 values will cause an error.
 2. Secret (or nondeterministic) inputs can be supplied to the VM via the [_advice provider_](#nondeterministic-inputs). There is no limit on how much data the advice provider can hold.
 
-After a program finishes executing, the elements remaining on the stack become the outputs of the program. Notice that having more than 16 values on the stack at the end of execution will cause an error, so the values beyond the top 16 elements of the stack should be dropped. We've provided the [`truncate_stack`](./user_docs/libcore/sys.md) utility procedure in the core library for this purpose.
+After a program finishes executing, the elements remaining on the stack become the outputs of the program. Notice that having more than 16 values on the stack at the end of execution will cause an error, so the values beyond the top 16 elements of the stack should be dropped. We've provided the [`truncate_stack`](./user_docs/core_lib/sys.md) utility procedure in the core library for this purpose.
 
 The number of public inputs and outputs of a program can be reduced by making use of the advice stack and Merkle trees. Just 4 elements are sufficient to represent a root of a Merkle tree, which can be expanded into an arbitrary number of values.
 

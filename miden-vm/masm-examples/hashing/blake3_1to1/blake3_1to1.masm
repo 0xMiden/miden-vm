@@ -12,7 +12,7 @@ begin
         # => [HASH_INPUTS_1, HASH_INPUTS_2, num_iters_left]
 
         # Execute blake3 hash function
-        exec.blake3::hash_1to1
+        exec.blake3::hash
         # => [HASH_INPUTS_1', HASH_INPUTS_2', num_iters_left]
 
         # Decrement counter, and check if we loop again

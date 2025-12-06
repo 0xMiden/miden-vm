@@ -15,19 +15,19 @@ Miden VM "offloads" all hash-related computations to a separate _hash processor_
 
 The chiplet can be thought of as having a small instruction set of $11$ instructions. These instructions are listed below, and examples of how these instructions are used by the chiplet are described in the following sections.
 
-| Instruction | Description                                                                                                                                                                                                                                                                                                        |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `HR`        | Executes a single round of the VM's native hash function. All cycles which are not one less than a multiple of $8$ execute this instruction. That is, the chiplet executes this instruction on cycles $0, 1, 2, 3, 4, 5, 6$, but not $7$, and then again, $8, 9, 10, 11, 12, 13, 14$, but not $15$ etc.            |
-| `BP`        | Initiates computation of a single permutation, a 2-to-1 hash, or a linear hash of many elements. This instruction can be executed only on cycles which are multiples of $8$, and it can also be executed concurrently with an `HR` instruction.                                                                    |
-| `MP`        | Initiates Merkle path verification computation. This instruction can be executed only on cycles which are multiples of $8$, and it can also be executed concurrently with an `HR` instruction.                                                                                                                     |
-| `MV`        | Initiates Merkle path verification for the "old" node value during Merkle root update computation. This instruction can be executed only on cycles which are multiples of $8$, and it can also be executed concurrently with an `HR` instruction.                                                                  |
-| `MU`        | Initiates Merkle path verification for the "new" node value during Merkle root update computation. This instruction can be executed only on cycles which are multiples of $8$, and it can also be executed concurrently with an `HR` instruction.                                                                  |
-| `HOUT`      | Returns the result of the currently running computation. This instruction can be executed only on cycles which are one less than a multiple of $8$ (e.g. $7$, $15$ etc.).                                                                                                                                          |
-| `SOUT`      | Returns the whole hasher state. This instruction can be executed only on cycles which are one less than a multiple of $8$, and only if the computation was started using `BP` instruction.                                                                                                                         |
-| `ABP`       | Absorbs a new set of elements into the hasher state when computing a linear hash of many elements. This instruction can be executed only on cycles which are one less than a multiple of $8$, and only if the computation was started using `BP` instruction.                                                      |
-| `MPA`       | Absorbs the next Merkle path node into the hasher state during Merkle path verification computation. This instruction can be executed only on cycles which are one less than a multiple of $8$, and only if the computation was started using `MP` instruction.                                                    |
-| `MVA`       | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "old" node value during Merkle root update computation. This instruction can be executed only on cycles which are one less than a multiple of $8$, and only if the computation was started using `MV` instruction. |
-| `MUA`       | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "new" node value during Merkle root update computation. This instruction can be executed only on cycles which are one less than a multiple of $8$, and only if the computation was started using `Mu` instruction. |
+| Instruction | Description | Cycles | Context | Notes |
+| ----------- | ----------- | ------ | ------- | ----- |
+| `HR` | Executes a single round of the VM's native hash function | $0$-$6$, $8$-$14$, $16$-$22$... (not $7$, $15$, $23$...) | Any | |
+| `BP` | Initiates computation of a single permutation, a 2-to-1 hash, or a linear hash of many elements | Multiples of $8$ ($0$, $8$, $16$...) | Start of computation | Concurrent with `HR` |
+| `MP` | Initiates Merkle path verification computation | Multiples of $8$ | Start of computation | Concurrent with `HR` |
+| `MV` | Initiates Merkle path verification for the "old" node value | Multiples of $8$ | Merkle root update | Concurrent with `HR` |
+| `MU` | Initiates Merkle path verification for the "new" node value | Multiples of $8$ | Merkle root update | Concurrent with `HR` |
+| `HOUT` | Returns the "output" portion of the hasher state (indices $[4,8)$) | $8n-1$ ($7$, $15$, $23$...) | End of computation | |
+| `SOUT` | Returns entire hasher state | $8n-1$ ($7$, $15$, $23$...) | End of computation | Only after `BP` |
+| `ABP` | Absorbs a new set of elements into the hasher state | $8n-1$ ($7$, $15$, $23$...) | Linear hash (multi-block) | Only after `BP` |
+| `MPA` | Absorbs the next Merkle path node into the hasher state | $8n-1$ ($7$, $15$, $23$...) | Merkle path verification | Only after `MP` |
+| `MVA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "old" node value | $8n-1$ ($7$, $15$, $23$...) | Merkle root update | Only after `MV` |
+| `MUA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "new" node value | $8n-1$ ($7$, $15$, $23$...) | Merkle root update | Only after `MU` |
 
 ## Chiplet trace
 
@@ -220,14 +220,14 @@ The chiplet accomplishes the above by executing the following instructions:
 // verify the old merkle path
 [MV, HR]                    // init state and execute a hash round (concurrently)
 HR HR HR HR HR HR           // execute 6 more hash rounds
-MPV                         // copy result & absorb the next node into the state
+MVA                         // copy result & absorb the next node into the state
 HR HR HR HR HR HR HR        // execute 7 hash rounds
 HOUT                        // return elements 4, 5, 6, 7 of the state as output
 
 // verify the new merkle path
 [MU, HR]                    // init state and execute a hash round (concurrently)
 HR HR HR HR HR HR           // execute 6 more hash rounds
-MPU                         // copy result & absorb the next node into the state
+MUA                         // copy result & absorb the next node into the state
 HR HR HR HR HR HR HR        // execute 7 hash rounds
 HOUT                        // return elements 4, 5, 6, 7 of the state as output
 ```

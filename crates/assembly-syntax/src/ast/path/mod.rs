@@ -8,6 +8,8 @@ pub use self::{
     path::Path,
     path_buf::PathBuf,
 };
+#[cfg(feature = "serde")]
+use crate::debuginfo::Span;
 use crate::diagnostics::{Diagnostic, miette};
 
 /// Represents errors that can occur when creating, parsing, or manipulating [Path]s
@@ -61,7 +63,7 @@ pub trait StartsWith<Prefix: ?Sized> {
     fn starts_with_exactly(&self, prefix: &Prefix) -> bool;
 }
 
-/// Serialize a [Path]
+/// Serialize a [Path]-like value
 #[cfg(feature = "serde")]
 pub fn serialize<P, S>(path: P, serializer: S) -> Result<S::Ok, S::Error>
 where
@@ -72,15 +74,26 @@ where
     path.as_ref().serialize(serializer)
 }
 
-/// Deserialize a [Path]
+/// Deserialize a [Path]-like value
 #[cfg(feature = "serde")]
 pub fn deserialize<'de, P, D>(deserializer: D) -> Result<P, D::Error>
 where
-    PathBuf: Into<P>,
+    P: From<&'de Path>,
     D: serde::Deserializer<'de>,
 {
-    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
-    Ok(path.into())
+    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(P::from(path))
+}
+
+/// Deserialize a [Path]-like value wrapped in a [Span]
+#[cfg(feature = "serde")]
+pub fn deserialize_spanned<'de, P, D>(deserializer: D) -> Result<Span<P>, D::Error>
+where
+    P: From<&'de Path>,
+    D: serde::Deserializer<'de>,
+{
+    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    Ok(Span::unknown(P::from(path)))
 }
 
 #[cfg(feature = "arbitrary")]

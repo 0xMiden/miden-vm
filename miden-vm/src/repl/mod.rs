@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use miden_assembly::{Assembler, Library};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
 use rustyline::{DefaultEditor, error::ReadlineError};

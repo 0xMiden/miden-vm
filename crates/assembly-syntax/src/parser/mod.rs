@@ -90,11 +90,13 @@ impl ModuleParser {
         &mut self,
         path: impl AsRef<Path>,
         source: Arc<SourceFile>,
+        source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
         let path = path.as_ref();
         let forms = parse_forms_internal(source.clone(), &mut self.interned)
             .map_err(|err| Report::new(err).with_source_code(source.clone()))?;
-        sema::analyze(source, self.kind, path, forms, self.warnings_as_errors).map_err(Report::new)
+        sema::analyze(source, self.kind, path, forms, self.warnings_as_errors, source_manager)
+            .map_err(Report::new)
     }
 
     /// Parse a [ast::Module], `name`, from `path`.
@@ -103,7 +105,7 @@ impl ModuleParser {
         &mut self,
         name: N,
         path: P,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report>
     where
         N: AsRef<Path>,
@@ -117,7 +119,7 @@ impl ModuleParser {
             .load_file(path)
             .into_diagnostic()
             .wrap_err_with(|| format!("failed to load source file from '{}'", path.display()))?;
-        self.parse(name, source_file)
+        self.parse(name, source_file, source_manager)
     }
 
     /// Parse a [ast::Module], `name`, from `source`.
@@ -125,7 +127,7 @@ impl ModuleParser {
         &mut self,
         name: impl AsRef<Path>,
         source: impl ToString,
-        source_manager: &dyn SourceManager,
+        source_manager: Arc<dyn SourceManager>,
     ) -> Result<Box<ast::Module>, Report> {
         use miden_debug_types::SourceContent;
 
@@ -137,7 +139,7 @@ impl ModuleParser {
             source.to_string().into_boxed_str(),
         );
         let source_file = source_manager.load_from_raw_parts(uri, content);
-        self.parse(name, source_file)
+        self.parse(name, source_file, source_manager)
     }
 }
 
@@ -182,7 +184,7 @@ fn parse_forms_internal(
 pub fn read_modules_from_dir(
     dir: impl AsRef<std::path::Path>,
     namespace: impl AsRef<Path>,
-    source_manager: &dyn SourceManager,
+    source_manager: Arc<dyn SourceManager>,
 ) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
     use std::collections::{BTreeMap, btree_map::Entry};
 
@@ -212,7 +214,7 @@ pub fn read_modules_from_dir(
 
         // Parse module at the given path
         let mut parser = ModuleParser::new(ast::ModuleKind::Library);
-        let ast = parser.parse_file(&name, &source_path, source_manager)?;
+        let ast = parser.parse_file(&name, &source_path, source_manager.clone())?;
         match modules.entry(name) {
             Entry::Occupied(ref entry) => {
                 return Err(report!("duplicate module '{0}'", entry.key().clone()));

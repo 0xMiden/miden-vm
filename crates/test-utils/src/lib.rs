@@ -350,7 +350,7 @@ impl Test {
             self.add_modules.iter().fold(assembler, |mut assembler, (path, source)| {
                 let module = source
                     .parse_with_options(
-                        &self.source_manager,
+                        self.source_manager.clone(),
                         ParseOptions::new(ModuleKind::Library, path.clone()),
                     )
                     .expect("invalid masm source code");

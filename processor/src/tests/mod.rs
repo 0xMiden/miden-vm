@@ -724,6 +724,7 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
             PathBuf::new(module_name).unwrap(),
             miden_assembly::ast::ModuleKind::Library,
             source_file,
+            source_manager.clone(),
         )
         .unwrap()
     };
