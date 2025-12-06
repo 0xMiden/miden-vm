@@ -1,12 +1,12 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_debug_types::{SourceSpan, Span, Spanned};
+use miden_debug_types::{SourceManager, SourceSpan, Span, Spanned};
 pub use midenc_hir_type as types;
 use midenc_hir_type::{AddressSpace, Type, TypeRepr};
 
 use super::{
-    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, LocalSymbolResolutionError, Path,
-    PathBuf, SymbolResolution, Visibility,
+    ConstantExpr, DocString, GlobalItemIndex, Ident, ItemIndex, Path, SymbolResolution,
+    SymbolResolutionError, Visibility,
 };
 
 /// Abstracts over resolving an item to a concrete [Type], using one of:
@@ -19,15 +19,16 @@ use super::{
 /// Since type resolution happens in two different contexts during assembly, this abstraction allows
 /// us to share more of the resolution logic in both places.
 pub trait TypeResolver<E> {
-    /// Should be called by consumers of this resolver to convert a [LocalSymbolResolutionError]
-    /// to the error type used by the [TypeResolver] implementation.
-    fn resolve_local_failed(&self, err: LocalSymbolResolutionError) -> E;
+    fn source_manager(&self) -> Arc<dyn SourceManager>;
+    /// Should be called by consumers of this resolver to convert a [SymbolResolutionError] to the
+    /// error type used by the [TypeResolver] implementation.
+    fn resolve_local_failed(&self, err: SymbolResolutionError) -> E;
     /// Get the [Type] corresponding to the item given by `gid`
     fn get_type(&self, context: SourceSpan, gid: GlobalItemIndex) -> Result<Type, E>;
     /// Get the [Type] corresponding to the item in the current module given by `id`
     fn get_local_type(&self, context: SourceSpan, id: ItemIndex) -> Result<Option<Type>, E>;
     /// Attempt to resolve a symbol path, given by a `TypeExpr::Ref`, to an item
-    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<Option<SymbolResolution>, E>;
+    fn resolve_type_ref(&self, ty: Span<&Path>) -> Result<SymbolResolution, E>;
     /// Resolve a [TypeExpr] to a concrete [Type]
     fn resolve(&self, ty: &TypeExpr) -> Result<Option<Type>, E> {
         ty.resolve_type(self)
@@ -223,47 +224,83 @@ pub enum TypeExpr {
     /// A struct type expression, e.g. `struct { a: u32 }`
     Struct(StructType),
     /// A reference to a type aliased by name, e.g. `Foo`
-    Ref(Span<PathBuf>),
+    Ref(Span<Arc<Path>>),
 }
 
 impl TypeExpr {
+    /// Get any references to other types present in this expression
+    pub fn references(&self) -> Vec<Span<Arc<Path>>> {
+        use alloc::collections::BTreeSet;
+
+        let mut worklist = smallvec::SmallVec::<[_; 4]>::from_slice(&[self]);
+        let mut references = BTreeSet::new();
+
+        while let Some(ty) = worklist.pop() {
+            match ty {
+                Self::Primitive(_) => continue,
+                Self::Ptr(ty) => {
+                    worklist.push(&ty.pointee);
+                },
+                Self::Array(ty) => {
+                    worklist.push(&ty.elem);
+                },
+                Self::Struct(ty) => {
+                    for field in ty.fields.iter() {
+                        worklist.push(&field.ty);
+                    }
+                },
+                Self::Ref(ty) => {
+                    references.insert(ty.clone());
+                },
+            }
+        }
+
+        references.into_iter().collect()
+    }
+
+    /// Resolve this type expression to a concrete type, using `resolver`
     pub fn resolve_type<E, R>(&self, resolver: &R) -> Result<Option<Type>, E>
     where
         R: ?Sized + TypeResolver<E>,
     {
         match self {
             TypeExpr::Ref(path) => {
-                let mut current_path: Span<Arc<Path>> = path.clone().map(|path| path.into());
+                let mut current_path = path.clone();
                 loop {
                     match resolver.resolve_type_ref(current_path.as_deref())? {
-                        Some(SymbolResolution::Local(item)) => {
+                        SymbolResolution::Local(item) => {
                             return resolver.get_local_type(current_path.span(), item.into_inner());
                         },
-                        Some(SymbolResolution::External(path)) => {
+                        SymbolResolution::External(path) => {
+                            // We don't have a definition for this type yet
+                            if path == current_path {
+                                break Ok(None);
+                            }
                             current_path = path;
                         },
-                        Some(SymbolResolution::Exact { gid, .. }) => {
+                        SymbolResolution::Exact { gid, .. } => {
                             return resolver.get_type(current_path.span(), gid).map(Some);
                         },
-                        Some(SymbolResolution::Module { path: module_path, .. }) => {
+                        SymbolResolution::Module { path: module_path, .. } => {
                             break Err(resolver.resolve_local_failed(
-                                LocalSymbolResolutionError::InvalidSymbolType {
-                                    expected: "type",
-                                    span: path.span(),
-                                    actual: module_path.span(),
-                                },
+                                SymbolResolutionError::invalid_symbol_type(
+                                    path.span(),
+                                    "type",
+                                    module_path.span(),
+                                    &resolver.source_manager(),
+                                ),
                             ));
                         },
-                        Some(SymbolResolution::MastRoot(item)) => {
+                        SymbolResolution::MastRoot(item) => {
                             break Err(resolver.resolve_local_failed(
-                                LocalSymbolResolutionError::InvalidSymbolType {
-                                    expected: "type",
-                                    span: path.span(),
-                                    actual: item.span(),
-                                },
+                                SymbolResolutionError::invalid_symbol_type(
+                                    path.span(),
+                                    "type",
+                                    item.span(),
+                                    &resolver.source_manager(),
+                                ),
                             ));
                         },
-                        None => break Ok(None),
                     }
                 }
             },

@@ -116,7 +116,7 @@ where
         let path = path.as_ref();
         let mut parser = Module::parser(ModuleKind::Executable);
         let ast = parser
-            .parse_file(LibraryPath::exec_path(), path, &source_manager)
+            .parse_file(LibraryPath::exec_path(), path, source_manager.clone())
             .wrap_err_with(|| format!("Failed to parse program file `{}`", path.display()))?;
 
         Ok(Self { ast, source_manager })

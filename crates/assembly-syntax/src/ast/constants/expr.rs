@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_core::{
@@ -9,253 +9,11 @@ use miden_debug_types::{SourceSpan, Span, Spanned};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::PathBuf;
 use crate::{
-    Felt,
-    ast::{DocString, Ident, Visibility},
+    Felt, Path,
+    ast::{ConstantValue, Ident},
     parser::{IntValue, ParsingError, WordValue},
 };
-
-// CONSTANT
-// ================================================================================================
-
-/// Represents a constant definition in Miden Assembly syntax, i.e. `const.FOO = 1 + 1`.
-#[derive(Clone)]
-pub struct Constant {
-    /// The source span of the definition.
-    pub span: SourceSpan,
-    /// The documentation string attached to this definition.
-    pub docs: Option<DocString>,
-    /// The visibility of this constant
-    pub visibility: Visibility,
-    /// The name of the constant.
-    pub name: Ident,
-    /// The expression associated with the constant.
-    pub value: ConstantExpr,
-}
-
-impl Constant {
-    /// Creates a new [Constant] from the given source span, name, and value.
-    pub fn new(span: SourceSpan, visibility: Visibility, name: Ident, value: ConstantExpr) -> Self {
-        Self {
-            span,
-            docs: None,
-            visibility,
-            name,
-            value,
-        }
-    }
-
-    /// Adds documentation to this constant declaration.
-    pub fn with_docs(mut self, docs: Option<Span<String>>) -> Self {
-        self.docs = docs.map(DocString::new);
-        self
-    }
-
-    /// Returns the documentation associated with this item.
-    pub fn docs(&self) -> Option<Span<&str>> {
-        self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
-    }
-
-    /// Get the name of this constant
-    pub fn name(&self) -> &Ident {
-        &self.name
-    }
-}
-
-impl fmt::Debug for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Constant")
-            .field("docs", &self.docs)
-            .field("visibility", &self.visibility)
-            .field("name", &self.name)
-            .field("value", &self.value)
-            .finish()
-    }
-}
-
-impl crate::prettier::PrettyPrint for Constant {
-    fn render(&self) -> crate::prettier::Document {
-        use crate::prettier::*;
-
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
-
-        doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
-        doc += const_text(" = ");
-
-        doc + self.value.render()
-    }
-}
-
-impl Eq for Constant {}
-
-impl PartialEq for Constant {
-    fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.value == other.value
-    }
-}
-
-impl Spanned for Constant {
-    fn span(&self) -> SourceSpan {
-        self.span
-    }
-}
-
-// CONSTANT VALUE
-// ================================================================================================
-
-/// Represents a constant value in Miden Assembly syntax.
-#[derive(Clone)]
-#[repr(u8)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum ConstantValue {
-    /// A literal [`Felt`] value.
-    Int(Span<IntValue>) = 1,
-    /// A plain spanned string.
-    String(Ident),
-    /// A literal ['WordValue'].
-    Word(Span<WordValue>),
-    /// A spanned string with a [`HashKind`] showing to which type of value the given string should
-    /// be hashed.
-    Hash(HashKind, Ident),
-}
-
-impl Eq for ConstantValue {}
-
-impl PartialEq for ConstantValue {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Int(l), Self::Int(y)) => l == y,
-            (Self::Int(_), _) => false,
-            (Self::Word(l), Self::Word(y)) => l == y,
-            (Self::Word(_), _) => false,
-            (Self::String(l), Self::String(y)) => l == y,
-            (Self::String(_), _) => false,
-            (Self::Hash(x_hk, x_i), Self::Hash(y_hk, y_i)) => x_i == y_i && x_hk == y_hk,
-            (Self::Hash(..), _) => false,
-        }
-    }
-}
-
-impl core::hash::Hash for ConstantValue {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
-        match self {
-            Self::Int(value) => value.hash(state),
-            Self::Word(value) => value.hash(state),
-            Self::String(value) => value.hash(state),
-            Self::Hash(kind, value) => {
-                kind.hash(state);
-                value.hash(state);
-            },
-        }
-    }
-}
-
-impl fmt::Debug for ConstantValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Self::Int(lit) => fmt::Debug::fmt(&**lit, f),
-            Self::Word(lit) => fmt::Debug::fmt(&**lit, f),
-            Self::String(name) => fmt::Debug::fmt(&**name, f),
-            Self::Hash(hash_kind, str) => fmt::Debug::fmt(&(str, hash_kind), f),
-        }
-    }
-}
-
-impl crate::prettier::PrettyPrint for ConstantValue {
-    fn render(&self) -> crate::prettier::Document {
-        use crate::prettier::*;
-
-        match self {
-            Self::Int(literal) => display(literal),
-            Self::Word(literal) => display(literal),
-            Self::String(ident) => display(ident),
-            Self::Hash(hash_kind, str) => {
-                flatten(display(hash_kind) + const_text("(") + display(str) + const_text(")"))
-            },
-        }
-    }
-}
-
-impl Spanned for ConstantValue {
-    fn span(&self) -> SourceSpan {
-        match self {
-            Self::Int(spanned) => spanned.span(),
-            Self::Word(spanned) => spanned.span(),
-            Self::String(spanned) => spanned.span(),
-            Self::Hash(_, spanned) => spanned.span(),
-        }
-    }
-}
-
-impl ConstantValue {
-    const fn tag(&self) -> u8 {
-        // SAFETY: This is safe because we have given this enum a
-        // primitive representation with #[repr(u8)], with the first
-        // field of the underlying union-of-structs the discriminant
-        //
-        // See the section on "accessing the numeric value of the discriminant"
-        // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
-        unsafe { *(self as *const Self).cast::<u8>() }
-    }
-}
-
-impl Serializable for ConstantValue {
-    fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        target.write_u8(self.tag());
-        match self {
-            Self::Int(value) => value.inner().write_into(target),
-            Self::String(id) => id.write_into(target),
-            Self::Word(value) => value.inner().write_into(target),
-            Self::Hash(kind, id) => {
-                kind.write_into(target);
-                id.write_into(target);
-            },
-        }
-    }
-}
-
-impl Deserializable for ConstantValue {
-    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        match source.read_u8()? {
-            1 => IntValue::read_from(source).map(Span::unknown).map(Self::Int),
-            2 => Ident::read_from(source).map(Self::String),
-            3 => WordValue::read_from(source).map(Span::unknown).map(Self::Word),
-            4 => {
-                let kind = HashKind::read_from(source)?;
-                let id = Ident::read_from(source)?;
-                Ok(Self::Hash(kind, id))
-            },
-            invalid => Err(DeserializationError::InvalidValue(format!(
-                "unexpected ConstantValue tag: '{invalid}'"
-            ))),
-        }
-    }
-}
-
-#[cfg(feature = "arbitrary")]
-impl proptest::arbitrary::Arbitrary for ConstantValue {
-    type Parameters = ();
-
-    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        use proptest::{arbitrary::any, prop_oneof, strategy::Strategy};
-
-        prop_oneof![
-            any::<IntValue>().prop_map(|n| Self::Int(Span::unknown(n))),
-            any::<Ident>().prop_map(Self::String),
-            any::<WordValue>().prop_map(|word| Self::Word(Span::unknown(word))),
-            any::<(HashKind, Ident)>().prop_map(|(kind, s)| Self::Hash(kind, s)),
-        ]
-        .boxed()
-    }
-
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
-}
 
 // CONSTANT EXPRESSION
 // ================================================================================================
@@ -267,7 +25,7 @@ pub enum ConstantExpr {
     /// A literal [`Felt`] value.
     Int(Span<IntValue>),
     /// A reference to another constant.
-    Var(Span<PathBuf>),
+    Var(Span<Arc<Path>>),
     /// An binary arithmetic operator.
     BinaryOp {
         span: SourceSpan,
@@ -284,18 +42,12 @@ pub enum ConstantExpr {
     Hash(HashKind, Ident),
 }
 
-impl From<ConstantValue> for ConstantExpr {
-    fn from(value: ConstantValue) -> Self {
-        match value {
-            ConstantValue::Int(value) => Self::Int(value),
-            ConstantValue::String(value) => Self::String(value),
-            ConstantValue::Word(value) => Self::Word(value),
-            ConstantValue::Hash(kind, value) => Self::Hash(kind, value),
-        }
-    }
-}
-
 impl ConstantExpr {
+    /// Returns true if this expression is already evaluated to a concrete value
+    pub fn is_value(&self) -> bool {
+        matches!(self, Self::Int(_) | Self::Word(_) | Self::Hash(_, _) | Self::String(_))
+    }
+
     /// Unwrap an [`IntValue`] from this expression or panic.
     ///
     /// This is used in places where we expect the expression to have been folded to an integer,
@@ -338,11 +90,34 @@ impl ConstantExpr {
     /// value, otherwise a bug occurred.
     #[track_caller]
     pub fn expect_value(&self) -> ConstantValue {
+        self.as_value().unwrap_or_else(|| {
+            panic!("expected constant expression to be a value, got {:#?}", self)
+        })
+    }
+
+    /// Try to convert this expression into a [ConstantValue], if the expression is a value.
+    ///
+    /// Returns `Err` if the expression cannot be represented as a [ConstantValue].
+    pub fn into_value(self) -> Result<ConstantValue, Self> {
         match self {
-            Self::Int(value) => ConstantValue::Int(*value),
-            Self::String(value) => ConstantValue::String(value.clone()),
-            Self::Word(value) => ConstantValue::Word(*value),
-            other => panic!("expected constant expression to be a value, got {other:#?}"),
+            Self::Int(value) => Ok(ConstantValue::Int(value)),
+            Self::String(value) => Ok(ConstantValue::String(value)),
+            Self::Word(value) => Ok(ConstantValue::Word(value)),
+            Self::Hash(kind, value) => Ok(ConstantValue::Hash(kind, value)),
+            expr @ (Self::BinaryOp { .. } | Self::Var(_)) => Err(expr),
+        }
+    }
+
+    /// Get the [ConstantValue] representation of this expression, if it is a value.
+    ///
+    /// Returns `None` if the expression cannot be represented as a [ConstantValue].
+    pub fn as_value(&self) -> Option<ConstantValue> {
+        match self {
+            Self::Int(value) => Some(ConstantValue::Int(*value)),
+            Self::String(value) => Some(ConstantValue::String(value.clone())),
+            Self::Word(value) => Some(ConstantValue::Word(*value)),
+            Self::Hash(kind, value) => Some(ConstantValue::Hash(*kind, value.clone())),
+            Self::BinaryOp { .. } | Self::Var(_) => None,
         }
     }
 
@@ -425,6 +200,29 @@ impl ConstantExpr {
         }
     }
 
+    /// Get any references to other symbols present in this expression
+    pub fn references(&self) -> Vec<Span<Arc<Path>>> {
+        use alloc::collections::BTreeSet;
+
+        let mut worklist = smallvec::SmallVec::<[_; 4]>::from_slice(&[self]);
+        let mut references = BTreeSet::new();
+
+        while let Some(ty) = worklist.pop() {
+            match ty {
+                Self::Int(_) | Self::Word(_) | Self::String(_) | Self::Hash(..) => continue,
+                Self::Var(path) => {
+                    references.insert(path.clone());
+                },
+                Self::BinaryOp { lhs, rhs, .. } => {
+                    worklist.push(lhs);
+                    worklist.push(rhs);
+                },
+            }
+        }
+
+        references.into_iter().collect()
+    }
+
     fn is_literal(&self) -> bool {
         match self {
             Self::Int(_) | Self::String(_) | Self::Word(_) | Self::Hash(..) => true,
@@ -492,7 +290,9 @@ impl fmt::Debug for ConstantExpr {
             Self::Word(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Var(path) => fmt::Debug::fmt(path, f),
             Self::String(name) => fmt::Debug::fmt(&**name, f),
-            Self::Hash(hash_kind, str) => fmt::Debug::fmt(&(str, hash_kind), f),
+            Self::Hash(hash_kind, str) => {
+                f.debug_tuple("Hash").field(hash_kind).field(str).finish()
+            },
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 f.debug_tuple(op.name()).field(lhs).field(rhs).finish()
             },
@@ -505,13 +305,16 @@ impl crate::prettier::PrettyPrint for ConstantExpr {
         use crate::prettier::*;
 
         match self {
-            Self::Int(literal) => display(literal),
-            Self::Word(literal) => display(literal),
+            Self::Int(literal) => literal.render(),
+            Self::Word(literal) => literal.render(),
             Self::Var(path) => display(path),
-            Self::String(ident) => display(ident),
-            Self::Hash(hash_kind, str) => {
-                flatten(display(hash_kind) + const_text("(") + display(str) + const_text(")"))
-            },
+            Self::String(ident) => text(format!("\"{}\"", ident.as_str().escape_debug())),
+            Self::Hash(hash_kind, str) => flatten(
+                display(hash_kind)
+                    + const_text("(")
+                    + text(format!("\"{}\"", str.as_str().escape_debug()))
+                    + const_text(")"),
+            ),
             Self::BinaryOp { op, lhs, rhs, .. } => {
                 let single_line = lhs.render() + display(op) + rhs.render();
                 let multi_line = lhs.render() + nl() + (display(op)) + rhs.render();
@@ -543,7 +346,7 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 
         prop_oneof![
             any::<IntValue>().prop_map(|n| Self::Int(Span::unknown(n))),
-            crate::arbitrary::path::constant_pathbuf_random_length(0)
+            crate::arbitrary::path::constant_path_random_length(0)
                 .prop_map(|p| Self::Var(Span::unknown(p))),
             any::<(ConstantOp, IntValue, IntValue)>().prop_map(|(op, lhs, rhs)| Self::BinaryOp {
                 span: SourceSpan::UNKNOWN,

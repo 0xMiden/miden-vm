@@ -70,7 +70,7 @@ impl Export {
             Self::Procedure(item) => item.visibility(),
             Self::Constant(item) => item.visibility,
             Self::Type(item) => item.visibility(),
-            Self::Alias(_) => Visibility::Public,
+            Self::Alias(item) => item.visibility(),
         }
     }
 
