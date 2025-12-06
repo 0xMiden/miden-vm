@@ -563,7 +563,6 @@ pub struct ErrorContextImpl {
 }
 
 impl ErrorContextImpl {
-    #[allow(dead_code)]
     pub fn new(
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,
@@ -574,7 +573,6 @@ impl ErrorContextImpl {
         Self { label, source_file }
     }
 
-    #[allow(dead_code)]
     pub fn new_with_op_idx(
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,

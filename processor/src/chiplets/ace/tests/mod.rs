@@ -277,7 +277,7 @@ fn generate_memory(circuit: &EncodedCircuit, inputs: &[QuadFelt]) -> Vec<Word> {
 }
 
 /// Given an EvaluationContext
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows: usize) {
     let num_rows = num_read_rows + num_eval_rows;
     let mut columns: Vec<_> = (0..ACE_CHIPLET_NUM_COLS).map(|_| vec![ZERO; num_rows]).collect();

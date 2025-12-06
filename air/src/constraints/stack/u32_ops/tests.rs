@@ -58,7 +58,6 @@ proptest! {
     // -------------------------------- U32MADD test --------------------------------------------------
 
     #[test]
-    #[allow(arithmetic_overflow)]
     fn test_u32madd_operation(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
         let expected = [ZERO; NUM_CONSTRAINTS];
         let frame = get_u32madd_test_frame(a, b, c);

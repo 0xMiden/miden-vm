@@ -355,7 +355,7 @@ where
     /// Attempts to match the request with an existing response. If a match is found, the response
     /// is removed from the list of outstanding responses. Otherwise, the request is added to the
     /// list of outstanding requests.
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "bus-debugger"))]
     pub fn add_request(&mut self, request_msg: Box<dyn BusMessage<E>>, alphas: &[E]) {
         let msg_value = request_msg.value(alphas);
 
@@ -371,7 +371,7 @@ where
     /// Attempts to match the response with an existing request. If a match is found, the request is
     /// removed from the list of outstanding requests. Otherwise, the response is added to the list
     /// of outstanding responses.
-    #[allow(dead_code)]
+    #[cfg(any(test, feature = "bus-debugger"))]
     pub fn add_response(&mut self, response_msg: Box<dyn BusMessage<E>>, alphas: &[E]) {
         let msg_value = response_msg.value(alphas);
 
@@ -390,7 +390,6 @@ where
     /// requests or responses, it means that there is a mismatch between the requests and responses,
     /// and the test should fail. The `Debug` implementation for `BusDebugger` will print out the
     /// outstanding requests and responses.
-    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.outstanding_requests.is_empty() && self.outstanding_responses.is_empty()
     }

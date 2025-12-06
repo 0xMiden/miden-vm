@@ -1,13 +1,20 @@
-use alloc::collections::BTreeSet;
+use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
 use core::ops::ControlFlow;
 
+use miden_assembly_syntax::{
+    ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, library::ItemInfo,
+    sema::ConstEvalVisitor,
+};
+use miden_core::Felt;
+
 use crate::{
-    ModuleIndex, SourceSpan, Spanned,
+    ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
     ast::{
-        AliasTarget, InvocationTarget, Invoke, InvokeKind, Module, Procedure, SymbolResolution,
+        self, AliasTarget, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
+        constants::ConstEnvironment,
         visit::{self, VisitMut},
     },
-    linker::{LinkerError, SymbolResolutionContext, SymbolResolver},
+    linker::{LinkerError, SymbolItem, SymbolResolutionContext, SymbolResolver},
 };
 
 // MODULE REWRITE CHECK
@@ -22,35 +29,31 @@ use crate::{
 pub struct ModuleRewriter<'a, 'b: 'a> {
     resolver: &'a SymbolResolver<'b>,
     module_id: ModuleIndex,
-    span: SourceSpan,
     invoked: BTreeSet<Invoke>,
 }
 
+macro_rules! wrap_const_control_flow {
+    ($visitor:ident) => {
+        match $visitor.into_result() {
+            Ok(()) => return ControlFlow::Continue(()),
+            Err(errs) => {
+                let errors = errs.into_iter().map(RelatedError::wrap).collect::<Vec<_>>();
+                return ControlFlow::Break(LinkerError::Related {
+                    errors: errors.into_boxed_slice(),
+                });
+            },
+        }
+    };
+}
+
 impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
-    /// Create a new [ModuleRewriter] with the given [NameResolver]
-    pub fn new(resolver: &'a SymbolResolver<'b>) -> Self {
+    /// Create a new instance of this pass with the given [SymbolResolver]
+    pub fn new(module: ModuleIndex, resolver: &'a SymbolResolver<'b>) -> Self {
         Self {
             resolver,
-            module_id: ModuleIndex::new(u16::MAX as usize),
-            span: Default::default(),
+            module_id: module,
             invoked: Default::default(),
         }
-    }
-
-    /// Apply all rewrites to `module`
-    pub fn apply(
-        &mut self,
-        module_id: ModuleIndex,
-        module: &mut Module,
-    ) -> Result<(), LinkerError> {
-        self.module_id = module_id;
-        self.span = module.span();
-
-        if let ControlFlow::Break(err) = self.visit_mut_module(module) {
-            return Err(err);
-        }
-
-        Ok(())
     }
 
     fn rewrite_target(
@@ -158,5 +161,137 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
             Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => unreachable!(),
         }
         ControlFlow::Continue(())
+    }
+    fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_u8(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_u16(
+        &mut self,
+        imm: &mut ast::Immediate<u16>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_u16(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_u32(
+        &mut self,
+        imm: &mut ast::Immediate<u32>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_u32(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_error_message(
+        &mut self,
+        imm: &mut ast::Immediate<Arc<str>>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_error_message(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_felt(
+        &mut self,
+        imm: &mut ast::Immediate<Felt>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_felt(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_push_value(
+        &mut self,
+        imm: &mut ast::Immediate<miden_assembly_syntax::parser::PushValue>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_push_value(imm);
+        wrap_const_control_flow!(visitor)
+    }
+    fn visit_mut_immediate_word_value(
+        &mut self,
+        imm: &mut ast::Immediate<miden_assembly_syntax::parser::WordValue>,
+    ) -> ControlFlow<LinkerError> {
+        let mut visitor = ConstEvalVisitor::new(self);
+        let _ = visitor.visit_mut_immediate_word_value(imm);
+        wrap_const_control_flow!(visitor)
+    }
+}
+
+impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
+    type Error = LinkerError;
+
+    fn get_source_file_for(&self, span: SourceSpan) -> Option<Arc<SourceFile>> {
+        self.resolver.source_manager().get(span.source_id()).ok()
+    }
+
+    fn get(&self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+        let module = &self.resolver.linker()[self.module_id];
+        let name = Span::new(name.span(), name.as_str());
+        let context = SymbolResolutionContext {
+            span: name.span(),
+            module: self.module_id,
+            kind: None,
+        };
+        let symbol = match self.resolver.resolve_local(&context, &name)? {
+            SymbolResolution::Exact { gid, .. } => &self.resolver.linker()[gid],
+            SymbolResolution::Local(item) => &module[*item.inner()],
+            SymbolResolution::External(path) => {
+                return self.get_by_path(path.as_deref());
+            },
+            SymbolResolution::Module { .. } | SymbolResolution::MastRoot(_) => {
+                return Err(LinkerError::InvalidConstantRef {
+                    span: name.span(),
+                    source_file: self.get_source_file_for(name.span()),
+                });
+            },
+        };
+        match symbol.item() {
+            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
+                Ok(Some(CachedConstantValue::Hit(&info.value)))
+            },
+            SymbolItem::Constant(ast) => Ok(Some(CachedConstantValue::Miss(&ast.value))),
+            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
+                Err(LinkerError::InvalidConstantRef {
+                    span: name.span(),
+                    source_file: self.get_source_file_for(name.span()),
+                })
+            },
+            SymbolItem::Alias { .. } => unreachable!(),
+        }
+    }
+
+    fn get_by_path(
+        &self,
+        path: Span<&ast::Path>,
+    ) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+        let context = SymbolResolutionContext {
+            span: path.span(),
+            module: self.module_id,
+            kind: None,
+        };
+        let gid = match self.resolver.resolve_path(&context, path)? {
+            SymbolResolution::Exact { gid, .. } => gid,
+            SymbolResolution::Local(item) => self.module_id + item.into_inner(),
+            SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
+                return Err(LinkerError::InvalidConstantRef {
+                    span: path.span(),
+                    source_file: self.get_source_file_for(path.span()),
+                });
+            },
+            SymbolResolution::External(_) => unreachable!(),
+        };
+        match self.resolver.linker()[gid].item() {
+            SymbolItem::Compiled(ItemInfo::Constant(info)) => {
+                Ok(Some(CachedConstantValue::Hit(&info.value)))
+            },
+            SymbolItem::Constant(ast) => Ok(Some(CachedConstantValue::Miss(&ast.value))),
+            SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
+                Err(LinkerError::InvalidConstantRef {
+                    span: path.span(),
+                    source_file: self.get_source_file_for(path.span()),
+                })
+            },
+            SymbolItem::Alias { .. } => unreachable!(),
+        }
     }
 }

@@ -152,7 +152,7 @@ fn build_trace(
 /// of the hasher trace.
 fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // The selectors should match the hasher selectors
-    #[allow(clippy::needless_range_loop)]
+    #[expect(clippy::needless_range_loop)]
     for row in start..end {
         // The selectors should match the selectors for the hasher segment
         assert_eq!(ZERO, trace[0][row]);

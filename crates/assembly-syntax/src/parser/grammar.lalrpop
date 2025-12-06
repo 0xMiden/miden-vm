@@ -342,7 +342,7 @@ TypeDecl: Form = {
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
-                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name)))),
+                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name).into()))),
                                 rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                             };
                         }
@@ -351,7 +351,7 @@ TypeDecl: Form = {
                             next = ConstantExpr::BinaryOp {
                                 span,
                                 op: ConstantOp::Add,
-                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name)))),
+                                lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name).into()))),
                                 rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                             };
                         }
@@ -361,7 +361,7 @@ TypeDecl: Form = {
                     let discriminant = core::mem::replace(&mut next, ConstantExpr::BinaryOp {
                         span,
                         op: ConstantOp::Add,
-                        lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name.clone())))),
+                        lhs: Box::new(ConstantExpr::Var(Span::new(span, PathBuf::from(name.clone()).into()))),
                         rhs: Box::new(ConstantExpr::Int(Span::new(span, IntValue::U8(1)))),
                     });
                     vs.push(Variant::new(name, discriminant).with_span(span));
@@ -1952,7 +1952,7 @@ AliasTarget: AliasTarget = {
     }),
 }
 
-QualifiedItemPath: Span<PathBuf> = {
+QualifiedItemPath: Span<Arc<Path>> = {
     <path:MaybeQualifiedItemPath> =>? {
         if path.as_ident().is_some() {
             return Err(ParseError::User {
@@ -1963,14 +1963,14 @@ QualifiedItemPath: Span<PathBuf> = {
     }
 }
 
-MaybeQualifiedItemPath: Span<PathBuf> = {
+MaybeQualifiedItemPath: Span<Arc<Path>> = {
     MaybeQualifiedConstantPath,
     MaybeQualifiedProcedureOrTypePath,
 }
 
 
 #[inline]
-MaybeQualifiedProcedureOrTypePath: Span<PathBuf> = {
+MaybeQualifiedProcedureOrTypePath: Span<Arc<Path>> = {
     <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:Ident> <r:@R> =>? {
         let span = span!(source_id, l, r);
         if is_absolute && namespace.is_empty() {
@@ -1991,11 +1991,11 @@ MaybeQualifiedProcedureOrTypePath: Span<PathBuf> = {
             path
         };
 
-        Ok(Span::new(span, path))
+        Ok(Span::new(span, path.into()))
     },
 }
 
-MaybeQualifiedTypePath: Span<PathBuf> = {
+MaybeQualifiedTypePath: Span<Arc<Path>> = {
     <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:TypeIdent> <r:@R> =>? {
         let span = span!(source_id, l, r);
         if is_absolute && namespace.is_empty() {
@@ -2016,12 +2016,12 @@ MaybeQualifiedTypePath: Span<PathBuf> = {
             path
         };
 
-        Ok(Span::new(span, path))
+        Ok(Span::new(span, path.into()))
     },
 }
 
 #[inline]
-MaybeQualifiedConstantPath: Span<PathBuf> = {
+MaybeQualifiedConstantPath: Span<Arc<Path>> = {
     <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:ConstantName> <r:@R> =>? {
         let span = span!(source_id, l, r);
 
@@ -2043,7 +2043,7 @@ MaybeQualifiedConstantPath: Span<PathBuf> = {
             path
         };
 
-        Ok(Span::new(span, path))
+        Ok(Span::new(span, path.into()))
     }
 }
 

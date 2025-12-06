@@ -57,7 +57,7 @@ fn kernel_rom_no_access() {
 }
 
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn kernel_rom_with_access() {
     let kernel = build_kernel();
     let mut rom = KernelRom::new(kernel);
@@ -99,7 +99,7 @@ fn kernel_rom_with_access() {
 }
 
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn kernel_rom_with_single_access() {
     let kernel = build_kernel();
     let mut rom = KernelRom::new(kernel);

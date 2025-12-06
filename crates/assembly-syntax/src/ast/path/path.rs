@@ -8,11 +8,17 @@ use super::{Iter, PathBuf, PathComponent, PathError, StartsWith};
 use crate::ast::Ident;
 
 /// A borrowed reference to a subset of a path, e.g. another [Path] or a [PathBuf]
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(transparent)]
 pub struct Path {
     /// A view into the selected components of the path, i.e. the parts delimited by `::`
     inner: str,
+}
+
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.inner, f)
+    }
 }
 
 #[cfg(feature = "serde")]
@@ -431,6 +437,36 @@ impl PartialEq<&PathBuf> for Path {
 impl PartialEq<Path> for PathBuf {
     fn eq(&self, other: &Path) -> bool {
         self.inner.as_str() == &other.inner
+    }
+}
+
+impl PartialEq<&Path> for Path {
+    fn eq(&self, other: &&Path) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::boxed::Box<Path>> for Path {
+    fn eq(&self, other: &alloc::boxed::Box<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::rc::Rc<Path>> for Path {
+    fn eq(&self, other: &alloc::rc::Rc<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::sync::Arc<Path>> for Path {
+    fn eq(&self, other: &alloc::sync::Arc<Path>) -> bool {
+        self.inner == other.inner
+    }
+}
+
+impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
+    fn eq(&self, other: &alloc::borrow::Cow<'_, Path>) -> bool {
+        self.inner == other.as_ref().inner
     }
 }
 

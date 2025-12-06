@@ -158,7 +158,6 @@ impl VerifierChannel {
     /// For computations requiring multiple trace segments, trace states for auxiliary segments
     /// are also included as the second value of the returned tuple (trace states for all auxiliary
     /// segments are merged into a single table). Otherwise, the second value is None.
-    #[allow(clippy::type_complexity)]
     pub fn read_queried_trace_states(
         &mut self,
         positions: &[usize],

@@ -9,7 +9,6 @@ use crate::{
     testing::TestContext,
 };
 
-#[allow(clippy::type_complexity)]
 fn merge_programs(
     program_a: &str,
     program_b: &str,

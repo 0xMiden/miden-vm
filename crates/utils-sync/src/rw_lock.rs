@@ -91,7 +91,6 @@ unsafe impl RawRwLock for Spinlock {
     #[cfg(not(loom))]
     // This is intentional on the part of the [RawRwLock] API, basically a hack to provide
     // initial values as static items.
-    #[allow(clippy::declare_interior_mutable_const)]
     const INIT: Spinlock = Spinlock::new();
 
     type GuardMarker = lock_api::GuardSend;
