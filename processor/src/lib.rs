@@ -687,6 +687,11 @@ impl Process {
                     host.on_trace(process, *id)?;
                 }
             },
+            Decorator::DebugVar(_debug_var) => {
+                // Debug variable info is recorded during assembly and stored in the MAST,
+                // but doesn't require any execution-time action. The debugger can retrieve
+                // this info from the MAST decorators.
+            },
         };
         Ok(())
     }

@@ -4,7 +4,9 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 mod decorators;
-pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
+pub use decorators::{
+    AssemblyOp, DebugOptions, DebugVarInfo, DebugVarLocation, Decorator, DecoratorList,
+};
 use opcode_constants::*;
 
 use crate::{

@@ -121,6 +121,7 @@ fn confirm_operation_and_decorator_structure() {
             DebugOptions::AdvStackTop(_) => (),
         },
         Decorator::Trace(_) => (),
+        Decorator::DebugVar(_) => (),
     };
 }
 
