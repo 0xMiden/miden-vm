@@ -692,7 +692,7 @@ impl HasherChipletShim {
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
         self.replay.record_build_merkle_root(self.addr.into(), computed_root);
-        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
+        self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * u32::from(path.depth());
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
@@ -700,7 +700,7 @@ impl HasherChipletShim {
         self.replay.record_update_merkle_root(self.addr.into(), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
-        self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
+        self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * u32::from(path.depth());
     }
 
     pub fn extract_replay(&mut self) -> HasherResponseReplay {

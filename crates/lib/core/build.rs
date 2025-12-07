@@ -235,7 +235,7 @@ fn main() -> Result<(), Report> {
         .into_diagnostic()?;
 
     // Generate documentation
-    if std::env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
+    if env::var("MIDEN_BUILD_LIB_DOCS").is_ok() {
         build_core_lib_docs(&asm_dir, DOC_DIR_PATH).into_diagnostic()?;
     }
 

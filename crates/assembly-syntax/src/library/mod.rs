@@ -1,3 +1,4 @@
+#![allow(unused_qualifications)] // False positive in macros of ConstantExport
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
@@ -12,7 +13,7 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
-use crate::ast::{AttributeSet, Ident, Path, PathBuf, ProcedureName};
+use crate::ast::{AttributeSet, ConstantValue, Ident, Path, PathBuf, ProcedureName};
 
 mod error;
 mod module;
@@ -188,7 +189,7 @@ pub struct ConstantExport {
     )]
     pub path: Arc<Path>,
     /// The constant-folded AST representing the value of this constant
-    pub value: crate::ast::ConstantValue,
+    pub value: ConstantValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +200,7 @@ pub struct TypeExport {
     #[cfg_attr(feature = "serde", serde(with = "crate::ast::path"))]
     pub path: Arc<Path>,
     /// The type bound to `name`
-    pub ty: crate::ast::types::Type,
+    pub ty: Type,
 }
 
 #[cfg(feature = "arbitrary")]
@@ -209,7 +210,7 @@ impl Arbitrary for TypeExport {
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use proptest::strategy::{Just, Strategy};
         let path = crate::arbitrary::path::user_defined_type_path_random_length(1);
-        let ty = Just(crate::ast::types::Type::Felt);
+        let ty = Just(Type::Felt);
 
         (path, ty).prop_map(|(path, ty)| Self { path, ty }).boxed()
     }
@@ -338,8 +339,7 @@ impl Library {
         self.exports
             .get(path.as_ref())
             .and_then(LibraryExport::as_procedure)
-            .map(|export| self.mast_forest[export.node].is_external())
-            .unwrap_or(false)
+            .is_some_and(|export| self.mast_forest[export.node].is_external())
     }
 
     /// Returns a reference to the inner [`MastForest`].
@@ -467,7 +467,7 @@ pub struct KernelLibrary {
 }
 
 #[cfg(feature = "serde")]
-impl serde::Serialize for KernelLibrary {
+impl Serialize for KernelLibrary {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -613,7 +613,7 @@ impl Deserializable for Library {
                     })
                 },
                 1 => {
-                    let value = crate::ast::ConstantValue::read_from(source)?;
+                    let value = ConstantValue::read_from(source)?;
                     LibraryExport::Constant(ConstantExport { path: path.clone(), value })
                 },
                 2 => {
@@ -640,7 +640,7 @@ impl Deserializable for Library {
 }
 
 #[cfg(feature = "serde")]
-impl serde::Serialize for Library {
+impl Serialize for Library {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -648,7 +648,7 @@ impl serde::Serialize for Library {
         use serde::ser::SerializeStruct;
 
         struct LibraryExports<'a>(&'a BTreeMap<Arc<Path>, LibraryExport>);
-        impl serde::Serialize for LibraryExports<'_> {
+        impl Serialize for LibraryExports<'_> {
             fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
             where
                 S: serde::Serializer,
@@ -672,7 +672,7 @@ impl serde::Serialize for Library {
 }
 
 #[cfg(feature = "serde")]
-impl<'de> serde::Deserialize<'de> for Library {
+impl<'de> Deserialize<'de> for Library {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -691,7 +691,7 @@ impl<'de> serde::Deserialize<'de> for Library {
         impl<'de> Visitor<'de> for LibraryVisitor {
             type Value = Library;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 formatter.write_str("struct Library")
             }
 
@@ -1036,7 +1036,7 @@ impl Deserializable for TypeDeserializer {
 }
 
 #[cfg(feature = "arbitrary")]
-impl proptest::prelude::Arbitrary for Library {
+impl Arbitrary for Library {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -1112,5 +1112,5 @@ impl proptest::prelude::Arbitrary for Library {
             .boxed()
     }
 
-    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+    type Strategy = BoxedStrategy<Self>;
 }

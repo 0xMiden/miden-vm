@@ -4,7 +4,7 @@ use core::{cell::Cell, ops::Index};
 use miden_assembly_syntax::{
     Path,
     ast::{
-        self, AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
+        AliasTarget, ItemIndex, LocalSymbol, LocalSymbolResolver, ModuleIndex, ModuleKind,
         SymbolResolution, SymbolResolutionError, SymbolTable,
     },
     debuginfo::{SourceManager, Span, Spanned},
@@ -207,7 +207,7 @@ impl Index<ItemIndex> for LinkModule {
     }
 }
 
-struct LinkModuleIter<'a, 'b: 'a> {
+struct LinkModuleIter<'a, 'b> {
     resolver: &'a SymbolResolver<'b>,
     module: &'a LinkModule,
 }
@@ -230,7 +230,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                     | SymbolItem::Constant(_)
                     | SymbolItem::Type(_) => {
                         let path = self.module.path.join(symbol.name());
-                        ast::LocalSymbol::Item {
+                        LocalSymbol::Item {
                             name: symbol.name().clone(),
                             resolved: SymbolResolution::Exact {
                                 gid,
@@ -244,7 +244,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                         if let Some(resolved) = resolved.get() {
                             let path = self.resolver.item_path(gid);
                             let span = name.span();
-                            ast::LocalSymbol::Import {
+                            LocalSymbol::Import {
                                 name,
                                 resolution: Ok(SymbolResolution::Exact {
                                     gid: resolved,
@@ -253,7 +253,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                             }
                         } else {
                             match alias.target() {
-                                AliasTarget::MastRoot(root) => ast::LocalSymbol::Import {
+                                AliasTarget::MastRoot(root) => LocalSymbol::Import {
                                     name,
                                     resolution: Ok(SymbolResolution::MastRoot(*root)),
                                 },
@@ -270,7 +270,7 @@ impl<'a, 'b: 'a> SymbolTable for LinkModuleIter<'a, 'b> {
                                         path.as_deref(),
                                         &source_manager,
                                     );
-                                    ast::LocalSymbol::Import { name, resolution }
+                                    LocalSymbol::Import { name, resolution }
                                 },
                             }
                         }

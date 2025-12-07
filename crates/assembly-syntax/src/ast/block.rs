@@ -53,7 +53,7 @@ impl Block {
 }
 
 impl fmt::Debug for Block {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(&self.body).finish()
     }
 }

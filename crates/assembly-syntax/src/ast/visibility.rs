@@ -15,7 +15,7 @@ pub enum Visibility {
 }
 
 impl fmt::Display for Visibility {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_public() { f.write_str("pub") } else { Ok(()) }
     }
 }

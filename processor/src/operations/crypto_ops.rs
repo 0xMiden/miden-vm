@@ -434,7 +434,7 @@ mod tests {
         let root = tree.root();
         let node = nodes[index];
         let index = index as u64;
-        let depth = tree.depth() as u64;
+        let depth = u64::from(tree.depth());
 
         let stack_inputs = [
             root[0].as_int(),
@@ -487,7 +487,7 @@ mod tests {
             tree.root()[2].as_int(),
             tree.root()[3].as_int(),
             leaf_index as u64,
-            tree.depth() as u64,
+            u64::from(tree.depth()),
             leaves[leaf_index][0].as_int(),
             leaves[leaf_index][1].as_int(),
             leaves[leaf_index][2].as_int(),
@@ -508,7 +508,7 @@ mod tests {
             new_tree.root()[2],
             new_tree.root()[1],
             new_tree.root()[0],
-            Felt::new(tree.depth() as u64),
+            Felt::new(u64::from(tree.depth())),
             Felt::new(leaf_index as u64),
             tree.root()[3],
             tree.root()[2],

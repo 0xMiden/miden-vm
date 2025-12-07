@@ -123,7 +123,7 @@ fn prepare_advice_stack(
 
     stack.push(num_layers as u64);
 
-    let mut current_domain_size = domain_size as u64;
+    let mut current_domain_size = u64::from(domain_size);
     let mut current_depth = depth as u64;
 
     for i in 0..num_layers {

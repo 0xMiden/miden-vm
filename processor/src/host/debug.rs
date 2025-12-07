@@ -56,7 +56,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         match *options {
@@ -72,7 +72,7 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
             DebugOptions::MemAll => self.print_mem_all(process),
             DebugOptions::MemInterval(n, m) => self.print_mem_interval(process, n..=m),
             DebugOptions::LocalInterval(n, m, num_locals) => {
-                self.print_local_interval(process, n..=m, num_locals as u32)
+                self.print_local_interval(process, n..=m, u32::from(num_locals))
             },
             DebugOptions::AdvStackTop(n) => {
                 // Reverse the advice stack so last element becomes index 0
@@ -86,7 +86,7 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
         .map_err(DebugError::from)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessState<'_>, trace_id: u32) -> Result<(), TraceError> {
         writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
@@ -105,7 +105,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         stack: &[Felt],
         n: Option<usize>,
         stack_type: &str,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
     ) -> fmt::Result {
         if stack.is_empty() {
             writeln!(self.writer, "{stack_type} empty before step {}.", process.clk())?;
@@ -149,7 +149,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
-    fn print_mem_all(&mut self, process: &ProcessState) -> fmt::Result {
+    fn print_mem_all(&mut self, process: &ProcessState<'_>) -> fmt::Result {
         let mem = process.get_mem_state(process.ctx());
 
         writeln!(
@@ -171,7 +171,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Writes memory values in the provided addresses interval.
     fn print_mem_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
         range: RangeInclusive<u32>,
     ) -> fmt::Result {
         let start = *range.start();
@@ -214,7 +214,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// The interval given is inclusive on *both* ends.
     fn print_local_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
         range: RangeInclusive<u16>,
         num_locals: u32,
     ) -> fmt::Result {
@@ -226,8 +226,8 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             fmp.as_int() as u32 - num_locals
         };
 
-        let start = *range.start() as u32;
-        let end = *range.end() as u32;
+        let start = u32::from(*range.start());
+        let end = u32::from(*range.end());
 
         if start == end {
             let addr = local_memory_offset + start;
@@ -247,7 +247,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             )?;
             let local_items: Vec<_> = range
                 .map(|local_idx| {
-                    let addr = local_memory_offset + local_idx as u32;
+                    let addr = local_memory_offset + u32::from(local_idx);
                     let value = process.get_mem_value(process.ctx(), addr);
                     let addr_str = local_idx.to_string();
                     let value_str = value.map(|v| v.to_string());
@@ -307,5 +307,5 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 
 /// Formats a value as a string, using "EMPTY" for None values.
 fn format_value<T: ToString>(value: Option<T>) -> String {
-    value.map(|v| v.to_string()).unwrap_or_else(|| "EMPTY".to_string())
+    value.map_or_else(|| "EMPTY".to_string(), |v| v.to_string())
 }

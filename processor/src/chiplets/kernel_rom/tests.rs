@@ -20,7 +20,7 @@ fn kernel_rom_invalid_access() {
     let mut rom = KernelRom::new(kernel);
 
     // accessing procedure which is in the kernel should be fine
-    assert!(rom.access_proc(PROC1_HASH.into(), &()).is_ok());
+    rom.access_proc(PROC1_HASH.into(), &()).unwrap();
 
     // accessing procedure which is not in the kernel should return an error
     assert!(rom.access_proc([ZERO, ONE, ZERO, ONE].into(), &()).is_err());

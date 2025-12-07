@@ -44,7 +44,7 @@ impl MastNodeInfo {
     pub fn try_into_mast_node_builder(
         self,
         node_count: usize,
-        basic_block_data_decoder: &BasicBlockDataDecoder,
+        basic_block_data_decoder: &BasicBlockDataDecoder<'_>,
     ) -> Result<MastNodeBuilder, DeserializationError> {
         match self.ty {
             MastNodeType::Block { ops_offset } => {
@@ -205,7 +205,7 @@ impl MastNodeType {
 
 impl Serializable for MastNodeType {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let discriminant = self.discriminant() as u64;
+        let discriminant = u64::from(self.discriminant());
         assert!(discriminant <= 0b1111);
 
         let payload = match *self {
@@ -256,11 +256,11 @@ impl MastNodeType {
             "MastNodeType::encode_u32_pair: right value doesn't fit in 30 bits: {right_value}",
         );
 
-        ((left_value as u64) << 30) | (right_value as u64)
+        (u64::from(left_value) << 30) | u64::from(right_value)
     }
 
     fn encode_u32_payload(payload: u32) -> u64 {
-        payload as u64
+        u64::from(payload)
     }
 }
 
@@ -384,7 +384,7 @@ mod tests {
     fn deserialize_large_payloads_fails() {
         // Serialized `CALL` with a 33-bit payload
         let serialized = {
-            let serialized_value = ((CALL as u64) << 60) | (u32::MAX as u64 + 1_u64);
+            let serialized_value = (u64::from(CALL) << 60) | (u64::from(u32::MAX) + 1_u64);
 
             let mut serialized_buffer: Vec<u8> = Vec::new();
             serialized_value.write_into(&mut serialized_buffer);

@@ -13,7 +13,7 @@ use crate::stack::{
 #[test]
 fn test_sdepth_operation() {
     let expected = [ZERO; NUM_CONSTRAINTS];
-    let depth = rand_value::<u32>() as u64;
+    let depth = u64::from(rand_value::<u32>());
 
     let frame = get_sdepth_test_frame(depth);
     let result = get_constraint_evaluation(frame);

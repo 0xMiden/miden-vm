@@ -25,7 +25,7 @@ use crate::Report;
 /// 3. Drop D and B to achieve our result [C, ...]
 ///
 /// This operation takes 20 VM cycles.
-pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
+pub(super) fn hash(block_builder: &mut BasicBlockBuilder<'_>) {
     #[rustfmt::skip]
     let ops = [
         // add 4 elements to the stack to be used as the capacity elements for the RPO permutation.
@@ -72,7 +72,7 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
 /// 4. Drop F and D to return our result [E, ...].
 ///
 /// This operation takes 16 VM cycles.
-pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
+pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder<'_>) {
     #[rustfmt::skip]
     let ops = [
         // Add 4 elements to the stack to prepare the capacity portion for the RPO permutation
@@ -113,7 +113,7 @@ pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
 /// - root of the tree, 4 elements.
 ///
 /// This operation takes 9 VM cycles.
-pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder) {
+pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder<'_>) {
     // stack: [d, i, R, ...]
     // pops the value of the node we are looking for from the advice stack
     read_mtree_node(block_builder);
@@ -143,7 +143,7 @@ pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder) {
 /// - new root of the tree after the update, 4 elements
 ///
 /// This operation takes 29 VM cycles.
-pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder<'_>) -> Result<(), Report> {
     // stack: [d, i, R_old, V_new, ...]
 
     // stack: [V_old, R_new, ...] (29 cycles)
@@ -163,7 +163,7 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Rep
 /// It is not checked whether the provided roots exist as Merkle trees in the advide providers.
 ///
 /// This operation takes 16 VM cycles.
-pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
+pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder<'_>) {
     // stack input:  [R_rhs, R_lhs, ...]
     // stack output: [R_merged, ...]
 
@@ -195,7 +195,7 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
 /// - new value of the node, 4 elements (only in the case of mtree_set)
 ///
 /// This operation takes 4 VM cycles.
-fn read_mtree_node(block_builder: &mut BasicBlockBuilder) {
+fn read_mtree_node(block_builder: &mut BasicBlockBuilder<'_>) {
     // The stack should be arranged in the following way: [d, i, R, ...] so that the decorator
     // can fetch the node value from the root. In the `mtree.get` operation we have the stack in
     // the following format: [d, i, R], whereas in the case of `mtree.set` we would also have the
@@ -213,7 +213,7 @@ fn read_mtree_node(block_builder: &mut BasicBlockBuilder) {
 /// and perform the mutation on the copied tree.
 ///
 /// This operation takes 29 VM cycles.
-fn update_mtree(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+fn update_mtree(block_builder: &mut BasicBlockBuilder<'_>) -> Result<(), Report> {
     // stack: [d, i, R_old, V_new, ...]
     // output: [R_new, R_old, V_new, V_old, ...]
 

@@ -492,8 +492,8 @@ where
 /// The flag is derived as the big-endian representation of these flags, plus one.
 /// They are also defined in [`chiplets::memory`](miden_air::trace::chiplets::memory).
 fn get_memory_op_label(is_read: Felt, is_word_access: Felt) -> Felt {
-    let is_read = (is_read == ONE) as u8;
-    let is_word_access = (is_word_access == ONE) as u8;
+    let is_read = u8::from(is_read == ONE);
+    let is_word_access = u8::from(is_word_access == ONE);
 
     const MEMORY_SELECTOR_FLAG_BASE: u8 = 0b011 + 1;
     const OP_FLAG_SHIFT: u8 = 3;

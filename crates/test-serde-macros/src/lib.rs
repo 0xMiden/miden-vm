@@ -1,7 +1,6 @@
 //! Proc macros for serde roundtrip testing in Miden VM
 //!
 //! This crate provides the `serde_test` macro for generating round-trip serialization tests.
-extern crate proc_macro;
 
 use proc_macro::TokenStream;
 use proc_macro2::Span;

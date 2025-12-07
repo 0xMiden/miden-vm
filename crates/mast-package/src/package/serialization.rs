@@ -245,7 +245,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
         impl<'de> serde::de::Visitor<'de> for PackageManifestVisitor {
             type Value = PackageManifest;
 
-            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
                 formatter.write_str("struct PackageManifest")
             }
 

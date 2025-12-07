@@ -716,9 +716,10 @@ impl Arbitrary for Program {
                 // Make the node a root manually
                 forest.make_root(node_id);
                 // After making it a root, it should be a procedure
-                if forest.num_procedures() == 0 {
-                    panic!("Failed to create a valid procedure from node");
-                }
+                assert!(
+                    forest.num_procedures() != 0,
+                    "Failed to create a valid procedure from node"
+                );
                 forest.procedure_roots()[0]
             };
 

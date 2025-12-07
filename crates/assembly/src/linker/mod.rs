@@ -287,7 +287,7 @@ impl Linker {
                 .into_iter()
                 .enumerate()
                 .map(|(idx, item)| {
-                    let gid = module_index + ast::ItemIndex::new(idx);
+                    let gid = module_index + ItemIndex::new(idx);
                     self.callgraph.get_or_insert_node(gid);
                     Symbol::new(
                         item.name().clone(),
@@ -760,7 +760,7 @@ impl Linker {
         &self,
         span: SourceSpan,
         gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, LinkerError> {
+    ) -> Result<types::Type, LinkerError> {
         use miden_assembly_syntax::ast::TypeResolver;
 
         let symbol_resolver = SymbolResolver::new(self);

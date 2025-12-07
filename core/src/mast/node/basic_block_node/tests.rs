@@ -12,7 +12,7 @@ use crate::{
 fn batch_ops_1() {
     // --- one operation ----------------------------------------------------------------------
     let ops = vec![Operation::Add];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -26,7 +26,7 @@ fn batch_ops_1() {
 fn batch_ops_2() {
     // --- two operations ---------------------------------------------------------------------
     let ops = vec![Operation::Add, Operation::Mul];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -40,7 +40,7 @@ fn batch_ops_2() {
 fn batch_ops_3() {
     // --- one group with one immediate value -------------------------------------------------
     let ops = vec![Operation::Add, Operation::Push(Felt::new(12345678))];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -64,7 +64,7 @@ fn batch_ops_4() {
         Operation::Push(Felt::new(7)),
         Operation::Add,
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -97,7 +97,7 @@ fn batch_ops_5() {
         Operation::Add,
         Operation::Push(Felt::new(7)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -135,7 +135,7 @@ fn batch_ops_6() {
         Operation::Add,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -167,7 +167,7 @@ fn batch_ops_7() {
         Operation::Add,
         Operation::Push(Felt::new(11)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -199,7 +199,7 @@ fn batch_ops_8() {
         Operation::Push(ONE),
         Operation::Push(Felt::new(2)),
     ];
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -242,7 +242,7 @@ fn batch_ops_9() {
         Operation::Pad,
     ];
 
-    let (batches, hash) = super::batch_and_hash_ops(ops.clone());
+    let (batches, hash) = batch_and_hash_ops(ops.clone());
     insta::assert_debug_snapshot!(batches);
     insta::assert_debug_snapshot!(build_group_chunks(&batches).collect::<Vec<_>>());
 
@@ -278,13 +278,14 @@ fn operation_or_decorator_iterator() {
     ];
 
     // Convert raw decorators to decorator list by adding them to the forest first
-    let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
+    let decorator_list: Vec<(usize, DecoratorId)> = decorators
         .into_iter()
-        .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), crate::mast::MastForestError> {
+        .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
             let decorator_id = mast_forest.add_decorator(decorator)?;
             Ok((idx, decorator_id))
         })
-        .collect::<Result<Vec<_>, _>>().unwrap();
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
 
     let node_id = BasicBlockNodeBuilder::new(operations, decorator_list)
         .add_to_forest(&mut mast_forest)
@@ -318,7 +319,7 @@ fn operation_or_decorator_iterator() {
 fn build_group(ops: &[Operation]) -> Felt {
     let mut group = 0u64;
     for (i, op) in ops.iter().enumerate() {
-        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
+        group |= u64::from(op.op_code()) << (Operation::OP_BITS * i);
     }
     Felt::new(group)
 }
@@ -338,7 +339,7 @@ proptest! {
     /// - Operations are correctly distributed across batches and groups.
     #[test]
     fn test_batch_creation_invariants(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = batch_and_hash_ops(ops.clone());
 
         // A basic block contains one or more batches
         assert!(!batches.is_empty(), "There should be at least one batch");
@@ -372,7 +373,7 @@ proptest! {
     /// - If no groups available, both operation and immediate move to next batch
     #[test]
     fn test_immediate_value_placement(ops in op_non_control_sequence_strategy(50)) {
-        let (batches, _) = super::batch_and_hash_ops(ops.clone());
+        let (batches, _) = batch_and_hash_ops(ops.clone());
 
         for batch in batches {
             let mut op_idx_in_group = 0;
@@ -445,7 +446,7 @@ proptest! {
         let mut dummy_forest = MastForest::new();
 
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decs
+        let forest_decorators: Vec<(usize, DecoratorId)> = decs
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();
@@ -622,7 +623,7 @@ proptest! {
         // Build BasicBlockNode using linked storage (this applies padding)
         let mut forest = MastForest::new();
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();
@@ -689,7 +690,7 @@ proptest! {
         // Build BasicBlockNode using linked storage
         let mut forest = MastForest::new();
         // Convert decorators to use forest's decorator IDs
-        let forest_decorators: Vec<(usize, crate::mast::DecoratorId)> = decorators
+        let forest_decorators: Vec<(usize, DecoratorId)> = decorators
             .iter()
             .map(|(idx, decorator_id)| (*idx, *decorator_id))
             .collect();

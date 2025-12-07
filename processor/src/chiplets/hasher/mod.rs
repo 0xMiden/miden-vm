@@ -249,7 +249,7 @@ impl Hasher {
 
     /// Fills the provided trace fragment with trace data from this hasher trace instance. This
     /// also returns the trace builder for hasher-related auxiliary trace columns.
-    pub(super) fn fill_trace(self, trace: &mut TraceFragment) {
+    pub(super) fn fill_trace(self, trace: &mut TraceFragment<'_>) {
         self.trace.fill_trace(trace)
     }
 

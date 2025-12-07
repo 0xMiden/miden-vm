@@ -188,7 +188,7 @@ impl Spanned for QualifiedProcedureName {
 }
 
 impl fmt::Debug for QualifiedProcedureName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QualifiedProcedureName").field("path", &self.path).finish()
     }
 }
@@ -202,7 +202,7 @@ impl crate::prettier::PrettyPrint for QualifiedProcedureName {
 }
 
 impl fmt::Display for QualifiedProcedureName {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.path, f)
     }
 }
@@ -339,7 +339,7 @@ impl From<ProcedureName> for miette::SourceSpan {
     }
 }
 
-impl core::ops::Deref for ProcedureName {
+impl Deref for ProcedureName {
     type Target = str;
 
     #[inline(always)]

@@ -31,7 +31,9 @@ enum KeySize {
 ///
 /// # Errors
 /// Returns an error if the provided word array is not sorted in non-decreasing order.
-pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_lowerbound_array(
+    process: &ProcessState<'_>,
+) -> Result<Vec<AdviceMutation>, EventError> {
     push_lowerbound_result(process, 4, KeySize::Full)
 }
 
@@ -53,7 +55,7 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 /// # Errors
 /// Returns an error if the keys are not sorted in non-decreasing order.
 pub fn handle_lowerbound_key_value(
-    process: &ProcessState,
+    process: &ProcessState<'_>,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let use_full_key = process.get_stack_item(7);
 
@@ -76,7 +78,7 @@ const START_ADDR_OFFSET: usize = 5;
 const END_ADDR_OFFSET: usize = 6;
 
 fn push_lowerbound_result(
-    process: &ProcessState,
+    process: &ProcessState<'_>,
     stride: u32,
     key_size: KeySize,
 ) -> Result<Vec<AdviceMutation>, EventError> {

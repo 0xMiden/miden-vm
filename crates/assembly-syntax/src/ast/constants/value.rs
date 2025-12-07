@@ -64,7 +64,7 @@ impl core::hash::Hash for ConstantValue {
 }
 
 impl fmt::Debug for ConstantValue {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Word(lit) => fmt::Debug::fmt(&**lit, f),

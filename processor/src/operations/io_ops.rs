@@ -373,7 +373,7 @@ mod tests {
 
         // --- calling MLOADW with a stack of minimum depth is ok ----------------
         let mut process = Process::new_dummy_with_decoder_helpers_and_empty_stack();
-        assert!(process.execute_op(Operation::MLoadW, program, &mut host).is_ok());
+        process.execute_op(Operation::MLoadW, program, &mut host).unwrap();
     }
 
     #[test]
@@ -410,7 +410,7 @@ mod tests {
 
         // --- calling MLOAD with a stack of minimum depth is ok ----------------
         let mut process = Process::new_dummy_with_decoder_helpers_and_empty_stack();
-        assert!(process.execute_op(Operation::MLoad, program, &mut host).is_ok());
+        process.execute_op(Operation::MLoad, program, &mut host).unwrap();
     }
 
     #[test]
@@ -529,7 +529,7 @@ mod tests {
 
         // --- calling STOREW with a stack of minimum depth is ok ----------------
         let mut process = Process::new_dummy_with_decoder_helpers_and_empty_stack();
-        assert!(process.execute_op(Operation::MStoreW, program, &mut host).is_ok());
+        process.execute_op(Operation::MStoreW, program, &mut host).unwrap();
     }
 
     #[test]
@@ -579,7 +579,7 @@ mod tests {
 
         // --- calling MSTORE with a stack of minimum depth is ok ----------------
         let mut process = Process::new_dummy_with_decoder_helpers_and_empty_stack();
-        assert!(process.execute_op(Operation::MStore, program, &mut host).is_ok());
+        process.execute_op(Operation::MStore, program, &mut host).unwrap();
     }
 
     #[test]

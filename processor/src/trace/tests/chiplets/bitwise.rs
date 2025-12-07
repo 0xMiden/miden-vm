@@ -26,7 +26,7 @@ use super::{
 fn b_chip_trace_bitwise() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
-    let stack = [a as u64, b as u64];
+    let stack = [u64::from(a), u64::from(b)];
     let operations = vec![
         Operation::U32and,
         Operation::Push(Felt::from(a)),

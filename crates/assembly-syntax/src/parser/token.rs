@@ -245,9 +245,9 @@ impl From<Felt> for IntValue {
 impl IntValue {
     pub fn as_int(&self) -> u64 {
         match self {
-            Self::U8(value) => *value as u64,
-            Self::U16(value) => *value as u64,
-            Self::U32(value) => *value as u64,
+            Self::U8(value) => u64::from(*value),
+            Self::U16(value) => u64::from(*value),
+            Self::U32(value) => u64::from(*value),
             Self::Felt(value) => value.as_int(),
         }
     }
@@ -304,9 +304,9 @@ impl core::ops::Div<IntValue> for IntValue {
 impl PartialEq<Felt> for IntValue {
     fn eq(&self, other: &Felt) -> bool {
         match self {
-            Self::U8(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U16(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U32(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U8(lhs) => u64::from(*lhs) == other.as_int(),
+            Self::U16(lhs) => u64::from(*lhs) == other.as_int(),
+            Self::U32(lhs) => u64::from(*lhs) == other.as_int(),
             Self::Felt(lhs) => lhs == other,
         }
     }
@@ -399,13 +399,13 @@ impl proptest::arbitrary::Arbitrary for IntValue {
             // U8 values - full range
             num::u8::ANY.prop_map(IntValue::U8),
             // U16 values that don't overlap with U8 to preserve variant during serialization
-            (u8::MAX as u16 + 1..=u16::MAX).prop_map(IntValue::U16),
+            (u16::from(u8::MAX) + 1..=u16::MAX).prop_map(IntValue::U16),
             // U32 values - full range
             num::u32::ANY.prop_map(IntValue::U32),
             // Felt values - values that don't fit in u32 but are within field modulus
             (num::u64::ANY)
                 .prop_filter_map("valid felt value", |n| {
-                    if n > u32::MAX as u64 && n < crate::FIELD_MODULUS {
+                    if n > u64::from(u32::MAX) && n < crate::FIELD_MODULUS {
                         Some(IntValue::Felt(Felt::new(n)))
                     } else {
                         None

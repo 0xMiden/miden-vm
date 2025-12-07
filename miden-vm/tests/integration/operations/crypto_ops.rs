@@ -115,7 +115,7 @@ fn mtree_get() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
     ];
 
     let final_stack = [
@@ -147,7 +147,7 @@ fn mtree_verify() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         leaves[index][0].as_int(),
         leaves[index][1].as_int(),
         leaves[index][2].as_int(),
@@ -159,7 +159,7 @@ fn mtree_verify() {
         leaves[index][2].as_int(),
         leaves[index][1].as_int(),
         leaves[index][0].as_int(),
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         index as u64,
         tree.root()[3].as_int(),
         tree.root()[2].as_int(),
@@ -187,7 +187,7 @@ fn mtree_verify_negative() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         tampered_index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         leaves[index][0].as_int(),
         leaves[index][1].as_int(),
         leaves[index][2].as_int(),
@@ -199,7 +199,7 @@ fn mtree_verify_negative() {
         leaves[index][2].as_int(),
         leaves[index][1].as_int(),
         leaves[index][0].as_int(),
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         index as u64,
         tree.root()[3].as_int(),
         tree.root()[2].as_int(),
@@ -232,7 +232,7 @@ fn mtree_update() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
     ];
 
     // --- mtree_set ----------------------------------------------------------------------

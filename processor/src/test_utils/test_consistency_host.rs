@@ -21,7 +21,7 @@ pub struct ProcessStateSnapshot {
 }
 
 impl From<&ProcessState<'_>> for ProcessStateSnapshot {
-    fn from(state: &ProcessState) -> Self {
+    fn from(state: &ProcessState<'_>) -> Self {
         ProcessStateSnapshot {
             clk: state.clk().into(),
             ctx: state.ctx().into(),
@@ -64,7 +64,7 @@ impl TraceCollector {
 }
 
 impl DebugHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessState<'_>, trace_id: u32) -> Result<(), TraceError> {
         // Count the trace event
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
@@ -151,13 +151,17 @@ where
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessState,
+        _process: &mut ProcessState<'_>,
         _options: &DebugOptions,
     ) -> Result<(), DebugError> {
         Ok(())
     }
 
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState<'_>,
+        trace_id: u32,
+    ) -> Result<(), TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
@@ -193,7 +197,7 @@ where
 
     fn on_event(
         &mut self,
-        _process: &ProcessState,
+        _process: &ProcessState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async move { Ok(Vec::new()) } // For testing, return empty mutations
     }

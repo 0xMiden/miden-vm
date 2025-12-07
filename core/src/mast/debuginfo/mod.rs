@@ -212,7 +212,7 @@ impl DebugInfo {
         &mut self,
         node_id: MastNodeId,
         decorators_info: Vec<(usize, DecoratorId)>,
-    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+    ) -> Result<(), DecoratorIndexError> {
         self.op_decorator_storage.add_decorator_info_for_node(node_id, decorators_info)
     }
 

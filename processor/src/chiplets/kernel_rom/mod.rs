@@ -93,7 +93,7 @@ impl KernelRom {
     // --------------------------------------------------------------------------------------------
 
     /// Populates the provided execution trace fragment with execution trace of this kernel ROM.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut TraceFragment<'_>) {
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
         let mut row = RowIndex::from(0);
         for access_info in self.access_map.values() {
@@ -138,7 +138,7 @@ impl ProcAccessInfo {
     }
 
     /// Writes a single row into the provided trace fragment for this procedure access entry.
-    pub fn write_into_trace(&self, trace: &mut TraceFragment, row: RowIndex, is_first: bool) {
+    pub fn write_into_trace(&self, trace: &mut TraceFragment<'_>, row: RowIndex, is_first: bool) {
         let s_first = Felt::from(is_first);
         trace.set(row, 0, s_first);
         trace.set(row, 1, self.proc_hash[0]);

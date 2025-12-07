@@ -360,7 +360,7 @@ mod tests {
         assert_eq!(MIN_STACK_DEPTH, process.stack.depth());
 
         // calling drop with a minimum stack depth should be ok
-        assert!(process.execute_op(Operation::Drop, program, &mut host).is_ok());
+        process.execute_op(Operation::Drop, program, &mut host).unwrap();
     }
 
     #[test]
@@ -381,7 +381,7 @@ mod tests {
         assert_eq!(expected, process.stack.trace_state());
 
         // duplicating non-existent item from the min stack range should be ok
-        assert!(process.execute_op(Operation::Dup2, program, &mut host).is_ok());
+        process.execute_op(Operation::Dup2, program, &mut host).unwrap();
         // drop it again before continuing the tests and stack comparison
         process.execute_op(Operation::Drop, program, &mut host).unwrap();
 
@@ -432,7 +432,7 @@ mod tests {
         // swapping with a minimum stack should be ok
         let stack = StackInputs::default();
         let mut process = Process::new_dummy(stack);
-        assert!(process.execute_op(Operation::Swap, program, &mut host).is_ok());
+        process.execute_op(Operation::Swap, program, &mut host).unwrap();
     }
 
     #[test]
@@ -450,7 +450,7 @@ mod tests {
         // swapping with a minimum stack should be ok
         let stack = StackInputs::default();
         let mut process = Process::new_dummy(stack);
-        assert!(process.execute_op(Operation::SwapW, program, &mut host).is_ok());
+        process.execute_op(Operation::SwapW, program, &mut host).unwrap();
     }
 
     #[test]
@@ -469,7 +469,7 @@ mod tests {
         // swapping with a minimum stack should be ok
         let stack = StackInputs::default();
         let mut process = Process::new_dummy(stack);
-        assert!(process.execute_op(Operation::SwapW2, program, &mut host).is_ok());
+        process.execute_op(Operation::SwapW2, program, &mut host).unwrap();
     }
 
     #[test]
@@ -488,7 +488,7 @@ mod tests {
 
         // swapping with a minimum stack should be ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::SwapW3, program, &mut host).is_ok());
+        process.execute_op(Operation::SwapW3, program, &mut host).unwrap();
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
 
         // executing movup with a minimum stack depth should be ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::MovUp2, program, &mut host).is_ok());
+        process.execute_op(Operation::MovUp2, program, &mut host).unwrap();
     }
 
     #[test]
@@ -558,7 +558,7 @@ mod tests {
 
         // executing movdn with a minimum stack depth should be ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::MovDn2, program, &mut host).is_ok());
+        process.execute_op(Operation::MovDn2, program, &mut host).unwrap();
     }
 
     #[test]
@@ -584,7 +584,7 @@ mod tests {
 
         // executing conditional swap with a minimum stack depth should be ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::CSwap, program, &mut host).is_ok());
+        process.execute_op(Operation::CSwap, program, &mut host).unwrap();
     }
 
     #[test]
@@ -610,7 +610,7 @@ mod tests {
 
         // executing conditional swap with a minimum stack depth should be ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::CSwapW, program, &mut host).is_ok());
+        process.execute_op(Operation::CSwapW, program, &mut host).unwrap();
     }
 
     // HELPER FUNCTIONS

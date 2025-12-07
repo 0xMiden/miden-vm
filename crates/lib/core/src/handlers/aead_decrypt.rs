@@ -47,7 +47,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::a
 /// 1. The MASM procedure re-verifies the tag when decrypting
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
-pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_aead_decrypt(process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [event_id, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)

@@ -130,8 +130,8 @@ fn u32assert2() {
     let test = build_op_test!(asm_op, &[value_a, value_b]);
     test.expect_stack(&[value_b, value_a]);
 
-    let value_a = rand_value::<u32>() as u64;
-    let value_b = rand_value::<u32>() as u64;
+    let value_a = u64::from(rand_value::<u32>());
+    let value_b = u64::from(rand_value::<u32>());
     let test = build_op_test!(asm_op, &[value_a, value_b]);
     test.expect_stack(&[value_b, value_a]);
 }
@@ -278,7 +278,7 @@ proptest! {
         let asm_op="u32testw";
 
         // should leave a 1 on the stack since all values in the word are valid u32 values
-        let values: Vec<u64> = word.iter().map(|a| *a as u64).collect();
+        let values: Vec<u64> = word.iter().map(|a| u64::from(*a)).collect();
         let mut expected = values.clone();
         // push the expected result
         expected.push(1);
@@ -294,8 +294,8 @@ proptest! {
         let asm_op = "u32assert";
 
         // assertion passes and leaves the stack unchanged if a < 2^32
-        let test = build_op_test!(asm_op, &[value as u64]);
-        test.prop_expect_stack(&[value as u64])?;
+        let test = build_op_test!(asm_op, &[u64::from(value)]);
+        test.prop_expect_stack(&[u64::from(value)])?;
     }
 
     #[test]
@@ -303,7 +303,7 @@ proptest! {
         let asm_op = "u32assertw";
 
         // should pass and leave the stack unchanged if a < 2^32 for all values in the word
-        let values: Vec<u64> = word.iter().map(|a| *a as u64).collect();
+        let values: Vec<u64> = word.iter().map(|a| u64::from(*a)).collect();
         let mut expected = values.clone();
         // reverse the values to put the expected array in stack order
         expected.reverse();
@@ -332,7 +332,7 @@ proptest! {
         // so the field modulus must be applied first
         let felt_value = value % Felt::MODULUS;
         let expected_b = felt_value >> 32;
-        let expected_c = felt_value as u32 as u64;
+        let expected_c = u64::from(felt_value as u32);
 
         let test = build_op_test!(asm_op, &[value, value]);
         test.prop_expect_stack(&[expected_b, expected_c, value])?;

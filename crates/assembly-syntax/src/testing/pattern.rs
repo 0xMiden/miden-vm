@@ -34,16 +34,15 @@ impl Pattern {
     #[track_caller]
     pub fn assert_match(&self, input: impl AsRef<str>) {
         let input = input.as_ref();
-        if !self.is_match(input) {
-            panic!(
-                r"expected string was not found in emitted diagnostics:
-expected input to {expected}
-matched against: `{actual}`
-",
-                expected = self,
-                actual = input
-            );
-        }
+        assert!(
+            self.is_match(input),
+            r"expected string was not found in emitted diagnostics:
+        expected input to {expected}
+        matched against: `{actual}`
+        ",
+            expected = self,
+            actual = input
+        )
     }
 
     /// Like [Pattern::assert_match], but renders additional context
@@ -52,22 +51,21 @@ matched against: `{actual}`
     pub fn assert_match_with_context(&self, input: impl AsRef<str>, context: impl AsRef<str>) {
         let input = input.as_ref();
         let context = context.as_ref();
-        if !self.is_match(input) {
-            panic!(
-                r"expected string was not found in emitted diagnostics:
-expected input to {expected}
-matched against: `{actual}`
-full output: `{context}`
-",
-                expected = self,
-                actual = input
-            );
-        }
+        assert!(
+            self.is_match(input),
+            r"expected string was not found in emitted diagnostics:
+        expected input to {expected}
+        matched against: `{actual}`
+        full output: `{context}`
+        ",
+            expected = self,
+            actual = input
+        )
     }
 }
 
 impl fmt::Display for Pattern {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Literal(lit) => write!(f, "contain `{lit}`"),
             Self::Regex(pat) => write!(f, "match regular expression `{}`", pat.as_str()),

@@ -72,7 +72,7 @@ impl Assembler {
         &self,
         callee: &InvocationTarget,
         caller: GlobalItemIndex,
-        block_builder: &mut BasicBlockBuilder,
+        block_builder: &mut BasicBlockBuilder<'_>,
     ) -> Result<(), Report> {
         let mast_root = {
             let resolved = self
@@ -98,7 +98,7 @@ impl Assembler {
     fn procref_mast_root(
         &self,
         mast_root: Word,
-        block_builder: &mut BasicBlockBuilder,
+        block_builder: &mut BasicBlockBuilder<'_>,
     ) -> Result<(), Report> {
         // Create an array with `Push` operations containing root elements
         let ops = mast_root

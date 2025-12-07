@@ -36,7 +36,7 @@ impl<'a> PathComponent<'a> {
         match self {
             Self::Root => None,
             Self::Normal(id) => Some(Ident::from_raw_parts(Span::unknown(Arc::from(
-                id.to_string().into_boxed_str(),
+                (*id).to_string().into_boxed_str(),
             )))),
         }
     }
@@ -64,7 +64,7 @@ impl AsRef<str> for PathComponent<'_> {
 }
 
 impl fmt::Display for PathComponent<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
@@ -258,15 +258,12 @@ impl<'a> Iterator for Components<'a> {
                         self.front = State::Done;
                         continue;
                     }
-                    match self.path.strip_prefix("::") {
-                        Some(rest) => {
-                            self.path = rest;
-                            self.front = State::Body;
-                        },
-                        None => {
-                            self.front = State::Done;
-                            return Some(Err(PathError::MissingPathSeparator));
-                        },
+                    if let Some(rest) = self.path.strip_prefix("::") {
+                        self.path = rest;
+                        self.front = State::Body;
+                    } else {
+                        self.front = State::Done;
+                        return Some(Err(PathError::MissingPathSeparator));
                     }
                 },
                 State::Done => break,

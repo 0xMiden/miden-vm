@@ -64,7 +64,7 @@ fn test_decorators_only_execute_in_debug_mode() {
 
         fn on_debug(
             &mut self,
-            _process: &mut ProcessState,
+            _process: &mut ProcessState<'_>,
             _options: &miden_core::DebugOptions,
         ) -> Result<(), DebugError> {
             Ok(())
@@ -72,7 +72,7 @@ fn test_decorators_only_execute_in_debug_mode() {
 
         fn on_trace(
             &mut self,
-            _process: &mut ProcessState,
+            _process: &mut ProcessState<'_>,
             trace_id: u32,
         ) -> Result<(), TraceError> {
             if trace_id == 999 {
@@ -87,7 +87,7 @@ fn test_decorators_only_execute_in_debug_mode() {
             None
         }
 
-        fn on_event(&mut self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+        fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
             Ok(Vec::new())
         }
     }

@@ -96,9 +96,12 @@ fn assert_root_mapping(
 fn assert_child_id_lt_parent_id(forest: &MastForest) -> Result<(), &str> {
     for (mast_node_id, node) in forest.nodes().iter().enumerate() {
         node.for_each_child(|child_id| {
-            if child_id.to_usize() >= mast_node_id {
-                panic!("child id {} is not < parent id {}", child_id.to_usize(), mast_node_id);
-            }
+            assert!(
+                child_id.to_usize() < mast_node_id,
+                "child id {} is not < parent id {}",
+                child_id.to_usize(),
+                mast_node_id
+            );
         });
     }
 
@@ -964,7 +967,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     );
 
     // Count how many times each decorator appears in the merged forest
-    let mut decorator_ref_counts = alloc::collections::BTreeMap::new();
+    let mut decorator_ref_counts = BTreeMap::new();
 
     // Check all nodes for decorator references
     for node in &merged.nodes {
@@ -988,12 +991,12 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
     for (i, decorator) in merged.decorators().iter().enumerate() {
         let deco_id = DecoratorId::from_u32_safe(i as u32, &merged).unwrap();
         let ref_count = decorator_ref_counts.get(&deco_id).unwrap_or(&0);
-        if ref_count == &0 {
-            panic!(
-                "Decorator at index {} (value: {:?}) is not referenced anywhere in the merged forest (orphan)",
-                i, decorator
-            );
-        }
+        assert!(
+            ref_count != &0,
+            "Decorator at index {} (value: {:?}) is not referenced anywhere in the merged forest (orphan)",
+            i,
+            decorator
+        )
     }
 
     // Verify op-indexed decorators are correctly preserved for Forest A's block
@@ -1007,7 +1010,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
         );
 
         // Check op-indexed decorators at correct positions
-        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+        let indexed_decs: BTreeMap<usize, DecoratorId> =
             block_a.indexed_decorator_iter(&merged).collect();
 
         assert_eq!(
@@ -1043,7 +1046,7 @@ fn mast_forest_merge_op_indexed_decorators_preservation() {
         );
 
         // Check op-indexed decorators at correct positions
-        let indexed_decs: alloc::collections::BTreeMap<usize, DecoratorId> =
+        let indexed_decs: BTreeMap<usize, DecoratorId> =
             block_b.indexed_decorator_iter(&merged).collect();
 
         assert_eq!(

@@ -242,12 +242,12 @@ fn write_rows(
         if gap > stride {
             gap -= stride;
             prev_val += stride;
-            write_trace_row(trace, step, 0, prev_val as u64);
+            write_trace_row(trace, step, 0, u64::from(prev_val));
         } else {
             stride /= 3;
         }
     }
-    write_trace_row(trace, step, num_lookups, value as u64);
+    write_trace_row(trace, step, num_lookups, u64::from(value));
 }
 
 /// Populates a single row at the specified step in the trace table.

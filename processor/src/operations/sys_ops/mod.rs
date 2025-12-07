@@ -141,7 +141,7 @@ mod tests {
         process.execute_op(Operation::Swap, program, &mut host).unwrap();
         process.execute_op(Operation::Drop, program, &mut host).unwrap();
 
-        assert!(process.execute_op(Operation::Assert(ZERO), program, &mut host).is_ok());
+        process.execute_op(Operation::Assert(ZERO), program, &mut host).unwrap();
     }
 
     #[test]

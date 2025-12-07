@@ -141,7 +141,7 @@ fn test_assert() {
         let result = processor.execute_sync(&program, &mut host);
 
         // Check that the execution succeeds
-        assert!(result.is_ok());
+        result.unwrap();
     }
 
     // Case 2: the stack top is not ONE
@@ -384,7 +384,7 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new(&alloc::vec::Vec::new());
+    let processor = FastProcessor::new(&Vec::new());
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);

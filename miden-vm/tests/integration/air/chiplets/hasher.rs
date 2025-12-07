@@ -34,7 +34,7 @@ fn mtree_get() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
     ];
 
     build_op_test!(asm_op, &stack_inputs, &[], store)
@@ -64,7 +64,7 @@ fn mtree_verify() {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         leaves[index][0].as_int(),
         leaves[index][1].as_int(),
         leaves[index][2].as_int(),
@@ -136,7 +136,7 @@ fn build_mtree_update_test_inputs() -> (Vec<u64>, MerkleStore, Vec<Word>) {
         tree.root()[2].as_int(),
         tree.root()[3].as_int(),
         index as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
     ];
 
     (stack_inputs, store, leaves)

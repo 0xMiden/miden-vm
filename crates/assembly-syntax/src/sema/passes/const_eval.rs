@@ -61,7 +61,7 @@ where
                     ))) => {
                         // A reference to another constant was used, try to evaluate the expression
                         let expr = expr.clone();
-                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                        match constants::eval::expr(&expr, self.env) {
                             Ok(ConstantExpr::Int(value)) => value,
                             // Unable to evaluate in the current context
                             Ok(ConstantExpr::Var(_) | ConstantExpr::BinaryOp { .. }) => {
@@ -131,7 +131,7 @@ where
             return ControlFlow::Continue(());
         }
 
-        match crate::ast::constants::eval::expr(&constant.value, self.env) {
+        match constants::eval::expr(&constant.value, self.env) {
             Ok(evaluated) => {
                 constant.value = evaluated;
             },
@@ -161,7 +161,7 @@ where
                 Ok(Some(CachedConstantValue::Miss(expr @ ConstantExpr::Var(_)))) => {
                     // A reference to another constant was used, try to evaluate the expression
                     let expr = expr.clone();
-                    match crate::ast::constants::eval::expr(&expr, self.env) {
+                    match constants::eval::expr(&expr, self.env) {
                         Ok(ConstantExpr::Hash(HashKind::Event, _)) => (),
                         // Unable to evaluate in the current context
                         Ok(ConstantExpr::Var(_)) => return ControlFlow::Continue(()),
@@ -203,7 +203,7 @@ where
                 },
             }
         }
-        crate::ast::visit::visit_mut_inst(self, inst)
+        visit::visit_mut_inst(self, inst)
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut Immediate<u8>) -> ControlFlow<()> {
         self.eval_const(imm)
@@ -264,7 +264,7 @@ where
                     ))) => {
                         // A reference to another constant was used, try to evaluate the expression
                         let expr = expr.clone();
-                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                        match constants::eval::expr(&expr, self.env) {
                             Ok(ConstantExpr::Int(value)) => {
                                 *imm = Immediate::Value(Span::new(
                                     span,
@@ -368,7 +368,7 @@ where
                     ))) => {
                         // A reference to another constant was used, try to evaluate the expression
                         let expr = expr.clone();
-                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                        match constants::eval::expr(&expr, self.env) {
                             Ok(ConstantExpr::Int(value)) => {
                                 *imm = Immediate::Value(Span::new(
                                     span,
@@ -467,7 +467,7 @@ where
                     Ok(Some(CachedConstantValue::Miss(expr @ ConstantExpr::Var(_)))) => {
                         // A reference to another constant was used, try to evaluate the expression
                         let expr = expr.clone();
-                        match crate::ast::constants::eval::expr(&expr, self.env) {
+                        match constants::eval::expr(&expr, self.env) {
                             Ok(ConstantExpr::Word(value)) => {
                                 *imm = Immediate::Value(Span::new(span, *value.inner()));
                             },

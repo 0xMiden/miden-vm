@@ -109,7 +109,7 @@ impl crate::prettier::PrettyPrint for InvocationTarget {
     }
 }
 impl fmt::Display for InvocationTarget {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use crate::prettier::PrettyPrint;
 
         self.pretty_print(f)

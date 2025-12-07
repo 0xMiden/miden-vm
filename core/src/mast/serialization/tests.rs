@@ -255,14 +255,14 @@ fn serialize_deserialize_all_nodes() {
 
         {
             // Convert raw decorators to decorator list by adding them to the forest first
-            let decorator_list: Vec<(usize, crate::mast::DecoratorId)> = decorators
-            .into_iter()
-            .map(|(idx, decorator)| -> Result<(usize, crate::mast::DecoratorId), MastForestError> {
-                let decorator_id = mast_forest.add_decorator(decorator)?;
-                Ok((idx, decorator_id))
-            })
-            .collect::<Result<Vec<_>, MastForestError>>()
-            .unwrap();
+            let decorator_list: Vec<(usize, DecoratorId)> = decorators
+                .into_iter()
+                .map(|(idx, decorator)| -> Result<(usize, DecoratorId), MastForestError> {
+                    let decorator_id = mast_forest.add_decorator(decorator)?;
+                    Ok((idx, decorator_id))
+                })
+                .collect::<Result<Vec<_>, MastForestError>>()
+                .unwrap();
 
             BasicBlockNodeBuilder::new(operations, decorator_list)
                 .add_to_forest(&mut mast_forest)
@@ -515,12 +515,11 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 
     // Get the deserialized block
     let deserialized_root_id = deserialized.procedure_roots()[0];
-    let deserialized_block =
-        if let crate::mast::MastNode::Block(block) = &deserialized[deserialized_root_id] {
-            block
-        } else {
-            panic!("Expected a block node");
-        };
+    let deserialized_block = if let MastNode::Block(block) = &deserialized[deserialized_root_id] {
+        block
+    } else {
+        panic!("Expected a block node");
+    };
 
     // Verify that each decorator appears exactly once in the deserialized structure
     assert_eq!(

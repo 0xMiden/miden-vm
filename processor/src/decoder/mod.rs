@@ -250,7 +250,7 @@ impl Process {
         // start new execution context for the operand stack. this has the effect of resetting
         // stack depth to 16.
         let (stack_depth, next_overflow_addr) = self.stack.start_context();
-        debug_assert!(stack_depth <= u32::MAX as usize, "stack depth too big");
+        debug_assert!(u32::try_from(stack_depth).is_ok(), "stack depth too big");
 
         // update the system registers and start decoding the block; this appends a row with
         // CALL/SYSCALL operation to the decoder trace and records information about the current
@@ -409,7 +409,7 @@ impl Process {
         debug_assert_eq!(dyn_node.digest(), hashed_block);
 
         let (stack_depth, next_overflow_addr) = self.stack.shift_left_and_start_context();
-        debug_assert!(stack_depth <= u32::MAX as usize, "stack depth too big");
+        debug_assert!(u32::try_from(stack_depth).is_ok(), "stack depth too big");
 
         let ctx_info = ExecutionContextInfo::new(
             self.system.ctx(),
@@ -935,7 +935,7 @@ pub(crate) struct BasicBlockContext {
 
 /// Removes the specified operation from the op group and returns the resulting op group.
 fn remove_opcode_from_group(op_group: Felt, op: Operation) -> Felt {
-    let opcode = op.op_code() as u64;
+    let opcode = u64::from(op.op_code());
     let result = Felt::new((op_group.as_int() - opcode) >> NUM_OP_BITS);
     debug_assert!(op_group.as_int() >= result.as_int(), "op group underflow");
     result
@@ -960,7 +960,7 @@ pub fn build_op_group(ops: &[Operation]) -> Felt {
     let mut group = 0u64;
     let mut i = 0;
     for op in ops.iter() {
-        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
+        group |= u64::from(op.op_code()) << (Operation::OP_BITS * i);
         i += 1;
     }
     assert!(i <= OP_GROUP_SIZE, "too many ops");

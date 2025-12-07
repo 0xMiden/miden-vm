@@ -233,6 +233,6 @@ fn binary_xor(a: Felt, b: Felt) -> Felt {
 }
 
 fn rand_u32() -> Felt {
-    let value = rand_value::<u64>() as u32 as u64;
+    let value = u64::from(rand_value::<u64>() as u32);
     Felt::new(value)
 }

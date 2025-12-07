@@ -143,21 +143,18 @@ impl PathBuf {
         P: AsRef<Path> + ?Sized,
     {
         let parent = parent.as_ref();
-        match self.split_last() {
-            Some((last, _)) => {
-                let parent = parent.as_str();
-                let mut buf = String::with_capacity(last.len() + parent.len() + 2);
-                if !parent.is_empty() {
-                    buf.push_str(parent);
-                    buf.push_str("::");
-                }
-                buf.push_str(last);
-                self.inner = buf;
-            },
-            None => {
-                self.inner.clear();
-                self.inner.push_str(parent.as_str());
-            },
+        if let Some((last, _)) = self.split_last() {
+            let parent = parent.as_str();
+            let mut buf = String::with_capacity(last.len() + parent.len() + 2);
+            if !parent.is_empty() {
+                buf.push_str(parent);
+                buf.push_str("::");
+            }
+            buf.push_str(last);
+            self.inner = buf;
+        } else {
+            self.inner.clear();
+            self.inner.push_str(parent.as_str());
         }
     }
 
@@ -418,7 +415,6 @@ mod tests {
     #[test]
     fn kernel_path() {
         let path = PathBuf::new("$kernel::bar::baz").unwrap();
-        std::dbg!(&path);
         assert!(path.is_absolute());
         assert_eq!(path.components().count(), 4);
         assert_eq!(path.last(), Some("baz"));

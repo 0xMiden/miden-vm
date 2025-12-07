@@ -128,7 +128,7 @@ impl HasherTrace {
     // --------------------------------------------------------------------------------------------
 
     /// Fills the provided trace fragment with trace data from this hasher trace instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut TraceFragment<'_>) {
         // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace widths");

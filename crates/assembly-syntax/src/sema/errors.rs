@@ -238,7 +238,7 @@ pub enum LimitKind {
 }
 
 impl fmt::Display for LimitKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Procedures => f.write_str("too many procedures in module"),
             Self::Locals => f.write_str("too many procedure locals"),

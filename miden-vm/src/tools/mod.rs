@@ -376,7 +376,7 @@ mod tests {
         let advice_inputs = AdviceInputs::default();
         let host = DefaultHost::default();
         let program = Assembler::default().assemble_program(source).unwrap();
-        let execution_details = super::analyze(&program, stack_inputs, advice_inputs, host);
+        let execution_details = analyze(&program, stack_inputs, advice_inputs, host);
         let expected_details = ExecutionDetails {
             total_noops: 0,
             asm_op_stats: vec![

@@ -391,18 +391,12 @@ impl MastForestContributor for SplitNodeBuilder {
                 let if_branch_hash = forest[self.branches[0]].digest();
                 let else_branch_hash = forest[self.branches[1]].digest();
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[if_branch_hash, else_branch_hash],
-                    SplitNode::DOMAIN,
-                )
+                hasher::merge_in_domain(&[if_branch_hash, else_branch_hash], SplitNode::DOMAIN)
             },
         )
     }
 
-    fn remap_children(
-        self,
-        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, remapping: &impl crate::LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         SplitNodeBuilder {
             branches: [
                 *remapping.get(self.branches[0]).unwrap_or(&self.branches[0]),
@@ -414,31 +408,25 @@ impl MastForestContributor for SplitNodeBuilder {
         }
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }
@@ -496,7 +484,7 @@ impl proptest::prelude::Arbitrary for SplitNodeBuilder {
         use proptest::prelude::*;
 
         (
-            any::<[crate::mast::MastNodeId; 2]>(),
+            any::<[MastNodeId; 2]>(),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
                 0..=params.max_decorators,

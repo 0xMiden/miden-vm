@@ -354,7 +354,7 @@ impl OpBatchAccumulator {
     /// Add the opcode to the group and increment the op index pointer
     #[inline]
     fn push_op(&mut self, op: Operation) {
-        let opcode = op.op_code() as u64;
+        let opcode = u64::from(op.op_code());
         self.group |= opcode << (Operation::OP_BITS * self.op_idx);
         self.ops.push(op);
         self.op_idx += 1;

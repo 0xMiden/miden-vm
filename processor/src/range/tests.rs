@@ -50,7 +50,7 @@ fn range_checks() {
 fn range_checks_rand() {
     let mut checker = RangeChecker::new();
     let values = rand_array::<u64, 300>();
-    let values = values.into_iter().map(|v| Felt::new(v as u16 as u64)).collect::<Vec<_>>();
+    let values = values.into_iter().map(|v| Felt::new(u64::from(v as u16))).collect::<Vec<_>>();
     for &value in values.iter() {
         checker.add_value(value.as_int() as u16);
     }

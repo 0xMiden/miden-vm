@@ -537,22 +537,22 @@ impl Assembler {
         let mut cache = crate::linker::ResolverCache::default();
         let export = match self.linker[gid].item() {
             SymbolItem::Compiled(ItemInfo::Procedure(item)) => {
-                let resolved = match mast_forest_builder.get_procedure(gid) {
-                    Some(proc) => ResolvedProcedure {
+                let resolved = if let Some(proc) = mast_forest_builder.get_procedure(gid) {
+                    ResolvedProcedure {
                         node: proc.body_node_id(),
                         signature: proc.signature(),
-                    },
+                    }
+                } else {
                     // We didn't find the procedure in our current MAST forest. We still need to
                     // check if it exists in one of a library dependency.
-                    None => {
-                        let node = self.ensure_valid_procedure_mast_root(
-                            InvokeKind::ProcRef,
-                            SourceSpan::UNKNOWN,
-                            item.digest,
-                            mast_forest_builder,
-                        )?;
-                        ResolvedProcedure { node, signature: item.signature.clone() }
-                    },
+
+                    let node = self.ensure_valid_procedure_mast_root(
+                        InvokeKind::ProcRef,
+                        SourceSpan::UNKNOWN,
+                        item.digest,
+                        mast_forest_builder,
+                    )?;
+                    ResolvedProcedure { node, signature: item.signature.clone() }
                 };
                 let digest = item.digest;
                 let ResolvedProcedure { node, signature } = resolved;
@@ -795,7 +795,7 @@ impl Assembler {
                         procedure_gid,
                         is_program_entrypoint,
                         path,
-                        ast::Visibility::Public,
+                        Visibility::Public,
                         None,
                         module_kind.is_kernel(),
                         self.source_manager.clone(),
@@ -1181,16 +1181,15 @@ impl Assembler {
                 // Note: this module is guaranteed to be of AST variant, since we have the
                 // AST of a procedure contained in it (i.e. `proc`). Hence, it must be that
                 // the entire module is in AST representation as well.
-                if module.kind().is_kernel() || module.path().is_kernel_path() {
-                    panic!(
-                        "linker failed to validate syscall correctly: {}",
-                        Report::new(LinkerError::InvalidSysCallTarget {
-                            span,
-                            source_file: current_source_file.clone(),
-                            callee: proc.path().clone(),
-                        })
-                    )
-                }
+                assert!(
+                    !(module.kind().is_kernel() || module.path().is_kernel_path()),
+                    "linker failed to validate syscall correctly: {}",
+                    Report::new(LinkerError::InvalidSysCallTarget {
+                        span,
+                        source_file: current_source_file.clone(),
+                        callee: proc.path().clone(),
+                    })
+                )
             },
             Some(_) | None => (),
         }

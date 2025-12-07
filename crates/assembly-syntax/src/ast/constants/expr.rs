@@ -284,7 +284,7 @@ impl core::hash::Hash for ConstantExpr {
 }
 
 impl fmt::Debug for ConstantExpr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Int(lit) => fmt::Debug::fmt(&**lit, f),
             Self::Word(lit) => fmt::Debug::fmt(&**lit, f),
@@ -391,7 +391,7 @@ impl ConstantOp {
 }
 
 impl fmt::Display for ConstantOp {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Add => f.write_str("+"),
             Self::Sub => f.write_str("-"),
@@ -491,7 +491,7 @@ impl HashKind {
 }
 
 impl fmt::Display for HashKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Word => f.write_str("word"),
             Self::Event => f.write_str("event"),

@@ -135,13 +135,17 @@ where
 
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &mut ProcessState<'_>,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState<'_>,
+        trace_id: u32,
+    ) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
@@ -159,7 +163,7 @@ where
         self.store.get(node_digest)
     }
 
-    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&mut self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
         if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
             // the event was handled by the registered event handlers; just return

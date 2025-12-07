@@ -62,7 +62,7 @@ mod tests {
         // calling ext2mul with a stack of minimum depth is ok
         let stack = StackInputs::new(vec![]).expect("inputs lenght too long");
         let mut process = Process::new_dummy(stack);
-        assert!(process.execute_op(Operation::Ext2Mul, program, &mut host).is_ok());
+        process.execute_op(Operation::Ext2Mul, program, &mut host).unwrap();
     }
 
     // HELPER FUNCTIONS

@@ -46,7 +46,7 @@ impl Decorator {
                     asm_op.context_name().as_bytes(),
                     asm_op.op().as_bytes(),
                     &[asm_op.num_cycles()],
-                    &[asm_op.should_break() as u8],
+                    &[u8::from(asm_op.should_break())],
                 ];
                 if let Some(location) = asm_op.location() {
                     let bytes_to_hash = [

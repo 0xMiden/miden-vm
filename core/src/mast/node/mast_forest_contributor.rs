@@ -22,7 +22,7 @@ pub trait MastForestContributor {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
     ) -> Result<crate::mast::MastNodeFingerprint, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given

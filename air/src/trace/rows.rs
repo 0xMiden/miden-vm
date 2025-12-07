@@ -33,7 +33,7 @@ impl RowIndex {
 }
 
 impl Display for RowIndex {
-    fn fmt(&self, f: &mut Formatter) -> core::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -49,7 +49,7 @@ impl From<RowIndex> for u32 {
 
 impl From<RowIndex> for u64 {
     fn from(step: RowIndex) -> u64 {
-        step.0 as u64
+        u64::from(step.0)
     }
 }
 

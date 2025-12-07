@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_assignments)]
 #![doc = include_str!("../README.md")]
 
 #[macro_use]

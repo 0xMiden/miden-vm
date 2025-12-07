@@ -1,5 +1,3 @@
-extern crate lalrpop;
-
 use rustc_version::{Channel, version_meta};
 
 fn main() {

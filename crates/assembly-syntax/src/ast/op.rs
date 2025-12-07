@@ -54,7 +54,7 @@ impl crate::prettier::PrettyPrint for Op {
 }
 
 impl fmt::Debug for Op {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::If { then_blk, else_blk, .. } => {
                 f.debug_struct("If").field("then", then_blk).field("else", else_blk).finish()

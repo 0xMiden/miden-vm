@@ -233,33 +233,30 @@ impl MastForestMerger {
         let node_fingerprint =
             remapped_builder.fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)?;
 
-        match self.lookup_node_by_fingerprint(&node_fingerprint) {
-            Some(matching_node_id) => {
-                // If a node with a matching fingerprint exists, then the merging node is a
-                // duplicate and we remap it to the existing node.
-                self.node_id_mappings[forest_idx].insert(merging_id, matching_node_id);
-            },
-            None => {
-                // If no node with a matching fingerprint exists, then the merging node is
-                // unique and we can add it to the merged forest using builders.
-                let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
-                self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
+        if let Some(matching_node_id) = self.lookup_node_by_fingerprint(&node_fingerprint) {
+            // If a node with a matching fingerprint exists, then the merging node is a
+            // duplicate and we remap it to the existing node.
+            self.node_id_mappings[forest_idx].insert(merging_id, matching_node_id);
+        } else {
+            // If no node with a matching fingerprint exists, then the merging node is
+            // unique and we can add it to the merged forest using builders.
+            let new_node_id = remapped_builder.add_to_forest(&mut self.mast_forest)?;
+            self.node_id_mappings[forest_idx].insert(merging_id, new_node_id);
 
-                // We need to update the indices with the newly inserted nodes
-                // since the MastNodeFingerprint computation requires all descendants of a node
-                // to be in this index. Hence when we encounter a node in the merging forest
-                // which has descendants (Call, Loop, Split, ...), then their descendants need to be
-                // in the indices.
-                self.node_id_by_hash.insert(node_fingerprint, new_node_id);
-                let returned_id = self
-                    .hash_by_node_id
-                    .push(node_fingerprint)
-                    .map_err(|_| MastForestError::TooManyNodes)?;
-                debug_assert_eq!(
-                    returned_id, new_node_id,
-                    "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
-                );
-            },
+            // We need to update the indices with the newly inserted nodes
+            // since the MastNodeFingerprint computation requires all descendants of a node
+            // to be in this index. Hence when we encounter a node in the merging forest
+            // which has descendants (Call, Loop, Split, ...), then their descendants need to be
+            // in the indices.
+            self.node_id_by_hash.insert(node_fingerprint, new_node_id);
+            let returned_id = self
+                .hash_by_node_id
+                .push(node_fingerprint)
+                .map_err(|_| MastForestError::TooManyNodes)?;
+            debug_assert_eq!(
+                returned_id, new_node_id,
+                "hash_by_node_id push() should return the same node IDs as node_id_by_hash"
+            );
         }
 
         Ok(())

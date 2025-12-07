@@ -18,7 +18,7 @@ use crate::{ADVICE_READ_LIMIT, ProcedureContext};
 /// Returns an error if the specified number of values to pushed is smaller than 1 or greater
 /// than 16.
 pub fn adv_push(
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
     proc_ctx: &ProcedureContext,
     n: u8,
     span: SourceSpan,

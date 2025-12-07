@@ -464,8 +464,8 @@ impl PartialEq<alloc::sync::Arc<Path>> for Path {
     }
 }
 
-impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
-    fn eq(&self, other: &alloc::borrow::Cow<'_, Path>) -> bool {
+impl PartialEq<Cow<'_, Path>> for Path {
+    fn eq(&self, other: &Cow<'_, Path>) -> bool {
         self.inner == other.as_ref().inner
     }
 }

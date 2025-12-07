@@ -19,7 +19,7 @@ fn test_stack_overflow_constraints() {
 
     // ------------------ right shift operation ---------------------------------------------------
 
-    let depth = 16 + rand_value::<u32>() as u64;
+    let depth = 16 + u64::from(rand_value::<u32>());
     let mut frame = generate_evaluation_frame(Operation::Pad.op_code().into());
 
     // Set the output. The top element in the next frame should be 0.
@@ -76,7 +76,7 @@ fn test_stack_overflow_constraints() {
 
     // ------------------ no shift operation ----------------------------------------------------
 
-    let depth = 16 + rand_value::<u32>() as u64;
+    let depth = 16 + u64::from(rand_value::<u32>());
     let b1 = rand_value::<u64>();
     let h1 = Felt::new(depth - 16).inv();
     let mut frame = generate_evaluation_frame(Operation::Noop.op_code().into());
@@ -98,7 +98,7 @@ fn test_stack_overflow_constraints() {
 
 #[test]
 fn test_stack_depth_air() {
-    let depth = 16 + rand_value::<u32>() as u64;
+    let depth = 16 + u64::from(rand_value::<u32>());
     // block with a control block opcode.
     let mut frame = generate_evaluation_frame(Operation::Split.op_code().into());
 
@@ -111,7 +111,7 @@ fn test_stack_depth_air() {
     frame.current_mut()[STACK_TRACE_OFFSET] = ONE;
     // setting it to any u64 random value other than 0.
     frame.current_mut()[DECODER_TRACE_OFFSET + IS_CALL_FLAG_COL_IDX] =
-        Felt::new(rand_value::<u32>() as u64);
+        Felt::new(u64::from(rand_value::<u32>()));
     frame.current_mut()[B1_COL_IDX] = Felt::new(12);
     frame.current_mut()[H0_COL_IDX] = Felt::new(depth - 16).inv();
 

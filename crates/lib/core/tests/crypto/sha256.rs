@@ -13,10 +13,10 @@ fn sha256_hash_bytes() {
     let ifelts = [
         group_slice_elements::<u8, 4>(&[ibytes.clone(), ipadding].concat())
             .iter()
-            .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+            .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
             .rev()
             .collect::<Vec<u64>>(),
-        vec![length_in_bytes as u64; 1],
+        vec![length_in_bytes; 1],
     ]
     .concat();
 
@@ -62,7 +62,7 @@ fn sha256_hash_bytes() {
     let obytes = hasher.finalize();
     let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
         .collect::<Vec<u64>>();
 
     let test = build_test!(source, &[]);
@@ -87,7 +87,7 @@ fn sha256_2_to_1_hash() {
 
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
         .rev()
         .collect::<Vec<u64>>();
 
@@ -97,7 +97,7 @@ fn sha256_2_to_1_hash() {
     let obytes = hasher.finalize();
     let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
         .collect::<Vec<u64>>();
 
     let test = build_test!(source, &ifelts);
@@ -116,7 +116,7 @@ fn sha256_1_to_1_hash() {
     let ibytes = rand_array::<Felt, 4>().into_bytes();
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
         .rev()
         .collect::<Vec<u64>>();
 
@@ -126,7 +126,7 @@ fn sha256_1_to_1_hash() {
     let obytes = hasher.finalize();
     let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
-        .map(|&bytes| u32::from_be_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_be_bytes(bytes)))
         .collect::<Vec<u64>>();
 
     let test = build_test!(source, &ifelts);

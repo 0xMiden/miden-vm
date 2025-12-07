@@ -20,7 +20,7 @@ fn blake3_hash_64_bytes() {
 
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
-        .map(|&bytes| u32::from_le_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_le_bytes(bytes)))
         .rev()
         .collect::<Vec<u64>>();
 
@@ -28,7 +28,7 @@ fn blake3_hash_64_bytes() {
     let obytes = hasher.as_bytes();
     let ofelts = group_slice_elements::<u8, 4>(obytes)
         .iter()
-        .map(|&bytes| u32::from_le_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_le_bytes(bytes)))
         .collect::<Vec<u64>>();
 
     let test = build_test!(source, &ifelts);
@@ -49,7 +49,7 @@ fn blake3_hash_32_bytes() {
     let ibytes = rand_array::<Felt, 4>().into_bytes();
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
-        .map(|&bytes| u32::from_le_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_le_bytes(bytes)))
         .rev()
         .collect::<Vec<u64>>();
 
@@ -57,7 +57,7 @@ fn blake3_hash_32_bytes() {
     let obytes = hasher.as_bytes();
     let ofelts = group_slice_elements::<u8, 4>(obytes)
         .iter()
-        .map(|&bytes| u32::from_le_bytes(bytes) as u64)
+        .map(|&bytes| u64::from(u32::from_le_bytes(bytes)))
         .collect::<Vec<u64>>();
 
     let test = build_test!(source, &ifelts);

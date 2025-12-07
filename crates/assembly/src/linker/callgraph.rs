@@ -42,7 +42,7 @@ pub struct CallGraph {
 impl CallGraph {
     /// Gets the set of edges from the given caller to its callees in the graph.
     pub fn out_edges(&self, gid: GlobalItemIndex) -> &[GlobalItemIndex] {
-        self.nodes.get(&gid).map(|out_edges| out_edges.as_slice()).unwrap_or(&[])
+        self.nodes.get(&gid).map_or(&[], |out_edges| out_edges.as_slice())
     }
 
     /// Inserts a node in the graph for `id`, if not already present.

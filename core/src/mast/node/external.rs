@@ -118,8 +118,8 @@ impl ExternalNodePrettyPrint<'_> {
     }
 }
 
-impl crate::prettier::PrettyPrint for ExternalNodePrettyPrint<'_> {
-    fn render(&self) -> crate::prettier::Document {
+impl PrettyPrint for ExternalNodePrettyPrint<'_> {
+    fn render(&self) -> Document {
         let external = const_text("external")
             + const_text(".")
             + text(self.node.digest.as_bytes().to_hex_with_prefix());
@@ -331,39 +331,30 @@ impl MastForestContributor for ExternalNodeBuilder {
         )
     }
 
-    fn remap_children(
-        self,
-        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, _remapping: &impl crate::LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // ExternalNode has no children to remap, so return self unchanged
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = digest;
         self
     }
@@ -418,12 +409,7 @@ impl proptest::prelude::Arbitrary for ExternalNodeBuilder {
 
         (
             any::<[u64; 4]>().prop_map(|[a, b, c, d]| {
-                miden_crypto::Word::new([
-                    miden_crypto::Felt::new(a),
-                    miden_crypto::Felt::new(b),
-                    miden_crypto::Felt::new(c),
-                    miden_crypto::Felt::new(d),
-                ])
+                Word::new([Felt::new(a), Felt::new(b), Felt::new(c), Felt::new(d)])
             }),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),

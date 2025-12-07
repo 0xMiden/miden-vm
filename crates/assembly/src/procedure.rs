@@ -125,7 +125,7 @@ impl ProcedureContext {
             self.visibility,
             self.signature,
             is_syscall,
-            self.num_locals as u32,
+            u32::from(self.num_locals),
             mast_root,
             mast_node_id,
         )

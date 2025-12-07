@@ -70,8 +70,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockHashTableCo
             },
             OPCODE_SPLIT => BlockHashTableRow::from_split(main_trace, row).collapse(alphas),
             OPCODE_LOOP => BlockHashTableRow::from_loop(main_trace, row)
-                .map(|row| row.collapse(alphas))
-                .unwrap_or(E::ONE),
+                .map_or(E::ONE, |row| row.collapse(alphas)),
             OPCODE_REPEAT => BlockHashTableRow::from_repeat(main_trace, row).collapse(alphas),
             OPCODE_DYN | OPCODE_DYNCALL | OPCODE_CALL | OPCODE_SYSCALL => {
                 BlockHashTableRow::from_dyn_dyncall_call_syscall(main_trace, row).collapse(alphas)

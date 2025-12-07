@@ -156,7 +156,7 @@ impl Ident {
 }
 
 impl fmt::Debug for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Ident").field(&self.name).finish()
     }
 }
@@ -209,7 +209,7 @@ impl AsRef<str> for Ident {
 }
 
 impl fmt::Display for Ident {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.name, f)
     }
 }
@@ -484,7 +484,7 @@ pub mod arbitrary {
         /// Generate a random identifier of `length` containing any characters from our dictionary
         pub fn ident_any_random_length()
             (length in 1..u8::MAX)
-            (id in ident_any(length as u32)) -> Ident {
+            (id in ident_any(u32::from(length))) -> Ident {
             id
         }
     }
@@ -494,7 +494,7 @@ pub mod arbitrary {
         /// dictionary
         pub fn bare_ident_any_random_length()
             (length in 1..u8::MAX)
-            (id in ident_any(length as u32)) -> Ident {
+            (id in ident_any(u32::from(length))) -> Ident {
             id
         }
     }
@@ -504,7 +504,7 @@ pub mod arbitrary {
         /// dictionary
         pub fn const_ident_any_random_length()
             (length in 1..u8::MAX)
-            (id in const_ident_any(length as u32)) -> Ident {
+            (id in const_ident_any(u32::from(length))) -> Ident {
             id
         }
     }

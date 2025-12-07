@@ -54,7 +54,7 @@ impl MemoryError {
         err_ctx: &impl ErrorContext,
     ) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        MemoryError::UnalignedWordAccess { addr, ctx, clk, label, source_file }
+        MemoryError::UnalignedWordAccess { label, source_file, addr, ctx, clk }
     }
 
     pub fn address_out_of_bounds(addr: u64, err_ctx: &impl ErrorContext) -> Self {

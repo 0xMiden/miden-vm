@@ -592,7 +592,6 @@ fn test_smt_peek() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-#[expect(clippy::type_complexity)]
 fn prepare_insert_or_set(
     key: Word,
     value: Word,

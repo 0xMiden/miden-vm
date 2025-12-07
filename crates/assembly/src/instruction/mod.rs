@@ -30,7 +30,7 @@ impl Assembler {
     pub(super) fn compile_instruction(
         &self,
         instruction: &Span<Instruction>,
-        block_builder: &mut BasicBlockBuilder,
+        block_builder: &mut BasicBlockBuilder<'_>,
         proc_ctx: &mut ProcedureContext,
     ) -> Result<Option<MastNodeId>, Report> {
         // Determine whether this instruction can create a new node
@@ -84,7 +84,7 @@ impl Assembler {
     fn compile_instruction_impl(
         &self,
         instruction: &Span<Instruction>,
-        block_builder: &mut BasicBlockBuilder,
+        block_builder: &mut BasicBlockBuilder<'_>,
         proc_ctx: &mut ProcedureContext,
         before_enter: Vec<miden_core::mast::DecoratorId>,
     ) -> Result<Option<MastNodeId>, Report> {
@@ -426,7 +426,7 @@ impl Assembler {
             Instruction::LocLoad(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
-                Some(v.expect_value() as u32),
+                Some(u32::from(v.expect_value())),
                 true,
                 true,
                 span,
@@ -494,7 +494,7 @@ impl Assembler {
             Instruction::LocStore(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
-                v.expect_value() as u32,
+                u32::from(v.expect_value()),
                 true,
                 true,
                 span,
@@ -590,16 +590,12 @@ impl Assembler {
             // ----- emit instruction -------------------------------------------------------------
             // emit: reads event ID from top of stack and execute the corresponding handler.
             Instruction::Emit => {
-                block_builder.push_ops([Operation::Emit]);
+                block_builder.push_ops([Emit]);
             },
             // emit.<id>: expands to `push.<id>, emit, drop` sequence leaving the stack unchanged.
             Instruction::EmitImm(event_id) => {
                 let event_id_value = event_id.expect_value();
-                block_builder.push_ops([
-                    Operation::Push(event_id_value),
-                    Operation::Emit,
-                    Operation::Drop,
-                ]);
+                block_builder.push_ops([Push(event_id_value), Emit, Drop]);
             },
 
             // ----- trace instruction ------------------------------------------------------------
@@ -620,7 +616,7 @@ impl Assembler {
 ///
 /// When the value is 0, PUSH operation is replaced with PAD. When the value is 1, PUSH operation
 /// is replaced with PAD INCR because in most cases this will be more efficient than doing a PUSH.
-fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
+fn push_u32_value(span_builder: &mut BasicBlockBuilder<'_>, value: u32) {
     use Operation::*;
 
     if value == 0 {
@@ -638,7 +634,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
 ///
 /// When the value is 0, PUSH operation is replaced with PAD. When the value is 1, PUSH operation
 /// is replaced with PAD INCR because in most cases this will be more efficient than doing a PUSH.
-fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
+fn push_felt(span_builder: &mut BasicBlockBuilder<'_>, value: Felt) {
     span_builder.push_ops(push_value_ops(value));
 }
 
@@ -647,7 +643,7 @@ fn push_felt(span_builder: &mut BasicBlockBuilder, value: Felt) {
 ///
 /// The instruction takes 3 cycles to execute and transforms the stack as follows:
 /// [a, b, c, d, ...] -> [d, c, b, a, ...].
-fn push_reversew(block_builder: &mut BasicBlockBuilder) {
+fn push_reversew(block_builder: &mut BasicBlockBuilder<'_>) {
     use Operation::*;
 
     block_builder.push_ops([MovDn3, Swap, MovUp2]);
@@ -668,5 +664,5 @@ fn validate_local_word_alignment(
             .with_source_file(proc_ctx.source_manager().get(proc_ctx.span().source_id()).ok())
             .into());
     }
-    Ok(addr as u32)
+    Ok(u32::from(addr))
 }

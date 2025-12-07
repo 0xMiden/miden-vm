@@ -32,7 +32,7 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO.
-pub fn handle_u64_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_u64_div(process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
     let divisor = {
         let divisor_hi = process.get_stack_item(1).as_int();
         let divisor_lo = process.get_stack_item(2).as_int();

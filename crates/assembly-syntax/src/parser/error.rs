@@ -27,7 +27,7 @@ pub enum LiteralErrorKind {
 }
 
 impl fmt::Display for LiteralErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Empty => f.write_str("input was empty"),
             Self::InvalidDigit => f.write_str("invalid digit"),
@@ -57,7 +57,7 @@ pub enum HexErrorKind {
 }
 
 impl fmt::Display for HexErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingDigits => {
                 f.write_str("expected number of hex digits to be a multiple of 2")
@@ -81,7 +81,7 @@ pub enum BinErrorKind {
 }
 
 impl fmt::Display for BinErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::TooLong => f.write_str(
                 "value has too many digits, binary string can contain no more than 32 digits",

@@ -501,7 +501,7 @@ impl MemoryAccess {
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
             let addr: u32 = addr.try_into().unwrap();
-            assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
+            assert_eq!(u32::from(addr_idx_in_word), addr % WORD_SIZE as u32);
         }
 
         Self {

@@ -15,7 +15,7 @@ pub(crate) const HASH_CYCLE_LEN_FELT: Felt =
 #[inline(always)]
 pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
     let value = value.as_int();
-    let lo = (value as u32) as u64;
+    let lo = u64::from(value as u32);
     let hi = value >> 32;
     (Felt::new(hi), Felt::new(lo))
 }
@@ -24,7 +24,7 @@ pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
 /// valid 32-bit integer value.
 pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
     let (hi, lo) = split_u32_into_u16(value.as_int());
-    (Felt::new(hi as u64), Felt::new(lo as u64))
+    (Felt::new(u64::from(hi)), Felt::new(u64::from(lo)))
 }
 
 /// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.

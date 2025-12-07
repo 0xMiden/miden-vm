@@ -255,15 +255,12 @@ pub fn start_repl(library_paths: &Vec<PathBuf>, use_corelib: bool) {
 
                     should_print_stack = false;
                 } else if line == "!undo" {
-                    match program_lines.pop() {
-                        Some(last_line) => {
-                            println!("Undoing {last_line}");
-                            should_print_stack = true;
-                        },
-                        None => {
-                            println!("There's no previously executed command");
-                            should_print_stack = false;
-                        },
+                    if let Some(last_line) = program_lines.pop() {
+                        println!("Undoing {last_line}");
+                        should_print_stack = true;
+                    } else {
+                        println!("There's no previously executed command");
+                        should_print_stack = false;
                     };
                 } else if line == "!stack" {
                     should_print_stack = true;
@@ -299,7 +296,6 @@ pub fn start_repl(library_paths: &Vec<PathBuf>, use_corelib: bool) {
 /// Compiles and executes a compiled Miden program, returning the stack, memory and any Miden
 /// errors. The program is passed in as a String, passed to the Miden Assembler, and then passed
 /// into the Miden Processor to be executed.
-#[expect(clippy::type_complexity)]
 fn execute(
     program: String,
     provided_libraries: &[Library],

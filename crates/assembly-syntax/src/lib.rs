@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_assignments)]
 
 #[macro_use]
 extern crate alloc;
@@ -31,4 +32,4 @@ pub use self::{
 };
 
 /// The modulus of the Miden field as a raw u64 integer
-pub(crate) const FIELD_MODULUS: u64 = miden_core::Felt::MODULUS;
+pub(crate) const FIELD_MODULUS: u64 = Felt::MODULUS;

@@ -12,7 +12,7 @@ use crate::{AdviceError, ExecutionError, ProcessState, errors::ErrorContext};
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
 
 pub fn handle_system_event(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     system_event: SystemEvent,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
@@ -62,7 +62,7 @@ pub fn handle_system_event(
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
 fn insert_mem_values_into_adv_map(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let addr_range = process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
@@ -96,7 +96,7 @@ fn insert_mem_values_into_adv_map(
 /// Where `KEY` is computed as `hash(A || B, domain)`, where `domain` is provided via the immediate
 /// value.
 fn insert_hdword_into_adv_map(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     domain: Felt,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
@@ -134,7 +134,7 @@ fn insert_hdword_into_adv_map(
 /// - `A'` (and other words with `'`) is the `A` word with the reversed element order: `A = [a3, a2,
 ///   a1, a0]`, `A' = [a0, a1, a2, a3]`.
 fn insert_hqword_into_adv_map(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // get the top four words from the stack and hash them to compute the key value
@@ -173,7 +173,7 @@ fn insert_hqword_into_adv_map(
 /// Where `KEY` is computed by extracting the digest elements from `hperm([C, A, B])`. For example,
 /// if `C` is `[0, d, 0, 0]`, `KEY` will be set as `hash(A || B, d)`.
 fn insert_hperm_into_adv_map(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // read the state from the stack
@@ -226,7 +226,7 @@ fn insert_hperm_into_adv_map(
 ///
 /// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
 fn merge_merkle_nodes(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // fetch the arguments from the stack
@@ -263,7 +263,7 @@ fn merge_merkle_nodes(
 ///   the specified root.
 /// - Value of the node at the specified depth and index is not known to the advice provider.
 fn copy_merkle_node_to_adv_stack(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let depth = process.get_stack_item(1);
@@ -303,7 +303,7 @@ fn copy_merkle_node_to_adv_stack(
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
 fn copy_map_value_to_adv_stack(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     include_len: bool,
     pad_to: u8,
     err_ctx: &impl ErrorContext,
@@ -335,7 +335,7 @@ fn copy_map_value_to_adv_stack(
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
 fn copy_map_value_length_to_adv_stack(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let key = process.get_stack_word_be(1);
@@ -368,7 +368,7 @@ fn copy_map_value_length_to_adv_stack(
 /// Outputs:
 ///   Advice stack: [has_mapkey, ...]
 /// ```
-pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
+pub fn push_key_presence_flag(process: &mut ProcessState<'_>) -> Result<(), ExecutionError> {
     let map_key = process.get_stack_word_be(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
@@ -395,7 +395,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
 fn push_ext2_inv_result(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let coef0 = process.get_stack_item(2);
@@ -423,7 +423,7 @@ fn push_ext2_inv_result(
 ///   Advice stack: [leading_zeros, ...]
 /// ```
 fn push_leading_zeros(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_zeros()), err_ctx)
@@ -440,7 +440,7 @@ fn push_leading_zeros(
 ///   Advice stack: [trailing_zeros, ...]
 /// ```
 fn push_trailing_zeros(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_zeros()), err_ctx)
@@ -457,7 +457,7 @@ fn push_trailing_zeros(
 ///   Advice stack: [leading_ones, ...]
 /// ```
 fn push_leading_ones(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_ones()), err_ctx)
@@ -474,7 +474,7 @@ fn push_leading_ones(
 ///   Advice stack: [trailing_ones, ...]
 /// ```
 fn push_trailing_ones(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_ones()), err_ctx)
@@ -494,7 +494,7 @@ fn push_trailing_ones(
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals `ZERO`.
 fn push_ilog2(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let n = process.get_stack_item(1).as_int();
@@ -513,7 +513,7 @@ fn push_ilog2(
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.
 fn push_transformed_stack_top(
-    process: &mut ProcessState,
+    process: &mut ProcessState<'_>,
     f: impl FnOnce(u32) -> Felt,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {

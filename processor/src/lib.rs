@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(unused_assignments)]
 
 #[macro_use]
 extern crate alloc;
@@ -508,30 +509,29 @@ impl Process {
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
         // the host (corresponding to an external library loaded in the host); if none are
         // found, return an error.
-        match program.find_procedure_root(callee_hash) {
-            Some(callee_id) => self.execute_mast_node(callee_id, program, host)?,
-            None => {
-                let mast_forest = host
-                    .get_mast_forest(&callee_hash)
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
+        if let Some(callee_id) = program.find_procedure_root(callee_hash) {
+            self.execute_mast_node(callee_id, program, host)?
+        } else {
+            let mast_forest = host
+                .get_mast_forest(&callee_hash)
+                .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
 
-                // We limit the parts of the program that can be called externally to procedure
-                // roots, even though MAST doesn't have that restriction.
-                let root_id = mast_forest
-                    .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
+            // We limit the parts of the program that can be called externally to procedure
+            // roots, even though MAST doesn't have that restriction.
+            let root_id = mast_forest
+                .find_procedure_root(callee_hash)
+                .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
 
-                // Merge the advice map of this forest into the advice provider.
-                // Note that the map may be merged multiple times if a different procedure from the
-                // same forest is called.
-                // For now, only compiled libraries contain non-empty advice maps, so for most
-                // cases, this call will be cheap.
-                self.advice
-                    .extend_map(mast_forest.advice_map())
-                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
+            // Merge the advice map of this forest into the advice provider.
+            // Note that the map may be merged multiple times if a different procedure from the
+            // same forest is called.
+            // For now, only compiled libraries contain non-empty advice maps, so for most
+            // cases, this call will be cheap.
+            self.advice
+                .extend_map(mast_forest.advice_map())
+                .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
 
-                self.execute_mast_node(root_id, &mast_forest, host)?
-            },
+            self.execute_mast_node(root_id, &mast_forest, host)?
         }
 
         if node.is_dyncall() {
@@ -941,10 +941,10 @@ impl<'a> ProcessState<'a> {
         let start_addr = self.get_stack_item(start_idx).as_int();
         let end_addr = self.get_stack_item(end_idx).as_int();
 
-        if start_addr > u32::MAX as u64 {
+        if start_addr > u64::from(u32::MAX) {
             return Err(MemoryError::address_out_of_bounds(start_addr, &()));
         }
-        if end_addr > u32::MAX as u64 {
+        if end_addr > u64::from(u32::MAX) {
             return Err(MemoryError::address_out_of_bounds(end_addr, &()));
         }
 

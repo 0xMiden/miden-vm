@@ -56,7 +56,7 @@ impl EventHandler for KeccakPrecompile {
     /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` (least significant u32 on top)
     /// - **Precompile Request**: Stores tag `[event_id, len_bytes, 0, 0]` and raw preimage bytes
     ///   for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_int();
         let len_bytes = process.get_stack_item(2).as_int();

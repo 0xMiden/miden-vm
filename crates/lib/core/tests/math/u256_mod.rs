@@ -20,12 +20,12 @@ fn mul_unsafe() {
         .to_u32_digits()
         .iter()
         .chain(b.to_u32_digits().iter())
-        .map(|&v| v as u64)
+        .map(|&v| u64::from(v))
         .collect::<Vec<_>>();
     let result = (a * b)
         .to_u32_digits()
         .iter()
-        .map(|&v| v as u64)
+        .map(|&v| u64::from(v))
         .take(8)
         .rev()
         .collect::<Vec<_>>();

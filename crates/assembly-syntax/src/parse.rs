@@ -358,39 +358,38 @@ impl Parse for &std::path::Path {
 
         use crate::{Path, PathError};
 
-        let path = match options.path {
-            Some(path) => path,
-            None => {
-                let mut buf = match options.kind {
-                    ModuleKind::Library => PathBuf::default(),
-                    ModuleKind::Executable => Path::exec_path().to_path_buf(),
-                    ModuleKind::Kernel => Path::kernel_path().to_path_buf(),
-                };
-                self.components()
-                    .skip_while(|component| {
-                        matches!(
-                            component,
-                            Component::Prefix(_)
-                                | Component::RootDir
-                                | Component::ParentDir
-                                | Component::CurDir
-                        )
-                    })
-                    .try_for_each(|component| {
-                        let part: &str = component
-                            .as_os_str()
-                            .to_str()
-                            .ok_or(PathError::InvalidUtf8)
-                            .and_then(|s| Path::validate(s).map(|_| s))
-                            .into_diagnostic()
-                            .wrap_err("invalid module path")?;
-                        buf.push(part);
+        let path = if let Some(path) = options.path {
+            path
+        } else {
+            let mut buf = match options.kind {
+                ModuleKind::Library => PathBuf::default(),
+                ModuleKind::Executable => Path::exec_path().to_path_buf(),
+                ModuleKind::Kernel => Path::kernel_path().to_path_buf(),
+            };
+            self.components()
+                .skip_while(|component| {
+                    matches!(
+                        component,
+                        Component::Prefix(_)
+                            | Component::RootDir
+                            | Component::ParentDir
+                            | Component::CurDir
+                    )
+                })
+                .try_for_each(|component| {
+                    let part: &str = component
+                        .as_os_str()
+                        .to_str()
+                        .ok_or(PathError::InvalidUtf8)
+                        .and_then(|s| Path::validate(s).map(|_| s))
+                        .into_diagnostic()
+                        .wrap_err("invalid module path")?;
+                    buf.push(part);
 
-                        Ok::<(), Report>(())
-                    })?;
+                    Ok::<(), Report>(())
+                })?;
 
-                buf.into()
-            },
+            buf.into()
         };
         let source_file = source_manager
             .load_file(self)

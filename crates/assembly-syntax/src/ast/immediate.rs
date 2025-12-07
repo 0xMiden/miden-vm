@@ -147,7 +147,7 @@ impl<T: core::hash::Hash> core::hash::Hash for Immediate<T> {
 }
 
 impl<T: fmt::Debug> fmt::Debug for Immediate<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Value(value) if f.alternate() => write!(f, "Value({value:#?})"),
             Self::Value(value) => write!(f, "Value({value:?})"),
@@ -157,7 +157,7 @@ impl<T: fmt::Debug> fmt::Debug for Immediate<T> {
 }
 
 impl<T: fmt::Display> fmt::Display for Immediate<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Value(value) => write!(f, "{value}"),
             Self::Constant(name) => write!(f, "{name}"),

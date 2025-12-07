@@ -1230,7 +1230,7 @@ fn mem_operations_with_constants() -> TestResult {
 #[test]
 fn const_conversion_failed_to_u16() -> TestResult {
     // Define constant value greater than u16::MAX
-    let constant_value: u64 = u16::MAX as u64 + 1;
+    let constant_value: u64 = u64::from(u16::MAX) + 1;
 
     let context = TestContext::default();
     let source = source_file!(
@@ -1271,7 +1271,7 @@ fn const_conversion_failed_to_u16() -> TestResult {
 fn const_conversion_failed_to_u32() -> TestResult {
     let context = TestContext::default();
     // Define constant value greater than u16::MAX
-    let constant_value: u64 = u32::MAX as u64 + 1;
+    let constant_value: u64 = u64::from(u32::MAX) + 1;
 
     let source = source_file!(
         &context,
@@ -1499,7 +1499,7 @@ fn test_push_word_slice_invalid() -> TestResult {
     "
         )
     );
-    assert!(context.assemble(source_invalid_range).is_err());
+    context.assemble(source_invalid_range).unwrap_err();
 
     let source_empty_range = source_file!(
         &context,
@@ -1513,7 +1513,7 @@ fn test_push_word_slice_invalid() -> TestResult {
     "
         )
     );
-    assert!(context.assemble(source_empty_range).is_err());
+    context.assemble(source_empty_range).unwrap_err();
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -1526,7 +1526,7 @@ fn test_push_word_slice_invalid() -> TestResult {
     "
         )
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    context.assemble(source_invalid_constant_type).unwrap_err();
 
     let source_invalid_constant_type = source_file!(
         &context,
@@ -1538,7 +1538,7 @@ fn test_push_word_slice_invalid() -> TestResult {
     "
         )
     );
-    assert!(context.assemble(source_invalid_constant_type).is_err());
+    context.assemble(source_invalid_constant_type).unwrap_err();
 
     Ok(())
 }
@@ -4459,9 +4459,7 @@ fn issue_1644_single_forest_merge_identity() -> TestResult {
         }
     }
 
-    if should_panic {
-        panic!("Merge idempotence violation");
-    }
+    assert!(!should_panic, "Merge idempotence violation");
 
     eprintln!("Merge identity test passed - no violations detected");
     Ok(())

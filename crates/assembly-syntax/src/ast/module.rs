@@ -77,7 +77,7 @@ impl ModuleKind {
 }
 
 impl fmt::Display for ModuleKind {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Library => f.write_str("library"),
             Self::Executable => f.write_str("executable"),
@@ -646,7 +646,7 @@ impl PartialEq for Module {
 
 /// Debug representation of this module
 impl fmt::Debug for Module {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Module")
             .field("docs", &self.docs)
             .field("path", &self.path)
@@ -680,8 +680,7 @@ impl crate::prettier::PrettyPrint for Module {
         let mut doc = self
             .docs
             .as_ref()
-            .map(|docstring| docstring.render() + nl())
-            .unwrap_or(Document::Empty);
+            .map_or(Document::Empty, |docstring| docstring.render() + nl());
 
         for (item_index, item) in self.items.iter().enumerate() {
             if item_index > 0 {
@@ -714,16 +713,16 @@ impl TypeResolver<SymbolResolutionError> for ModuleTypeResolver<'_> {
         &self,
         context: SourceSpan,
         _gid: GlobalItemIndex,
-    ) -> Result<ast::types::Type, SymbolResolutionError> {
+    ) -> Result<types::Type, SymbolResolutionError> {
         Err(SymbolResolutionError::undefined(context, &self.resolver.source_manager()))
     }
     fn get_local_type(
         &self,
         context: SourceSpan,
         id: ItemIndex,
-    ) -> Result<Option<ast::types::Type>, SymbolResolutionError> {
+    ) -> Result<Option<types::Type>, SymbolResolutionError> {
         match &self.module[id] {
-            super::Export::Type(ty) => match ty {
+            Export::Type(ty) => match ty {
                 TypeDecl::Alias(ty) => self.resolve(&ty.ty),
                 TypeDecl::Enum(ty) => Ok(Some(ty.ty().clone())),
             },

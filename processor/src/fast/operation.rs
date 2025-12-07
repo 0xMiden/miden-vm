@@ -396,7 +396,6 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-#[expect(clippy::too_many_arguments)]
 pub fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
@@ -411,7 +410,7 @@ pub fn eval_circuit_fast_(
     let num_eval = num_eval.as_int();
 
     let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
+    if num_wires > u64::from(MAX_NUM_ACE_WIRES) {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::TooManyWires(num_wires),

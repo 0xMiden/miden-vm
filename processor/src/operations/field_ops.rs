@@ -259,7 +259,7 @@ mod tests {
 
         // calling add with a stack of minimum depth is ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::Add, program, &mut host).is_ok());
+        process.execute_op(Operation::Add, program, &mut host).unwrap();
     }
 
     #[test]
@@ -299,7 +299,7 @@ mod tests {
 
         // calling mul with a stack of minimum depth is ok
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::Mul, program, &mut host).is_ok());
+        process.execute_op(Operation::Mul, program, &mut host).unwrap();
     }
 
     #[test]
@@ -395,7 +395,7 @@ mod tests {
 
         // --- calling AND with a stack of minimum depth is ok ----------------
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::And, program, &mut host).is_ok());
+        process.execute_op(Operation::And, program, &mut host).unwrap();
     }
 
     #[test]
@@ -446,7 +446,7 @@ mod tests {
 
         // --- calling OR with a stack of minimum depth is a ok ----------------
         let mut process = Process::new_dummy_with_empty_stack();
-        assert!(process.execute_op(Operation::Or, program, &mut host).is_ok());
+        process.execute_op(Operation::Or, program, &mut host).unwrap();
     }
 
     #[test]
@@ -505,7 +505,7 @@ mod tests {
         let stack_inputs = StackInputs::default();
         let (mut process, mut host) =
             Process::new_dummy_with_inputs_and_decoder_helpers(stack_inputs, advice_inputs);
-        assert!(process.execute_op(Operation::Eq, program, &mut host).is_ok());
+        process.execute_op(Operation::Eq, program, &mut host).unwrap();
     }
 
     #[test]
@@ -620,7 +620,7 @@ mod tests {
 
         let old_exp = 17;
         let old_acc = 5;
-        let old_base = u32::MAX as u64 + 1_u64;
+        let old_base = u64::from(u32::MAX) + 1_u64;
 
         let new_exp = Felt::new(8_u64);
         let new_acc = Felt::new(old_acc * old_base);

@@ -49,40 +49,35 @@ impl BundleCmd {
         let dir = self.dir.file_name().ok_or("`dir` cannot end with `..`.").map_err(Report::msg)?;
 
         // write the masl output
-        let output_file = match &self.output {
-            Some(output) => output,
-            None => {
-                let parent =
-                    &self.dir.parent().ok_or("Invalid output path").map_err(Report::msg)?;
-                &parent.join("out").with_extension(Library::LIBRARY_EXTENSION)
-            },
+        let output_file = if let Some(output) = &self.output {
+            output
+        } else {
+            let parent = &self.dir.parent().ok_or("Invalid output path").map_err(Report::msg)?;
+            &parent.join("out").with_extension(Library::LIBRARY_EXTENSION)
         };
 
-        match &self.kernel {
-            Some(kernel) => {
-                if !kernel.is_file() {
-                    return Err(Report::msg("`kernel` must be a file"));
-                };
-                assembler.link_dynamic_library(CoreLibrary::default())?;
-                let library = assembler.assemble_kernel_from_dir(kernel, Some(&self.dir))?;
-                library.write_to_file(output_file).into_diagnostic()?;
-                println!(
-                    "Built kernel module {} with library {}",
-                    kernel.display(),
-                    &self.dir.display()
-                );
-            },
-            None => {
-                let namespace = match &self.namespace {
-                    Some(namespace) => namespace.to_string(),
-                    None => dir.to_string_lossy().into_owned(),
-                };
-                let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
-                assembler.link_dynamic_library(CoreLibrary::default())?;
-                let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
-                library.write_to_file(output_file).into_diagnostic()?;
-                println!("Built library {namespace}");
-            },
+        if let Some(kernel) = &self.kernel {
+            if !kernel.is_file() {
+                return Err(Report::msg("`kernel` must be a file"));
+            };
+            assembler.link_dynamic_library(CoreLibrary::default())?;
+            let library = assembler.assemble_kernel_from_dir(kernel, Some(&self.dir))?;
+            library.write_to_file(output_file).into_diagnostic()?;
+            println!(
+                "Built kernel module {} with library {}",
+                kernel.display(),
+                &self.dir.display()
+            );
+        } else {
+            let namespace = match &self.namespace {
+                Some(namespace) => namespace.to_string(),
+                None => dir.to_string_lossy().into_owned(),
+            };
+            let library_namespace = LibraryPath::new(&namespace).into_diagnostic()?;
+            assembler.link_dynamic_library(CoreLibrary::default())?;
+            let library = assembler.assemble_library_from_dir(&self.dir, library_namespace)?;
+            library.write_to_file(output_file).into_diagnostic()?;
+            println!("Built library {namespace}");
         }
 
         Ok(())

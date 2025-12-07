@@ -123,10 +123,13 @@ pub fn get_u32split_test_frame(a: u64) -> EvaluationFrame<Felt> {
     let m = (Felt::from(u32::MAX) - c).inv();
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = Felt::new(t2 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = Felt::new(t3 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] =
+        Felt::new(u64::from(t2));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] =
+        Felt::new(u64::from(t3));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = m;
 
     frame
@@ -151,8 +154,9 @@ pub fn get_u32add_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
     let (t1, t0) = split_u32_into_u16(lo.as_int());
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = hi;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = ZERO;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = ZERO;
@@ -180,8 +184,9 @@ pub fn get_u32add3_test_frame(a: u32, b: u32, c: u32) -> EvaluationFrame<Felt> {
     let (t1, t0) = split_u32_into_u16(lo.as_int());
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = hi;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = ZERO;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = ZERO;
@@ -210,10 +215,13 @@ pub fn get_u32mul_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
     let m = (Felt::from(u32::MAX) - hi).inv();
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = Felt::new(t2 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = Felt::new(t3 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] =
+        Felt::new(u64::from(t2));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] =
+        Felt::new(u64::from(t3));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = m;
 
     frame
@@ -226,7 +234,7 @@ pub fn get_u32madd_test_frame(a: u32, b: u32, c: u32) -> EvaluationFrame<Felt> {
     let mut frame = generate_evaluation_frame(Operation::U32madd.op_code() as usize);
 
     // element splitted into two 32-bit limbs.
-    let (hi, lo) = split_element(Felt::new((a as u64) * (b as u64) + (c as u64)));
+    let (hi, lo) = split_element(Felt::new(u64::from(a) * u64::from(b) + u64::from(c)));
 
     // Set the output. First and second element in the next frame should be the upper and
     // lower 32-bit limb of the addition of the third element with the product of the first
@@ -242,10 +250,13 @@ pub fn get_u32madd_test_frame(a: u32, b: u32, c: u32) -> EvaluationFrame<Felt> {
     let m = (Felt::from(u32::MAX) - hi).inv();
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = Felt::new(t2 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = Felt::new(t3 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] =
+        Felt::new(u64::from(t2));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] =
+        Felt::new(u64::from(t3));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = m;
 
     frame
@@ -269,8 +280,9 @@ pub fn get_u32sub_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
     let (t1, t0) = split_u32_into_u16(result.into());
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = ZERO;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = ZERO;
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = ZERO;
@@ -302,10 +314,13 @@ pub fn get_u32div_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
     let (t3, t2) = split_u32_into_u16(hi.into());
 
     // set the helper registers in the decoder.
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(t0 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] = Felt::new(t1 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] = Felt::new(t2 as u64);
-    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] = Felt::new(t3 as u64);
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(u64::from(t0));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 1] =
+        Felt::new(u64::from(t1));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 2] =
+        Felt::new(u64::from(t2));
+    frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 3] =
+        Felt::new(u64::from(t3));
     frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET + 4] = ZERO;
 
     frame
@@ -314,7 +329,7 @@ pub fn get_u32div_test_frame(a: u32, b: u32) -> EvaluationFrame<Felt> {
 /// Splits an element into two field elements containing 32-bit integer values
 pub fn split_element(value: Felt) -> (Felt, Felt) {
     let value = value.as_int();
-    let lo = (value as u32) as u64;
+    let lo = u64::from(value as u32);
     let hi = value >> 32;
     (Felt::new(hi), Felt::new(lo))
 }
@@ -323,7 +338,7 @@ pub fn split_element(value: Felt) -> (Felt, Felt) {
 /// valid 32-bit integer value.
 pub fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
     let (hi, lo) = split_u32_into_u16(value.as_int());
-    (Felt::new(hi as u64), Felt::new(lo as u64))
+    (Felt::new(u64::from(hi)), Felt::new(u64::from(lo)))
 }
 
 /// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.

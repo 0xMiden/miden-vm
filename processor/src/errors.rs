@@ -308,17 +308,17 @@ impl ExecutionError {
         err_ctx: &impl ErrorContext,
     ) -> ExecutionError {
         let (label, source_file) = err_ctx.label_and_source_file();
-        ExecutionError::AdviceError { label, source_file, err, clk }
+        ExecutionError::AdviceError { label, source_file, clk, err }
     }
 
     pub fn divide_by_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::DivideByZero { clk, label, source_file }
+        Self::DivideByZero { label, source_file, clk }
     }
 
     pub fn input_not_u32(clk: RowIndex, input: u64, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32StackValue { clk, input, label, source_file }
+        Self::NotU32StackValue { label, source_file, clk, input }
     }
 
     pub fn dynamic_node_not_found(digest: Word, err_ctx: &impl ErrorContext) -> Self {

@@ -345,7 +345,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
         tree.root()[3].as_int(),
         // Intentionally choose the wrong index to trigger the error
         (index + 1) as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         leaves[index][0].as_int(),
         leaves[index][1].as_int(),
         leaves[index][2].as_int(),
@@ -383,7 +383,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
         tree.root()[3].as_int(),
         // Intentionally choose the wrong index to trigger the error
         (index + 1) as u64,
-        tree.depth() as u64,
+        u64::from(tree.depth()),
         leaves[index][0].as_int(),
         leaves[index][1].as_int(),
         leaves[index][2].as_int(),
@@ -580,7 +580,7 @@ fn test_diagnostic_address_out_of_bounds() {
             mem_store
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
+    let build_test = build_test_by_mode!(true, source, &[u64::from(u32::MAX) + 1_u64]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
@@ -600,7 +600,7 @@ fn test_diagnostic_address_out_of_bounds() {
             mem_storew_be
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
+    let build_test = build_test_by_mode!(true, source, &[u64::from(u32::MAX) + 1_u64]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
@@ -620,7 +620,7 @@ fn test_diagnostic_address_out_of_bounds() {
             swap swap mem_load push.1 drop
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
+    let build_test = build_test_by_mode!(true, source, &[u64::from(u32::MAX) + 1_u64]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
@@ -640,7 +640,7 @@ fn test_diagnostic_address_out_of_bounds() {
             swap swap mem_loadw_be push.1 drop
         end";
 
-    let build_test = build_test_by_mode!(true, source, &[u32::MAX as u64 + 1_u64]);
+    let build_test = build_test_by_mode!(true, source, &[u64::from(u32::MAX) + 1_u64]);
     let err = build_test.execute().expect_err("expected error");
 
     assert_diagnostic_lines!(
@@ -905,7 +905,7 @@ fn test_diagnostic_not_u32_value() {
             u32and trace.2
         end";
 
-    let big_value = u32::MAX as u64 + 1_u64;
+    let big_value = u64::from(u32::MAX) + 1_u64;
     let build_test = build_test_by_mode!(true, source, &[big_value]);
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
@@ -925,7 +925,7 @@ fn test_diagnostic_not_u32_value() {
             u32overflowing_add3 trace.2
         end";
 
-    let big_value = u32::MAX as u64 + 1_u64;
+    let big_value = u64::from(u32::MAX) + 1_u64;
     let build_test = build_test_by_mode!(true, source, &[big_value]);
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(

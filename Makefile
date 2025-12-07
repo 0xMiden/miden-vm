@@ -62,7 +62,7 @@ clippy: ## Runs Clippy with configs
 
 .PHONY: fix
 fix: ## Runs Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES_BUT_ASYNC}
+	cargo +nightly clippy --fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES_BUT_ASYNC}
 
 
 .PHONY: format

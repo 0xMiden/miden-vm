@@ -211,7 +211,7 @@ impl<'input> Lexer<'input> {
     #[inline]
     fn span(&self) -> SourceSpan {
         assert!(self.token_start <= self.token_end, "invalid range");
-        assert!(self.token_end <= u32::MAX as usize, "file too large");
+        assert!(u32::try_from(self.token_end).is_ok(), "file too large");
         SourceSpan::new(self.source_id, (self.token_start as u32)..(self.token_end as u32))
     }
 
@@ -249,17 +249,14 @@ impl<'input> Lexer<'input> {
         let c = self.read();
 
         if c == '#' {
-            match self.peek() {
-                '!' => {
-                    self.skip();
-                    self.skip();
-                    return self.lex_docs();
-                },
-                _ => {
-                    self.skip();
-                    self.skip_comment();
-                    return Ok(Token::Comment);
-                },
+            if self.peek() == '!' {
+                self.skip();
+                self.skip();
+                return self.lex_docs();
+            } else {
+                self.skip();
+                self.skip_comment();
+                return Ok(Token::Comment);
             }
         }
 
@@ -275,14 +272,20 @@ impl<'input> Lexer<'input> {
         match self.read() {
             '@' => pop!(self, Token::At),
             '!' => pop!(self, Token::Bang),
-            ':' => match self.peek() {
-                ':' => pop2!(self, Token::ColonColon),
-                _ => pop!(self, Token::Colon),
+            ':' => {
+                if self.peek() == ':' {
+                    pop2!(self, Token::ColonColon)
+                } else {
+                    pop!(self, Token::Colon)
+                }
             },
             ';' => pop!(self, Token::Semicolon),
-            '.' => match self.peek() {
-                '.' => pop2!(self, Token::Range),
-                _ => pop!(self, Token::Dot),
+            '.' => {
+                if self.peek() == '.' {
+                    pop2!(self, Token::Range)
+                } else {
+                    pop!(self, Token::Dot)
+                }
             },
             ',' => pop!(self, Token::Comma),
             '=' => pop!(self, Token::Equal),
@@ -294,14 +297,20 @@ impl<'input> Lexer<'input> {
             '}' => pop!(self, Token::Rbrace),
             ']' => pop!(self, Token::Rbracket),
             ')' => pop!(self, Token::Rparen),
-            '-' => match self.peek() {
-                '>' => pop2!(self, Token::Rstab),
-                _ => pop!(self, Token::Minus),
+            '-' => {
+                if self.peek() == '>' {
+                    pop2!(self, Token::Rstab)
+                } else {
+                    pop!(self, Token::Minus)
+                }
             },
             '+' => pop!(self, Token::Plus),
-            '/' => match self.peek() {
-                '/' => pop2!(self, Token::SlashSlash),
-                _ => pop!(self, Token::Slash),
+            '/' => {
+                if self.peek() == '/' {
+                    pop2!(self, Token::SlashSlash)
+                } else {
+                    pop!(self, Token::Slash)
+                }
             },
             '*' => pop!(self, Token::Star),
             '$' => self.lex_special_identifier(),
@@ -508,13 +517,12 @@ impl<'input> Lexer<'input> {
             }
         }
 
-        match self.slice() {
-            id @ ("$kernel" | "$exec") => Ok(Token::Ident(id)),
-            _ => {
-                let start = self.span().start();
-                let span = SourceSpan::at(self.span().source_id(), start);
-                Err(ParsingError::InvalidToken { span })
-            },
+        if let id @ ("$kernel" | "$exec") = self.slice() {
+            Ok(Token::Ident(id))
+        } else {
+            let start = self.span().start();
+            let span = SourceSpan::at(self.span().source_id(), start);
+            Err(ParsingError::InvalidToken { span })
         }
     }
 
@@ -615,7 +623,7 @@ fn pad_hex_if_needed<'a>(hex: &'a str) -> Cow<'a, str> {
         Cow::Borrowed(hex)
     } else {
         // allocate once, with exact capacity
-        let mut s = alloc::string::String::with_capacity(hex.len() + 1);
+        let mut s = String::with_capacity(hex.len() + 1);
         s.push('0');
         s.push_str(hex);
         Cow::Owned(s)
@@ -710,11 +718,11 @@ fn is_ascii_binary(c: char) -> bool {
 
 #[inline]
 pub fn shrink_u64_hex(n: u64) -> IntValue {
-    if n <= (u8::MAX as u64) {
+    if u8::try_from(n).is_ok() {
         IntValue::U8(n as u8)
-    } else if n <= (u16::MAX as u64) {
+    } else if u16::try_from(n).is_ok() {
         IntValue::U16(n as u16)
-    } else if n <= (u32::MAX as u64) {
+    } else if u32::try_from(n).is_ok() {
         IntValue::U32(n as u32)
     } else {
         IntValue::Felt(Felt::new(n))
@@ -723,9 +731,9 @@ pub fn shrink_u64_hex(n: u64) -> IntValue {
 
 #[inline]
 fn shrink_u32_bin(n: u32) -> BinEncodedValue {
-    if n <= (u8::MAX as u32) {
+    if u8::try_from(n).is_ok() {
         BinEncodedValue::U8(n as u8)
-    } else if n <= (u16::MAX as u32) {
+    } else if u16::try_from(n).is_ok() {
         BinEncodedValue::U16(n as u16)
     } else {
         BinEncodedValue::U32(n)

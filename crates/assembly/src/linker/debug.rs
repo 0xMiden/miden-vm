@@ -3,7 +3,7 @@ use core::fmt;
 use super::*;
 
 impl fmt::Debug for Linker {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Linker")
             .field("nodes", &DisplayModuleGraphNodes(&self.modules))
             .field("graph", &DisplayModuleGraph(self))
@@ -15,7 +15,7 @@ impl fmt::Debug for Linker {
 struct DisplayModuleGraph<'a>(&'a Linker);
 
 impl fmt::Debug for DisplayModuleGraph<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_set()
             .entries(self.0.modules.iter().enumerate().flat_map(|(module_index, m)| {
                 let module_index = ModuleIndex::new(module_index);
@@ -35,7 +35,7 @@ impl fmt::Debug for DisplayModuleGraph<'_> {
 struct DisplayModuleGraphNodes<'a>(&'a [LinkModule]);
 
 impl fmt::Debug for DisplayModuleGraphNodes<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
             .entries(self.0.iter().enumerate().flat_map(|(module_index, m)| {
                 let module_index = ModuleIndex::new(module_index);
@@ -63,7 +63,7 @@ struct DisplayModuleGraphNode<'a> {
 }
 
 impl fmt::Debug for DisplayModuleGraphNode<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Node")
             .field("id", &format_args!("{}", &self.id))
             .field("module", &self.path)
@@ -80,7 +80,7 @@ struct DisplayModuleGraphNodeWithEdges<'a> {
 }
 
 impl fmt::Debug for DisplayModuleGraphNodeWithEdges<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Edge")
             .field(
                 "caller",

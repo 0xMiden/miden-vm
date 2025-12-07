@@ -771,8 +771,8 @@ fn test_mast_forest_compaction_comprehensive() {
     forest.make_root(call_with_after_deco);
 
     // === Dyn nodes with before-enter decorators ===
-    let dyn_no_deco = crate::mast::DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
-    let dyn_with_before_deco = crate::mast::DynNodeBuilder::new_dyn()
+    let dyn_no_deco = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+    let dyn_with_before_deco = DynNodeBuilder::new_dyn()
         .with_before_enter(vec![debug_deco])
         .add_to_forest(&mut forest)
         .unwrap();

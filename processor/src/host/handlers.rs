@@ -20,19 +20,19 @@ use crate::{AdviceMutation, ExecutionError, ProcessState};
 /// be stored in the process's advice provider.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 /// Default implementation for both free functions and closures with signature
 /// `fn(&ProcessState) -> Result<(), HandlerError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a ProcessState) -> Result<Vec<AdviceMutation>, EventError>
+    F: for<'a> Fn(&'a ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError>
         + Send
         + Sync
         + 'static,
 {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         self(process)
     }
 }
@@ -41,7 +41,7 @@ where
 pub struct NoopEventHandler;
 
 impl EventHandler for NoopEventHandler {
-    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }
@@ -176,7 +176,7 @@ impl EventHandlerRegistry {
     pub fn handle_event(
         &self,
         id: EventId,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
         if let Some((_event_name, handler)) = self.handlers.get(&id) {
             let mutations = handler.on_event(process)?;
@@ -202,7 +202,7 @@ pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessState<'_>,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = crate::host::debug::DefaultDebugHandler::default();
@@ -210,7 +210,7 @@ pub trait DebugHandler: Sync {
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessState<'_>, trace_id: u32) -> Result<(), TraceError> {
         let _ = (&process, trace_id);
         #[cfg(feature = "std")]
         std::println!(

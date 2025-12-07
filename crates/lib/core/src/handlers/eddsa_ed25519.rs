@@ -42,7 +42,7 @@ const PRECOMPILE_REQUEST_LEN: usize =
 pub struct EddsaPrecompile;
 
 impl EventHandler for EddsaPrecompile {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, pk_ptr, k_digest_ptr, sig_ptr, ...]
         let pk_ptr = process.get_stack_item(1).as_int();
         let k_digest_ptr = process.get_stack_item(2).as_int();

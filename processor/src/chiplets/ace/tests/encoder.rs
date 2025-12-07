@@ -141,7 +141,7 @@ impl EncodedCircuit {
             Op::Add => 2,
         };
 
-        let encoded = id_l as u64 + ((id_r as u64) << ID_BITS) + (op << (2 * ID_BITS));
+        let encoded = u64::from(id_l) + (u64::from(id_r) << ID_BITS) + (op << (2 * ID_BITS));
         Some(Felt::new(encoded))
     }
 }

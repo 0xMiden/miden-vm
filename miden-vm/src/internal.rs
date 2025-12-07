@@ -385,11 +385,11 @@ mod tests {
 
         // Just "0x" without hex data
         let result = InputFile::parse_word("0x");
-        assert!(result.is_err());
+        result.unwrap_err();
 
         // Too short hex (less than 64 chars after 0x)
         let result = InputFile::parse_word("0x123");
-        assert!(result.is_err());
+        result.unwrap_err();
     }
 
     #[test]

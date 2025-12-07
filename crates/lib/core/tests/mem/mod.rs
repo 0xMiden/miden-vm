@@ -279,7 +279,7 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     advice_stack[0] += 1; // corrupt the expected hash
     advice_stack.extend(data);
     let res = build_test!(three_words, operand_stack, &advice_stack).execute();
-    assert!(res.is_err());
+    res.unwrap_err();
 }
 
 #[test]

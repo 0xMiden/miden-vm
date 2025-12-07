@@ -54,7 +54,7 @@ impl miette::SourceCode for SourceFile {
         span: &miette::SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
-    ) -> Result<alloc::boxed::Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
         let mut start =
             u32::try_from(span.offset()).map_err(|_| miette::MietteError::OutOfBounds)?;
         let len = u32::try_from(span.len()).map_err(|_| miette::MietteError::OutOfBounds)?;
@@ -62,18 +62,17 @@ impl miette::SourceCode for SourceFile {
         if context_lines_before > 0 {
             let line_index = self.content.line_index(start.into());
             let start_line_index = line_index.saturating_sub(context_lines_before as u32);
-            start = self.content.line_start(start_line_index).map(|idx| idx.to_u32()).unwrap_or(0);
+            start = self.content.line_start(start_line_index).map_or(0, |idx| idx.to_u32());
         }
         if context_lines_after > 0 {
             let line_index = self.content.line_index(end.into());
             let end_line_index = line_index
                 .checked_add(context_lines_after as u32)
                 .ok_or(miette::MietteError::OutOfBounds)?;
-            end = self
-                .content
-                .line_range(end_line_index)
-                .map(|range| range.end.to_u32())
-                .unwrap_or_else(|| self.content.source_range().end.to_u32());
+            end = self.content.line_range(end_line_index).map_or_else(
+                || self.content.source_range().end.to_u32(),
+                |range| range.end.to_u32(),
+            );
         }
         Ok(Box::new(ScopedSourceFileRef {
             file: self,
@@ -382,7 +381,7 @@ impl miette::SourceCode for SourceFileRef {
         span: &miette::SourceSpan,
         context_lines_before: usize,
         context_lines_after: usize,
-    ) -> Result<alloc::boxed::Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
+    ) -> Result<Box<dyn miette::SpanContents<'a> + 'a>, miette::MietteError> {
         self.file.read_span(span, context_lines_before, context_lines_after)
     }
 }
@@ -413,7 +412,7 @@ pub struct SourceContent {
 }
 
 impl fmt::Debug for SourceContent {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let Self {
             language,
             uri,
@@ -665,69 +664,65 @@ impl SourceContent {
         range: Option<Selection>,
         version: i32,
     ) -> Result<(), SourceContentUpdateError> {
-        match range {
-            Some(range) => {
-                let start = self
-                    .line_column_to_offset(range.start.line, range.start.character)
-                    .ok_or(SourceContentUpdateError::InvalidSelectionStart(range.start))?
-                    .to_usize();
-                let end = self
-                    .line_column_to_offset(range.end.line, range.end.character)
-                    .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.end))?
-                    .to_usize();
-                assert!(start <= end, "start of range must be less than end, got {start}..{end}",);
-                self.content.replace_range(start..end, &text);
+        if let Some(range) = range {
+            let start = self
+                .line_column_to_offset(range.start.line, range.start.character)
+                .ok_or(SourceContentUpdateError::InvalidSelectionStart(range.start))?
+                .to_usize();
+            let end = self
+                .line_column_to_offset(range.end.line, range.end.character)
+                .ok_or(SourceContentUpdateError::InvalidSelectionEnd(range.end))?
+                .to_usize();
+            assert!(start <= end, "start of range must be less than end, got {start}..{end}",);
+            self.content.replace_range(start..end, &text);
 
-                let added_line_starts = compute_line_starts(&text, Some(start as u32));
-                let num_added = added_line_starts.len();
-                let splice_start = range.start.line.to_usize() + 1;
-                // Determine deletion range in line_starts to respect Selection semantics.
-                // For multi-line edits, remove line starts from (start.line + 1) up to end.line
-                // inclusive, since all intervening newlines are removed by the
-                // replacement, regardless of end.character.
-                enum Deletion {
-                    Empty,
-                    Inclusive(usize), // inclusive end index
+            let added_line_starts = compute_line_starts(&text, Some(start as u32));
+            let num_added = added_line_starts.len();
+            let splice_start = range.start.line.to_usize() + 1;
+            // Determine deletion range in line_starts to respect Selection semantics.
+            // For multi-line edits, remove line starts from (start.line + 1) up to end.line
+            // inclusive, since all intervening newlines are removed by the
+            // replacement, regardless of end.character.
+            enum Deletion {
+                Empty,
+                Inclusive(usize), // inclusive end index
+            }
+            let deletion = if range.start.line == range.end.line {
+                Deletion::Empty
+            } else {
+                let mut end_line_for_splice = range.end.line.to_usize();
+                if !self.line_starts.is_empty() {
+                    let max_idx = self.line_starts.len() - 1;
+                    if end_line_for_splice > max_idx {
+                        end_line_for_splice = max_idx;
+                    }
                 }
-                let deletion = if range.start.line == range.end.line {
-                    Deletion::Empty
+                if end_line_for_splice >= splice_start {
+                    Deletion::Inclusive(end_line_for_splice)
                 } else {
-                    let mut end_line_for_splice = range.end.line.to_usize();
-                    if !self.line_starts.is_empty() {
-                        let max_idx = self.line_starts.len() - 1;
-                        if end_line_for_splice > max_idx {
-                            end_line_for_splice = max_idx;
-                        }
-                    }
-                    if end_line_for_splice >= splice_start {
-                        Deletion::Inclusive(end_line_for_splice)
-                    } else {
-                        Deletion::Empty
-                    }
-                };
-
-                match deletion {
-                    Deletion::Empty => {
-                        self.line_starts.splice(splice_start..splice_start, added_line_starts);
-                    },
-                    Deletion::Inclusive(end_idx) => {
-                        self.line_starts.splice(splice_start..=end_idx, added_line_starts);
-                    },
+                    Deletion::Empty
                 }
+            };
 
-                let diff =
-                    (text.len() as i32).saturating_sub_unsigned((end as u32) - (start as u32));
-                if diff != 0 {
-                    for i in (splice_start + num_added)..self.line_starts.len() {
-                        self.line_starts[i] =
-                            ByteIndex(self.line_starts[i].to_u32().saturating_add_signed(diff));
-                    }
+            match deletion {
+                Deletion::Empty => {
+                    self.line_starts.splice(splice_start..splice_start, added_line_starts);
+                },
+                Deletion::Inclusive(end_idx) => {
+                    self.line_starts.splice(splice_start..=end_idx, added_line_starts);
+                },
+            }
+
+            let diff = (text.len() as i32).saturating_sub_unsigned((end as u32) - (start as u32));
+            if diff != 0 {
+                for i in (splice_start + num_added)..self.line_starts.len() {
+                    self.line_starts[i] =
+                        ByteIndex(self.line_starts[i].to_u32().saturating_add_signed(diff));
                 }
-            },
-            None => {
-                self.line_starts = compute_line_starts(&text, None);
-                self.content = text;
-            },
+            }
+        } else {
+            self.line_starts = compute_line_starts(&text, None);
+            self.content = text;
         }
 
         self.version = version;
@@ -813,7 +808,7 @@ impl core::ops::Add<ByteOffset> for ByteIndex {
     type Output = ByteIndex;
 
     fn add(self, rhs: ByteOffset) -> Self {
-        Self((self.0 as i64 + rhs.0) as u32)
+        Self((i64::from(self.0) + rhs.0) as u32)
     }
 }
 
@@ -841,7 +836,7 @@ impl core::ops::Sub<ByteOffset> for ByteIndex {
     type Output = ByteIndex;
 
     fn sub(self, rhs: ByteOffset) -> Self {
-        Self((self.0 as i64 - rhs.0) as u32)
+        Self((i64::from(self.0) - rhs.0) as u32)
     }
 }
 

@@ -76,6 +76,6 @@ impl PrettyPrint for DocString {
             }
         });
 
-        fragment.map(|doc| const_text("#! ") + doc + nl()).unwrap_or(Document::Empty)
+        fragment.map_or(Document::Empty, |doc| const_text("#! ") + doc + nl())
     }
 }

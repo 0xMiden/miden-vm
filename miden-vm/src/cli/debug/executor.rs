@@ -108,18 +108,17 @@ impl DebugExecutor {
 
     /// iterates to the next clock cycle.
     fn next_vm_state(&mut self) -> Option<VmState> {
-        match self.vm_state_iter.next() {
-            Some(next_vm_state_result) => match next_vm_state_result {
+        if let Some(next_vm_state_result) = self.vm_state_iter.next() {
+            match next_vm_state_result {
                 Ok(vm_state) => Some(vm_state),
                 Err(err) => {
                     println!("Execution error: {err:?}");
                     None
                 },
-            },
-            None => {
-                println!("Program execution complete.");
-                None
-            },
+            }
+        } else {
+            println!("Program execution complete.");
+            None
         }
     }
 
@@ -215,6 +214,6 @@ impl DebugExecutor {
 
     /// Returns `true` if the current state should break.
     fn should_break(&self) -> bool {
-        self.vm_state.asmop.as_ref().map(|asm| asm.should_break()).unwrap_or(false)
+        self.vm_state.asmop.as_ref().is_some_and(|asm| asm.should_break())
     }
 }

@@ -260,7 +260,7 @@ fn test_mmr_unpack() {
     // Set up the VM stack with the MMR hash, and its target address
     let mut stack = felt_slice_to_ints(&*peaks_hash);
     let mmr_ptr = 1000_u32;
-    stack.insert(0, mmr_ptr as u64);
+    stack.insert(0, u64::from(mmr_ptr));
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -347,7 +347,7 @@ fn test_mmr_unpack_invalid_hash() {
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
 
-    assert!(test.execute().is_err());
+    test.execute().unwrap_err();
 }
 
 /// Tests the case of an MMR with more than 16 peaks
@@ -383,7 +383,7 @@ fn test_mmr_unpack_large_mmr() {
     // Set up the VM stack with the MMR hash, and its target address
     let mut stack = felt_slice_to_ints(&*peaks_hash);
     let mmr_ptr = 1000_u32;
-    stack.insert(0, mmr_ptr as u64);
+    stack.insert(0, u64::from(mmr_ptr));
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -646,7 +646,7 @@ fn test_mmr_large_add_roundtrip() {
 
     // Set up the VM stack with the MMR hash, and its target address
     let mut stack = felt_slice_to_ints(&*hash);
-    stack.insert(0, mmr_ptr as u64);
+    stack.insert(0, u64::from(mmr_ptr));
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)

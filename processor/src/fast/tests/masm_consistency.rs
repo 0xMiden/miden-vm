@@ -232,21 +232,17 @@ fn test_masm_consistency(
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
 
-        match kernel_source {
-            Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
-                    .unwrap();
+        if let Some(kernel_source) = kernel_source {
+            let kernel_lib =
+                Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
+            let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                .assemble_program(program_source)
+                .unwrap();
 
-                (program, Some(kernel_lib))
-            },
-            None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
-                (program, None)
-            },
+            (program, Some(kernel_lib))
+        } else {
+            let program = Assembler::new(source_manager).assemble_program(program_source).unwrap();
+            (program, None)
         }
     };
 
@@ -312,21 +308,17 @@ fn test_masm_errors_consistency(
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
 
-        match kernel_source {
-            Some(kernel_source) => {
-                let kernel_lib =
-                    Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
-                let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
-                    .assemble_program(program_source)
-                    .unwrap();
+        if let Some(kernel_source) = kernel_source {
+            let kernel_lib =
+                Assembler::new(source_manager.clone()).assemble_kernel(kernel_source).unwrap();
+            let program = Assembler::with_kernel(source_manager, kernel_lib.clone())
+                .assemble_program(program_source)
+                .unwrap();
 
-                (program, Some(kernel_lib))
-            },
-            None => {
-                let program =
-                    Assembler::new(source_manager).assemble_program(program_source).unwrap();
-                (program, None)
-            },
+            (program, Some(kernel_lib))
+        } else {
+            let program = Assembler::new(source_manager).assemble_program(program_source).unwrap();
+            (program, None)
         }
     };
 

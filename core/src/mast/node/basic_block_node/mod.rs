@@ -600,9 +600,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                 .map(|op_or_dec| match op_or_dec {
                     OperationOrDecorator::Operation(op) => op.render(),
                     OperationOrDecorator::Decorator(decorator_id) => {
-                        self.mast_forest.decorator_by_id(decorator_id)
-                            .map(|decorator| decorator.render())
-                            .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
+                        self.mast_forest.decorator_by_id(decorator_id).map_or_else(|| const_text("<invalid_decorator_id>"), |decorator| decorator.render())
                     },
                 })
                 .reduce(|acc, doc| acc + const_text(" ") + doc)
@@ -628,9 +626,7 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
                     .map(|op_or_dec| match op_or_dec {
                         OperationOrDecorator::Operation(op) => op.render(),
                         OperationOrDecorator::Decorator(decorator_id) => {
-                            self.mast_forest.decorator_by_id(decorator_id)
-                                .map(|decorator| decorator.render())
-                                .unwrap_or_else(|| const_text("<invalid_decorator_id>"))
+                            self.mast_forest.decorator_by_id(decorator_id).map_or_else(|| const_text("<invalid_decorator_id>"), |decorator| decorator.render())
                         },
                     })
                     .reduce(|acc, doc| acc + nl() + doc)
@@ -650,7 +646,7 @@ impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
 }
 
 enum Mid<'a> {
-    Slice(core::slice::Iter<'a, (usize, DecoratorId)>),
+    Slice(Iter<'a, (usize, DecoratorId)>),
     Linked(DecoratedLinksIter<'a>),
 }
 
@@ -773,16 +769,16 @@ impl<'a> ExactSizeIterator for DecoratorOpLinkIterator<'a> {
 /// IOW this makes its `BasicBlockNode::raw_decorator_iter` padding-unaware, or equivalently
 /// "removes" the padding of these decorators
 pub struct RawDecoratorOpLinkIterator<'a> {
-    before: core::slice::Iter<'a, DecoratorId>,
+    before: Iter<'a, DecoratorId>,
     middle: RawMid<'a>,
-    after: core::slice::Iter<'a, DecoratorId>,
+    after: Iter<'a, DecoratorId>,
     pad2raw: PaddedToRawPrefix, // indexed by padded indices
     total_raw_ops: usize,       // count of raw ops
     seg: Segment,
 }
 
 enum RawMid<'a> {
-    Slice(core::slice::Iter<'a, (usize, DecoratorId)>),
+    Slice(Iter<'a, (usize, DecoratorId)>),
     Linked(DecoratedLinksIter<'a>),
 }
 
@@ -882,8 +878,8 @@ struct OperationOrDecoratorIterator<'a> {
     forest: Option<&'a MastForest>,
 
     // extra segments
-    before: core::slice::Iter<'a, DecoratorId>,
-    after: core::slice::Iter<'a, DecoratorId>,
+    before: Iter<'a, DecoratorId>,
+    after: Iter<'a, DecoratorId>,
 
     // operation traversal
     batch_index: usize,
@@ -1046,7 +1042,7 @@ impl RawToPaddedPrefix {
 
             for g in 0..n {
                 let group_len = indptr[g + 1] - indptr[g];
-                let has_pad = padding[g] as usize;
+                let has_pad = usize::from(padding[g]);
                 let raw_in_g = group_len - has_pad;
 
                 // For each raw op, record how many paddings were before it.
@@ -1126,7 +1122,7 @@ impl PaddedToRawPrefix {
 
             for g in 0..n {
                 let group_len = indptr[g + 1] - indptr[g];
-                let has_pad = padding[g] as usize;
+                let has_pad = usize::from(padding[g]);
                 let raw_in_g = group_len - has_pad;
 
                 // Emit raw ops of the group.
@@ -1332,8 +1328,8 @@ impl MastForestContributor for BasicBlockNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
         // decorator handling with operation indices that other nodes don't have
 
@@ -1416,39 +1412,30 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         }
     }
 
-    fn remap_children(
-        self,
-        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, _remapping: &impl crate::LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // BasicBlockNode has no children to remap
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }
@@ -1456,7 +1443,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
 
 #[cfg(any(test, feature = "arbitrary"))]
 impl proptest::prelude::Arbitrary for BasicBlockNodeBuilder {
-    type Parameters = super::arbitrary::BasicBlockNodeParams;
+    type Parameters = arbitrary::BasicBlockNodeParams;
     type Strategy = proptest::strategy::BoxedStrategy<Self>;
 
     fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {

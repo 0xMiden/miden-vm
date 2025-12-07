@@ -119,7 +119,7 @@ pub(super) fn op_u32sub<P: Processor>(
 
     let result = second_old.as_int().wrapping_sub(first_old.as_int());
     let first_new = Felt::new(result >> 63);
-    let second_new = Felt::new(result & u32::MAX as u64);
+    let second_new = Felt::new(result & u64::from(u32::MAX));
 
     tracer.record_u32_range_checks(processor.system().clk(), second_new, ZERO);
 

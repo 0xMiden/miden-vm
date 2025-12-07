@@ -55,8 +55,8 @@ impl CircuitEvaluation {
     /// This function panics if the number of rows for each section leads to more than
     /// [`MAX_NUM_ACE_WIRES`] wires.
     pub fn new(ctx: ContextId, clk: RowIndex, num_read_rows: u32, num_eval_rows: u32) -> Self {
-        let num_wires = 2 * (num_read_rows as u64) + (num_eval_rows as u64);
-        assert!(num_wires <= MAX_NUM_ACE_WIRES as u64, "too many wires");
+        let num_wires = 2 * u64::from(num_read_rows) + u64::from(num_eval_rows);
+        assert!(num_wires <= u64::from(MAX_NUM_ACE_WIRES), "too many wires");
 
         let num_rows = num_read_rows + num_eval_rows;
 

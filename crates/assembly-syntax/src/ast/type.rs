@@ -308,11 +308,11 @@ impl TypeExpr {
             TypeExpr::Array(t) => Ok(t
                 .elem
                 .resolve_type(resolver)?
-                .map(|elem| types::Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
+                .map(|elem| Type::Array(Arc::new(types::ArrayType::new(elem, t.arity))))),
             TypeExpr::Ptr(ty) => Ok(ty
                 .pointee
                 .resolve_type(resolver)?
-                .map(|pointee| types::Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
+                .map(|pointee| Type::Ptr(Arc::new(types::PointerType::new(pointee))))),
             TypeExpr::Struct(t) => {
                 let mut fields = Vec::with_capacity(t.fields.len());
                 for field in t.fields.iter() {
@@ -754,11 +754,7 @@ impl crate::prettier::PrettyPrint for TypeAlias {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map_or(Document::Empty, |docstring| docstring.render());
 
         if self.visibility.is_public() {
             doc += display(self.visibility) + const_text(" ");
@@ -931,11 +927,7 @@ impl crate::prettier::PrettyPrint for EnumType {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map_or(Document::Empty, |docstring| docstring.render());
 
         let variants = self
             .variants
@@ -1026,21 +1018,21 @@ impl Variant {
                 repr: ty.clone(),
             }),
             Type::I1 => Ok(()),
-            Type::I8 | Type::U8 if value > u8::MAX as u64 => {
+            Type::I8 | Type::U8 if value > u64::from(u8::MAX) => {
                 Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                     span: self.discriminant.span(),
                     repr: ty.clone(),
                 })
             },
             Type::I8 | Type::U8 => Ok(()),
-            Type::I16 | Type::U16 if value > u16::MAX as u64 => {
+            Type::I16 | Type::U16 if value > u64::from(u16::MAX) => {
                 Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                     span: self.discriminant.span(),
                     repr: ty.clone(),
                 })
             },
             Type::I16 | Type::U16 => Ok(()),
-            Type::I32 | Type::U32 if value > u32::MAX as u64 => {
+            Type::I32 | Type::U32 if value > u64::from(u32::MAX) => {
                 Err(SemanticAnalysisError::InvalidEnumDiscriminant {
                     span: self.discriminant.span(),
                     repr: ty.clone(),
@@ -1087,11 +1079,7 @@ impl crate::prettier::PrettyPrint for Variant {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let doc = self.docs.as_ref().map_or(Document::Empty, |docstring| docstring.render());
 
         doc + display(&self.name) + const_text(" = ") + self.discriminant.render()
     }

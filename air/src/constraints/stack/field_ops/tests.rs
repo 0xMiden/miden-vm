@@ -251,18 +251,15 @@ pub fn get_eqz_test_frame(a: u64) -> EvaluationFrame<Felt> {
 
     // Set the output. First element in the next frame should be 1 if the first element
     // in the current frame is 0 and 0 vice-versa.
-    match a {
-        0 => {
-            frame.current_mut()[STACK_TRACE_OFFSET] = ZERO;
-            frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] =
-                Felt::new(rand_value::<u64>());
-            frame.next_mut()[STACK_TRACE_OFFSET] = ONE;
-        },
-        _ => {
-            frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(a);
-            frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(a).inv();
-            frame.next_mut()[STACK_TRACE_OFFSET] = ZERO;
-        },
+    if a == 0 {
+        frame.current_mut()[STACK_TRACE_OFFSET] = ZERO;
+        frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] =
+            Felt::new(rand_value::<u64>());
+        frame.next_mut()[STACK_TRACE_OFFSET] = ONE;
+    } else {
+        frame.current_mut()[STACK_TRACE_OFFSET] = Felt::new(a);
+        frame.current_mut()[DECODER_TRACE_OFFSET + USER_OP_HELPERS_OFFSET] = Felt::new(a).inv();
+        frame.next_mut()[STACK_TRACE_OFFSET] = ZERO;
     }
 
     frame

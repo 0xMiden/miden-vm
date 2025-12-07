@@ -85,7 +85,7 @@ struct LoopNodePrettyPrint<'a> {
     mast_forest: &'a MastForest,
 }
 
-impl crate::prettier::PrettyPrint for LoopNodePrettyPrint<'_> {
+impl PrettyPrint for LoopNodePrettyPrint<'_> {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
@@ -370,18 +370,12 @@ impl MastForestContributor for LoopNodeBuilder {
             } else {
                 let body_hash = forest[self.body].digest();
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[body_hash, miden_crypto::Word::default()],
-                    LoopNode::DOMAIN,
-                )
+                hasher::merge_in_domain(&[body_hash, Word::default()], LoopNode::DOMAIN)
             },
         )
     }
 
-    fn remap_children(
-        self,
-        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, remapping: &impl crate::LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         LoopNodeBuilder {
             body: *remapping.get(self.body).unwrap_or(&self.body),
             before_enter: self.before_enter,
@@ -390,31 +384,25 @@ impl MastForestContributor for LoopNodeBuilder {
         }
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }
@@ -472,7 +460,7 @@ impl proptest::prelude::Arbitrary for LoopNodeBuilder {
         use proptest::prelude::*;
 
         (
-            any::<crate::mast::MastNodeId>(),
+            any::<MastNodeId>(),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
                 0..=params.max_decorators,

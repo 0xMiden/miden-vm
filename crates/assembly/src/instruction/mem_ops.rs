@@ -26,7 +26,7 @@ use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
 /// Returns an error if we are reading from local memory and local memory index is greater than
 /// the number of procedure locals.
 pub fn mem_read(
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
     proc_ctx: &ProcedureContext,
     addr: Option<u32>,
     is_local: bool,
@@ -85,7 +85,7 @@ pub fn mem_read(
 /// Returns an error if we are writing to local memory and local memory index is greater than
 /// the number of procedure locals.
 pub fn mem_write_imm(
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
     proc_ctx: &ProcedureContext,
     addr: u32,
     is_local: bool,
@@ -129,7 +129,7 @@ pub fn mem_write_imm(
 /// # Errors
 /// Returns an error if index is greater than the number of procedure locals.
 pub fn local_to_absolute_addr(
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
     proc_ctx: &ProcedureContext,
     index_of_local: u16,
     num_proc_locals: u16,

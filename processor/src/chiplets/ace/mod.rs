@@ -46,7 +46,10 @@ impl Ace {
     ///
     /// This also returns helper data needed for generating the part of the auxiliary trace
     /// associated with the ACE chiplet.
-    pub(crate) fn fill_trace(self, trace: &mut TraceFragment) -> Vec<EvaluatedCircuitsMetadata> {
+    pub(crate) fn fill_trace(
+        self,
+        trace: &mut TraceFragment<'_>,
+    ) -> Vec<EvaluatedCircuitsMetadata> {
         // make sure fragment dimensions are consistent with the dimensions of this trace
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
         debug_assert_eq!(ACE_CHIPLET_NUM_COLS, trace.width(), "inconsistent trace widths");
@@ -300,7 +303,7 @@ pub fn eval_circuit(
     let num_eval = num_eval.as_int();
 
     let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
+    if num_wires > u64::from(MAX_NUM_ACE_WIRES) {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::TooManyWires(num_wires),

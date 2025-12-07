@@ -330,16 +330,15 @@ fn test_trace_generation_at_fragment_boundaries(
             for (row_idx, (val_from_fragments, val_from_single_fragment)) in
                 col_from_fragments.iter().zip(col_from_single_fragment.iter()).enumerate()
             {
-                if val_from_fragments != val_from_single_fragment {
-                    panic!(
-                        "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}) row {}: multiple={}, single={}",
-                        col_idx,
-                        get_column_name(col_idx),
-                        row_idx,
-                        val_from_fragments,
-                        val_from_single_fragment
-                    );
-                }
+                assert!(
+                    val_from_fragments == val_from_single_fragment,
+                    "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}) row {}: multiple={}, single={}",
+                    col_idx,
+                    get_column_name(col_idx),
+                    row_idx,
+                    val_from_fragments,
+                    val_from_single_fragment
+                );
             }
             // If we reach here, the columns have different lengths
             panic!(

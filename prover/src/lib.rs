@@ -1,6 +1,7 @@
 #![no_std]
 
-#[cfg_attr(all(feature = "metal", target_arch = "aarch64", target_os = "macos"), macro_use)]
+#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
+#[macro_use]
 extern crate alloc;
 
 #[cfg(feature = "std")]

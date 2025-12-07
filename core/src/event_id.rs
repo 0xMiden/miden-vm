@@ -90,7 +90,7 @@ impl core::hash::Hash for EventId {
 
 impl Display for EventId {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
-        core::fmt::Display::fmt(&self.0, f)
+        Display::fmt(&self.0, f)
     }
 }
 

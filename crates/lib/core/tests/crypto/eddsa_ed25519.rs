@@ -206,7 +206,7 @@ impl EddsaSignatureHandler {
 }
 
 impl EventHandler for EddsaSignatureHandler {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         let provided_pk_rpo = process.get_stack_word_be(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");

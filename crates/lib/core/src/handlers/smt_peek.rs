@@ -36,7 +36,7 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 ///
 /// # Panics
 /// Will panic as unimplemented if the target depth is `64`.
-pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_smt_peek(process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
     let key = process.get_stack_word_be(1);
@@ -46,7 +46,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
     // or a root of an empty subtree at the returned depth
     let node = process
         .advice_provider()
-        .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
+        .get_tree_node(root, Felt::new(u64::from(SMT_DEPTH)), key[3])
         .map_err(|err| SmtPeekError::AdviceProviderError {
             message: format!("Failed to get tree node: {}", err),
         })?;
@@ -79,7 +79,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
 
 /// Retrieves the preimage of an SMT leaf node from the advice provider.
 fn get_smt_leaf_preimage(
-    process: &ProcessState,
+    process: &ProcessState<'_>,
     node: Word,
 ) -> Result<Vec<(Word, Word)>, SmtPeekError> {
     let kv_pairs = process

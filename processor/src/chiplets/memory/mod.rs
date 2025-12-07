@@ -298,7 +298,7 @@ impl Memory {
     }
 
     /// Fills the provided trace fragment with trace data from this memory instance.
-    pub fn fill_trace(self, trace: &mut TraceFragment) {
+    pub fn fill_trace(self, trace: &mut TraceFragment<'_>) {
         debug_assert_eq!(self.trace_len(), trace.len(), "inconsistent trace lengths");
 
         // set the pervious address and clock cycle to the first address and clock cycle of the

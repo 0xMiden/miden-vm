@@ -470,7 +470,7 @@ where
 impl<E, H> ConstraintCommitment<E> for MetalConstraintCommitment<E, H>
 where
     E: FieldElement,
-    H: ElementHasher<BaseField = E::BaseField> + core::marker::Sync,
+    H: ElementHasher<BaseField = E::BaseField> + Sync,
 {
     type HashFn = H;
     type VC = MerkleTree<H>;

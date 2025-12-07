@@ -33,9 +33,9 @@ impl TryFrom<u64> for Op {
 /// Given a `Felt`, tries to recover the components `id_l, id_r, op`.
 pub fn decode_instruction(instruction: Felt) -> Option<(u32, u32, Op)> {
     let mut remaining = instruction.as_int();
-    let id_l = (remaining & MAX_ID as u64) as u32;
+    let id_l = (remaining & u64::from(MAX_ID)) as u32;
     remaining >>= ID_BITS;
-    let id_r = (remaining & MAX_ID as u64) as u32;
+    let id_r = (remaining & u64::from(MAX_ID)) as u32;
     remaining >>= ID_BITS;
 
     // Ensure the ID did not overflow

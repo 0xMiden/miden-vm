@@ -29,7 +29,7 @@ pub struct RelatedLabel {
 }
 
 impl fmt::Display for RelatedLabel {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.message.as_ref())
     }
 }
@@ -197,7 +197,7 @@ impl Diagnostic for RelatedError {
 }
 
 impl fmt::Display for RelatedError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }

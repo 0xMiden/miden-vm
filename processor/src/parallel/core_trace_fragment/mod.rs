@@ -357,14 +357,13 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 };
 
                 // Execute the callee
-                match current_forest.find_procedure_root(callee_hash) {
-                    Some(callee_id) => self.execute_mast_node(callee_id, current_forest)?,
-                    None => {
-                        let (resolved_node_id, resolved_forest) =
-                            self.context.replay.mast_forest_resolution.replay_resolution();
+                if let Some(callee_id) = current_forest.find_procedure_root(callee_hash) {
+                    self.execute_mast_node(callee_id, current_forest)?
+                } else {
+                    let (resolved_node_id, resolved_forest) =
+                        self.context.replay.mast_forest_resolution.replay_resolution();
 
-                        self.execute_mast_node(resolved_node_id, &resolved_forest)?
-                    },
+                    self.execute_mast_node(resolved_node_id, &resolved_forest)?
                 };
 
                 // Restore context state for DYNCALL
@@ -875,14 +874,13 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
-#[expect(clippy::too_many_arguments)]
 fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
     num_vars: Felt,
     num_eval: Felt,
-    processor: &mut CoreTraceFragmentFiller,
+    processor: &mut CoreTraceFragmentFiller<'_>,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {

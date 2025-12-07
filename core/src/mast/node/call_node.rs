@@ -465,18 +465,12 @@ impl MastForestContributor for CallNodeBuilder {
                     CallNode::CALL_DOMAIN
                 };
 
-                crate::chiplets::hasher::merge_in_domain(
-                    &[callee_digest, miden_crypto::Word::default()],
-                    domain,
-                )
+                hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
             },
         )
     }
 
-    fn remap_children(
-        self,
-        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, remapping: &impl crate::LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         CallNodeBuilder {
             callee: *remapping.get(self.callee).unwrap_or(&self.callee),
             is_syscall: self.is_syscall,
@@ -486,31 +480,25 @@ impl MastForestContributor for CallNodeBuilder {
         }
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }
@@ -569,7 +557,7 @@ impl proptest::prelude::Arbitrary for CallNodeBuilder {
         use proptest::prelude::*;
 
         (
-            any::<crate::mast::MastNodeId>(),
+            any::<MastNodeId>(),
             any::<bool>(),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),

@@ -234,13 +234,15 @@ impl Test {
     pub fn add_event_handlers(&mut self, handlers: Vec<(EventName, Arc<dyn EventHandler>)>) {
         for (event, handler) in handlers {
             let event_name = event.as_str();
-            if SystemEvent::from_name(event_name).is_some() {
-                panic!("tried to register handler for reserved system event: {event_name}")
-            }
+            assert!(
+                SystemEvent::from_name(event_name).is_none(),
+                "tried to register handler for reserved system event: {event_name}"
+            );
             let event_id = event.to_event_id();
-            if self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id) {
-                panic!("handler for event '{event_name}' was already added")
-            }
+            assert!(
+                !self.handlers.iter().any(|(e, _)| e.to_event_id() == event_id),
+                "handler for event '{event_name}' was already added"
+            );
             self.handlers.push((event, handler));
         }
     }
@@ -465,7 +467,7 @@ impl Test {
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = miden_prover::prove(
+        let (mut stack_outputs, proof) = prove(
             &program,
             stack_inputs.clone(),
             self.advice_inputs.clone(),
@@ -496,11 +498,9 @@ impl Test {
         let program_info = ProgramInfo::from(program);
         if test_fail {
             stack_outputs.stack_mut()[0] += ONE;
-            assert!(
-                miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err()
-            );
+            verify(program_info, stack_inputs, stack_outputs, proof).unwrap_err();
         } else {
-            let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
+            let result = verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
     }
@@ -675,16 +675,15 @@ impl Test {
                 for (row_idx, (slow_val, parallel_val)) in
                     slow_column.iter().zip(parallel_column.iter()).enumerate()
                 {
-                    if slow_val != parallel_val {
-                        panic!(
-                            "Core trace columns do not match between slow and parallel processors at column {} ({}) row {}: slow={}, parallel={}",
-                            col_idx,
-                            get_column_name(col_idx),
-                            row_idx,
-                            slow_val,
-                            parallel_val
-                        );
-                    }
+                    assert!(
+                        slow_val == parallel_val,
+                        "Core trace columns do not match between slow and parallel processors at column {} ({}) row {}: slow={}, parallel={}",
+                        col_idx,
+                        get_column_name(col_idx),
+                        row_idx,
+                        slow_val,
+                        parallel_val
+                    );
                 }
                 // If we reach here, the columns have different lengths
                 panic!(

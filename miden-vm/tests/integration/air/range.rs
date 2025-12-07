@@ -26,7 +26,7 @@ fn range_check_multi() {
 #[test]
 fn range_check_u16max() {
     let asm_op = "u32overflowing_add";
-    let stack = vec![1, (u32::MAX - 1) as u64];
+    let stack = vec![1, u64::from(u32::MAX - 1)];
 
     build_op_test!(asm_op, &stack).prove_and_verify(stack, false);
 }

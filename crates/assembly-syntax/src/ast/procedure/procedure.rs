@@ -262,11 +262,7 @@ impl crate::prettier::PrettyPrint for Procedure {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map_or(Document::Empty, |docstring| docstring.render());
 
         if !self.attrs.is_empty() {
             doc += self
@@ -303,7 +299,7 @@ impl crate::prettier::PrettyPrint for Procedure {
 }
 
 impl fmt::Debug for Procedure {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Procedure")
             .field("docs", &self.docs)
             .field("attrs", &self.attrs)

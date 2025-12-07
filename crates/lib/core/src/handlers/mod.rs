@@ -52,10 +52,10 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
 ///     .ok_or(MyError::MemoryReadFailed)?;
 /// ```
 pub(crate) fn read_memory_region(
-    process: &ProcessState,
+    process: &ProcessState<'_>,
     start_ptr: u64,
     len: u64,
-) -> Option<alloc::vec::Vec<Felt>> {
+) -> Option<Vec<Felt>> {
     // Validate inputs fit in u32
     let start_addr: u32 = start_ptr.try_into().ok()?;
     let len_u32: u32 = len.try_into().ok()?;
@@ -109,7 +109,7 @@ pub(crate) fn read_memory_region(
 /// // Returns: [0x01, 0x02, 0x03, 0x04, 0x05]
 /// ```
 pub(crate) fn read_memory_packed_u32(
-    process: &ProcessState,
+    process: &ProcessState<'_>,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, MemoryReadError> {

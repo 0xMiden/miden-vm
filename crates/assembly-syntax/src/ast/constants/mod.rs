@@ -62,7 +62,7 @@ impl Constant {
 }
 
 impl fmt::Debug for Constant {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Constant")
             .field("docs", &self.docs)
             .field("visibility", &self.visibility)
@@ -76,11 +76,7 @@ impl crate::prettier::PrettyPrint for Constant {
     fn render(&self) -> crate::prettier::Document {
         use crate::prettier::*;
 
-        let mut doc = self
-            .docs
-            .as_ref()
-            .map(|docstring| docstring.render())
-            .unwrap_or(Document::Empty);
+        let mut doc = self.docs.as_ref().map_or(Document::Empty, |docstring| docstring.render());
 
         doc += flatten(const_text("const") + const_text(" ") + display(&self.name));
         doc += const_text(" = ");

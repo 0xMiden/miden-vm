@@ -65,19 +65,16 @@ pub fn generate_recursive_verifier_data(
     kernel: Option<&str>,
 ) -> Result<VerifierData, VerifierError> {
     let program = {
-        match kernel {
-            Some(kernel) => {
-                let context = miden_assembly::testing::TestContext::new();
-                let kernel_lib =
-                    Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
-                let assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
-                let program: Program = assembler.assemble_program(source).unwrap();
-                program
-            },
-            None => {
-                let program: Program = Assembler::default().assemble_program(source).unwrap();
-                program
-            },
+        if let Some(kernel) = kernel {
+            let context = miden_assembly::testing::TestContext::new();
+            let kernel_lib =
+                Assembler::new(context.source_manager()).assemble_kernel(kernel).unwrap();
+            let assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
+            let program: Program = assembler.assemble_program(source).unwrap();
+            program
+        } else {
+            let program: Program = Assembler::default().assemble_program(source).unwrap();
+            program
         }
     };
     let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();

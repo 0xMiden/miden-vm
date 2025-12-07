@@ -78,7 +78,7 @@ impl EventHandler for EcdsaPrecompile {
     /// - **Advice Stack**: Extended with verification result (1 for valid, 0 for invalid)
     /// - **Precompile Request**: Stores tag `[event_id, result, 0, 0]` and serialized request data
     ///   (pk || digest || sig) for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr_pk, ptr_digest, ptr_sig, ...]
         let ptr_pk = process.get_stack_item(1).as_int();
         let ptr_digest = process.get_stack_item(2).as_int();

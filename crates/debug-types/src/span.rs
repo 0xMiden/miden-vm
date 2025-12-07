@@ -54,7 +54,7 @@ pub struct Span<T> {
 }
 
 #[cfg(feature = "serde")]
-impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Span<T> {
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Span<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -65,7 +65,7 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for Span<T> {
 }
 
 #[cfg(feature = "serde")]
-impl<T: serde::Serialize> serde::Serialize for Span<T> {
+impl<T: Serialize> Serialize for Span<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
@@ -253,14 +253,14 @@ impl<T: ?Sized, U: AsMut<T>> AsMut<T> for Span<U> {
 
 impl<T: fmt::Debug> fmt::Debug for Span<T> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.spanned, f)
     }
 }
 
 impl<T: fmt::Display> fmt::Display for Span<T> {
     #[inline]
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.spanned, f)
     }
 }

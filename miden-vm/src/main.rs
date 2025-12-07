@@ -37,19 +37,18 @@ impl TryFrom<MidenVmCli> for Cli {
             Behavior::External(args) => {
                 let used_alias = args.first();
                 let is_known_alias = used_alias
-                    .map(|command_name| command_name.as_os_str() == OsStr::new("miden vm"))
-                    // Edge case where the CLI is called under no name.
-                    .unwrap_or(false);
+                    .is_some_and(|command_name| command_name.as_os_str() == OsStr::new("miden vm"));
 
                 if !is_known_alias {
-                    let error_message = used_alias
-                        .map(|command_name| {
+                    let error_message = used_alias.map_or(
+                        String::from("Called the CLI under an empty alias"),
+                        |command_name| {
                             format!(
                                 "Called the CLI with an unknown alias '{}'",
                                 command_name.clone().into_string().unwrap_or("".to_string())
                             )
-                        })
-                        .unwrap_or(String::from("Called the CLI under an empty alias"));
+                        },
+                    );
 
                     return Err(Report::msg(error_message));
                 }

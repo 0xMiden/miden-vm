@@ -45,9 +45,9 @@ pub fn generate_advice_inputs(
 
     // we need to provide the following instance specific data through the operand stack
     let initial_stack = vec![
-        proof.context.options().grinding_factor() as u64,
+        u64::from(proof.context.options().grinding_factor()),
         proof.context.options().num_queries() as u64,
-        proof.context.trace_info().length().ilog2() as u64,
+        u64::from(proof.context.trace_info().length().ilog2()),
     ];
 
     // build a seed for the public coin; the initial seed is the hash of public inputs and proof

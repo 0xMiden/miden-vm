@@ -1,0 +1,10 @@
+# cyclomatic complexity is not always useful
+cognitive-complexity-threshold = 100
+# types are used for safety encoding
+type-complexity-threshold = 10000
+# The VM sometimes requires a lot of wiring
+too-many-arguments-threshold = 16
+# Reasonably large enum variants are okay
+enum-variant-size-threshold = 1000
+# Allow unwrap in test
+allow-unwrap-in-tests = true

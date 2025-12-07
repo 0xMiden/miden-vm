@@ -291,7 +291,7 @@ where
 
 impl<I: Idx, T> IntoIterator for IndexVec<I, T> {
     type Item = T;
-    type IntoIter = alloc::vec::IntoIter<T>;
+    type IntoIter = vec::IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.raw.into_iter()

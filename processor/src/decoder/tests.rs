@@ -1557,7 +1557,7 @@ fn set_user_op_helpers_many() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
-    let (trace, ..) = build_trace(&[dividend as u64, divisor as u64], &program);
+    let (trace, ..) = build_trace(&[u64::from(dividend), u64::from(divisor)], &program);
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.
@@ -1565,7 +1565,7 @@ fn set_user_op_helpers_many() {
     let quot = dividend / divisor;
     let rem = dividend - quot * divisor;
     let check_1 = dividend - quot;
-    let check_2 = divisor as i128 - rem as i128 - 1; // note that `check2` is non-negative
+    let check_2 = i128::from(divisor) - i128::from(rem) - 1; // note that `check2` is non-negative
     let expected = build_expected_hasher_state(&[
         ZERO,
         ZERO,
@@ -1631,7 +1631,7 @@ fn build_dyn_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, us
 
 fn build_call_trace(program: &Program, kernel: Kernel) -> (SystemTrace, DecoderTrace, usize) {
     let mut host = DefaultHost::default();
-    let stack_inputs = crate::StackInputs::default();
+    let stack_inputs = StackInputs::default();
     let mut process =
         Process::new(kernel, stack_inputs, AdviceInputs::default(), ExecutionOptions::default());
 
@@ -1705,7 +1705,6 @@ fn check_op_decoding(
     );
 }
 
-#[expect(clippy::too_many_arguments)]
 #[track_caller]
 fn check_op_decoding_with_imm(
     trace: &DecoderTrace,

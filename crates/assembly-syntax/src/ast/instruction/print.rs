@@ -404,9 +404,9 @@ mod tests {
         assert_eq!("push.3.4.8.9", instruction);
         let instruction = format!(
             "{}",
-            Instruction::Push(Immediate::Value(miden_debug_types::Span::unknown(
-                crate::parser::PushValue::Int(crate::parser::IntValue::U8(3))
-            )))
+            Instruction::Push(Immediate::Value(Span::unknown(crate::parser::PushValue::Int(
+                crate::parser::IntValue::U8(3)
+            ))))
         );
         assert_eq!("push.3", instruction);
 

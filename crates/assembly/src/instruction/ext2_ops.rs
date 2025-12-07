@@ -8,7 +8,7 @@ use crate::{Report, ZERO};
 /// operations outputs the result c = (c1, c0) where c1 = a1 + b1 and c0 = a0 + b0.
 ///
 /// This operation takes 5 VM cycles.
-pub fn ext2_add(block_builder: &mut BasicBlockBuilder) {
+pub fn ext2_add(block_builder: &mut BasicBlockBuilder<'_>) {
     #[rustfmt::skip]
     let ops = [
         Swap,           // [b0, b1, a1, a0, ...]
@@ -25,7 +25,7 @@ pub fn ext2_add(block_builder: &mut BasicBlockBuilder) {
 /// operations outputs the result c = (c1, c0) where c1 = a1 - b1 and c0 = a0 - b0.
 ///
 /// This operation takes 7 VM cycles.
-pub fn ext2_sub(block_builder: &mut BasicBlockBuilder) {
+pub fn ext2_sub(block_builder: &mut BasicBlockBuilder<'_>) {
     #[rustfmt::skip]
     let ops = [
         Neg,        // [-b1, b0, a1, a0, ...]
@@ -44,7 +44,7 @@ pub fn ext2_sub(block_builder: &mut BasicBlockBuilder) {
 /// outputs the product c = (c1, c0) where c0 = a0b0 - 2(a1b1) and c1 = (a0 + a1)(b0 + b1) - a0b0
 ///
 /// This operation takes 3 VM cycles.
-pub fn ext2_mul(block_builder: &mut BasicBlockBuilder) {
+pub fn ext2_mul(block_builder: &mut BasicBlockBuilder<'_>) {
     block_builder.push_ops([Ext2Mul, Drop, Drop]);
 }
 
@@ -53,7 +53,7 @@ pub fn ext2_mul(block_builder: &mut BasicBlockBuilder) {
 /// operations outputs the result c = (c1, c0) where c = a * b^-1.
 ///
 /// This operation takes 11 VM cycles.
-pub fn ext2_div(block_builder: &mut BasicBlockBuilder) {
+pub fn ext2_div(block_builder: &mut BasicBlockBuilder<'_>) {
     block_builder.push_system_event(Ext2Inv);
     #[rustfmt::skip]
     let ops = [
@@ -77,7 +77,7 @@ pub fn ext2_div(block_builder: &mut BasicBlockBuilder) {
 /// [-a1, -a0, ...]
 ///
 /// This operation takes 4 VM cycles.
-pub fn ext2_neg(block_builder: &mut BasicBlockBuilder) {
+pub fn ext2_neg(block_builder: &mut BasicBlockBuilder<'_>) {
     #[rustfmt::skip]
     let ops = [
         Neg,            // [a1, a0, ...]
@@ -113,7 +113,7 @@ pub fn ext2_neg(block_builder: &mut BasicBlockBuilder) {
 /// assert b  = (1, 0) | (1, 0) is the multiplicative identity of extension field.
 ///
 /// This operation takes 8 VM cycles.
-pub fn ext2_inv(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
+pub fn ext2_inv(block_builder: &mut BasicBlockBuilder<'_>) -> Result<(), Report> {
     block_builder.push_system_event(Ext2Inv);
     #[rustfmt::skip]
     let ops = [

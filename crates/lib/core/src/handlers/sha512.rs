@@ -33,7 +33,7 @@ impl EventHandler for Sha512Precompile {
     /// ## Input Format
     /// - **Stack**: `[event_id, ptr, len_bytes, ...]`
     /// - **Memory**: bytes packed into u32 field elements starting at `ptr`
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_int();
         let len_bytes = process.get_stack_item(2).as_int();

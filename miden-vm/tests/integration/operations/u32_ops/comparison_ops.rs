@@ -66,7 +66,7 @@ proptest! {
         };
 
         let asm_op = "u32lt";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
         test.prop_expect_stack(&[expected])?;
     }
 
@@ -79,7 +79,7 @@ proptest! {
         };
 
         let asm_op = "u32lte";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
         test.prop_expect_stack(&[expected])?;
     }
 
@@ -92,7 +92,7 @@ proptest! {
         };
 
         let asm_op = "u32gt";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
         test.prop_expect_stack(&[expected])?;
     }
 
@@ -105,7 +105,7 @@ proptest! {
         };
 
         let asm_op = "u32gte";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
         test.prop_expect_stack(&[expected])?;
     }
 
@@ -114,8 +114,8 @@ proptest! {
         let expected = if a < b { a } else { b };
 
         let asm_op = "u32min";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
+        test.prop_expect_stack(&[u64::from(expected)])?;
     }
 
     #[test]
@@ -123,8 +123,8 @@ proptest! {
         let expected = if a > b { a } else { b };
 
         let asm_op = "u32max";
-        let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
-        test.prop_expect_stack(&[expected as u64])?;
+        let test = build_op_test!(&asm_op, &[u64::from(a), u64::from(b)]);
+        test.prop_expect_stack(&[u64::from(expected)])?;
     }
 }
 
@@ -169,22 +169,22 @@ fn test_comparison_op(asm_op: &str, expected_lt: u64, expected_eq: u64, expected
         Ordering::Greater => expected_gt,
     };
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
+    let test = build_op_test!(asm_op, &[u64::from(a), u64::from(b)]);
     test.expect_stack(&[expected]);
 
     // same test with immediate value
     let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
+    let test = build_op_test!(asm_op_imm, &[u64::from(a)]);
     test.expect_stack(&[expected]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
 
-    let test = build_op_test!(asm_op, &[c, a as u64, b as u64]);
+    let test = build_op_test!(asm_op, &[c, u64::from(a), u64::from(b)]);
     test.expect_stack(&[expected, c]);
 
     // same test with immediate value
-    let test = build_op_test!(asm_op_imm, &[c, a as u64]);
+    let test = build_op_test!(asm_op_imm, &[c, u64::from(a)]);
     test.expect_stack(&[expected, c]);
 }
 
@@ -223,21 +223,21 @@ fn test_min(asm_op: &str) {
         Ordering::Greater => b,
     };
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op, &[u64::from(a), u64::from(b)]);
+    test.expect_stack(&[u64::from(expected)]);
 
     let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op_imm, &[u64::from(a)]);
+    test.expect_stack(&[u64::from(expected)]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
 
-    let test = build_op_test!(asm_op, &[c, a as u64, b as u64]);
-    test.expect_stack(&[expected as u64, c]);
+    let test = build_op_test!(asm_op, &[c, u64::from(a), u64::from(b)]);
+    test.expect_stack(&[u64::from(expected), c]);
 
-    let test = build_op_test!(asm_op_imm, &[c, a as u64]);
-    test.expect_stack(&[expected as u64, c]);
+    let test = build_op_test!(asm_op_imm, &[c, u64::from(a)]);
+    test.expect_stack(&[u64::from(expected), c]);
 }
 
 /// Tests a u32max assembly operation against a number of cases to ensure that the operation puts
@@ -275,19 +275,19 @@ fn test_max(asm_op: &str) {
         Ordering::Greater => a,
     };
 
-    let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op, &[u64::from(a), u64::from(b)]);
+    test.expect_stack(&[u64::from(expected)]);
 
     let asm_op_imm = format!("{asm_op}.{b}");
-    let test = build_op_test!(asm_op_imm, &[a as u64]);
-    test.expect_stack(&[expected as u64]);
+    let test = build_op_test!(asm_op_imm, &[u64::from(a)]);
+    test.expect_stack(&[u64::from(expected)]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
 
-    let test = build_op_test!(asm_op, &[c, a as u64, b as u64]);
-    test.expect_stack(&[expected as u64, c]);
+    let test = build_op_test!(asm_op, &[c, u64::from(a), u64::from(b)]);
+    test.expect_stack(&[u64::from(expected), c]);
 
-    let test = build_op_test!(asm_op_imm, &[c, a as u64]);
-    test.expect_stack(&[expected as u64, c]);
+    let test = build_op_test!(asm_op_imm, &[c, u64::from(a)]);
+    test.expect_stack(&[u64::from(expected), c]);
 }

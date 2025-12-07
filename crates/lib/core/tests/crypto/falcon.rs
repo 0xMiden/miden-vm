@@ -60,7 +60,9 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn push_falcon_signature(
+    process: &ProcessState<'_>,
+) -> Result<Vec<AdviceMutation>, EventError> {
     let pub_key = process.get_stack_word_be(1);
     let msg = process.get_stack_word_be(5);
 
@@ -73,7 +75,7 @@ pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutatio
     let mut sk_bytes = Vec::with_capacity(sk.len());
     for element in sk {
         let value = element.as_int();
-        assert!(value <= u8::MAX as u64, "invalid secret key");
+        assert!(u8::try_from(value).is_ok(), "invalid secret key");
         sk_bytes.push(value as u8);
     }
 
@@ -107,11 +109,11 @@ fn test_falcon512_norm_sq() {
     ";
 
     // normalize(e) = e^2 - phi * (2*M*e - M^2) where phi := (e > (M - 1)/2)
-    let upper = rand::rng().random_range(Q + 1..M);
+    let upper = rng().random_range(Q + 1..M);
     let test_upper = build_test!(source, &[upper]);
     test_upper.expect_stack(&[(M - upper) * (M - upper)]);
 
-    let lower = rand::rng().random_range(0..=Q);
+    let lower = rng().random_range(0..=Q);
     let test_lower = build_test!(source, &[lower]);
     test_lower.expect_stack(&[lower * lower])
 }
@@ -132,13 +134,14 @@ fn test_falcon512_diff_mod_m() {
     let w = J - 1;
     let u = 0;
 
-    let test1 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test1 = build_test!(source, &[u64::from(v_lo), v_hi, w + J, u]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-        .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
+    let expanded_answer = (i128::from(v)
+        - i128::from((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64)))
+    .rem_euclid(i128::from(M));
+    let simplified_answer =
+        (i128::from(v) + i128::from(w) + i128::from(J) - i128::from(u)).rem_euclid(i128::from(M));
     assert_eq!(expanded_answer, simplified_answer);
 
     test1.expect_stack(&[simplified_answer as u64]);
@@ -147,13 +150,14 @@ fn test_falcon512_diff_mod_m() {
     let w = 0;
     let u = J - 1;
 
-    let test2 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test2 = build_test!(source, &[u64::from(v_lo), v_hi, w + J, u]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-        .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
+    let expanded_answer = (i128::from(v)
+        - i128::from((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64)))
+    .rem_euclid(i128::from(M));
+    let simplified_answer =
+        (i128::from(v) + i128::from(w) + i128::from(J) - i128::from(u)).rem_euclid(i128::from(M));
     assert_eq!(expanded_answer, simplified_answer);
 
     test2.expect_stack(&[simplified_answer as u64]);
@@ -173,13 +177,13 @@ proptest! {
 
     let (v_lo, v_hi) = (v as u32, v >> 32);
 
-    let test1 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test1 = build_test!(source, &[u64::from(v_lo), v_hi, w + J, u]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
-    let expanded_answer = (v as i128
-        - ((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64) as i128))
-    .rem_euclid(M as i128);
-    let simplified_answer = (v as i128 + w as i128 + J as i128 - u as i128).rem_euclid(M as i128);
+    let expanded_answer = (i128::from(v)
+        - i128::from((u as i64 + -(w as i64).rem_euclid(M as i64)).rem_euclid(M as i64)))
+    .rem_euclid(i128::from(M));
+    let simplified_answer = (i128::from(v) + i128::from(w) + i128::from(J) - i128::from(u)).rem_euclid(i128::from(M));
     assert_eq!(expanded_answer, simplified_answer);
 
     test1.prop_expect_stack(&[simplified_answer as u64])?;
@@ -313,7 +317,6 @@ fn falcon_prove_verify() {
     assert!(result.is_ok(), "error: {result:?}");
 }
 
-#[expect(clippy::type_complexity)]
 fn generate_test(
     sk: SecretKey,
     message: Word,
@@ -332,7 +335,7 @@ fn generate_test(
     let pk: Word = sk.public_key().to_commitment();
     let sk_bytes = sk.to_bytes();
 
-    let to_adv_map = sk_bytes.iter().map(|a| Felt::new(*a as u64)).collect::<Vec<Felt>>();
+    let to_adv_map = sk_bytes.iter().map(|a| Felt::new(u64::from(*a))).collect::<Vec<Felt>>();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 

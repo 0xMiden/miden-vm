@@ -121,7 +121,7 @@ impl AnalysisContext {
                 constant.span(),
                 PathBuf::from(constant.clone()).into(),
             ));
-            match crate::ast::constants::eval::expr(&expr, self) {
+            match constants::eval::expr(&expr, self) {
                 Ok(value) => {
                     self.constants.get_mut(constant).unwrap().value = value;
                 },

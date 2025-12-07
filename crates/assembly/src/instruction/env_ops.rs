@@ -20,7 +20,7 @@ use crate::ProcedureContext;
 /// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
 /// when immediate value is 1, `PUSH` operation is replaced with `PAD INCR` because in most cases
 /// this will be more efficient than doing a `PUSH`.
-pub fn push_one<T>(imm: T, block_builder: &mut BasicBlockBuilder)
+pub fn push_one<T>(imm: T, block_builder: &mut BasicBlockBuilder<'_>)
 where
     T: Into<Felt>,
 {
@@ -33,7 +33,7 @@ where
 /// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
 /// when immediate value is 1, `PUSH` operation is replaced with `PAD INCR` because in most cases
 /// this will be more efficient than doing a `PUSH`.
-pub fn push_many<T>(imms: &[T], block_builder: &mut BasicBlockBuilder)
+pub fn push_many<T>(imms: &[T], block_builder: &mut BasicBlockBuilder<'_>)
 where
     T: Into<Felt> + Copy,
 {
@@ -54,7 +54,7 @@ where
 pub fn push_word_slice(
     imm: &Immediate<WordValue>,
     range: &Range<usize>,
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
 ) -> Result<(), Report> {
     let v = imm.expect_value();
     match v.0.get(range.clone()) {
@@ -87,7 +87,7 @@ pub fn push_word_slice(
 /// # Errors
 /// Returns an error if index is greater than the number of procedure locals.
 pub fn locaddr(
-    block_builder: &mut BasicBlockBuilder,
+    block_builder: &mut BasicBlockBuilder<'_>,
     index: u16,
     proc_ctx: &ProcedureContext,
     instr_span: SourceSpan,
@@ -97,6 +97,6 @@ pub fn locaddr(
 
 /// Appends CALLER operation to the span which puts the hash of the function which created the
 /// latest execution context.
-pub fn caller(block_builder: &mut BasicBlockBuilder) {
+pub fn caller(block_builder: &mut BasicBlockBuilder<'_>) {
     block_builder.push_op(Caller);
 }

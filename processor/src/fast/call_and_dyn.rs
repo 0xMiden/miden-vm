@@ -19,7 +19,6 @@ use crate::{
 
 impl FastProcessor {
     /// Executes a Call node from the start.
-    #[expect(clippy::too_many_arguments)]
     #[inline(always)]
     pub(super) fn start_call_node(
         &mut self,
@@ -186,30 +185,27 @@ impl FastProcessor {
         // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
         // the host (corresponding to an external library loaded in the host); if none are found,
         // return an error.
-        match current_forest.find_procedure_root(callee_hash) {
-            Some(callee_id) => {
-                continuation_stack.push_start_node(callee_id);
-            },
-            None => {
-                let (root_id, new_forest) = self
-                    .load_mast_forest(
-                        callee_hash,
-                        host,
-                        ExecutionError::dynamic_node_not_found,
-                        &err_ctx,
-                    )
-                    .await?;
-                tracer.record_mast_forest_resolution(root_id, &new_forest);
+        if let Some(callee_id) = current_forest.find_procedure_root(callee_hash) {
+            continuation_stack.push_start_node(callee_id);
+        } else {
+            let (root_id, new_forest) = self
+                .load_mast_forest(
+                    callee_hash,
+                    host,
+                    ExecutionError::dynamic_node_not_found,
+                    &err_ctx,
+                )
+                .await?;
+            tracer.record_mast_forest_resolution(root_id, &new_forest);
 
-                // Push current forest to the continuation stack so that we can return to it
-                continuation_stack.push_enter_forest(current_forest.clone());
+            // Push current forest to the continuation stack so that we can return to it
+            continuation_stack.push_enter_forest(current_forest.clone());
 
-                // Push the root node of the external MAST forest onto the continuation stack.
-                continuation_stack.push_start_node(root_id);
+            // Push the root node of the external MAST forest onto the continuation stack.
+            continuation_stack.push_start_node(root_id);
 
-                // Set the new MAST forest as current
-                *current_forest = new_forest;
-            },
+            // Set the new MAST forest as current
+            *current_forest = new_forest;
         }
 
         // Increment the clock, corresponding to the row inserted for the DYN or DYNCALL operation

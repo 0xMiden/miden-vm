@@ -73,7 +73,7 @@ pub trait BaseHost {
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &mut ProcessState<'_>,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = debug::DefaultDebugHandler::default();
@@ -81,7 +81,11 @@ pub trait BaseHost {
     }
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(
+        &mut self,
+        process: &mut ProcessState<'_>,
+        trace_id: u32,
+    ) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }
@@ -89,7 +93,7 @@ pub trait BaseHost {
     /// Handles the failure of the assertion instruction.
     fn on_assert_failed(
         &mut self,
-        _process: &ProcessState,
+        _process: &ProcessState<'_>,
         _err_code: Felt,
     ) -> Option<AssertError> {
         None
@@ -130,7 +134,7 @@ pub trait SyncHost: BaseHost {
     /// - Return errors without event names or IDs - the p will enrich them via
     ///   [`BaseHost::resolve_event()`]
     /// - System events (IDs 0-255) are handled by the VM before calling this method
-    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
+    fn on_event(&mut self, process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 // ASYNC HOST trait

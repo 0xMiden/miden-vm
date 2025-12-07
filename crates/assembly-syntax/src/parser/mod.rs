@@ -9,7 +9,7 @@ macro_rules! span {
 }
 
 lalrpop_util::lalrpop_mod!(
-    #[expect(clippy::all)]
+    #[allow(unused_qualifications, unused_lifetimes, clippy::all)]
     grammar,
     "/parser/grammar.rs"
 );
@@ -275,8 +275,7 @@ mod module_walker {
             let mut file_path = entry.path();
             let is_module = file_path
                 .extension()
-                .map(|ext| ext == AsRef::<OsStr>::as_ref(Module::FILE_EXTENSION))
-                .unwrap_or(false);
+                .is_some_and(|ext| ext == AsRef::<OsStr>::as_ref(Module::FILE_EXTENSION));
             if !is_module {
                 return Ok(None);
             }
