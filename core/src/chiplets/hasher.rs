@@ -1,4 +1,7 @@
-//! TODO: add docs
++//! Constants and utility functions for the hasher chiplet.
++//!
++//! Provides pass-through wrappers for RPO hash operations including digest merging (for Merkle
++//! trees) and element hashing.
 use miden_crypto::Word as Digest;
 
 use super::Felt;
