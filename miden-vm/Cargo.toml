@@ -41,7 +41,7 @@ required-features = ["internal", "no_err_ctx"]
 harness = false
 
 [[bench]]
-name = "deserialize_libcore"
+name = "deserialize_core_lib"
 harness = false
 
 [[test]]
@@ -78,7 +78,7 @@ miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
 miden-mast-package.workspace = true
-miden-libcore.workspace = true
+miden-core-lib.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies

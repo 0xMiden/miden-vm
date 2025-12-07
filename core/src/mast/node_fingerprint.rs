@@ -60,41 +60,41 @@ pub fn fingerprint_from_parts(
     children_ids: &[MastNodeId],
     node_digest: Word,
 ) -> Result<MastNodeFingerprint, MastForestError> {
-    let pre_decorator_hash_bytes =
-        before_enter_ids.iter().flat_map(|&id| forest[id].fingerprint().as_bytes());
-    let post_decorator_hash_bytes =
-        after_exit_ids.iter().flat_map(|&id| forest[id].fingerprint().as_bytes());
+    let pre_decorator_hash_bytes: Vec<[u8; 32]> =
+        before_enter_ids.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
+    let post_decorator_hash_bytes: Vec<[u8; 32]> =
+        after_exit_ids.iter().map(|&id| forest[id].fingerprint().as_bytes()).collect();
 
-    let children_decorator_roots = children_ids
-        .iter()
-        .filter_map(|child_id| {
-            hash_by_node_id
-                .get(*child_id)
-                .ok_or(MastForestError::ChildFingerprintMissing(*child_id))
-                .map(|child_fingerprint| child_fingerprint.decorator_root)
-                .transpose()
-        })
-        .collect::<Result<Vec<DecoratorFingerprint>, MastForestError>>()?;
+    let children_decorator_roots: Vec<[u8; 32]> = {
+        let mut roots = Vec::new();
+        for child_id in children_ids {
+            if let Some(child_fingerprint) = hash_by_node_id.get(*child_id) {
+                if let Some(decorator_root) = child_fingerprint.decorator_root {
+                    roots.push(decorator_root.as_bytes());
+                }
+            } else {
+                return Err(MastForestError::ChildFingerprintMissing(*child_id));
+            }
+        }
+        roots
+    };
 
     // Reminder: the `MastNodeFingerprint`'s decorator root will be `None` if and only if there are
     // no decorators attached to the node, and all children have no decorator roots (meaning
     // that there are no decorators in all the descendants).
-    if pre_decorator_hash_bytes.clone().next().is_none()
-        && post_decorator_hash_bytes.clone().next().is_none()
+    if pre_decorator_hash_bytes.is_empty()
+        && post_decorator_hash_bytes.is_empty()
         && children_decorator_roots.is_empty()
     {
         Ok(MastNodeFingerprint::new(node_digest))
     } else {
-        let decorator_bytes_to_hash: Vec<u8> = pre_decorator_hash_bytes
-            .chain(post_decorator_hash_bytes)
-            .chain(
-                children_decorator_roots
-                    .into_iter()
-                    .flat_map(|decorator_root| decorator_root.as_bytes()),
-            )
-            .collect();
+        let decorator_bytes_iter = pre_decorator_hash_bytes
+            .iter()
+            .map(|bytes| bytes.as_slice())
+            .chain(post_decorator_hash_bytes.iter().map(|bytes| bytes.as_slice()))
+            .chain(children_decorator_roots.iter().map(|bytes| bytes.as_slice()));
 
-        let decorator_root = Blake3_256::hash(&decorator_bytes_to_hash);
+        let decorator_root = Blake3_256::hash_iter(decorator_bytes_iter);
         Ok(MastNodeFingerprint::with_decorator_root(node_digest, decorator_root))
     }
 }

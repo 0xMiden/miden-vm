@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use miden_assembly::diagnostics::Report;
 use miden_core::Program;
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{AsmOpInfo, RowIndex, TraceLenSummary};
 use miden_prover::AdviceInputs;
 use miden_vm::{DefaultHost, Operation, StackInputs, SyncHost, internal::InputFile};
@@ -181,7 +181,7 @@ impl ExecutionDetails {
 }
 
 impl fmt::Display for ExecutionDetails {
-    #[allow(clippy::write_literal)]
+    #[expect(clippy::write_literal)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // calculate the percentage of padded rows
         let padding_percentage = (self.trace_len_summary().padded_trace_len()

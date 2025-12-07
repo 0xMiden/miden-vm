@@ -253,9 +253,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.48"
+version = "1.2.49"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c481bdbf0ed3b892f6f806287d72acd515b352a4ec27a208489b8c1bc839633a"
+checksum = "90583009037521a116abf44494efecd645ba48b6622457080f080b85544e2215"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -1330,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "miden-air"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "criterion",
  "miden-core",
@@ -1344,7 +1344,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "env_logger",
  "insta",
@@ -1352,7 +1352,7 @@ dependencies = [
  "miden-assembly",
  "miden-assembly-syntax",
  "miden-core",
- "miden-libcore",
+ "miden-core-lib",
  "miden-mast-package",
  "miden-processor",
  "proptest",
@@ -1362,7 +1362,7 @@ dependencies = [
 
 [[package]]
 name = "miden-assembly-syntax"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "aho-corasick",
  "env_logger",
@@ -1389,7 +1389,7 @@ dependencies = [
 
 [[package]]
 name = "miden-core"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "criterion",
  "derive_more",
@@ -1411,6 +1411,36 @@ dependencies = [
  "winter-math",
  "winter-rand-utils",
  "winter-utils",
+]
+
+[[package]]
+name = "miden-core-lib"
+version = "0.21.0"
+dependencies = [
+ "blake3",
+ "criterion",
+ "env_logger",
+ "fs-err",
+ "miden-air",
+ "miden-assembly",
+ "miden-core",
+ "miden-crypto",
+ "miden-processor",
+ "miden-test-utils",
+ "miden-utils-sync",
+ "miden-verifier",
+ "num",
+ "num-bigint",
+ "pretty_assertions",
+ "rand",
+ "rand_chacha",
+ "rstest",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "thiserror",
+ "winter-air",
+ "winter-fri",
 ]
 
 [[package]]
@@ -1458,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "miden-debug-types"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "memchr",
  "miden-crypto",
@@ -1493,38 +1523,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "miden-libcore"
-version = "0.20.0"
-dependencies = [
- "blake3",
- "criterion",
- "env_logger",
- "fs-err",
- "miden-air",
- "miden-assembly",
- "miden-core",
- "miden-crypto",
- "miden-processor",
- "miden-test-utils",
- "miden-utils-sync",
- "miden-verifier",
- "num",
- "num-bigint",
- "pretty_assertions",
- "rand",
- "rand_chacha",
- "rstest",
- "serde_json",
- "sha2",
- "sha3",
- "thiserror",
- "winter-air",
- "winter-fri",
-]
-
-[[package]]
 name = "miden-mast-package"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "derive_more",
  "miden-assembly-syntax",
@@ -1582,7 +1582,7 @@ dependencies = [
 
 [[package]]
 name = "miden-processor"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "insta",
  "itertools 0.14.0",
@@ -1607,7 +1607,7 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "elsa",
  "miden-air",
@@ -1640,7 +1640,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
- "miden-libcore",
+ "miden-core-lib",
  "miden-processor",
  "miden-prover",
  "miden-verifier",
@@ -1653,7 +1653,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-core-derive"
-version = "0.1.0"
+version = "0.21.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1662,7 +1662,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-diagnostics"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "miden-crypto",
  "miden-debug-types",
@@ -1673,7 +1673,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-indexing"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "serde",
  "thiserror",
@@ -1681,7 +1681,7 @@ dependencies = [
 
 [[package]]
 name = "miden-utils-sync"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "lock_api",
  "loom",
@@ -1691,7 +1691,7 @@ dependencies = [
 
 [[package]]
 name = "miden-verifier"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "miden-air",
  "miden-core",
@@ -1702,7 +1702,7 @@ dependencies = [
 
 [[package]]
 name = "miden-vm"
-version = "0.20.0"
+version = "0.21.0"
 dependencies = [
  "assert_cmd",
  "blake3",
@@ -1712,8 +1712,8 @@ dependencies = [
  "hex",
  "miden-assembly",
  "miden-core",
+ "miden-core-lib",
  "miden-debug-types",
- "miden-libcore",
  "miden-mast-package",
  "miden-processor",
  "miden-prover",
@@ -2725,9 +2725,9 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 
 [[package]]
 name = "term"
-version = "1.2.0"
+version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2111ef44dae28680ae9752bb89409e7310ca33a8c621ebe7b106cf5c928b3ac0"
+checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
  "windows-sys 0.61.2",
 ]
@@ -2875,9 +2875,9 @@ dependencies = [
 
 [[package]]
 name = "toml_edit"
-version = "0.23.7"
+version = "0.23.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6485ef6d0d9b5d0ec17244ff7eb05310113c3f316f2d14200d4de56b3cb98f8d"
+checksum = "5d7cbc3b4b49633d57a0509303158ca50de80ae32c265093b24c414705807832"
 dependencies = [
  "indexmap",
  "toml_datetime",

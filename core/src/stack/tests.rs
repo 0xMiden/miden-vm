@@ -171,7 +171,7 @@ fn test_get_stack_word_be_and_le() {
     assert_eq!(word_le_4[3], Felt::new(8), "LE word[4] element 3");
 
     // Verify that get_stack_word() is an alias for get_stack_word_be()
-    #[allow(deprecated)]
+    #[expect(deprecated)]
     let word_default = outputs.get_stack_word(0).unwrap();
     assert_eq!(word_default, word_be_0, "get_stack_word() should equal get_stack_word_be()");
 

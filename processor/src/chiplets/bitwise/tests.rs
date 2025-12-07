@@ -16,7 +16,7 @@ fn bitwise_init() {
 }
 
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn bitwise_and() {
     let mut bitwise = Bitwise::new();
 
@@ -60,7 +60,7 @@ fn bitwise_and() {
 }
 
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn bitwise_xor() {
     let mut bitwise = Bitwise::new();
 
@@ -104,7 +104,7 @@ fn bitwise_xor() {
 }
 
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn bitwise_multiple() {
     let mut bitwise = Bitwise::new();
 
@@ -202,7 +202,7 @@ fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
 fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {
     let mut bit_offset = 28;
 
-    #[allow(clippy::needless_range_loop)]
+    #[expect(clippy::needless_range_loop)]
     for i in start..start + 8 {
         let a = a >> bit_offset;
         let b = b >> bit_offset;

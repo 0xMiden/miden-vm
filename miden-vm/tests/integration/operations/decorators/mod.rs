@@ -60,14 +60,13 @@ impl SyncHost for TestHost {
 }
 
 impl AsyncHost for TestHost {
-    #[allow(clippy::manual_async_fn)]
     fn get_mast_forest(
         &self,
         _node_digest: &Word,
     ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
         async move { None }
     }
-    #[allow(clippy::manual_async_fn)]
+
     fn on_event(
         &mut self,
         process: &ProcessState<'_>,

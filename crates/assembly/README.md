@@ -61,7 +61,7 @@ for the full set of APIs and how to use them.
 The first use case that you are likely to encounter is the desire to factor out
 some shared code into a _library_. A library is a set of modules which belong
 to a common namespace, and which are packaged together. The
-[core library](../../libcore) is an example of this.
+[core library](../../crates/lib/core) is an example of this.
 
 To call code in this library from your program entrypoint, you must add the
 library to the instance of the assembler you will compile the program with,
@@ -75,7 +75,7 @@ core library in our own program, we would add it like so:
 ```rust
 # use miden_assembly::Assembler;
 # use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-# use miden_libcore::CoreLibrary;
+# use miden_core_lib::CoreLibrary;
 # use std::sync::Arc;
 #
 let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()))
@@ -190,7 +190,7 @@ together, let's look at one last example:
 ```rust
 use miden_assembly::Assembler;
 use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

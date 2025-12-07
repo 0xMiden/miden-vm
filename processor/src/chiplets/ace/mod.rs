@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::{

@@ -110,8 +110,7 @@ pub struct BlockInfo {
     pub parent_addr: Felt,
     pub ctx_info: Option<ExecutionContextInfo>,
     pub is_loop_body: bool,
-    #[allow(dead_code)] // TODO: remove this filed
-    pub is_first_child: bool,
+    pub is_first_child: bool, // TODO: remove this field
 }
 
 impl BlockInfo {

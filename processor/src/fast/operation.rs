@@ -396,7 +396,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 pub fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,

@@ -1,5 +1,5 @@
 mod name;
-#[allow(clippy::module_inception)]
+#[expect(clippy::module_inception)]
 mod procedure;
 
 pub(crate) use self::procedure::InvokedIter;

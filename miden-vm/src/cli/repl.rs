@@ -13,14 +13,14 @@ pub struct ReplCmd {
     library_paths: Vec<PathBuf>,
 
     /// Link in the core library
-    #[arg(short = 'c', long = "libcore")]
-    use_libcore: bool,
+    #[arg(short = 'c', long = "corelib")]
+    use_corelib: bool,
 }
 
 impl ReplCmd {
     pub fn execute(&self) -> Result<(), Report> {
         // initiates repl tool.
-        start_repl(&self.library_paths, self.use_libcore);
+        start_repl(&self.library_paths, self.use_corelib);
         Ok(())
     }
 }

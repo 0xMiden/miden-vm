@@ -44,7 +44,7 @@
 //!
 //! # Example Implementation
 //!
-//! See the Keccak256 precompile in `miden_libcore::handlers::keccak256` for a complete reference
+//! See the Keccak256 precompile in `miden_core_lib::handlers::keccak256` for a complete reference
 //! implementation demonstrating both execution-time event handling and verification-time
 //! commitment recomputation.
 //!

@@ -16,7 +16,7 @@ pub mod ast;
 pub mod library;
 mod parse;
 pub mod parser;
-mod sema;
+pub mod sema;
 pub mod testing;
 
 #[doc(hidden)]
