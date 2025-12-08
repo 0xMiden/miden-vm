@@ -1,0 +1,263 @@
+
+#! Performs addition of two unsigned 128 bit integers preserving the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [overflowing_flag, chh, cmh, cml, cll, ...], where c = (a + b) % 2^128
+pub proc overflowing_add(b: u128, a: u128) -> (u32, u128)
+                        # [bhh bmh bml bll ahh amh aml all ...]
+    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
+    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
+    u32overflowing_add  # [oll rll bhh bmh bml ahh amh aml ...]
+    movup.7             # [aml oll rll bhh bmh bml ahh amh ...]
+    movup.5             # [bml aml oll rll bhh bmh ahh amh ...]
+    u32overflowing_add3 # [oml rml rll bhh bmh ahh amh ...]
+    movup.6             # [amh oml rml rll bhh bmh ahh ...]
+    movup.5             # [bmh amh oml rml rll bhh ahh ...]
+    u32overflowing_add3 # [omh rmh rml rll bhh ahh ...]
+    movup.5             # [ahh omh rmh rml rll bhh ...]
+    movup.5             # [bhh ahh omh rmh rml rll ...]
+    u32overflowing_add3 # [o rhh rmh rml rll ...]
+end
+
+#! Performs addition of two unsigned 128 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a + b) % 2^128
+pub proc wrapping_add(b: u128, a: u128) -> u128
+    exec.overflowing_add
+    drop
+end
+
+#! Performs subtraction of two unsigned 128 bit integers preserving the underflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [underflowing_flag, chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
+pub proc overflowing_sub(b: u128, a: u128) -> (u32, u128)
+                        # [bhh bmh bml bll ahh amh aml all ...]
+    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
+    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
+    u32overflowing_sub  # [ull rll bhh bmh bml ahh amh aml ...]
+    movup.7             # [aml ull rll bhh bmh bml ahh amh ...]
+    movup.5             # [bml aml ull rll bhh bmh ahh amh ...]
+    u32overflowing_sub  # [uml rml ull rll bhh bmh ahh amh ...]
+    swap.1              # [rml uml ull rll bhh bmh ahh amh ...]
+    movup.2             # [ull rml uml rll bhh bmh ahh amh ...]
+    u32overflowing_sub  # [uml' rml uml rll bhh bmh ahh amh ...]
+    movup.2             # [uml uml' rml rll bhh bmh ahh amh ...]
+    or                  # [uml rml rll bhh bmh ahh amh ...]
+    movup.6             # [amh uml rml rll bhh bmh ahh ...]
+    movup.5             # [bmh amh uml rml rll bhh ahh ...]
+    u32overflowing_sub  # [umh rmh uml rml rll bhh ahh ...]
+    swap.1              # [rmh umh uml rml rll bhh ahh ...]
+    movup.2             # [uml rmh umh rml rll bhh ahh ...]
+    u32overflowing_sub  # [umh' rmh umh rml rll bhh ahh ...]
+    movup.2             # [umh umh' rmh rml rll bhh ahh ...]
+    or                  # [umh rmh rml rll bhh ahh ...]
+    movup.5             # [ahh umh rmh rml rll bhh ...]
+    movup.5             # [bhh ahh umh rmh rml rll ...]
+    u32overflowing_sub  # [uhh rhh umh rmh rml rll ...]
+    swap.1              # [rhh uhh umh rmh rml rll ...]
+    movup.2             # [umh rhh uhh rmh rml rll ...]
+    u32overflowing_sub  # [uhh' rhh uhh rmh rml rll ...]
+    movup.2             # [uhh uhh' rhh rmh rml rll ...]
+    or                  # [uhh rhh rmh rml rll ...]
+end
+
+#! Performs subtraction of two unsigned 128 bit integers discarding the underflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
+pub proc wrapping_sub(b: u128, a: u128) -> (u32, u128)
+                        # [bhh bmh bml bll ahh amh aml all ...]
+    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
+    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
+    u32overflowing_sub  # [ull rll bhh bmh bml ahh amh aml ...]
+    movup.7             # [aml ull rll bhh bmh bml ahh amh ...]
+    movup.5             # [bml aml ull rll bhh bmh ahh amh ...]
+    u32overflowing_sub  # [uml rml ull rll bhh bmh ahh amh ...]
+    swap.1              # [rml uml ull rll bhh bmh ahh amh ...]
+    movup.2             # [ull rml uml rll bhh bmh ahh amh ...]
+    u32overflowing_sub  # [uml' rml uml rll bhh bmh ahh amh ...]
+    movup.2             # [uml uml' rml rll bhh bmh ahh amh ...]
+    or                  # [uml rml rll bhh bmh ahh amh ...]
+    movup.6             # [amh uml rml rll bhh bmh ahh ...]
+    movup.5             # [bmh amh uml rml rll bhh ahh ...]
+    u32overflowing_sub  # [umh rmh uml rml rll bhh ahh ...]
+    swap.1              # [rmh umh uml rml rll bhh ahh ...]
+    movup.2             # [uml rmh umh rml rll bhh ahh ...]
+    u32overflowing_sub  # [umh' rmh umh rml rll bhh ahh ...]
+    movup.2             # [umh umh' rmh rml rll bhh ahh ...]
+    or                  # [umh rmh rml rll bhh ahh ...]
+    movup.5             # [ahh umh rmh rml rll bhh ...]
+    movup.5             # [bhh ahh umh rmh rml rll ...]
+    u32wrapping_sub     # [rhh umh rmh rml rll ...]
+    swap.1              # [umh rhh rmh rml rll ...]
+    u32wrapping_sub     # [rhh rmh rml rll ...]
+end
+
+#! Performs multiplication of two unsigned 128 bit integers preserving the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [overflowing_flag, chh, cmh, cml, cll, ...], where c = (a * b) % 2^128
+
+#                 ahh     amh     aml     all
+#               x bhh     bmh     bml     bll
+# -------------------------------------------
+#                                  o0 allxbll
+#                          o1 amlxbll       0
+#                  o2 amhxbll       0       0
+#          f1 ahhxbll       0       0       0     bll x4 uses, ahh x1 uses
+#                          o4 allxbml       0
+#                  o5 amlxbml       0       0
+#          f2 amhxbml       0       0       0     amh x2 uses, bml x3 uses
+#                  o7 allxbmh       0       0
+#          f3 amlxbmh       0       0       0     aml x3 uses, bmh x2 uses
+#          f4 allxbhh       0       0       0     all x4 uses, bhh x1 uses
+# -------------------------------------------
+#           f      rhh    rmh     rml     rll
+
+pub proc overflowing_mul(b: u128, a: u128) -> (u64, u128)
+                         # [bhh bmh bml bll ahh amh aml all ... ]
+     # all x bll
+     dup.7 dup.4
+     u32overflowing_mul  # [o0 rll bhh bmh bml bll ahh amh aml all ...]
+
+     # aml x bll + o0 -> rml0
+     dup.8 dup.6
+     u32overflowing_madd # [o1 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+
+     # amh x bll + o1 -> rmh0
+     dup.8 dup.7
+     u32overflowing_madd # [o2 rmh0 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+
+     # ahh x bll + o2 -> rhh0, f1
+     movup.8 movup.8
+     u32overflowing_madd
+     push.0 neq          # [f1 rhh0 rmh0 rml0 rll bhh bmh bml amh aml all ...]
+
+     # all x bml + rml0 -> rml
+     movup.3
+     dup.10 dup.8
+     u32overflowing_madd # [o4 rml f1 rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+
+     # aml x bml + o4 -> rmh1
+     dup.10 dup.9
+     u32overflowing_madd # [o5 rmh1 rml f1 rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+
+     # amh x bml + o5 -> rhh1, f2
+     movup.10 movup.10
+     u32overflowing_madd
+     push.0 neq          # [f2 rhh1 rmh1 rml f1 rhh0 rmh0 rll bhh bmh aml all ...]
+
+     # all x bmh + rmh0 -> rmh3
+     movup.6
+     dup.11 dup.10
+     u32overflowing_madd # [o7 rmh3 f2 rhh1 rmh1 rml f1 rhh0 rll bhh bmh aml all ...]
+
+     # aml x bmh + o7 -> rhh2, f3
+     movup.11 movup.11
+     u32overflowing_madd
+     push.0 neq          # [f3 rhh2 rmh3 f2 rhh1 rmh1 rml f1 rhh0 rll bhh all ...]
+
+     # rmh1 + rmh3 -> rmh
+     movup.5 movup.3
+     u32overflowing_add
+     push.0 neq          # [o9 rmh f3 rhh2 f2 rhh1 rml f1 rhh0 rll bhh all ...]
+
+     # all x bhh + o9 -> rhh3, f4
+     movup.11 movup.11
+     u32overflowing_madd
+     push.0 neq          # [f4 rhh3 rmh f3 rhh2 f2 rhh1 rml f1 rhh0 rll ...]
+
+     # rhh0 + rhh1 + rhh2 -> rhh4, f5
+     movup.9 movup.7 movup.6
+     u32overflowing_add3 # [f5 rhh4 f4 rhh3 rmh f3 f2 rml f1 rll ...]
+
+     # rhh4 + rhh3 -> rhh, f6
+     movup.3 movup.2
+     u32overflowing_add  # [f6 rhh f5 f4 rmh f3 f2 rml f1 rll ...]
+
+     # all the overflows
+     movup.2 add
+     movup.2 add
+     movup.3 add
+     movup.3 add
+     movup.4 add
+     push.0 neq          # [f rhh rmh rml rll ...]
+end
+
+#! Performs multiplication of two unsigned 128 bit integers discarding the overflow.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a * b) % 2^128
+
+#                 ahh     amh     aml     all
+#               x bhh     bmh     bml     bll
+# -------------------------------------------
+#                                  o0 allxbll
+#                          o1 amlxbll       0
+#                  o2 amhxbll       0       0
+#             ahhxbll       0       0       0     bll x4 uses, ahh x1 uses
+#                          o3 allxbml       0
+#                  o4 amlxbml       0       0
+#             amhxbml       0       0       0     amh x2 uses, bml x3 uses
+#                  o5 allxbmh       0       0
+#             amlxbmh       0       0       0     aml x3 uses, bmh x2 uses
+#             allxbhh       0       0       0     all x4 uses, bhh x1 uses
+# -------------------------------------------
+#                  rhh    rmh     rml     rll
+
+pub proc wrapping_mul(b: u128, a: u128) -> u128
+                         # [bhh bmh bml bll ahh amh aml all ... ]
+    # all x bll -> rll
+    dup.7 dup.4
+    u32overflowing_mul   # [o0 rll bhh bmh bml bll ahh amh aml all ...]
+
+    # aml x bml + o0 -> rml0
+    dup.8 dup.6
+    u32overflowing_madd  # [o1 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+
+    # amh x bll + o1 -> rmh0
+    dup.8 dup.7
+    u32overflowing_madd  # [o2 rmh0 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+
+    # ahh x bll + o2 -> rhh0
+    movup.8 movup.8
+    u32wrapping_madd     # [rhh0 rmh0 rml0 rll bhh bmh bml amh aml all ...]
+
+    # all x bml + rml0 -> rml
+    movup.2 dup.9 dup.7
+    u32overflowing_madd  # [o3 rml rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+
+    # aml x bml + o3 -> rmh1
+    dup.9 dup.8
+    u32overflowing_madd  # [o4 rmh1 rml rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+
+    # amh x bml + o4 -> rhh1
+    movup.9 movup.9
+    u32wrapping_madd     # [rhh1 rmh1 rml rhh0 rmh0 rll bhh bmh aml all ...]
+
+    # all x bmh + rmh1 -> rmh2
+    swap.1 dup.9 dup.8
+    u32overflowing_madd  # [o5 rmh2 rhh1 rml rhh0 rmh0 rll bhh bmh aml all ...]
+
+    # aml x bmh + o5 -> rhh2
+    movup.9 movup.9
+    u32wrapping_madd     # [rhh2 rmh2 rhh1 rml rhh0 rmh0 rll bhh all ...]
+
+    # all x bhh + rhh2 -> rhh3
+    movup.8 movup.8
+    u32wrapping_madd     # [rhh3 rmh2 rhh1 rml rhh0 rmh0 rll ...]
+
+    # rmh0 + rmh2 -> rmh
+    swap.1 movup.5
+    u32overflowing_add   # [o6 rmh rhh3 rhh1 rml rhh0 rll ...]
+
+    # rhh0 + rhh3 + o6 -> rhh4
+    movup.5 movup.3
+    u32wrapping_add3     # [rhh4 rmh rhh1 rml rll ...]
+
+    # rhh4 + rhh1 -> rhh
+    movup.2
+    u32wrapping_add      # [rhh rmh rml rll ...]
+end
