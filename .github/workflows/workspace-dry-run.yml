@@ -1,0 +1,27 @@
+name: Workspace release dry-run
+
+on:
+  push:
+    branches:
+      - main
+      - next
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  release-dry-run:
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Dry-run workspace release
+        uses: ./.github/actions/workspace-release
+        with:
+          mode: "dry-run"
+          verify-main-head: "false"
+          # ref left blank: uses the pushed ref

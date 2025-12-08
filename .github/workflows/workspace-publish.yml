@@ -1,0 +1,24 @@
+name: Publish workspace to crates.io
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+    env:
+      # crates.io API token
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+    steps:
+      - name: Publish workspace crates
+        uses: ./.github/actions/workspace-release
+        with:
+          mode: "publish"
+          verify-main-head: "true"
+          ref: "main"

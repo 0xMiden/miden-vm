@@ -1,0 +1,94 @@
+name: workspace-release
+description: "Dry-run or publish Rust workspace crates using cargo"
+
+inputs:
+  mode:
+    description: "Release mode: dry-run or publish"
+    required: true
+    default: "dry-run"
+  verify-main-head:
+    description: "If true, ensure the triggering SHA matches main's HEAD"
+    required: false
+    default: "false"
+  ref:
+    description: "Git ref to check out (optional)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.ref }}
+
+    # Optional: guard that release happens from latest main
+    - name: Verify tag matches main HEAD
+      if: ${{ inputs.verify-main-head == 'true' }}
+      shell: bash
+      run: |
+        git fetch origin main --depth=1
+        main_sha="$(git rev-parse origin/main)"
+        tag_sha="$(git rev-parse HEAD)"
+
+        echo "main_sha=$main_sha"
+        echo "tag_sha=$tag_sha"
+
+        if [ "$main_sha" != "$tag_sha" ]; then
+          echo "::error::The release/tag commit does not match origin/main HEAD. Aborting."
+          exit 1
+        fi
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and git index
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    # Install cargo-msrv for MSRV checks
+    - name: Install cargo-msrv
+      shell: bash
+      run: cargo install cargo-msrv
+
+    # Keep your existing MSRV check
+    - name: Check MSRV
+      shell: bash
+      run: |
+        chmod +x scripts/check-msrv.sh
+        ./scripts/check-msrv.sh
+
+    # For real publish, make sure we have a token
+    - name: Check crates.io token for publish
+      if: ${{ inputs.mode == 'publish' }}
+      shell: bash
+      run: |
+        if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
+          echo "::error::CARGO_REGISTRY_TOKEN is not set"
+          exit 1
+        fi
+
+    # Dry-run vs real publish
+    - name: Dry-run workspace publish
+      if: ${{ inputs.mode == 'dry-run' }}
+      shell: bash
+      run: |
+        echo "Running cargo publish --workspace --dry-run"
+        cargo publish --workspace --all-features --dry-run
+
+    - name: Publish workspace crates
+      if: ${{ inputs.mode == 'publish' }}
+      shell: bash
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ env.CARGO_REGISTRY_TOKEN }}
+      run: |
+        echo "Publishing workspace crates to crates.io"
+        cargo publish --workspace --all-features
