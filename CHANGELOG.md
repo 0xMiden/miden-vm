@@ -62,6 +62,8 @@
 ## 0.20.2 (2026-01-05)
 
 - Fixed issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
+- Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
+- Add initial `math::u128` functions for lib/core/math runtime. ([#2438](https://github.com/0xMiden/miden-vm/pull/2438)).
 
 ## 0.20.1 (2025-12-14)
 
