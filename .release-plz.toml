@@ -13,67 +13,48 @@ auto-bump-patch = true
 # Only increment patch version by default
 default-bump = "patch"
 
-[packages]
-# Configure all workspace packages
-include-workspace-members = true
+# All workspace packages with publish = true by default
+[[package]]
+name = "miden-utils-sync"
 
-# Configuration for specific packages that need special handling
-[miden-utils-sync]
-publish = true
-# Dependencies must be published first
+[[package]]
+name = "miden-utils-diagnostics"
 
-[miden-utils-diagnostics]
-publish = true
-# Depends on utils-sync
+[[package]]
+name = "miden-utils-indexing"
 
-[miden-utils-indexing]
-publish = true
-# Depends on utils-sync
+[[package]]
+name = "miden-debug-types"
 
-[miden-debug-types]
-publish = true
-# Depends on utils-diagnosticss
+[[package]]
+name = "miden-utils-core-derive"
 
-[miden-utils-core-derive]
-publish = true
-# Depends on utils-sync
+[[package]]
+name = "miden-core"
 
-[miden-core]
-publish = true
-# Depends on utils-sync, utils-diagnostics, utils-indexing, debug-types, utils-core-derive
+[[package]]
+name = "miden-air"
 
-[miden-air]
-publish = true
-# Depends on core
+[[package]]
+name = "miden-assembly-syntax"
 
-[miden-assembly-syntax]
-publish = true
-# Depends on core
+[[package]]
+name = "miden-mast-package"
 
-[miden-mast-package]
-publish = true
-# Depends on assembly-syntax
+[[package]]
+name = "miden-assembly"
 
-[miden-assembly]
-publish = true
-# Depends on core, assembly-syntax, mast-package
+[[package]]
+name = "miden-processor"
 
-[miden-processor]
-publish = true
-# Depends on air, assembly, core
+[[package]]
+name = "miden-prover"
 
-[miden-prover]
-publish = true
-# Depends on processor
+[[package]]
+name = "miden-verifier"
 
-[miden-verifier]
-publish = true
-# Depends on processor
+[[package]]
+name = "miden-core-lib"
 
-[miden-core-lib]
-publish = true
-# Depends on verifier
-
-[miden-vm]
-publish = true
-# Main package, depends on processor, prover, verifier, core-lib
+[[package]]
+name = "miden-vm"

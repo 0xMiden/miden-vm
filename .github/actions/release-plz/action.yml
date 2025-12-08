@@ -22,24 +22,17 @@ runs:
       uses: actions/checkout@v4
       with:
         fetch-depth: 0
-        ref: ${{ inputs.ref || '' }}
+        ref: ${{ inputs.ref }}
     - name: Cleanup large tools for build space
       uses: ./.github/actions/cleanup-runner
     - name: Install dependencies
       shell: bash
       run: sudo apt-get update && sudo apt-get install -y jq
-    - name: Update Rust toolchain
-      shell: bash
-      run: |
-        rustup update --no-self-update
     - uses: dtolnay/rust-toolchain@stable
     - uses: Swatinem/rust-cache@v2
     - name: Install cargo-msrv
       shell: bash
       run: cargo install cargo-msrv
-    - name: Cache rustup toolchains
-      shell: bash
-      run: rustup update
     - name: Check MSRV for workspace
       shell: bash
       run: |

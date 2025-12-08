@@ -1,6 +1,11 @@
 # Preview releases without publishing
 name: Release-plz (dry-run)
 
+# Limits workflow concurrency to only the latest commit in the branch
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.ref }}"
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
