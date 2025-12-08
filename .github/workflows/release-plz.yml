@@ -1,0 +1,30 @@
+# Runs release-plz to publish releases when GitHub releases are created
+#
+# This workflow is the production release pipeline with these security measures:
+# - Only runs on GitHub releases (manual trigger)
+# - Forces checkout of main branch (regardless of tag branch)
+# - Verifies release tag points to main HEAD (prevents releases from wrong commits)
+# - Uses production mode (actual publishing and version bumps)
+#
+# The shared release-plz action ensures core logic stays synchronized with dry-run workflow
+name: Release-plz (main)
+
+permissions:
+  contents: read
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  release-plz-release:
+    name: Release-plz release
+    runs-on: ubuntu-latest
+    if: ${{ github.repository_owner == '0xMiden' }}
+    steps:
+      - name: Run release-plz
+        uses: ./.github/actions/release-plz
+        with:
+          dry-run: 'false'
+          ref: main
+          verify-main-head: 'true'

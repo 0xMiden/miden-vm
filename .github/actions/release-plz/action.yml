@@ -1,0 +1,64 @@
+name: 'Release-plz Action'
+description: 'Runs release-plz with dry-run support and workflow synchronization
+
+This action provides both dry-run and production release modes while keeping
+core logic synchronized between workflows:
+
+- Dry-run mode: Tests release-plz configuration without publishing
+- Production mode: Actually publishes releases and bumps versions
+
+The shared implementation ensures divergence is impossible between workflows.'
+
+inputs:
+  dry-run:
+    description: 'Whether to run in dry-run mode (true) or production mode (false)'
+    required: false
+    default: 'false'
+  ref:
+    description: 'Git ref to checkout (empty for default branch, "main" for production releases)'
+    required: false
+    default: ''
+  verify-main-head:
+    description: 'Whether to verify release is from main HEAD (security for production)'
+    required: false
+    default: 'false'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.ref || '' }}
+    - name: Update Rust toolchain
+      shell: bash
+      run: |
+        rustup update --no-self-update
+    - name: Verify release was triggered from main HEAD
+      if: ${{ inputs.verify-main-head == 'true' }}
+      shell: bash
+      run: |
+        # Ensure the release tag refers to the latest commit on main.
+        # Compare the commit SHA that triggered the workflow with the HEAD of the branch we just
+        # checked out (main).
+        tag_sha="${{ github.sha }}"
+        main_sha="$(git rev-parse HEAD)"
+
+        echo "Tag points to:        $tag_sha"
+        echo "Current main HEAD is: $main_sha"
+
+        if [ "$tag_sha" != "$main_sha" ]; then
+          echo "::error::The release tag was not created from the latest commit on main. Aborting."
+          exit 1
+        fi
+        echo "Release tag matches main HEAD — continuing."
+    # This is the core release-plz execution - shared between dry-run and production workflows
+    # The only difference is the --dry-run flag, ensuring identical behavior otherwise
+    - name: Run release-plz
+      uses: release-plz/action@v0.5
+      with:
+        command: release ${{ inputs.dry-run == 'true' && '--dry-run' || '' }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}

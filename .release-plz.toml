@@ -1,0 +1,79 @@
+[workspace]
+# Automatically publish to crates.io when release is created
+publish = true
+# Don't create release PRs - we'll create GitHub releases manually
+consolidate-commits = false
+# Don't create changelog files - we decided to skip automatic changelog generation
+create-changelogs = false
+
+# Simple version bumping strategy instead of conventional commits
+[version]
+# Use simple auto-increment: always bump patch version unless major/minor explicitly requested
+auto-bump-patch = true
+# Only increment patch version by default
+default-bump = "patch"
+
+[packages]
+# Configure all workspace packages
+include-workspace-members = true
+
+# Configuration for specific packages that need special handling
+[miden-utils-sync]
+publish = true
+# Dependencies must be published first
+
+[miden-utils-diagnostics]
+publish = true
+# Depends on utils-sync
+
+[miden-utils-indexing]
+publish = true
+# Depends on utils-sync
+
+[miden-debug-types]
+publish = true
+# Depends on utils-diagnosticss
+
+[miden-utils-core-derive]
+publish = true
+# Depends on utils-sync
+
+[miden-core]
+publish = true
+# Depends on utils-sync, utils-diagnostics, utils-indexing, debug-types, utils-core-derive
+
+[miden-air]
+publish = true
+# Depends on core
+
+[miden-assembly-syntax]
+publish = true
+# Depends on core
+
+[miden-mast-package]
+publish = true
+# Depends on assembly-syntax
+
+[miden-assembly]
+publish = true
+# Depends on core, assembly-syntax, mast-package
+
+[miden-processor]
+publish = true
+# Depends on air, assembly, core
+
+[miden-prover]
+publish = true
+# Depends on processor
+
+[miden-verifier]
+publish = true
+# Depends on processor
+
+[miden-core-lib]
+publish = true
+# Depends on verifier
+
+[miden-vm]
+publish = true
+# Main package, depends on processor, prover, verifier, core-lib
