@@ -1,15 +1,4 @@
-# Runs release-plz dry-run to preview upcoming releases
-#
-# This workflow intentionally differs from the main release workflow in these ways:
-# - Runs on pushes to main/next branches (not on GitHub releases)
-# - Uses the branch that triggered the workflow (not forced to main)
-# - Skips main HEAD verification (allows testing releases from feature branches)
-# - Dry-run mode only (no actual publishing or version bumps)
-#
-# These differences make it useful for:
-# - Testing release-plz configuration changes
-# - Previewing what a release would look like
-# - Validating dependency ordering before actual releases
+# Preview releases without publishing
 name: Release-plz (dry-run)
 
 permissions:

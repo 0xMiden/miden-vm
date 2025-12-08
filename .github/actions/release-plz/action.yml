@@ -1,13 +1,5 @@
 name: 'Release-plz Action'
-description: 'Runs release-plz with dry-run support and workflow synchronization
-
-This action provides both dry-run and production release modes while keeping
-core logic synchronized between workflows:
-
-- Dry-run mode: Tests release-plz configuration without publishing
-- Production mode: Actually publishes releases and bumps versions
-
-The shared implementation ensures divergence is impossible between workflows.'
+description: 'Runs release-plz with dry-run support and workflow synchronization'
 
 inputs:
   dry-run:
@@ -31,10 +23,28 @@ runs:
       with:
         fetch-depth: 0
         ref: ${{ inputs.ref || '' }}
+    - name: Cleanup large tools for build space
+      uses: ./.github/actions/cleanup-runner
+    - name: Install dependencies
+      shell: bash
+      run: sudo apt-get update && sudo apt-get install -y jq
     - name: Update Rust toolchain
       shell: bash
       run: |
         rustup update --no-self-update
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+    - name: Install cargo-msrv
+      shell: bash
+      run: cargo install cargo-msrv
+    - name: Cache rustup toolchains
+      shell: bash
+      run: rustup update
+    - name: Check MSRV for workspace
+      shell: bash
+      run: |
+        chmod +x scripts/check-msrv.sh
+        ./scripts/check-msrv.sh
     - name: Verify release was triggered from main HEAD
       if: ${{ inputs.verify-main-head == 'true' }}
       shell: bash
@@ -53,8 +63,6 @@ runs:
           exit 1
         fi
         echo "Release tag matches main HEAD — continuing."
-    # This is the core release-plz execution - shared between dry-run and production workflows
-    # The only difference is the --dry-run flag, ensuring identical behavior otherwise
     - name: Run release-plz
       uses: release-plz/action@v0.5
       with:
