@@ -66,16 +66,7 @@ runs:
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
 
-    # For real publish, make sure we have a token
-    - name: Check crates.io token for publish
-      if: ${{ inputs.mode == 'publish' }}
-      shell: bash
-      run: |
-        if [ -z "${CARGO_REGISTRY_TOKEN:-}" ]; then
-          echo "::error::CARGO_REGISTRY_TOKEN is not set"
-          exit 1
-        fi
-
+  
     # Dry-run vs real publish
     - name: Dry-run workspace publish
       if: ${{ inputs.mode == 'dry-run' }}
