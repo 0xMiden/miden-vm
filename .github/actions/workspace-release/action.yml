@@ -54,6 +54,9 @@ runs:
         restore-keys: |
           ${{ runner.os }}-cargo-
 
+    - name: Cleanup large tools for build space
+      uses: ./.github/actions/cleanup-runner
+
     # Install cargo-msrv for MSRV checks
     - name: Install cargo-msrv
       shell: bash
