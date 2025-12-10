@@ -8,6 +8,7 @@ use core::{
     fmt,
     ops::{Index, IndexMut},
 };
+use std::sync::OnceLock;
 
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 #[cfg(feature = "serde")]
@@ -58,7 +59,7 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -72,6 +73,10 @@ pub struct MastForest {
     /// Debug information including decorators and error codes.
     /// Always present (as per issue #1821), but can be empty for stripped builds.
     debug_info: DebugInfo,
+
+    /// Cached commitment to this MAST forest (commitment to all roots).
+    /// This is computed lazily on first access and invalidated on any mutation.
+    commitment_cache: OnceLock<Word>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -84,9 +89,24 @@ impl MastForest {
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
             debug_info: DebugInfo::new(),
+            commitment_cache: OnceLock::new(),
         }
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+/// Equality implementations
+impl PartialEq for MastForest {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare all fields except commitment_cache, which is derived data
+        self.nodes == other.nodes
+            && self.roots == other.roots
+            && self.advice_map == other.advice_map
+            && self.debug_info == other.debug_info
+    }
+}
+
+impl Eq for MastForest {}
 
 // ------------------------------------------------------------------------------------------------
 /// State mutators
@@ -106,6 +126,8 @@ impl MastForest {
 
         if !self.roots.contains(&new_root_id) {
             self.roots.push(new_root_id);
+            // Invalidate the cached commitment since we modified the roots
+            self.commitment_cache.take();
         }
     }
 
@@ -130,6 +152,10 @@ impl MastForest {
 
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
+
+        // Invalidate the cached commitment since we modified the forest structure
+        self.commitment_cache.take();
+
         id_remappings
     }
 
@@ -157,12 +183,12 @@ impl MastForest {
     ///
     /// This operation performs node deduplication by merging the forest with itself.
     /// The method assumes that decorators have already been stripped if that is desired.
-    /// The operation modifies the forest in-place, updating all node references as needed.
+    /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
     /// 1. Merging the forest with itself to deduplicate identical nodes
     /// 2. Updating internal node references and remappings
-    /// 3. Modifying the forest in-place with the compacted result
+    /// 3. Returning the compacted forest and root map
     ///
     /// # Examples
     ///
@@ -175,23 +201,18 @@ impl MastForest {
     /// // First strip decorators if needed
     /// forest.strip_decorators();
     ///
-    /// // Then compact the forest
-    /// let root_map = forest.compact();
+    /// // Then compact the forest (consumes the original)
+    /// let (compacted_forest, root_map) = forest.compact();
     ///
-    /// // Forest is now compacted with duplicate nodes merged
+    /// // compacted_forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(&mut self) -> MastForestRootMap {
+    pub fn compact(self) -> (MastForest, MastForestRootMap) {
         // Merge with itself to deduplicate nodes
         // Note: This cannot fail for a self-merge under normal conditions.
         // The only possible failures (TooManyNodes, TooManyDecorators) would require the
         // original forest to be at capacity limits, at which point compaction wouldn't help.
-        let (compacted_forest, root_map) = MastForest::merge([&*self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge");
-
-        // Replace current forest with compacted version
-        *self = compacted_forest;
-
-        root_map
+        MastForest::merge([&self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge")
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -384,6 +405,21 @@ impl MastForest {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
         digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
         miden_crypto::hash::rpo::Rpo256::merge_many(&digests)
+    }
+
+    /// Returns the commitment to this MAST forest.
+    ///
+    /// The commitment is computed as the sequential hash of all procedure roots in the forest.
+    /// This value is cached after the first computation and reused for subsequent calls,
+    /// unless the forest is mutated (in which case the cache is invalidated).
+    ///
+    /// The commitment uniquely identifies the forest's structure, as each root's digest
+    /// transitively includes all of its descendants. Therefore, a commitment to all roots
+    /// is a commitment to the entire forest.
+    pub fn commitment(&self) -> Word {
+        *self.commitment_cache.get_or_init(|| {
+            self.compute_nodes_commitment(&self.roots)
+        })
     }
 
     /// Returns the number of nodes in this MAST forest.
