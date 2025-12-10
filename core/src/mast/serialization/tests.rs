@@ -553,3 +553,39 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
     // Note: The decorators() method test was removed as MastNodeErrorContext trait has been removed
     // The decorator functionality is now accessed through MastForest.get_assembly_op() directly
 }
+
+/// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
+#[test]
+fn mast_forest_deserialize_invalid_ops_offset_fails() {
+    use crate::utils::Serializable;
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let serialized = forest.to_bytes();
+
+    use crate::utils::SliceReader;
+    let mut reader = SliceReader::new(&serialized);
+
+    let _: [u8; 8] = reader.read_array().unwrap(); // magic + version
+    let _node_count: usize = reader.read().unwrap();
+    let _decorator_count: usize = reader.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+
+    // Calculate offset to MastNodeInfo
+    let node_info_offset = 5 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+
+    // Corrupt the ops_offset field with an out-of-bounds value
+    let block_discriminant: u64 = 3;
+    let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
+
+    let mut corrupted = serialized;
+    corrupted_value.write_into(&mut &mut corrupted[node_info_offset..node_info_offset + 8]);
+
+    let result = MastForest::read_from_bytes(&corrupted);
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
+}
