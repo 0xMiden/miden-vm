@@ -1196,12 +1196,18 @@ fn test_commitment_caching() {
     // Test that advice_map mutations don't invalidate the cache
     forest.advice_map_mut().insert(Word::from([Felt::ZERO; 4]), vec![]);
     let commitment5 = forest.commitment();
-    assert_eq!(commitment3, commitment5, "advice_map mutation should not invalidate commitment cache");
+    assert_eq!(
+        commitment3, commitment5,
+        "advice_map mutation should not invalidate commitment cache"
+    );
 
     // Test that strip_decorators doesn't invalidate the cache
     forest.strip_decorators();
     let commitment6 = forest.commitment();
-    assert_eq!(commitment3, commitment6, "strip_decorators should not invalidate commitment cache");
+    assert_eq!(
+        commitment3, commitment6,
+        "strip_decorators should not invalidate commitment cache"
+    );
 
     // Test that remove_nodes invalidates the cache
     let nodes_to_remove = alloc::collections::BTreeSet::new();

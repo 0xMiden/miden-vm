@@ -20,6 +20,7 @@ std = ["dep:parking_lot"]
 
 [dependencies]
 lock_api = { version = "0.4", features = ["arc_lock"] }
+once_cell = { version = "1.21", default-features = false, features = ["alloc", "race"] }
 parking_lot = { version = "0.12", optional = true }
 
 [dev-dependencies]

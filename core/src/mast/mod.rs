@@ -8,9 +8,9 @@ use core::{
     fmt,
     ops::{Index, IndexMut},
 };
-use std::sync::OnceLock;
 
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
+use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -76,7 +76,7 @@ pub struct MastForest {
 
     /// Cached commitment to this MAST forest (commitment to all roots).
     /// This is computed lazily on first access and invalidated on any mutation.
-    commitment_cache: OnceLock<Word>,
+    commitment_cache: OnceLockCompat<Word>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -89,7 +89,7 @@ impl MastForest {
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
             debug_info: DebugInfo::new(),
-            commitment_cache: OnceLock::new(),
+            commitment_cache: OnceLockCompat::new(),
         }
     }
 }
@@ -417,9 +417,7 @@ impl MastForest {
     /// transitively includes all of its descendants. Therefore, a commitment to all roots
     /// is a commitment to the entire forest.
     pub fn commitment(&self) -> Word {
-        *self.commitment_cache.get_or_init(|| {
-            self.compute_nodes_commitment(&self.roots)
-        })
+        *self.commitment_cache.get_or_init(|| self.compute_nodes_commitment(&self.roots))
     }
 
     /// Returns the number of nodes in this MAST forest.

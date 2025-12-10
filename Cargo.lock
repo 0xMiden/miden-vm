@@ -1401,6 +1401,7 @@ dependencies = [
  "miden-test-serde-macros",
  "miden-utils-core-derive",
  "miden-utils-indexing",
+ "miden-utils-sync",
  "num-derive",
  "num-traits",
  "proptest",
@@ -1685,6 +1686,7 @@ version = "0.21.0"
 dependencies = [
  "lock_api",
  "loom",
+ "once_cell",
  "parking_lot",
  "proptest",
 ]
