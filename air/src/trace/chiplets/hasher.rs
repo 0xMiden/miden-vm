@@ -1,4 +1,8 @@
-//! TODO: add docs
+//! Constants and types for the hasher chiplet execution trace.
+//!
+//! The hasher chiplet handles hash operations using RPO (Rescue Prime Optimized). The trace uses
+//! selector columns to distinguish between operations like linear hashing, Merkle path verification,
+//! and Merkle root updates.
 
 use core::ops::Range;
 
