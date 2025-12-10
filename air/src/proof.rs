@@ -34,7 +34,7 @@ impl ExecutionProof {
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
     /// function, and a list of all deferred [PrecompileRequest]s.
     pub const fn new(
-        proof: Proof,
+        proof: Vec<u8>,
         hash_fn: HashFunction,
         pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
@@ -94,7 +94,7 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Proof, Vec<PrecompileRequest>) {
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
         (self.hash_fn, self.proof, self.pc_requests)
     }
 }

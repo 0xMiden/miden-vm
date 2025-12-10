@@ -10,7 +10,7 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{ProgramInfo, StackInputs, StackOutputs};
+use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
 use p3_field::PrimeCharacteristicRing;
@@ -52,6 +52,7 @@ const IS_FULL_CONSTRAINT_SET: bool = false;
 // PROCESSOR AIR
 // ================================================================================================
 
+/*
 /// Algebraic Intermediate Representation (AIR) for Miden VM.
 ///
 /// Defines execution constraints for Miden programs. Contains the public inputs (program hash,
@@ -76,6 +77,7 @@ impl ProcessorAir {
         self.trace_length() - self.context().num_transition_exemptions()
     }
 }
+*/
 
 /*
 impl Air for ProcessorAir {

@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{StackOutputs, stack::MIN_STACK_DEPTH};
 
 use super::super::{
-    Assertion, CLK_COL_IDX, DECODER_TRACE_OFFSET, EvaluationFrame, FMP_COL_IDX, Felt, 
+    Assertion, CLK_COL_IDX, DECODER_TRACE_OFFSET, EvaluationFrame, Felt,
     ONE, STACK_AUX_TRACE_OFFSET, STACK_TRACE_OFFSET, TransitionConstraintDegree, ZERO,
 };
 use crate::{
