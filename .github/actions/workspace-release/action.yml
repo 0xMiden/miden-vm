@@ -10,20 +10,10 @@ inputs:
     description: "If true, ensure the triggering SHA matches main's HEAD"
     required: false
     default: "false"
-  ref:
-    description: "Git ref to check out (optional)"
-    required: false
-    default: ""
 
 runs:
   using: "composite"
   steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        ref: ${{ inputs.ref }}
-
     # Optional: guard that release happens from latest main
     - name: Verify tag matches main HEAD
       if: ${{ inputs.verify-main-head == 'true' }}
