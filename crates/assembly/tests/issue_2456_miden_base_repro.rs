@@ -16,7 +16,7 @@ use miden_assembly::Assembler;
 use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
 
 #[test]
-fn test_call_after_push_simplified() {
+fn test_issue_2456_call_after_push_simplified() {
     // Simplified version: inline procedure instead of library
     let source = "
         proc foo
@@ -50,7 +50,7 @@ fn test_call_after_push_simplified() {
 }
 
 #[test]
-fn test_call_after_push_with_drops_workaround() {
+fn test_issue_2456_call_after_push_with_drops_workaround() {
     // Version with the "drop drop" workaround mentioned in the issue
     let source = "
         proc foo

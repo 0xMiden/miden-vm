@@ -5,7 +5,7 @@ use miden_assembly::Assembler;
 use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
 
 #[test]
-fn test_call_with_push_before() {
+fn test_issue_2456_call_with_push_before() {
     let assembler = Assembler::default();
 
     // This program should trigger the "DecoratorId out of bounds" issue
@@ -38,7 +38,7 @@ fn test_call_with_push_before() {
 }
 
 #[test]
-fn test_call_with_push_and_drops_before() {
+fn test_issue_2456_call_with_push_and_drops_before() {
     let assembler = Assembler::default();
 
     // This version with drops should work (as mentioned in the issue)
