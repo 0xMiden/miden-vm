@@ -417,7 +417,7 @@ impl PartialEq for PointerType {
 impl core::hash::Hash for PointerType {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.pointee.hash(state);
-        self.addrspace.hash(state);
+        self.address_space().hash(state);
     }
 }
 
