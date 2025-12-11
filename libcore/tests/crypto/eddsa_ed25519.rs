@@ -9,7 +9,7 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    AlgebraicSponge, EventName, Felt, PrimeCharacteristicRing, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable},
 };
@@ -142,7 +142,8 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         assert_eq!(precompile_commitment, verifier_commitment);
 
         let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid));
+        let expected = if expected_valid { Felt::ONE } else { Felt::ZERO };
+        assert_eq!(result, expected);
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");

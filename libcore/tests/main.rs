@@ -32,7 +32,17 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
-mod pcs;
-mod stark;
+
+// TODO(plonky3): Re-enable PCS and STARK tests after porting to Plonky3
+// These modules test Winterfell-specific proof system functionality (FRI, commitment schemes,
+// recursive verifier) that is being replaced by Plonky3's p3-fri and p3-uni-stark.
+// They will need to be reimplemented to test:
+// - p3-fri commitment schemes
+// - p3-uni-stark proof generation/verification
+// - Plonky3-based recursive verifier (when available)
+//
+// mod pcs;
+// mod stark;
+
 mod sys;
 mod word;

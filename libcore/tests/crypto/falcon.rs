@@ -3,7 +3,7 @@ use std::{sync::Arc, vec};
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{
-    AlgebraicSponge, EventId, EventName, PrimeCharacteristicRing, PrimeField64, StarkField, ZERO,
+    AlgebraicSponge, EventId, EventName, PrimeCharacteristicRing, PrimeField64, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
 };
 use miden_libcore::{CoreLibrary, falcon_sign};

@@ -17,13 +17,17 @@ edition.workspace = true
 bench = false
 doctest = false
 
-[[bench]]
-name = "compute_op_flags"
-harness = false
-
-[[bench]]
-name = "enforce_stack_constraint"
-harness = false
+# TODO(plonky3): Re-enable these benchmarks once stack constraints are ported to Plonky3
+# The constraints module is currently disabled as it depends on Winterfell APIs
+# that need to be migrated to use Plonky3's Air trait system.
+#
+# [[bench]]
+# name = "compute_op_flags"
+# harness = false
+#
+# [[bench]]
+# name = "enforce_stack_constraint"
+# harness = false
 
 [features]
 default = ["std"]

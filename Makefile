@@ -32,7 +32,11 @@ WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIBCORE_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal
+# TODO(plonky3): Re-enable metal feature after GPU prover is ported to Plonky3
+# The metal GPU prover depends on Winterfell's ExecutionProver API which has been
+# replaced with Plonky3's p3-uni-stark::prove(). GPU acceleration needs to be
+# reimplemented using Plonky3's proving infrastructure.
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,testing,internal
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
