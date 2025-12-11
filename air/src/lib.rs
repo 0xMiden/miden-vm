@@ -13,7 +13,7 @@ use core::borrow::{Borrow, BorrowMut};
 use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 use p3_air::{AirBuilderWithPublicValues, PermutationAirBuilder};
-use p3_field::PrimeCharacteristicRing;
+use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
 use p3_matrix::Matrix;
 use winter_air::ProofOptions as WinterProofOptions;
 
@@ -416,6 +416,35 @@ pub struct ProcessorAir;
 impl<F> BaseAir<F> for ProcessorAir {
     fn width(&self) -> usize {
         TRACE_WIDTH
+    }
+}
+
+impl<F, EF> p3_air::BaseAirWithAuxTrace<F, EF> for ProcessorAir
+where
+    F: Field,
+    EF: ExtensionField<F>,
+{
+    fn aux_width(&self) -> usize {
+        // TODO: Implement aux trace
+        // decoder (1) + stack (2) + range (1) + chiplets (1) = 5 columns
+        0
+    }
+
+    fn num_randomness(&self) -> usize {
+        // TODO: Implement aux trace
+        // Need challenges for LogUp permutation arguments
+        0
+    }
+
+    fn build_aux_trace(
+        &self,
+        _main: &p3_matrix::dense::RowMajorMatrix<F>,
+        _challenges: &[EF],
+    ) -> Option<p3_matrix::dense::RowMajorMatrix<F>> {
+        // TODO: Implement aux trace bridging
+        // Need to convert RowMajorMatrix to ExecutionTrace format,
+        // call ExecutionTrace::build_aux_trace, then convert back
+        None
     }
 }
 

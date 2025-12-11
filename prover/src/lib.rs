@@ -21,6 +21,10 @@ use tracing::instrument;
 mod gpu;
 
 mod prove;
+use prove::{
+    prove_blake, prove_keccak, prove_poseidon2, types::Proof as P3Proof, utils::to_row_major,
+};
+
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{
@@ -30,7 +34,6 @@ pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
     StackOutputs, SyncHost, Word, crypto, math, utils,
 };
-use prove::{prove_blake, prove_keccak, types::Proof as P3Proof, utils::to_row_major};
 
 // PROVER
 // ================================================================================================
@@ -142,13 +145,8 @@ where
             unimplemented!()
         },
         HashFunction::Poseidon2 => {
-            todo!()
-            // let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
-            //     options,
-            //     stack_inputs,
-            //     stack_outputs.clone(),
-            // );
-            // maybe_await!(prover.prove(trace))
+            println!("poseidon2 proving");
+            prove_poseidon2(trace)
         },
     };
 
