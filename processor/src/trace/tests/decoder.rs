@@ -794,7 +794,7 @@ fn decoder_p3_trace_two_batches() {
     // for the next 7 cycles (2, 3, 4, 5, 6, 7, 8), an entry for an op group is removed from the
     // table
     for (i, clk) in (2..9).enumerate() {
-        expected_value = expected_value / b0_values[i];
+        expected_value /= b0_values[i];
         assert_eq!(expected_value, p3[clk]);
     }
 

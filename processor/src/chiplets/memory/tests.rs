@@ -199,7 +199,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        Felt::from_u32(addr0.into()),
+        Felt::from_u32(addr0),
         1.into(),
         word1,
     );
@@ -239,7 +239,7 @@ fn mem_write() {
         MemoryOperation::Write,
         MemoryAccessType::Word,
         ContextId::root(),
-        Felt::from_u32(addr0.into()),
+        Felt::from_u32(addr0),
         6.into(),
         word5678,
     );

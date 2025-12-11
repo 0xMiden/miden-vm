@@ -67,6 +67,19 @@ skip-tree = [
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
     { name = "syn", version = "=2.0.111" },
+    # TODO(plonky3): Allow itertools 0.12.x/0.13.x - miden-verifier uses older version
+    # Update miden-verifier to 0.14.x once Plonky3 migration stabilizes
+    { name = "itertools", version = "=0.12.1" },
+    { name = "itertools", version = "=0.13.0" },
+    # TODO(plonky3): Allow duplicate miden crates during migration
+    # miden-air v0.3.0 from Plonky3 fork vs local v0.20.0
+    { name = "miden-air", version = "=0.3.0" },
+    # miden-crypto v0.14.1 from crates.io (old) vs v0.20.0 from migration branch
+    { name = "miden-crypto", version = "=0.14.1" },
+    # miden-prover v0.3.0 from Plonky3 fork vs local v0.20.0
+    { name = "miden-prover", version = "=0.3.0" },
+    # spin v0.9.x via flume/miden-crypto vs v0.10.x via p3-dft
+    { name = "spin", version = "=0.9.8" },
 ]
 
 # Sources configuration
@@ -74,3 +87,9 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# TODO(plonky3): Remove git sources once Plonky3 and miden-crypto are published to crates.io
+# During migration, we depend on development branches for Plonky3 integration
+allow-git = [
+    "https://github.com/0xMiden/Plonky3",
+    "https://github.com/0xMiden/crypto",
+]
