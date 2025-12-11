@@ -394,14 +394,15 @@ mod tests {
         assert_eq!(inputs[ALPHA_ADDR_INDEX], stack_state[ALPHA_ADDR_INDEX]);
 
         // --- check that the helper registers were updated correctly -----------------------------
-        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
+        let tmp1_base = tmp1.as_basis_coefficients_slice();
+        let tmp0_base = tmp0.as_basis_coefficients_slice();
         let helper_reg_expected = [
             alpha_mem_word[0],
             alpha_mem_word[1],
-            tmp1.base_element(0),
-            tmp1.base_element(1),
-            tmp0.base_element(0),
-            tmp0.base_element(1),
+            tmp1_base[0],
+            tmp1_base[1],
+            tmp0_base[0],
+            tmp0_base[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
