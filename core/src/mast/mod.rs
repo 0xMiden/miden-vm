@@ -605,13 +605,10 @@ impl MastForest {
                 for (op_idx, decorator_id) in decorator_links {
                     if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
                     {
-                        // when an instruction compiles down to multiple operations, only the first
-                        // operation is associated with the assembly op. We need to check if the
-                        // target operation index falls within the range of operations associated
-                        // with the assembly op.
-                        if target_op_idx >= op_idx
-                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
-                        {
+                        // With the 1-1 mapping, every operation covered by an AsmOp is linked to
+                        // that AsmOp. We can directly check if this decorator is linked to the
+                        // target operation index.
+                        if op_idx == target_op_idx {
                             return Some(assembly_op);
                         }
                     }
