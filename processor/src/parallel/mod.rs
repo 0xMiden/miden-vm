@@ -19,10 +19,9 @@ use miden_air::{
 use miden_core::{
     BasedVectorSpace, Felt, Field, Kernel, ONE, OPCODE_PUSH, Operation, PrimeCharacteristicRing,
     PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
-    batch_multiplicative_inverse,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     stack::MIN_STACK_DEPTH,
-    utils::{range, uninit_vector},
+    utils::{range, serial_batch_inversion, uninit_vector},
 };
 use rayon::prelude::*;
 
@@ -256,8 +255,10 @@ fn generate_core_trace_columns(
     );
 
     // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_multiplicative_inverse(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
+    let h0_column = &core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
+    let mut h0_inverted = vec![ZERO; h0_column.len()];
+    serial_batch_inversion(h0_column, &mut h0_inverted);
+    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] = h0_inverted;
 
     core_trace_columns
 }

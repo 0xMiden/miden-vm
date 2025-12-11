@@ -499,7 +499,7 @@ pub fn b_chip_log_precompile() {
     // request the initialization of the span hash
     let span_init =
         build_expected(&alphas, LINEAR_HASH_LABEL, span_state, [ZERO; STATE_WIDTH], ONE, ZERO);
-    expected *= span_init.inverse();
+    expected *= span_init.inverse_unwrap_zero();
     // provide the initialization of the span hash
     expected *= build_expected_from_trace(&trace, &alphas, 0.into());
     assert_eq!(expected, b_chip[1]);
@@ -525,7 +525,7 @@ pub fn b_chip_log_precompile() {
         ZERO,
     );
     // request the log_precompile initialization.
-    expected *= log_pc_init.inverse();
+    expected *= log_pc_init.inverse_unwrap_zero();
 
     // Compute the output state by applying the permutation
     let mut log_pc_output_state = log_pc_state;
@@ -540,7 +540,7 @@ pub fn b_chip_log_precompile() {
         ZERO,
     );
     // request the log_precompile result.
-    expected *= log_pc_result.inverse();
+    expected *= log_pc_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[2]);
 
     // at cycle 2 the result of the span hash is requested by the decoder
@@ -553,7 +553,7 @@ pub fn b_chip_log_precompile() {
         Felt::new(HASH_CYCLE_LEN as u64),
         ZERO,
     );
-    expected *= span_result.inverse();
+    expected *= span_result.inverse_unwrap_zero();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
