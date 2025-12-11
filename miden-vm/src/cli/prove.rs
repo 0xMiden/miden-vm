@@ -5,7 +5,6 @@ use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_libcore::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
-use tracing::info_span;
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},

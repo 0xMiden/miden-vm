@@ -5,8 +5,8 @@ use miden_air::{
     RowIndex,
     trace::{
         CLK_COL_IDX, CTX_COL_IDX, ColMatrix, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH,
-        FN_HASH_RANGE, MIN_TRACE_LEN, PADDED_TRACE_WIDTH,
-        STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
+        FN_HASH_RANGE, MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH,
+        SYS_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
@@ -17,19 +17,15 @@ use miden_air::{
     },
 };
 use miden_core::{
-    BasedVectorSpace, Felt, Field, Kernel, ONE, OPCODE_PUSH, Operation, PrimeCharacteristicRing,
-    PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
+    Felt, Kernel, ONE, Operation, Word, ZERO,
     stack::MIN_STACK_DEPTH,
-    utils::{range, serial_batch_inversion, uninit_vector},
+    utils::{serial_batch_inversion, uninit_vector},
 };
 use rayon::prelude::*;
 
 use crate::{
-    ChipletsLengths, ContextId, ErrorContext, ExecutionError, ExecutionTrace,
-    ProcessState, TraceLenSummary,
-    chiplets::{Chiplets, CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    continuation_stack::Continuation,
+    ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
+    chiplets::Chiplets,
     crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{

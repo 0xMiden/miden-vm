@@ -57,6 +57,7 @@ pub struct AuxTraceBuilders {
 #[derive(Debug)]
 pub struct ExecutionTrace {
     meta: Vec<u8>,
+    #[allow(dead_code)]
     trace_info: TraceInfo,
     pub main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,

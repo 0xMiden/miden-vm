@@ -120,7 +120,7 @@ pub fn verify_with_precompiles(
         .map_err(VerificationError::PrecompileVerificationError)?;
 
     // build public inputs, explicitly passing the recomputed precompile transcript state
-    let pub_inputs =
+    let _pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
 
     match hash_fn {

@@ -22,6 +22,7 @@ pub fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let mut result: RowMajorMatrix<Felt> =
         RowMajorMatrix::new(vec![ZERO; TRACE_WIDTH * trace.get_trace_len()], TRACE_WIDTH);
     result.rows_mut().enumerate().for_each(|(row_idx, row)| {
+        #[allow(clippy::needless_range_loop)]
         for col_idx in 0..TRACE_WIDTH {
             row[col_idx] = trace.main_trace.get(col_idx, row_idx)
         }
@@ -38,6 +39,7 @@ where
     let mut result: RowMajorMatrix<E> =
         RowMajorMatrix::new(vec![E::ZERO; AUX_TRACE_WIDTH * trace.num_rows()], AUX_TRACE_WIDTH);
     result.rows_mut().enumerate().for_each(|(row_idx, row)| {
+        #[allow(clippy::needless_range_loop)]
         for col_idx in 0..AUX_TRACE_WIDTH {
             row[col_idx] = trace.get(col_idx, row_idx)
         }

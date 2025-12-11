@@ -21,11 +21,8 @@ use tracing::instrument;
 mod gpu;
 
 mod prove;
-use prove::{prove_blake, prove_keccak, types::Proof as P3Proof, utils::to_row_major};
-
 // EXPORTS
 // ================================================================================================
-
 pub use miden_air::{
     DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
 };
@@ -33,11 +30,13 @@ pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
     StackOutputs, SyncHost, Word, crypto, math, utils,
 };
+use prove::{prove_blake, prove_keccak, types::Proof as P3Proof, utils::to_row_major};
 
 // PROVER
 // ================================================================================================
 
 pub struct ExecutionProver<SC> {
+    #[allow(dead_code)]
     config: SC,
     public_inputs: PublicInputs,
     _sc: PhantomData<SC>,
@@ -101,7 +100,7 @@ where
     let now = Instant::now();
     let mut trace = miden_processor::execute(
         program,
-        stack_inputs.clone(),
+        stack_inputs,
         advice_inputs,
         host,
         *options.execution_options(),
@@ -116,7 +115,7 @@ where
         now.elapsed().as_millis()
     );
 
-    let stack_outputs = trace.stack_outputs().clone();
+    let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
     let _program_info = trace.program_info();
 

@@ -263,10 +263,7 @@ fn build_syscall_block_request<E: ExtensionField<Felt>>(
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
+) -> E {
     let control_block_req = ControlBlockRequestMessage {
         transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),

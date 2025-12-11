@@ -12,8 +12,7 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventId, EventName, ONE, PrimeCharacteristicRing, Program, WORD_SIZE, ZERO,
-    assert_matches,
+    EMPTY_WORD, EventName, ONE, PrimeCharacteristicRing, Program, WORD_SIZE, ZERO,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,

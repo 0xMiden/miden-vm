@@ -139,7 +139,7 @@ where
         })
         .collect_vec();
 
-    let quotient = opened_values
+    let _quotient = opened_values
         .quotient_chunks
         .iter()
         .enumerate()
@@ -172,7 +172,7 @@ where
         accumulator: SC::Challenge::ZERO,
     };
     air.eval(&mut folder);
-    let folded_constraints = folder.accumulator;
+    let _folded_constraints = folder.accumulator;
 
     // TODO
     // Finally, check that
@@ -191,6 +191,7 @@ pub enum VerificationError<PcsErr> {
     InvalidOpeningArgument(PcsErr),
     /// Out-of-domain evaluation mismatch, i.e. `constraints(zeta)` did not match
     /// `quotient(zeta) Z_H(zeta)`.
+    #[allow(dead_code)]
     OodEvaluationMismatch,
 }
 type ViewPair<'a, T> = VerticalPair<RowMajorMatrixView<'a, T>, RowMajorMatrixView<'a, T>>;

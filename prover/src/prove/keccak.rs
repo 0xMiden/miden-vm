@@ -74,15 +74,15 @@ pub fn prove_keccak(trace: ExecutionTrace) -> Vec<u8> {
     let mut challenger = config.initialise_challenger();
     let pcs = config.pcs();
     let trace_domain: TwoAdicMultiplicativeCoset<Felt> =
-        <FriPcs as Pcs<Challenge, Challenger>>::natural_domain_for_degree(&pcs, degree);
+        <FriPcs as Pcs<Challenge, Challenger>>::natural_domain_for_degree(pcs, degree);
 
     let (trace_commit, trace_data) = info_span!("commit to main trace data").in_scope(|| {
-        <FriPcs as Pcs<Challenge, Challenger>>::commit(&pcs, vec![(trace_domain, trace_row_major)])
+        <FriPcs as Pcs<Challenge, Challenger>>::commit(pcs, vec![(trace_domain, trace_row_major)])
     });
 
     challenger.observe(Felt::from_u8(log_degree as u8));
 
-    challenger.observe(trace_commit.clone());
+    challenger.observe(trace_commit);
     challenger.observe_slice(&public_values);
 
     let alphas: [Challenge; 16] =
@@ -96,13 +96,10 @@ pub fn prove_keccak(trace: ExecutionTrace) -> Vec<u8> {
         info_span!("flatten auxiliary trace").in_scope(|| aux_row_major.flatten_to_base());
     let (aux_trace_commit, aux_trace_data) =
         info_span!("commit to auxiliary trace data").in_scope(|| {
-            <FriPcs as Pcs<Challenge, Challenger>>::commit(
-                &pcs,
-                vec![(trace_domain, aux_row_major)],
-            )
+            <FriPcs as Pcs<Challenge, Challenger>>::commit(pcs, vec![(trace_domain, aux_row_major)])
         });
 
-    challenger.observe(aux_trace_commit.clone());
+    challenger.observe(aux_trace_commit);
 
     let quotient_domain =
         trace_domain.create_disjoint_domain(1 << (log_degree + log_quotient_degree));
@@ -146,7 +143,7 @@ pub fn prove_keccak(trace: ExecutionTrace) -> Vec<u8> {
         info_span!("commit to quotient poly chunks").in_scope(|| {
             <FriPcs as Pcs<Challenge, Challenger>>::commit(
                 pcs,
-                qc_domains.into_iter().zip(quotient_chunks.into_iter()),
+                qc_domains.into_iter().zip(quotient_chunks),
             )
         });
     challenger.observe(quotient_commit);

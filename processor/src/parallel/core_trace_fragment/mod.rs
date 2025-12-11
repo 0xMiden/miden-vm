@@ -298,7 +298,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             MastNode::Call(call_node) => {
                 self.context.state.decoder.replay_node_start(&mut self.context.replay);
 
-                self.context.state.stack.start_context();
+                let _ = self.context.state.stack.start_context();
 
                 // Set up new context for the call
                 if call_node.is_syscall() {
@@ -581,7 +581,7 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
 
     fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
         // Goldilocks modulus is 2^64 - 2^32 + 1 = 0xFFFFFFFF00000001
-        const SENTINEL_VALUE: Felt = Felt::new(0xFFFFFFFF00000001u64 - 1);
+        const SENTINEL_VALUE: Felt = Felt::new(0xffffffff00000001u64 - 1);
 
         // push the last element on the overflow table
         {
@@ -858,14 +858,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     ) -> [Felt; NUM_USER_OP_HELPERS] {
         let alpha_coeffs = alpha.as_basis_coefficients_slice();
         let acc_tmp_coeffs = acc_tmp.as_basis_coefficients_slice();
-        [
-            alpha_coeffs[0],
-            alpha_coeffs[1],
-            k0,
-            k1,
-            acc_tmp_coeffs[0],
-            acc_tmp_coeffs[1],
-        ]
+        [alpha_coeffs[0], alpha_coeffs[1], k0, k1, acc_tmp_coeffs[0], acc_tmp_coeffs[1]]
     }
 
     #[inline(always)]

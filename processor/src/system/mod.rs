@@ -4,7 +4,7 @@ use core::fmt::{self, Display};
 use miden_air::RowIndex;
 use miden_core::PrimeCharacteristicRing;
 
-use super::{EMPTY_WORD, ExecutionError, Felt, ONE, SysTrace, Word, ZERO};
+use super::{EMPTY_WORD, ExecutionError, Felt, SysTrace, Word, ZERO};
 
 #[cfg(test)]
 mod tests;
@@ -270,7 +270,7 @@ impl From<ContextId> for u64 {
 
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
-        Felt::from_u32(context_id.0.into())
+        Felt::from_u32(context_id.0)
     }
 }
 

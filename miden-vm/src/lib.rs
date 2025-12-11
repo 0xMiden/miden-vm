@@ -15,8 +15,8 @@ pub use miden_processor::{
     VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
 };
 pub use miden_prover::{
-    ExecutionProof, FieldExtension, HashFunction, InputError, ProvingOptions, StackOutputs,
-    Word, math, prove,
+    ExecutionProof, FieldExtension, HashFunction, InputError, ProvingOptions, StackOutputs, Word,
+    math, prove,
 };
 pub use miden_verifier::VerificationError;
 

@@ -103,11 +103,12 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(bound = "")]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 192-bit output.
+    #[default]
     Blake3_192 = 0x00,
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
@@ -119,12 +120,6 @@ pub enum HashFunction {
     Keccak = 0x04,
     /// Poseidon hash function with 256-bit output.
     Poseidon2 = 0x05,
-}
-
-impl Default for HashFunction {
-    fn default() -> Self {
-        Self::Blake3_192
-    }
 }
 
 impl HashFunction {

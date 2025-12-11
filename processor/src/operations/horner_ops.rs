@@ -97,7 +97,7 @@ impl Process {
         self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
 
         let alpha_base: &[Felt] = alpha.as_basis_coefficients_slice();
-        let acc_tmp_base: &[Felt] = tmp0.as_basis_coefficients_slice();
+        let _acc_tmp_base: &[Felt] = tmp0.as_basis_coefficients_slice();
 
         // set the helper registers
         // h₀, h₁: evaluation point α
@@ -194,14 +194,7 @@ impl Process {
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerExt,
-            &[
-                alpha_coeffs[0],
-                alpha_coeffs[1],
-                k0,
-                k1,
-                acc_tmp_coeffs[0],
-                acc_tmp_coeffs[1],
-            ],
+            &[alpha_coeffs[0], alpha_coeffs[1], k0, k1, acc_tmp_coeffs[0], acc_tmp_coeffs[1]],
         );
 
         Ok(())
