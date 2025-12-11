@@ -1,0 +1,21 @@
+# Fibonacci computation example for Poseidon2 proving
+# Computes the 10th Fibonacci number using iterative approach
+# Usage: miden-vm prove fibonacci.masm --hasher poseidon2
+
+begin
+    push.10  # n: number of iterations
+    push.0   # fib(0)
+    push.1   # fib(1)
+
+    repeat.8
+        dup.1    # Duplicate second element
+        add      # Add top two elements
+        swap     # Swap to prepare for next iteration
+        drop     # Drop old value
+    end
+
+    # Clean up stack to maintain 16-element requirement
+    drop
+    drop
+    drop
+end

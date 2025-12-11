@@ -21,10 +21,6 @@ use tracing::instrument;
 mod gpu;
 
 mod prove;
-use prove::{
-    prove_blake, prove_keccak, prove_poseidon2, types::Proof as P3Proof, utils::to_row_major,
-};
-
 // EXPORTS
 // ================================================================================================
 pub use miden_air::{
@@ -33,6 +29,9 @@ pub use miden_air::{
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
     StackOutputs, SyncHost, Word, crypto, math, utils,
+};
+use prove::{
+    prove_blake, prove_keccak, prove_poseidon2, types::Proof as P3Proof, utils::to_row_major,
 };
 
 // PROVER

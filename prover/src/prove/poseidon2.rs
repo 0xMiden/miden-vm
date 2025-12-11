@@ -3,8 +3,7 @@
 // This implementation replaces the manual STARK protocol with Plonky3's high-level
 // p3_uni_stark::prove() function, reducing code from 200+ lines to ~30 lines.
 
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_air::ProcessorAir;
 use miden_processor::ExecutionTrace;
@@ -36,7 +35,8 @@ const PARTIAL_ROUNDS: usize = 22;
 type Perm = Poseidon2Goldilocks<WIDTH>;
 type MyHash = PaddingFreeSponge<Perm, WIDTH, 8, 8>;
 type MyCompress = TruncatedPermutation<Perm, 2, 8, WIDTH>;
-type ValMmcs = MerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, MyHash, MyCompress, 8>;
+type ValMmcs =
+    MerkleTreeMmcs<<Val as Field>::Packing, <Val as Field>::Packing, MyHash, MyCompress, 8>;
 type ChallengeMmcs = ExtensionMmcs<Val, Challenge, ValMmcs>;
 type Dft = Radix2DitParallel<Val>;
 type FriPcs = TwoAdicFriPcs<Val, Dft, ValMmcs, ChallengeMmcs>;
@@ -74,21 +74,19 @@ pub fn prove_poseidon2(trace: ExecutionTrace) -> Vec<u8> {
 ///
 /// Uses a fixed seed (0) for reproducibility - the same constants must be used
 /// by both prover and verifier.
-pub fn generate_poseidon2_config(log_degree: usize, constraint_degree: usize) -> StarkConfigPoseidon {
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
+pub fn generate_poseidon2_config(
+    log_degree: usize,
+    constraint_degree: usize,
+) -> StarkConfigPoseidon {
+    use rand::{SeedableRng, rngs::StdRng};
 
     // Create RNG with fixed seed for reproducible constants
     let mut rng = StdRng::seed_from_u64(0);
 
     // Generate Poseidon2 round constants
-    let external_constants = ExternalLayerConstants::new_from_rng(
-        HALF_FULL_ROUNDS * 2,
-        &mut rng,
-    );
-    let internal_constants: Vec<Val> = (0..PARTIAL_ROUNDS)
-        .map(|_| Val::from_u64(rng.random()))
-        .collect();
+    let external_constants = ExternalLayerConstants::new_from_rng(HALF_FULL_ROUNDS * 2, &mut rng);
+    let internal_constants: Vec<Val> =
+        (0..PARTIAL_ROUNDS).map(|_| Val::from_u64(rng.random())).collect();
 
     // Create Poseidon2 permutation and hash/compress functions
     let perm = Perm::new(external_constants, internal_constants);

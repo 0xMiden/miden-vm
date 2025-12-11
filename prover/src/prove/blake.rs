@@ -3,8 +3,7 @@
 // This implementation replaces the manual STARK protocol with Plonky3's high-level
 // p3_uni_stark::prove() function, reducing code from 215 lines to ~70 lines.
 
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 
 use miden_air::{Felt, ProcessorAir};
 use miden_processor::ExecutionTrace;

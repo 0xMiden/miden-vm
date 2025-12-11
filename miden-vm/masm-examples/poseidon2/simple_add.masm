@@ -1,0 +1,10 @@
+# Simple addition example for Poseidon2 proving
+# Demonstrates basic arithmetic operations
+# Usage: miden-vm prove simple_add.masm --hasher poseidon2
+
+begin
+    push.5
+    push.3
+    add
+    drop  # Drop result to maintain 16-element stack requirement
+end

@@ -5,6 +5,8 @@ use p3_field::{BasedVectorSpace, PackedField};
 use p3_matrix::dense::RowMajorMatrixView;
 use p3_uni_stark::{PackedChallenge, PackedVal, StarkGenericConfig, Val};
 
+// TODO(plonky3): Remove or reintegrate after p3-uni-stark migration is complete
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ProverConstraintFolder<'a, SC: StarkGenericConfig> {
     pub main: RowMajorMatrixView<'a, PackedVal<SC>>,

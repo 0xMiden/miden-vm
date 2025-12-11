@@ -31,6 +31,8 @@ pub fn to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     result
 }
 
+// TODO(plonky3): Remove or reintegrate after p3-uni-stark migration is complete
+#[allow(dead_code)]
 #[instrument("naive transposition", skip_all)]
 pub fn to_row_major_aux<E>(trace: &ColMatrix<E>) -> RowMajorMatrix<E>
 where
@@ -48,6 +50,8 @@ where
     result
 }
 
+// TODO(plonky3): Remove or reintegrate after p3-uni-stark migration is complete
+#[allow(dead_code)]
 #[instrument(name = "compute quotient polynomial", skip_all)]
 pub fn quotient_values<SC, A, Mat>(
     air: &A,
