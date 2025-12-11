@@ -46,7 +46,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, split_node, host);
+            let err_ctx = err_ctx!(current_forest, node_id, host);
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         };
 

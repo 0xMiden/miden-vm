@@ -1,4 +1,5 @@
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
     vec::Vec,
@@ -19,12 +20,12 @@ pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
     ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
-    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
-    AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
+    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
@@ -493,6 +494,76 @@ impl MastForest {
     ) {
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
+
+    /// Returns the [`AssemblyOp`] associated with this node and operation (if provided), if any.
+    ///
+    /// If the `target_op_idx` is provided, the method treats the node as having operations and will
+    /// return the assembly op associated with the operation at the corresponding index. If no
+    /// `target_op_idx` is provided, the method will return the first assembly op found
+    /// (effectively assuming that the node has at most one associated [`AssemblyOp`]).
+    pub fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        let node = &self[node_id];
+
+        // Replicate the behavior of the original MastNodeErrorContext::decorators method
+        // by collecting all decorators in the correct order for each node type
+        let decorator_links: Box<dyn Iterator<Item = (usize, DecoratorId)>> = match node {
+            MastNode::Block(block_node) => {
+                let num_ops: usize = block_node.num_operations() as usize;
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
+                let op_iter = self
+                    .decorator_links_for_node(node_id)
+                    .expect("Block node must have some valid set of decorator links");
+                let after_iter =
+                    self.after_exit_decorators(node_id).iter().map(move |&id| (num_ops, id));
+
+                Box::new(before_iter.chain(op_iter).chain(after_iter))
+            },
+            _ => {
+                // For all other node types: before_enter at index 0, after_exit at index 1
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
+
+                let after_iter = self.after_exit_decorators(node_id).iter().map(|&id| (1, id));
+
+                Box::new(before_iter.chain(after_iter))
+            },
+        };
+
+        match target_op_idx {
+            // If a target operation index is provided, return the assembly op associated with that
+            // operation.
+            Some(target_op_idx) => {
+                for (op_idx, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
+                        // when an instruction compiles down to multiple operations, only the first
+                        // operation is associated with the assembly op. We need to check if the
+                        // target operation index falls within the range of operations associated
+                        // with the assembly op.
+                        if target_op_idx >= op_idx
+                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
+                        {
+                            return Some(assembly_op);
+                        }
+                    }
+                }
+            },
+            // If no target operation index is provided, return the first assembly op found.
+            None => {
+                for (_, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
+                        return Some(assembly_op);
+                    }
+                }
+            },
+        }
+
+        None
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -511,6 +582,64 @@ impl MastForest {
         // we use u64 as keys for the map
         self.debug_info.insert_error_code(code.as_int(), msg);
         code
+    }
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+#[cfg(test)]
+impl MastForest {
+    /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
+    ///
+    /// This helper method combines before_enter, operation-indexed, and after_exit decorators
+    /// into a single collection, which is useful for testing decorator positions and ordering.
+    ///
+    /// **Performance Warning**: This method performs multiple allocations through collect() calls
+    /// and should not be relied upon for performance-critical code. It is intended for testing
+    /// only.
+    pub fn all_decorators(&self, node_id: MastNodeId) -> Vec<(usize, DecoratorId)> {
+        let node = &self[node_id];
+
+        // For non-basic blocks, just get before_enter and after_exit decorators at position 0
+        if !node.is_basic_block() {
+            let before_enter_decorators: Vec<_> = self
+                .before_enter_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (0, deco_id))
+                .collect();
+
+            let after_exit_decorators: Vec<_> = self
+                .after_exit_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (1, deco_id))
+                .collect();
+
+            return [before_enter_decorators, after_exit_decorators].concat();
+        }
+
+        // For basic blocks, we need to handle operation-indexed decorators with proper positioning
+        let block = node.unwrap_basic_block();
+
+        // Before-enter decorators are at position 0
+        let before_enter_decorators: Vec<_> = self
+            .before_enter_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (0, deco_id))
+            .collect();
+
+        // Operation-indexed decorators with their actual positions
+        let op_indexed_decorators: Vec<_> =
+            self.decorator_links_for_node(node_id).unwrap().into_iter().collect();
+
+        // After-exit decorators are positioned after all operations
+        let after_exit_decorators: Vec<_> = self
+            .after_exit_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (block.num_operations() as usize, deco_id))
+            .collect();
+
+        [before_enter_decorators, op_indexed_decorators, after_exit_decorators].concat()
     }
 }
 

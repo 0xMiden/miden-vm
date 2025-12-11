@@ -488,8 +488,9 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .add_to_forest(&mut forest)
         .unwrap();
 
-    let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
+    // decorators
+    let all_decorators = forest.all_decorators(node_id);
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
     assert_eq!(all_decorators.len(), 3);
@@ -580,8 +581,8 @@ fn test_decorator_positions() {
 
     let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-    // Test that MastNodeErrorContext::decorators returns all decorators
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // Test that MastForest::decorator_links_for_node returns all decorators using the helper method
+    let all_decorators = forest.all_decorators(node_id);
     assert_eq!(all_decorators.len(), 5);
 
     // Verify the order and positions:

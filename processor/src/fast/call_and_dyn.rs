@@ -41,12 +41,9 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, call_node, host);
+        let err_ctx = err_ctx!(current_forest, current_node_id, host);
 
-        let callee_hash = current_forest
-            .get_node_by_id(call_node.callee())
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() })?
-            .digest();
+        let callee_hash = current_forest[call_node.callee()].digest();
 
         self.save_context_and_truncate_stack(tracer);
 
@@ -106,7 +103,7 @@ impl FastProcessor {
         // so we prefix it with underscore to indicate this intentional unused state
         // and suppress warnings in feature combinations that include `no_err_ctx`.
         let _call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, _call_node, host);
+        let err_ctx = err_ctx!(current_forest, node_id, host);
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
@@ -142,7 +139,7 @@ impl FastProcessor {
         // added to the trace.
         let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
-        let err_ctx = err_ctx!(&current_forest, dyn_node, host);
+        let err_ctx = err_ctx!(&current_forest, current_node_id, host);
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -237,7 +234,7 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, dyn_node, host);
+        let err_ctx = err_ctx!(current_forest, node_id, host);
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(tracer, &err_ctx)?;

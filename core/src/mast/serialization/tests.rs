@@ -9,7 +9,7 @@ use crate::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        SplitNodeBuilder, node::MastNodeErrorContext,
+        SplitNodeBuilder,
     },
     operations::Operation,
 };
@@ -550,12 +550,6 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
         "after_exit decorator should not be duplicated in indexed decorators"
     );
 
-    // Verify that all decorators() method returns all decorators (this is the full iterator)
-    let all_decorators: Vec<_> = deserialized_block.decorators(&forest).collect();
-    assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
-
-    // Verify the order: before_enter, op-indexed, after_exit
-    assert_eq!(all_decorators[0].1, before_enter_deco, "First decorator should be before_enter");
-    assert_eq!(all_decorators[1].1, op_deco, "Second decorator should be op-indexed");
-    assert_eq!(all_decorators[2].1, after_exit_deco, "Third decorator should be after_exit");
+    // Note: The decorators() method test was removed as MastNodeErrorContext trait has been removed
+    // The decorator functionality is now accessed through MastForest.get_assembly_op() directly
 }

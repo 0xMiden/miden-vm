@@ -6,7 +6,7 @@ use crate::{
     Decorator, Operation,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
-        MastNodeErrorContext, node::MastForestContributor,
+        node::MastForestContributor,
     },
 };
 
@@ -436,10 +436,14 @@ fn mast_forest_merge_decorators() {
         panic!("expected basic block node");
     };
 
-    assert_eq!(
-        &merged_foo_block.decorators(&merged).collect::<Vec<_>>()[..],
-        &[(0, merged_deco1), (0, merged_deco2)]
-    );
+    // Test basic block decorators using new MastForest API
+    // The basic block should have Trace(1) and Trace(2) as before-enter decorators at index 0
+    let merged_foo_block_id = merged_foo_block.linked_id().unwrap();
+
+    // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
+    // decorators using the helper method
+    let all_decorators = merged.all_decorators(merged_foo_block_id);
+    assert_eq!(all_decorators, vec![(0, merged_deco1), (0, merged_deco2)]);
 
     // Asserts that there exists exactly one Loop Node with the given decorators.
     assert_eq!(

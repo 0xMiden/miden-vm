@@ -1,5 +1,8 @@
 #!/bin/sh
 
+# Deprecated: please use the Github actions workflow,
+# This is meant to be used in a break-the-glass situation
+#
 # Expects
 # 1. to be run from the root of the repository
 # 2. for ~/.cargo/credentials.toml to contain your crates.io token (see
