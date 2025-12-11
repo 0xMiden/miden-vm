@@ -1,14 +1,14 @@
 use core::ops::ControlFlow;
 
 use miden_air::{
-    Felt, FieldElement, RowIndex,
+    Felt, RowIndex,
     trace::{
         STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };
 use miden_core::{
-    ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
+    ONE, OPCODE_PUSH, Operation, QuadFelt, WORD_SIZE, Word, ZERO,
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,

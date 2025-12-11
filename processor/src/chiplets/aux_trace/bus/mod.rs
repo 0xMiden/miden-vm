@@ -212,7 +212,7 @@ fn build_dyncall_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req_value =
         build_control_block_request(main_trace, [ZERO; 8], op_code_felt, alphas, row, _debugger);
@@ -239,7 +239,7 @@ fn build_call_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req_value = build_control_block_request(
         main_trace,

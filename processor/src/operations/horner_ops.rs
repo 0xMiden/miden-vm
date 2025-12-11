@@ -1,4 +1,4 @@
-use miden_core::{BasedVectorSpace, Felt, FieldElement, ONE, Operation, QuadFelt};
+use miden_core::{BasedVectorSpace, Felt, ONE, Operation, QuadFelt};
 
 use crate::{ExecutionError, Process, errors::ErrorContext};
 

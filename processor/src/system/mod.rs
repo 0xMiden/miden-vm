@@ -4,7 +4,7 @@ use core::fmt::{self, Display};
 use miden_air::RowIndex;
 use miden_core::PrimeCharacteristicRing;
 
-use super::{EMPTY_WORD, ExecutionError, Felt, FieldElement, ONE, SysTrace, Word, ZERO};
+use super::{EMPTY_WORD, ExecutionError, Felt, ONE, SysTrace, Word, ZERO};
 
 #[cfg(test)]
 mod tests;

@@ -12,7 +12,7 @@ use miden_core::{
 };
 
 use super::{
-    Felt, FieldElement, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
+    build_ace_memory_read_element_request, build_ace_memory_read_word_request,
 };
 use crate::{
     chiplets::aux_trace::build_value,
@@ -262,7 +262,7 @@ struct LogPrecompileMessage {
 
 impl<E> BusMessage<E> for LogPrecompileMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let state_elements: [Felt; 4] = self.state.into();
@@ -286,7 +286,7 @@ impl core::fmt::Display for LogPrecompileMessage {
 ///
 /// Helper register layout for `log_precompile` is codified as:
 /// - `h0` = hasher address, `h1..h4` = `CAP_PREV[0..3]`.
-fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
+fn build_log_precompile_capacity_remove<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
     alphas: &[E],
@@ -311,7 +311,7 @@ fn build_log_precompile_capacity_remove<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Inserts the next transcript state (`CAP_NEXT`) into the virtual table bus.
-fn build_log_precompile_capacity_insert<E: FieldElement<BaseField = Felt>>(
+fn build_log_precompile_capacity_insert<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     row: RowIndex,
     alphas: &[E],

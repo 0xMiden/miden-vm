@@ -14,7 +14,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, FieldElement, ONE, OPCODE_DYNCALL,
+    ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL,
     PrimeCharacteristicRing, ZERO,
 };
 
@@ -101,7 +101,7 @@ pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
 }
 
 /// Builds `DYN` and `DYNCALL` read request made to the memory chiplet for the callee hash.
-pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
     alphas: &[E],
@@ -133,7 +133,7 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: FieldElement<BaseFie
 /// context.
 ///
 /// Currently, this is done with `CALL` and `DYNCALL`.
-pub(super) fn build_fmp_initialization_write_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -332,7 +332,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
 }
 
 /// Builds `HORNERBASE` requests made to the memory chiplet.
-pub(super) fn build_hornerbase_eval_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -373,7 +373,7 @@ pub(super) fn build_hornerbase_eval_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HORNEREXT` requests made to the memory chiplet.
-pub(super) fn build_hornerext_eval_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,

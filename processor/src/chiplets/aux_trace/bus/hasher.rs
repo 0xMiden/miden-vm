@@ -197,7 +197,7 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
 /// - `s0..s3`: `R1[3..0]`
 /// - `s4..s7`: `R0[3..0]`
 /// - `s8..s11`: `CAP_NEXT[3..0]`
-pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
