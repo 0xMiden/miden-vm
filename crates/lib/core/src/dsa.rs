@@ -23,7 +23,7 @@ pub mod ecdsa_k256_keccak {
     use miden_core::{Felt, Word, utils::Serializable};
     use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, SecretKey, Signature};
 
-    use crate::handlers::bytes_to_packed_u32_felts;
+    use crate::handlers::bytes_to_packed_u32_elements;
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
     /// associated public key into a vector of field elements in the format expected by
@@ -47,9 +47,9 @@ pub mod ecdsa_k256_keccak {
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         let mut out = Vec::new();
         let pk_bytes = pk.to_bytes();
-        out.extend(bytes_to_packed_u32_felts(&pk_bytes));
+        out.extend(bytes_to_packed_u32_elements(&pk_bytes));
         let sig_bytes = sig.to_bytes();
-        out.extend(bytes_to_packed_u32_felts(&sig_bytes));
+        out.extend(bytes_to_packed_u32_elements(&sig_bytes));
         out
     }
 }
@@ -69,7 +69,7 @@ pub mod eddsa_ed25519 {
     use miden_core::{Felt, Word, utils::Serializable};
     use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature};
 
-    use crate::handlers::bytes_to_packed_u32_felts;
+    use crate::handlers::bytes_to_packed_u32_elements;
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
     /// associated public key into a vector of field elements in the format expected by
@@ -94,9 +94,9 @@ pub mod eddsa_ed25519 {
     pub fn encode_signature(pk: &PublicKey, sig: &Signature) -> Vec<Felt> {
         let mut out = Vec::new();
         let pk_bytes = pk.to_bytes();
-        out.extend(bytes_to_packed_u32_felts(&pk_bytes));
+        out.extend(bytes_to_packed_u32_elements(&pk_bytes));
         let sig_bytes = sig.to_bytes();
-        out.extend(bytes_to_packed_u32_felts(&sig_bytes));
+        out.extend(bytes_to_packed_u32_elements(&sig_bytes));
         out
     }
 }

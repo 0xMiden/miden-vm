@@ -16,7 +16,7 @@ use miden_core::{
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,
     handlers::{
-        bytes_to_packed_u32_felts,
+        bytes_to_packed_u32_elements,
         eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
     },
 };
@@ -163,7 +163,7 @@ fn test_eddsa_verify_with_message() {
     let secret_key = SecretKey::with_rng(&mut rng);
 
     // Compute public key commitment
-    let pk_felts = bytes_to_packed_u32_felts(&secret_key.public_key().to_bytes());
+    let pk_felts = bytes_to_packed_u32_elements(&secret_key.public_key().to_bytes());
     let pk_commitment = Rpo256::hash_elements(&pk_felts);
 
     let stack_words = [message, pk_commitment];
@@ -212,7 +212,7 @@ impl EventHandler for EddsaSignatureHandler {
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
             let pk = secret_key.public_key();
-            let pk_felts = bytes_to_packed_u32_felts(&pk.to_bytes());
+            let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
             Rpo256::hash_elements(&pk_felts)
         };
         assert_eq!(
@@ -236,7 +236,7 @@ fn test_eddsa_verify_high_level_wrapper() {
     let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
 
     let pk_commitment = {
-        let pk_felts = bytes_to_packed_u32_felts(&public_key.to_bytes());
+        let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
         Rpo256::hash_elements(&pk_felts)
     };
 
@@ -324,10 +324,10 @@ fn compute_k_digest_bytes(pk: &PublicKey, message: &[u8; 32], sig: &Signature) -
 // ================================================================================================
 
 fn generate_memory_store_masm(request: &EddsaRequest, message: &[u8; 32]) -> String {
-    let pk_felts = bytes_to_packed_u32_felts(&request.pk().to_bytes());
-    let k_digest_felts = bytes_to_packed_u32_felts(&request.k_digest().to_bytes());
-    let sig_felts = bytes_to_packed_u32_felts(&request.sig().to_bytes());
-    let msg_felts = bytes_to_packed_u32_felts(message);
+    let pk_felts = bytes_to_packed_u32_elements(&request.pk().to_bytes());
+    let k_digest_felts = bytes_to_packed_u32_elements(&request.k_digest().to_bytes());
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+    let msg_felts = bytes_to_packed_u32_elements(message);
 
     [
         masm_store_felts(&pk_felts, PK_ADDR),
