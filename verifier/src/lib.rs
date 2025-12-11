@@ -9,7 +9,10 @@ use alloc::vec;
 use std::println;
 
 // use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
-use miden_air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
+use miden_air::{ExecutionProof, Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
+use miden_core::precompile::{
+    PrecompileTranscriptDigest, PrecompileVerificationError, PrecompileVerifierRegistry,
+};
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
@@ -29,7 +32,6 @@ pub use winter_verifier::{AcceptableOptions, VerifierError};
 pub mod math {
     pub use miden_core::Felt;
 }
-pub use exports::*;
 
 // VERIFIER
 // ================================================================================================
@@ -124,6 +126,8 @@ pub fn verify_with_precompiles(
     match hash_fn {
         HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
             println!("blake verifying");
+            type Val = Felt;
+            type Challenge = BinomialExtensionField<Felt, 2>;
             type H = Blake3;
             type FieldHash = SerializingHasher<H>;
             type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
@@ -148,6 +152,7 @@ pub fn verify_with_precompiles(
                 log_final_poly_len: 7,
                 num_queries: 27,
                 proof_of_work_bits: 16,
+                log_folding_factor: 1,
                 mmcs: challenge_mmcs,
             };
 
@@ -157,8 +162,9 @@ pub fn verify_with_precompiles(
 
             let config = Config::new(pcs, challenger);
 
+            let air = ProcessorAir {};
             let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-            verify_proof(&config, &processor_air, &proof, &vec![])
+            verify_proof(&config, &air, &proof, &vec![])
         },
         HashFunction::Rpo256 => {
             todo!()
