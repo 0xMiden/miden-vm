@@ -217,3 +217,25 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
 // ================================================================================================
 
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn proptest_packed_u32_elements_roundtrip(values in prop::collection::vec(any::<u32>(), 0..100)) {
+            // Convert u32 values to Felts
+            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from(v)).collect();
+
+            // Roundtrip: Felts -> bytes -> Felts
+            let bytes = packed_u32_elements_to_bytes(&felts);
+            let roundtrip_felts = bytes_to_packed_u32_elements(&bytes);
+
+            // Should be equal
+            prop_assert_eq!(felts, roundtrip_felts);
+        }
+    }
+}

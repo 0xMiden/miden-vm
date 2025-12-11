@@ -35,7 +35,10 @@ use alloc::{vec, vec::Vec};
 use miden_core::{
     EventName,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        bytes_to_packed_u32_elements,
+    },
 };
 use miden_crypto::{
     ZERO,
@@ -44,7 +47,7 @@ use miden_crypto::{
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::{bytes_to_packed_u32_elements, read_memory_packed_u32};
+use crate::handlers::read_memory_packed_u32;
 
 /// Qualified event name for the ECDSA signature verification event.
 pub const ECDSA_VERIFY_EVENT_NAME: EventName =

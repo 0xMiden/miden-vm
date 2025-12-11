@@ -13,7 +13,10 @@ use core::convert::TryInto;
 use miden_core::{
     EventName,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        bytes_to_packed_u32_elements,
+    },
 };
 use miden_crypto::{
     ZERO,
@@ -22,7 +25,7 @@ use miden_crypto::{
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::{MemoryReadError, bytes_to_packed_u32_elements, read_memory_packed_u32};
+use crate::handlers::{MemoryReadError, read_memory_packed_u32};
 
 // CONSTANTS
 // ================================================================================================

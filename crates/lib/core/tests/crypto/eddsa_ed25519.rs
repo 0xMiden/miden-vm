@@ -11,14 +11,11 @@ use core::convert::TryFrom;
 use miden_core::{
     EventName, Felt, FieldElement, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable},
+    utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,
-    handlers::{
-        bytes_to_packed_u32_elements,
-        eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
-    },
+    handlers::eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},

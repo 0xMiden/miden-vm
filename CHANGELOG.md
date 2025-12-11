@@ -12,6 +12,7 @@
 - Add MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).
 - Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 - Removed undocumented `err_code` field from `ExecutionError::NotU32Values` ([#2419](https://github.com/0xMiden/miden-vm/pull/2419)).
+- Moved `bytes_to_packed_u32_elements` to `miden-core::utils` and added `packed_u32_elements_to_bytes` inverse function ([#2458](https://github.com/0xMiden/miden-vm/pull/2458)).
 
 ## 0.20.0 (2025-12-05)
 

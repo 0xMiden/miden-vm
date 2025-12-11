@@ -8,14 +8,11 @@
 use miden_core::{
     EventName, Felt, FieldElement, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable},
+    utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
 use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
-    handlers::{
-        bytes_to_packed_u32_elements,
-        ecdsa::{EcdsaPrecompile, EcdsaRequest},
-    },
+    handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
 use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};

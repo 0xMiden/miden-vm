@@ -168,9 +168,6 @@ pub(crate) fn read_memory_packed_u32(
     Ok(out)
 }
 
-// Re-export bytes_to_packed_u32_elements from miden-core for backwards compatibility
-pub use miden_core::utils::bytes_to_packed_u32_elements;
-
 // ERROR TYPES
 // ================================================================================================
 
