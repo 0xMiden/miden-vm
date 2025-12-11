@@ -203,6 +203,7 @@ pub fn generate_blake_config() -> StarkConfigBlake {
         log_final_poly_len: 7,
         num_queries: 27,
         proof_of_work_bits: 16,
+        log_folding_factor: 1,
         mmcs: challenge_mmcs,
     };
 

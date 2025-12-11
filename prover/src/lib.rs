@@ -16,11 +16,12 @@ use miden_air::{ProcessorAir, PublicInputs};
 use miden_gpu::HashFn;
 use miden_processor::{ExecutionTrace, Program};
 use p3_uni_stark::StarkGenericConfig;
-use tracing::{info_span, instrument};
+use tracing::instrument;
 
 mod gpu;
 
 mod prove;
+use prove::{prove_blake, prove_keccak, types::Proof as P3Proof, utils::to_row_major};
 
 // EXPORTS
 // ================================================================================================
@@ -71,7 +72,7 @@ where
             .all(|(l, r)| l == r)
     }
 
-    pub fn prove(&self, trace: ExecutionTrace) -> Proof<SC> where {
+    pub fn prove(&self, trace: ExecutionTrace) -> P3Proof<SC> where {
         let _processor_air = ProcessorAir {};
 
         //let mut public_inputs = self.public_inputs.stack_inputs().to_vec();
@@ -128,20 +129,15 @@ where
             todo!()
             // println!("rpo proving");
             // let proof = prove_rpo(trace);
-
-            // ExecutionProof::new(proof, hash_fn)
+            // proof
         },
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
             println!("blake proving");
-            let proof = prove_blake(trace);
-
-            ExecutionProof::new(proof, hash_fn)
+            prove_blake(trace)
         },
         HashFunction::Keccak => {
             println!("kecak proving");
-            let proof = prove_keccak(trace);
-
-            ExecutionProof::new(proof, hash_fn)
+            prove_keccak(trace)
         },
         HashFunction::Rpx256 => {
             unimplemented!()
@@ -155,8 +151,7 @@ where
             // );
             // maybe_await!(prover.prove(trace))
         },
-    }
-    .map_err(ExecutionError::ProverError)?;
+    };
 
     let proof = ExecutionProof::new(proof, hash_fn, pc_requests);
 
@@ -168,6 +163,11 @@ where
 
 // HELPERS and TYPES are consolidated into prove/ submodules
 
+// NOTE: The following Winter prover implementations are commented out as they don't match
+// the new struct definition with a single generic parameter SC.
+// These were part of the old Winter prover API and need to be removed or refactored.
+
+/*
 impl<H, R> ExecutionProver<H, R>
 where
     H: ElementHasher<BaseField = Felt>,
@@ -295,3 +295,4 @@ where
         )
     }
 }
+*/
