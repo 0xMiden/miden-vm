@@ -606,8 +606,10 @@ impl MastForest {
 impl MastForest {
     /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
     /// 1. Power-of-two number of groups in each batch
-    /// 2. No batch ends with an immediate operation
-    /// 3. OpBatch structural consistency (indptr integrity, bounds checking)
+    /// 2. No operation group ends with an operation requiring an immediate value
+    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
+    ///    indptr integrity, bounds checking)
     ///
     /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
     /// at assembly time rather than dynamically during execution, and adds comprehensive
