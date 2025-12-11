@@ -1,11 +1,10 @@
 [package]
 name = "miden-utils-core-derive"
-version = "0.1.0"
+version.workspace = true
 description = "Proc macro to derive enum dispatch trait implementations on miden-core structs"
 readme = "README.md"
 categories = ["development-tools::procedural-macro-helpers", "no-std"]
 keywords = ["enum", "proc-macro", "derive", "enum_dispatch"]
-publish = false
 license.workspace = true
 authors.workspace = true
 homepage.workspace = true

@@ -809,7 +809,7 @@ fn loop_node_repeat() {
 
 #[test]
 #[rustfmt::skip]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
     // build a program which looks like this:
     //
@@ -1102,7 +1102,7 @@ fn test_call_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
     // build a program which looks like this:
     //
@@ -1705,7 +1705,7 @@ fn check_op_decoding(
     );
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 #[track_caller]
 fn check_op_decoding_with_imm(
     trace: &DecoderTrace,

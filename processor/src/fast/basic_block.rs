@@ -21,7 +21,7 @@ impl FastProcessor {
     /// # Arguments
     /// * `node_id` - The ID of this basic block node in the `current_forest` MAST forest. This
     ///   should match the ID in `basic_block_node.decorators` when it's `Linked`.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     #[inline(always)]
     pub(super) async fn execute_basic_block_node(
         &mut self,
@@ -121,7 +121,7 @@ impl FastProcessor {
     }
 
     #[inline(always)]
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     async fn execute_op_batch(
         &mut self,
         basic_block: &BasicBlockNode,
@@ -165,7 +165,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
+                let err_ctx = err_ctx!(program, node_id, host, op_idx_in_block);
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {

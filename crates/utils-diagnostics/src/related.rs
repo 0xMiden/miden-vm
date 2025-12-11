@@ -14,7 +14,7 @@ use super::{Diagnostic, Label, LabeledSpan, Report, Severity, SourceCode};
 /// original error. A related label can have a distinct severity, its own message, and its own
 /// sub-labels, and may reference code in a completely different source file that the original
 /// error.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RelatedLabel {
     /// The severity for this related label
     pub severity: Severity,
@@ -69,7 +69,6 @@ impl RelatedLabel {
         Self::new(Severity::Error, message)
     }
 
-    #[allow(unused)]
     pub fn warning<S>(message: S) -> Self
     where
         Cow<'static, str>: From<S>,
@@ -77,7 +76,6 @@ impl RelatedLabel {
         Self::new(Severity::Warning, message)
     }
 
-    #[allow(unused)]
     pub fn advice<S>(message: S) -> Self
     where
         Cow<'static, str>: From<S>,
@@ -103,7 +101,6 @@ impl RelatedLabel {
         self
     }
 
-    #[allow(unused)]
     pub fn with_labels<I>(mut self, labels: I) -> Self
     where
         I: IntoIterator<Item = Label>,

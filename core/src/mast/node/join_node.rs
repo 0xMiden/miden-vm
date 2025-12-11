@@ -5,14 +5,11 @@ use miden_crypto::{Felt, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
-        MastNodeId,
-    },
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
     prettier::PrettyPrint,
 };
 
@@ -47,23 +44,6 @@ impl JoinNode {
     /// defined by the first node completes.
     pub fn second(&self) -> MastNodeId {
         self.children[1]
-    }
-}
-
-impl MastNodeErrorContext for JoinNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -371,22 +351,29 @@ impl JoinNodeBuilder {
 
 impl MastForestContributor for JoinNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let node = self.build(forest)?;
+        // Validate child node IDs
+        let forest_len = forest.nodes.len();
+        if self.children[0].to_usize() >= forest_len {
+            return Err(MastForestError::NodeIdOverflow(self.children[0], forest_len));
+        } else if self.children[1].to_usize() >= forest_len {
+            return Err(MastForestError::NodeIdOverflow(self.children[1], forest_len));
+        }
 
-        let JoinNode {
-            children,
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("JoinNodeBuilder::build() should always return owned decorators");
+        // Use the forced digest if provided, otherwise compute the digest
+        let digest = if let Some(forced_digest) = self.digest {
+            forced_digest
+        } else {
+            let left_child_hash = forest[self.children[0]].digest();
+            let right_child_hash = forest[self.children[1]].digest();
+
+            hasher::merge_in_domain(&[left_child_hash, right_child_hash], JoinNode::DOMAIN)
         };
 
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -394,7 +381,7 @@ impl MastForestContributor for JoinNodeBuilder {
             .nodes
             .push(
                 JoinNode {
-                    children,
+                    children: self.children,
                     digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
@@ -494,7 +481,7 @@ impl JoinNodeBuilder {
         // Use the forced digest if provided, otherwise use a default digest
         // The actual digest computation will be handled when the forest is complete
         let Some(digest) = self.digest else {
-            panic!("Digest is required for deserialization")
+            return Err(MastForestError::DigestRequiredForDeserialization);
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);

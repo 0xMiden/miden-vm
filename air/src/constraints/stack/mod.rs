@@ -159,7 +159,7 @@ pub fn enforce_general_constraints<E: FieldElement>(
     result[0] = are_equal(frame.stack_item_next(0) * flag_sum, expected_next_item);
 
     // enforces constraint on the ith element in the stack in the next trace.
-    #[allow(clippy::needless_range_loop)]
+    #[expect(clippy::needless_range_loop)]
     for i in 1..NUM_GENERAL_CONSTRAINTS - 2 {
         let flag_sum =
             op_flag.no_shift_at(i) + op_flag.left_shift_at(i + 1) + op_flag.right_shift_at(i - 1);
@@ -270,14 +270,14 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn stack_overflow_addr_next(&self) -> E;
 
     /// Returns the current value of stack helper column `h0`.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn stack_helper(&self) -> E;
 
     /// Gets the current element of the clk register in the trace.
     fn clk(&self) -> E;
 
     /// Gets the next element of the clk register in the trace.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn clk_next(&self) -> E;
 
     /// Gets the current value of user op helper register located at the specified index.

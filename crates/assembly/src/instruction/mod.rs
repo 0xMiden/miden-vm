@@ -45,38 +45,36 @@ impl Assembler {
         // Always collect decorators into a single Vec; it will remain empty if not needed.
         let mut decorators = Vec::new();
 
-        if self.in_debug_mode() {
-            // if the assembler is in debug mode, start tracking the instruction about to be
-            // executed; this will allow us to map the instruction to the sequence of
-            // operations which were executed as a part of this instruction.
-            block_builder.track_instruction(instruction, proc_ctx)?;
+        // Start tracking the instruction about to be executed; this will allow us to map the
+        // instruction to the sequence of operations which were executed as a part of this
+        // instruction.
+        block_builder.track_instruction(instruction, proc_ctx)?;
 
-            // New node is being created, so we are done building the current block. We then want to
-            // add the assembly operation to the new node - for example call, dyncall, if/else
-            // statements, loops, etc. However, `exec` instructions are compiled away and not
-            // added to the trace, so we should ignore them. Theoretically, we
-            // could probably add them anyways, but it currently breaks the
-            // `VmStateIterator`.
-            if can_create_node
-                && !matches!(instruction.inner(), Instruction::Exec(_))
-                && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
-            {
-                // Set the cycle count for this assembly op to 1
-                let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
-                match assembly_op {
-                    Decorator::AsmOp(op) => op.set_num_cycles(1),
-                    _ => panic!("expected AsmOp decorator"),
-                }
-                decorators.push(asm_op_id);
+        // New node is being created, so we are done building the current block. We then want to
+        // add the assembly operation to the new node - for example call, dyncall, if/else
+        // statements, loops, etc. However, `exec` instructions are compiled away and not
+        // added to the trace, so we should ignore them. Theoretically, we
+        // could probably add them anyways, but it currently breaks the
+        // `VmStateIterator`.
+        if can_create_node
+            && !matches!(instruction.inner(), Instruction::Exec(_))
+            && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
+        {
+            // Set the cycle count for this assembly op to 1
+            let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
+            match assembly_op {
+                Decorator::AsmOp(op) => op.set_num_cycles(1),
+                _ => panic!("expected AsmOp decorator"),
             }
+            decorators.push(asm_op_id);
         }
 
         // Compile the instruction, passing the decorators (which may be empty).
         let opt_new_node_id =
             self.compile_instruction_impl(instruction, block_builder, proc_ctx, decorators)?;
 
-        // If we're in debug mode but didn't create a node, set the cycle count after compilation.
-        if self.in_debug_mode() && !can_create_node {
+        // If we didn't create a node, set the cycle count after compilation.
+        if !can_create_node {
             let _ = block_builder.set_instruction_cycle_count();
         }
 
@@ -580,18 +578,13 @@ impl Assembler {
 
             // ----- debug decorators -------------------------------------------------------------
             Instruction::Breakpoint => {
-                if self.in_debug_mode() {
-                    block_builder.push_op(Noop);
-                    block_builder.track_instruction(instruction, proc_ctx)?;
-                }
+                block_builder.push_op(Noop);
+                block_builder.track_instruction(instruction, proc_ctx)?;
             },
 
             Instruction::Debug(options) => {
-                if self.in_debug_mode() {
-                    block_builder.push_decorator(Decorator::Debug(debug::compile_options(
-                        options, proc_ctx,
-                    )?))?;
-                }
+                block_builder
+                    .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;
             },
 
             // ----- emit instruction -------------------------------------------------------------

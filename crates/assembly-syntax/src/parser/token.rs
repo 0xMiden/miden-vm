@@ -114,14 +114,11 @@ pub struct WordValue(pub [Felt; 4]);
 
 impl fmt::Display for WordValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:#08x}{:08x}{:08x}{:08x}",
-            &self.0[0].as_int(),
-            &self.0[1].as_int(),
-            &self.0[2].as_int(),
-            &self.0[3].as_int(),
-        )
+        let mut builder = f.debug_list();
+        for value in self.0 {
+            builder.entry(&value.as_int());
+        }
+        builder.finish()
     }
 }
 
@@ -253,6 +250,22 @@ impl IntValue {
             Self::U32(value) => *value as u64,
             Self::Felt(value) => value.as_int(),
         }
+    }
+
+    pub fn checked_add(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_add(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_sub(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_sub(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_mul(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_mul(rhs.as_int()).map(super::lexer::shrink_u64_hex)
+    }
+
+    pub fn checked_div(&self, rhs: Self) -> Option<Self> {
+        self.as_int().checked_div(rhs.as_int()).map(super::lexer::shrink_u64_hex)
     }
 }
 

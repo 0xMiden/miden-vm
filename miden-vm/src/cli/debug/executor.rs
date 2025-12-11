@@ -11,7 +11,7 @@ pub struct DebugExecutor {
     vm_state_iter: VmStateIterator,
     vm_state: VmState,
     // TODO(pauls): Use this to render source-level diagnostics when program errors are encountered
-    #[allow(unused)]
+    #[expect(unused)]
     source_manager: Arc<dyn miden_assembly::SourceManager>,
 }
 

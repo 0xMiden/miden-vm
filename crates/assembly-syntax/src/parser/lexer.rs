@@ -190,7 +190,7 @@ impl<'input> Lexer<'input> {
     }
 
     #[inline]
-    #[allow(unused)]
+    #[expect(unused)]
     fn peek_next(&mut self) -> char {
         let (_, c) = self.scanner.peek_next();
         c

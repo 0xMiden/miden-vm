@@ -71,7 +71,7 @@ fn b_range_trace_stack() {
 /// The `StoreW` memory operation results in 2 16-bit range checks of 1, 0.
 /// The `LoadW` memory operation results in 2 16-bit range checks of 5, 0.
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn b_range_trace_mem() {
     let stack = [0, 1, 2, 3, 4, 0];
     let operations = vec![

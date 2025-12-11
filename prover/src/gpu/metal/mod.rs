@@ -210,21 +210,21 @@ where
     // --------------------------------------------------------------------------------------------
 
     /// Returns number of columns in the main segment of the execution trace.
-    #[allow(unused)]
+    #[expect(unused)]
     #[cfg(test)]
     pub fn main_segment_width(&self) -> usize {
         self.main_segment_lde.num_cols()
     }
 
     /// Returns a reference to [Matrix] representing the main trace segment.
-    #[allow(unused)]
+    #[expect(unused)]
     #[cfg(test)]
     pub fn get_main_segment(&self) -> &RowMatrix<Felt> {
         &self.main_segment_lde
     }
 
     /// Returns the entire trace for the column at the specified index.
-    #[allow(unused)]
+    #[expect(unused)]
     #[cfg(test)]
     pub fn get_main_segment_column(&self, col_idx: usize) -> Vec<Felt> {
         (0..self.main_segment_lde.num_rows())

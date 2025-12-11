@@ -2,14 +2,23 @@
 members = [
     "air",
     "core",
-    "crates/*",
+    "crates/assembly",
+    "crates/assembly-syntax",
+    "crates/debug-types",
+    "crates/lib/core",
+    "crates/mast-package",
+    "crates/test-serde-macros",
+    "crates/test-utils",
+    "crates/utils-core-derive",
+    "crates/utils-diagnostics",
+    "crates/utils-indexing",
+    "crates/utils-sync",
     "miden-vm",
     "processor",
     "prover",
-    "libcore",
     "verifier",
 ]
-resolver = "2"
+resolver = "3"
 
 [workspace.package]
 edition = "2024"
@@ -20,7 +29,7 @@ homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
 rust-version = "1.90"
-version = "0.20.0"
+version = "0.21.0"
 
 [profile.optimized]
 inherits = "release"
@@ -36,22 +45,22 @@ overflow-checks = true
 
 [workspace.dependencies]
 # Workspace crates
-miden-air = { path = "./air", version = "0.20", default-features = false }
-miden-assembly = { path = "./crates/assembly", version = "0.20", default-features = false }
-miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.20", default-features = false }
-miden-core = { path = "./core", version = "0.20", default-features = false }
-miden-debug-types = { path = "./crates/debug-types", version = "0.20", default-features = false }
-miden-mast-package = { path = "./crates/mast-package", version = "0.20", default-features = false }
-miden-processor = { path = "./processor", version = "0.20", default-features = false }
+miden-air = { path = "./air", version = "0.21", default-features = false }
+miden-assembly = { path = "./crates/assembly", version = "0.21", default-features = false }
+miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.21", default-features = false }
+miden-core = { path = "./core", version = "0.21", default-features = false }
+miden-debug-types = { path = "./crates/debug-types", version = "0.21", default-features = false }
+miden-mast-package = { path = "./crates/mast-package", version = "0.21", default-features = false }
+miden-processor = { path = "./processor", version = "0.21", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
-miden-prover = { path = "./prover", version = "0.20", default-features = false }
-miden-libcore = { path = "./libcore", version = "0.20", default-features = false }
-miden-utils-core-derive = { path = "./crates/utils-core-derive", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.20", default-features = false }
-miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.20", default-features = false }
-miden-utils-sync = { path = "./crates/utils-sync", version = "0.20", default-features = false }
+miden-prover = { path = "./prover", version = "0.21", default-features = false }
+miden-core-lib = { path = "./crates/lib/core", version = "0.21", default-features = false }
+miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.21", default-features = false }
+miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.21", default-features = false }
+miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.21", default-features = false }
+miden-utils-sync = { path = "./crates/utils-sync", version = "0.21", default-features = false }
 miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-utils" }
-miden-verifier = { path = "./verifier", version = "0.20", default-features = false }
+miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
 miden-crypto = { version = "0.19", default-features = false }

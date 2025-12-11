@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 
-use super::data::{Debug, Libraries, ProgramFile};
+use super::data::{Libraries, ProgramFile};
 
 #[derive(Debug, Clone, Parser)]
 #[command(about = "Assemble a Miden program")]
@@ -32,7 +32,8 @@ impl CompileCmd {
         let libraries = Libraries::new(&self.library_paths)?;
 
         // compile the program
-        let compiled_program = program.compile(Debug::Off, &libraries.libraries)?;
+        // Note: assembler debug mode is always enabled (issue #1821)
+        let compiled_program = program.compile(&libraries.libraries)?;
 
         // report program hash to user
         let program_hash: [u8; 32] = compiled_program.hash().into();

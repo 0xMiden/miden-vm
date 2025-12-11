@@ -1,7 +1,7 @@
 use std::{collections::BTreeSet, path::PathBuf};
 
 use miden_assembly::{Assembler, Library};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{AdviceInputs, ContextId, MemoryAddress};
 use miden_vm::{DefaultHost, StackInputs, math::Felt};
 use rustyline::{DefaultEditor, error::ReadlineError};
@@ -299,7 +299,7 @@ pub fn start_repl(library_paths: &Vec<PathBuf>, use_corelib: bool) {
 /// Compiles and executes a compiled Miden program, returning the stack, memory and any Miden
 /// errors. The program is passed in as a String, passed to the Miden Assembler, and then passed
 /// into the Miden Processor to be executed.
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 fn execute(
     program: String,
     provided_libraries: &[Library],

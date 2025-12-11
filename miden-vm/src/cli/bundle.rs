@@ -5,12 +5,12 @@ use miden_assembly::{
     Assembler, Library, PathBuf as LibraryPath,
     diagnostics::{IntoDiagnostic, Report},
 };
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 
 #[derive(Debug, Clone, Parser)]
 #[command(
     name = "Compile Library",
-    about = "Bundles .masm files into a single .masl library with access to the libcore."
+    about = "Bundles .masm files into a single .masl library with access to the core library."
 )]
 pub struct BundleCmd {
     /// Disable debug symbols (release mode)
@@ -41,7 +41,7 @@ impl BundleCmd {
         println!("Build library");
         println!("============================================================");
 
-        let mut assembler = Assembler::default().with_debug_mode(!self.release);
+        let mut assembler = Assembler::default();
 
         if self.dir.is_file() {
             return Err(Report::msg("`dir` must be a directory."));

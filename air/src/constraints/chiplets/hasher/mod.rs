@@ -347,11 +347,11 @@ trait EvaluationFrameExt<E: FieldElement> {
     // --- Flags ----------------------------------------------------------------------------------
 
     /// Set to 1 on the first 7 steps of every 8-step cycle. This flag is degree 1.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn f_rpr(&self, k: &[E]) -> E;
     /// Set to 1 when selector flags are (1,0,0) on rows which are multiples of 8. This flag is
     /// degree 4.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn f_bp(&self, k: &[E]) -> E;
     /// Set to 1 when selector flags are (1,0,1) on rows which are multiples of 8. This flag is
     /// degree 4.
@@ -364,11 +364,11 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn f_mu(&self, k: &[E]) -> E;
     /// Set to 1 when selector flags are (0,0,0) on rows which are 1 less than a multiple of 8. This
     /// flag is degree 4.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn f_hout(&self, k: &[E]) -> E;
     /// Set to 1 when selector flags are (0,0,1) on rows which are 1 less than a multiple of 8. This
     /// flag is degree 4.
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     fn f_sout(&self, k: &[E]) -> E;
     /// This flag will be set to 1 when either f_hout=1 or f_sout=1 in the current row. This flag is
     /// degree 3.
@@ -545,7 +545,7 @@ pub fn get_round_constants() -> Vec<Vec<Felt>> {
         constants.push(vec![ZERO; HASH_CYCLE_LEN]);
     }
 
-    #[allow(clippy::needless_range_loop)]
+    #[expect(clippy::needless_range_loop)]
     for i in 0..HASH_CYCLE_LEN - 1 {
         for j in 0..STATE_WIDTH {
             constants[j][i] = Hasher::ARK1[i][j];

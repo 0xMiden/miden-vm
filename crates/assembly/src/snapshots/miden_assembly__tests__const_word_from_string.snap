@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1343
 expression: program
 ---
 begin
@@ -8,6 +9,7 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(push.[10613494933894083877,4225041690115989743,1168993639339072050,13186528713821658146], 4)
         push(10613494933894083877)
         push(4225041690115989743)
         push(1168993639339072050)

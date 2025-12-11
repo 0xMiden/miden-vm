@@ -7,6 +7,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH, utils::range,
 };
 
+use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ErrorContext, ExecutionError, ONE,
     fast::Tracer,
@@ -358,11 +359,6 @@ pub(super) fn op_crypto_stream<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    use miden_core::Felt;
-
-    const WORD_SIZE_FELT: Felt = Felt::new(4);
-    const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
-
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
     const SRC_PTR_IDX: usize = 12;
     const DST_PTR_IDX: usize = 13;

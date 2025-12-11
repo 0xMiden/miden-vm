@@ -30,7 +30,7 @@ miden-assembly = { workspace = true, features = ["testing"] }
 miden-core.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
-miden-libcore.workspace = true
+miden-core-lib.workspace = true
 miden-verifier.workspace = true
 test-case = "3.2"
 winter-prover.workspace = true

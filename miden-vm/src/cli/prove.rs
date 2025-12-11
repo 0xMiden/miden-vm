@@ -2,7 +2,7 @@ use std::{path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
-use miden_libcore::CoreLibrary;
+use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
@@ -104,8 +104,7 @@ impl ProveCmd {
         let (program, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
-                let (program, source_manager) =
-                    get_masm_program(&self.program_file, &libraries, true)?;
+                let (program, source_manager) = get_masm_program(&self.program_file, &libraries)?;
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),

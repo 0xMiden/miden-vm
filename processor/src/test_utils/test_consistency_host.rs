@@ -186,13 +186,11 @@ impl<S> AsyncHost for TestConsistencyHost<S>
 where
     S: SourceManagerSync,
 {
-    #[allow(clippy::manual_async_fn)]
     fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
         let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
         async move { result }
     }
 
-    #[allow(clippy::manual_async_fn)]
     fn on_event(
         &mut self,
         _process: &ProcessState,

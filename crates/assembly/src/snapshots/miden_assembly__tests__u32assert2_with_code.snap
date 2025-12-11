@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1785
 expression: program
 ---
 begin
@@ -8,8 +9,11 @@ begin
         push(4294967294)
         mstore
         drop
+        asmOp(u32assert2, 1)
         u32assert2(0)
+        asmOp(u32assert2.err="Oh no", 1)
         u32assert2(15491226248792286710)
+        asmOp(u32assert2.err="Oh no", 1)
         u32assert2(15491226248792286710)
         noop
     end

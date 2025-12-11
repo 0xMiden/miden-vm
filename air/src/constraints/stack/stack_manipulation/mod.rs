@@ -207,7 +207,7 @@ pub fn enforce_swap_constraints<E: FieldElement>(
 ///   transition are weighted by their respective flag. for eg. in the case of SWAPW3 the first item
 ///   of the stack gets replaced with the 12 items and vice versa, therefore, only SWAPW3 transition
 ///   will be ONE and rest all flags would be ZERO.
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 pub fn enforce_swapwx_constraints<E: FieldElement>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
@@ -282,7 +282,6 @@ pub fn enforce_movdnn_constraints<E: FieldElement>(
 /// Therefore, the following constraints are enforced:
 /// - The top two elements or elements 1,2,3,4 should be swapped in the case of CSWAP and CSWAPW
 ///   respectively if the top element is 1, the state remains the same if the top element is 0.
-#[allow(clippy::needless_range_loop)]
 pub fn enforce_cswapx_constraints<E: FieldElement>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],

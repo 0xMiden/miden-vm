@@ -22,7 +22,7 @@ use super::{
 /// for this test we set those values explicitly, enforcing only that the same initial and final
 /// values are requested & provided.
 #[test]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn b_chip_trace_bitwise() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();

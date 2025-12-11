@@ -1,8 +1,8 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
+use miden_core_lib::CoreLibrary;
 use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_libcore::CoreLibrary;
 use miden_processor::ExecutionError;
 use miden_prover::Word;
 use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
@@ -630,7 +630,7 @@ fn procref() -> Result<(), Report> {
         let source_manager = Arc::new(miden_assembly::DefaultSourceManager::default());
         let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
-        let module = parser.parse_str(module_path, module_source, &source_manager)?;
+        let module = parser.parse_str(module_path, module_source, source_manager.clone())?;
         let library = Assembler::new(source_manager)
             .with_dynamic_library(CoreLibrary::default())
             .unwrap()
@@ -659,10 +659,10 @@ fn procref() -> Result<(), Report> {
         exec.sys::truncate_stack
     end";
 
-    let libcore = CoreLibrary::default();
+    let core_lib = CoreLibrary::default();
     let mut test = build_test!(source, &[]);
-    test.libraries.push(libcore.library().clone());
-    test.add_event_handlers(libcore.handlers());
+    test.libraries.push(core_lib.library().clone());
+    test.add_event_handlers(core_lib.handlers());
 
     test.expect_stack(&[
         mast_roots[0][3].as_int(),

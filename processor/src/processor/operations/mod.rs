@@ -15,6 +15,11 @@ mod stack_ops;
 mod sys_ops;
 mod u32_ops;
 
+/// WORD_SIZE, but as a `Felt`.
+const WORD_SIZE_FELT: Felt = Felt::new(4);
+/// The size of a double-word.
+const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
 /// Executes the provided synchronous operation.
 ///
 /// This excludes `Emit`, which must be executed asynchronously, as well as control flow

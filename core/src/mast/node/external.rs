@@ -9,10 +9,8 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-use crate::mast::{
-    DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId,
-};
+use super::{MastForestContributor, MastNodeExt};
+use crate::mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -31,23 +29,6 @@ use crate::mast::{
 pub struct ExternalNode {
     digest: Word,
     decorator_store: DecoratorStore,
-}
-
-impl MastNodeErrorContext for ExternalNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
-    }
 }
 
 // PRETTY PRINTING
@@ -292,23 +273,11 @@ impl ExternalNodeBuilder {
 
 impl MastForestContributor for ExternalNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        let node = self.build();
-
-        let ExternalNode {
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("ExternalNodeBuilder::build() should always return owned decorators");
-        };
-
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest
-            .debug_info
-            .register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -316,7 +285,7 @@ impl MastForestContributor for ExternalNodeBuilder {
             .nodes
             .push(
                 ExternalNode {
-                    digest,
+                    digest: self.digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
                 .into(),
@@ -398,22 +367,10 @@ impl ExternalNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        let node = self.build();
-
-        let ExternalNode {
-            digest,
-            decorator_store: DecoratorStore::Owned { before_enter, after_exit, .. },
-        } = node
-        else {
-            unreachable!("ExternalNodeBuilder::build() should always return owned decorators");
-        };
-
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
         // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest
-            .debug_info
-            .register_node_decorators(future_node_id, &before_enter, &after_exit);
+        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
@@ -421,7 +378,7 @@ impl ExternalNodeBuilder {
             .nodes
             .push(
                 ExternalNode {
-                    digest,
+                    digest: self.digest,
                     decorator_store: DecoratorStore::Linked { id: future_node_id },
                 }
                 .into(),
