@@ -3,9 +3,10 @@
 // This implementation replaces the manual STARK protocol with Plonky3's high-level
 // p3_uni_stark::prove() function, reducing code from 200+ lines to ~30 lines.
 
-use std::{println, vec, vec::Vec};
+use alloc::vec;
+use alloc::vec::Vec;
 
-use miden_air::{Felt, ProcessorAir};
+use miden_air::ProcessorAir;
 use miden_processor::ExecutionTrace;
 use p3_challenger::DuplexChallenger;
 use p3_commit::ExtensionMmcs;
@@ -17,7 +18,7 @@ use p3_matrix::Matrix;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_poseidon2::ExternalLayerConstants;
 use p3_symmetric::{PaddingFreeSponge, TruncatedPermutation};
-use p3_uni_stark::{StarkConfig, StarkGenericConfig};
+use p3_uni_stark::StarkConfig;
 use p3_util::{log2_ceil_usize, log2_strict_usize};
 use rand::Rng;
 
