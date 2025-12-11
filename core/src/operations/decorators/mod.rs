@@ -87,5 +87,6 @@ impl fmt::Display for Decorator {
 /// index.
 ///
 /// Note: for `AssemblyOp` decorators, when an instruction compiles down to multiple operations,
-/// only the first operation is associated with the assembly op.
+/// all operations are associated with the same assembly op, creating a 1-1 mapping between
+/// operations and AsmOp decorators.
 pub type DecoratorList = Vec<DecoratedOpLink>;
