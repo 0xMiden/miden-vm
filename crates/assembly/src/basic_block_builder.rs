@@ -138,21 +138,25 @@ impl BasicBlockBuilder<'_> {
     /// Computes the number of cycles elapsed since the last invocation of track_instruction() and
     /// updates the related AsmOp decorator to include this cycle count.
     ///
+    /// Creates a 1-1 mapping between operations and AsmOp: every operation covered by the AsmOp
+    /// is linked to that AsmOp. This means if an instruction compiles to multiple operations, all
+    /// of those operations will be associated with the same AsmOp decorator.
+    ///
     /// If the cycle count is 0, the original decorator is removed from the list and returned. This
     /// can happen for instructions which do not contribute any operations to the span block - e.g.,
     /// exec, call, and syscall.
     pub fn set_instruction_cycle_count(&mut self) -> Option<DecoratorId> {
         // get the last asmop decorator and the cycle at which it was added
         let (op_start, assembly_op_id) =
-            self.decorators.get_mut(self.last_asmop_pos).expect("no asmop decorator");
+            self.decorators[self.last_asmop_pos];
 
-        let assembly_op = match &mut self.mast_forest_builder[*assembly_op_id] {
+        let assembly_op = match &mut self.mast_forest_builder[assembly_op_id] {
             Decorator::AsmOp(assembly_op) => assembly_op,
             _ => panic!("internal error: last asmop decorator is not an AsmOp"),
         };
 
         // compute the cycle count for the instruction
-        let cycle_count = self.ops.len() - *op_start;
+        let cycle_count = self.ops.len() - op_start;
 
         // if the cycle count is 0, remove the decorator; otherwise update its cycle count
         if cycle_count == 0 {
@@ -160,6 +164,14 @@ impl BasicBlockBuilder<'_> {
             Some(decorator_id)
         } else {
             assembly_op.set_num_cycles(cycle_count as u8);
+
+            // Create a 1-1 mapping: link the AsmOp to all operations it covers.
+            // The first operation is already linked at op_start, so we add links for
+            // operations from op_start + 1 to op_start + cycle_count - 1.
+            // We insert them in reverse order to maintain the sorted order of the decorators list.
+            for op_idx in ((op_start + 1)..(op_start + cycle_count)).rev() {
+                self.decorators.insert(self.last_asmop_pos + 1, (op_idx, assembly_op_id));
+            }
 
             None
         }
