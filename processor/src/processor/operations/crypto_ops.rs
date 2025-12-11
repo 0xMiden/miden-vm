@@ -180,7 +180,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
         tracer.record_memory_read_element(eval_point_1, addr + ONE, ctx, clk);
 
-        QuadFelt::new(eval_point_0, eval_point_1)
+        QuadFelt::new([eval_point_0, eval_point_1])
     };
 
     // Read the coefficients from the stack (top 8 elements)
@@ -199,7 +199,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Read the current accumulator
     let acc =
-        QuadFelt::new(processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX));
+        QuadFelt::new([processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX)]);
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
     let tmp0 = (acc * alpha + c0) * alpha + c1;

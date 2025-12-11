@@ -96,22 +96,24 @@ impl Process {
         self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
         self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
 
-        let alpha_base = alpha.as_basis_coefficients_slice();
-        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
+        let alpha_base: &[Felt] = alpha.as_basis_coefficients_slice();
+        let acc_tmp_base: &[Felt] = tmp0.as_basis_coefficients_slice();
 
         // set the helper registers
         // h₀, h₁: evaluation point α
         // h₂, h₃: intermediate result tmp1 (Level 2)
         // h₄, h₅: intermediate result tmp0 (Level 1)
+        let tmp1_coeffs = tmp1.as_basis_coefficients_slice();
+        let tmp0_coeffs = tmp0.as_basis_coefficients_slice();
         self.decoder.set_user_op_helpers(
             Operation::HornerBase,
             &[
-                alpha.base_element(0),
-                alpha.base_element(1),
-                tmp1.base_element(0),
-                tmp1.base_element(1),
-                tmp0.base_element(0),
-                tmp0.base_element(1),
+                alpha_base[0],
+                alpha_base[1],
+                tmp1_coeffs[0],
+                tmp1_coeffs[1],
+                tmp0_coeffs[0],
+                tmp0_coeffs[1],
             ],
         );
 
@@ -175,7 +177,6 @@ impl Process {
         // read the evaluation point from memory
         // we also read the second half of the memory word containing alpha
         let (alpha, k0, k1) = self.get_evaluation_point(err_ctx)?;
-        let alpha_base = alpha.as_basis_coefficients_slice();
 
         // compute the temporary and updated accumulator values
         let acc_old = self.get_accumulator();
@@ -187,18 +188,19 @@ impl Process {
         self.stack.set(ACC_HIGH_INDEX, acc_new.to_array()[1]);
         self.stack.set(ACC_LOW_INDEX, acc_new.to_array()[0]);
 
-        let acc_tmp_base = acc_tmp.as_basis_coefficients_slice();
+        let alpha_coeffs: &[Felt] = alpha.as_basis_coefficients_slice();
+        let acc_tmp_coeffs: &[Felt] = acc_tmp.as_basis_coefficients_slice();
 
         // set the helper registers
         self.decoder.set_user_op_helpers(
             Operation::HornerExt,
             &[
-                alpha.base_element(0),
-                alpha.base_element(1),
+                alpha_coeffs[0],
+                alpha_coeffs[1],
                 k0,
                 k1,
-                acc_tmp.base_element(0),
-                acc_tmp.base_element(1),
+                acc_tmp_coeffs[0],
+                acc_tmp_coeffs[1],
             ],
         );
 
@@ -259,7 +261,7 @@ impl Process {
             .read(ctx, addr + ONE, self.system.clk(), err_ctx)
             .map_err(ExecutionError::MemoryError)?;
 
-        Ok(QuadFelt::new(alpha_0, alpha_1))
+        Ok(QuadFelt::new([alpha_0, alpha_1]))
     }
 
     /// Returns the evaluation point.

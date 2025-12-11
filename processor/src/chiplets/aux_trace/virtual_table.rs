@@ -267,7 +267,7 @@ where
     fn value(&self, alphas: &[E]) -> E {
         let state_elements: [Felt; 4] = self.state.into();
         alphas[0]
-            + alphas[1].mul_base(Felt::from(LOG_PRECOMPILE_LABEL))
+            + alphas[1] * Felt::from(LOG_PRECOMPILE_LABEL)
             + build_value(&alphas[2..6], state_elements)
     }
 
