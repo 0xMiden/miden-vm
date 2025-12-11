@@ -9,7 +9,7 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, Word, ZERO,
+    AlgebraicSponge, EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
 };
 use miden_crypto::hash::rpo::Rpo256;

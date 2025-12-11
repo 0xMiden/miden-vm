@@ -8,7 +8,8 @@ use alloc::{sync::Arc, vec, vec::Vec};
 
 use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
 use miden_core::{
-    EventName, Felt, Word, precompile::PrecompileVerifierRegistry, utils::Serializable,
+    AlgebraicSponge, EventName, Felt, Word, precompile::PrecompileVerifierRegistry,
+    utils::Serializable,
 };
 use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512};
 use miden_processor::{EventHandler, HostLibrary};

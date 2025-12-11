@@ -11,7 +11,7 @@ use alloc::{vec, vec::Vec};
 use core::convert::TryInto;
 
 use miden_core::{
-    EventName,
+    AlgebraicSponge, EventName,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -75,7 +75,7 @@ impl EventHandler for EddsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([miden_core::Felt::from(result as u8)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -127,7 +127,7 @@ impl EddsaRequest {
     }
 
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
-        let result = self.result().into();
+        let result = miden_core::Felt::from(self.result() as u8);
         let tag = [EDDSA25519_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         let pk_comm = {

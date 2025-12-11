@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, FieldElement, LexicographicWord, Word};
+use miden_core::{EventName, Felt, LexicographicWord, Word};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Event name for the lowerbound_array operation.
@@ -169,6 +169,7 @@ fn push_lowerbound_result(
 /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
 ///   elements zeroized.
 fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
+    use miden_core::PrimeCharacteristicRing;
     match key_size {
         KeySize::Full => LexicographicWord::new(word),
         KeySize::Half => {
