@@ -389,7 +389,12 @@ proc foo(t: T, u: U) -> i1
 # values on the operand stack upon return, with the value of type i1 on top,
 # followed by the value of type T
 proc foo() -> (i1, T)
+
+# The same signature as above, but with named results
+proc foo() -> (flag: i1, value: T)
 ```
+
+Parameters must be named, while results may be either named or anonymous, however named results are only permitted when there is more than one result. Names of parameters and results are only used for documentation purposes.
 
 Values are expected to be laid out on the operand stack in the order they
 appear, with the first to appear being on top of the operand stack. Additionally, a value is expected to be laid out on the operand stack by mapping its byte representation to 1 or more elements by treating each element as 4 bytes (with the exception of `felt`, which is converted 1:1), with the lowest-addressable bytes appearing closest to the top of the operand stack. The size of a value type is rounded up to the nearest element boundary, so a value of type `u8` would require a full element on the operand stack to represent; as would a value of type `struct { a: u8, b: u8, b: u16 }`, as the total size of the struct is 4 bytes. A value of type `[u32; 4]` on the other hand, would require 4 elements on the operand stack, with the element on top of the stack corresponding to the `u32` value at index 0 of the array.
