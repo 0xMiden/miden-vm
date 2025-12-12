@@ -310,6 +310,14 @@ impl Deserializable for MastForest {
             .debug_info
             .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
 
+        // Validate the deserialized forest
+        mast_forest.validate().map_err(|e| {
+            DeserializationError::InvalidValue(format!(
+                "validation failed after deserialization: {}",
+                e
+            ))
+        })?;
+
         Ok(mast_forest)
     }
 }
