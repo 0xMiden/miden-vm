@@ -20,6 +20,7 @@
 ## 0.20.1 (2025-12-14)
 
 - Fix issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
+- [BREAKING] Change serialization of `BasicBlockNode`s to use padded indices ([#2466](https://github.com/0xMiden/miden-vm/pull/2466/)).
 
 ## 0.20.0 (2025-12-05)
 
