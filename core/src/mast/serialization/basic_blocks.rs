@@ -54,13 +54,11 @@ impl BasicBlockDataBuilder {
         // Write number of batches
         (num_batches as u32).write_into(&mut self.node_data);
 
-        // Write indptr arrays for each batch (9 u8s per batch, since max index is 72)
+        // Write delta-encoded indptr arrays for each batch (4 bytes per batch)
         for batch in op_batches {
             let indptr = batch.indptr();
-            for &idx in indptr {
-                debug_assert!(idx <= 72, "batch index {} exceeds maximum of 72", idx);
-                (idx as u8).write_into(&mut self.node_data);
-            }
+            let packed = pack_indptr_deltas(indptr);
+            packed.write_into(&mut self.node_data);
         }
 
         // Write padding metadata (1 byte per batch, bit-packed)
