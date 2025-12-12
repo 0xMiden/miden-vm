@@ -25,7 +25,7 @@ pub struct VerifyCmd {
 
 impl VerifyCmd {
     pub fn execute(&self) -> Result<(), Report> {
-        let (input_file, output_file) = self.infer_defaults().unwrap();
+        let (input_file, output_file) = self.infer_defaults()?;
 
         println!("===============================================================================");
         println!("Verifying proof: {}", self.proof_file.display());
