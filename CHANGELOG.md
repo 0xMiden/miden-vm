@@ -56,9 +56,6 @@
 - Refactored Blake3_256 fingerprints to allocate less ([#2375](https://github.com/0xMiden/miden-vm/pull/2375)).
 - [BREAKING] Normalized signature encoding methods in the `dsa` module of the core library.
 
-- [BREAKING] Make the Assembler work in debug mode, remove optionality ([#2396](https://github.com/0xMiden/miden-vm/pull/2396)).
-- Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
-
 ## 0.19.1 (2025-11-6)
 
 - Add `verify_ecdsa_k256_keccak` procedure for verifying signatures using the `miden-crypto` format ([#2344](https://github.com/0xMiden/miden-vm/pull/2344)).

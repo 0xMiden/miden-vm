@@ -299,10 +299,10 @@ f_3 &= idx1' \cdot idx0' \text{ | degree} = 2
 \end{align*}
 $$
 
-The flag $f_i$ is set to $1$ when $v_i$ is being accessed, and $0$ otherwise. Next, for $0 \leq i < 4$,
+The flag $f_i$ is set to $1$ when $v_i'$ is being accessed, and $0$ otherwise. Next, for $0 \leq i < 4$,
 
 $$
-c_i = rw' + (1 - rw') \cdot (1 - ew') \cdot (1 - f_i') \text{ | degree} = 4
+c_i = rw' + (1 - rw') \cdot (1 - ew') \cdot (1 - f_i) \text{ | degree} = 4
 $$
 
 which is set to $1$ when $v_i$ is *not* written to, and $0$ otherwise.
