@@ -184,11 +184,11 @@ impl BasicBlockDataDecoder<'_> {
 
                     // Store immediate values from this operation group
                     for op in &batch_ops[start..end] {
-                        if let Some(imm) = op.imm_value() {
-                            if next_group_idx < 8 {
-                                groups[next_group_idx] = imm;
-                                next_group_idx += 1;
-                            }
+                        if let Some(imm) = op.imm_value()
+                            && next_group_idx < 8
+                        {
+                            groups[next_group_idx] = imm;
+                            next_group_idx += 1;
                         }
                     }
                 }
@@ -198,11 +198,7 @@ impl BasicBlockDataDecoder<'_> {
             let num_groups = next_group_idx;
 
             op_batches.push(crate::mast::OpBatch::new_from_parts(
-                batch_ops,
-                *indptr,
-                padding,
-                groups,
-                num_groups,
+                batch_ops, *indptr, padding, groups, num_groups,
             ));
 
             global_op_offset = batch_ops_end;

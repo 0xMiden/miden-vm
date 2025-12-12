@@ -651,20 +651,29 @@ impl MastNodeExt for BasicBlockNode {
     type Builder = BasicBlockNodeBuilder;
 
     fn to_builder(self, forest: &MastForest) -> Self::Builder {
-        let operations: Vec<Operation> = self.raw_operations().cloned().collect();
-        let un_adjusted_decorators = self.raw_op_indexed_decorators(forest);
-
-        let (before_enter, after_exit) = match self.decorators {
-            DecoratorStore::Owned { before_enter, after_exit, .. } => (before_enter, after_exit),
+        // Extract padded decorators and before_enter/after_exit based on storage type
+        let (padded_decorators, before_enter, after_exit) = match self.decorators {
+            DecoratorStore::Owned { decorators, before_enter, after_exit } => {
+                // Decorators are already padded in Owned storage
+                (decorators, before_enter, after_exit)
+            },
             DecoratorStore::Linked { id } => {
-                // For linked nodes, get the decorators from the forest's NodeToDecoratorIds
+                // For linked nodes, get decorators from forest's centralized storage
+                // The decorators are already padded in the centralized storage
+                let padded_decorators: DecoratorList = forest
+                    .debug_info
+                    .decorator_links_for_node(id)
+                    .expect("node must exist in forest")
+                    .into_iter()
+                    .collect();
                 let before_enter = forest.before_enter_decorators(id).to_vec();
                 let after_exit = forest.after_exit_decorators(id).to_vec();
-                (before_enter, after_exit)
+                (padded_decorators, before_enter, after_exit)
             },
         };
 
-        BasicBlockNodeBuilder::new(operations, un_adjusted_decorators)
+        // Use from_op_batches to avoid re-batching and re-adjusting decorators
+        BasicBlockNodeBuilder::from_op_batches(self.op_batches, padded_decorators, self.digest)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit)
     }
@@ -1347,7 +1356,7 @@ impl BasicBlockNodeBuilder {
                 let digest = self.digest.unwrap_or(computed_digest);
 
                 (op_batches, digest, padded_decorators)
-            }
+            },
             OperationData::Batched { op_batches, decorators } => {
                 if op_batches.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
@@ -1357,7 +1366,7 @@ impl BasicBlockNodeBuilder {
                 let digest = self.digest.expect("digest must be set for batched operations");
 
                 (op_batches, digest, decorators)
-            }
+            },
         };
 
         Ok(BasicBlockNode {
@@ -1419,7 +1428,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
 
                 (op_batches, digest, padded_decorators)
-            }
+            },
             OperationData::Batched { op_batches, decorators } => {
                 if op_batches.is_empty() {
                     return Err(MastForestError::EmptyBasicBlock);
@@ -1429,7 +1438,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 let digest = self.digest.expect("digest must be set for batched operations");
 
                 (op_batches, digest, decorators)
-            }
+            },
         };
 
         // Add decorator info to the forest storage
@@ -1476,7 +1485,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 }
 
                 (op_batches, digest, decorators.clone())
-            }
+            },
             OperationData::Batched { op_batches, decorators } => {
                 let digest = self.digest.expect("digest must be set for batched operations");
 
@@ -1491,7 +1500,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                     .collect();
 
                 (op_batches.clone(), digest, raw_decorators)
-            }
+            },
         };
 
         // Collect before_enter decorator fingerprints
