@@ -23,41 +23,40 @@ std = [
   "miden-air/std",
   "miden-core/std",
   "thiserror/std",
-  "winter-verifier/std",
 ]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-prover.workspace = true
 
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
-winter-verifier.workspace = true
-# air = { package = "miden-air", path = "../air", version = "0.14", default-features = false }
-# tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-# vm-core = { package = "miden-core", path = "../core", version = "0.14", default-features = false }
-# winter-verifier = { package = "winter-verifier", version = "0.12", default-features = false }
-# thiserror = { workspace = true }
-
-
-p3-matrix.workspace = true
-p3-uni-stark.workspace = true
-p3-field.workspace = true
-p3-merkle-tree .workspace = true
-p3-commit.workspace = true
-p3-fri .workspace = true
-p3-dft .workspace = true
-p3-poseidon2 .workspace = true
-p3-challenger .workspace = true
-p3-goldilocks.workspace = true
-p3-symmetric.workspace = true
-p3-util .workspace = true
-p3-blake3.workspace = true
-p3-air .workspace = true
-
 itertools = "0.12"
 
-serde = { version = "1.0", features = ["derive"] }
+# Plonky3 dependencies
+p3-air.workspace = true
+p3-blake3.workspace = true
+p3-challenger.workspace = true
+p3-commit.workspace = true
+p3-dft.workspace = true
+p3-field.workspace = true
+p3-fri.workspace = true
+p3-goldilocks.workspace = true
+p3-keccak.workspace = true
+p3-matrix.workspace = true
+p3-merkle-tree.workspace = true
+p3-poseidon2.workspace = true
+p3-symmetric.workspace = true
+p3-uni-stark.workspace = true
+p3-util.workspace = true
+
+# Miden-specific Plonky3 crates
+miden-air-trait.workspace = true
+miden-prover-p3.workspace = true
+
+# Serialization
+serde.workspace = true
 bincode = "1.3"

@@ -13,7 +13,7 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex, trace::ColMatrix};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
     StackOutputs, WORD_SIZE, Word, ZERO,
@@ -31,7 +31,6 @@ use miden_core::{
     },
 };
 use miden_debug_types::SourceSpan;
-pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
 
@@ -74,7 +73,9 @@ pub use chiplets::MemoryError;
 
 mod trace;
 use trace::TraceFragment;
-pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
+pub use trace::{
+    AuxTraceBuilders, ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary,
+};
 
 mod errors;
 pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
@@ -92,7 +93,6 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 
 pub mod math {
     pub use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing, PrimeField64, QuadFelt};
-    pub use winter_prover::math::fft;
 }
 
 pub mod crypto {

@@ -180,7 +180,6 @@ impl StackTrace {
 
         // compute inverses in the h0 helper column using batch inversion; any ZERO in the vector
         // will remain unchanged
-        // TODO(Al)
         let mut result = vec![Felt::ZERO; trace[H0_COL_IDX].len()];
         serial_batch_inversion(&trace[H0_COL_IDX], &mut result);
         trace[H0_COL_IDX] = result;
@@ -266,10 +265,7 @@ fn init_helper_columns(
     // if the overflow table is not empty, set h0 to (init_depth - 16)
     let mut h0 = vec![Felt::ZERO; init_trace_capacity];
     // TODO: change type of `init_depth` to `u32`
-    // TODO(Al)
     h0[0] = Felt::from_u64((init_depth - MIN_STACK_DEPTH) as u64);
-    //Felt::try_from((init_depth - MIN_STACK_DEPTH) as u64)
-    //    .expect("value is greater than or equal to the field modulus");
 
     [b0, b1, h0]
 }

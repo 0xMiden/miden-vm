@@ -11,10 +11,7 @@ use alloc::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Felt,
-    Word,
-    // utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-    // TODO(Al)
+    Felt, Word,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

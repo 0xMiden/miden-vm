@@ -1,89 +1,36 @@
 #![no_std]
 
-#[cfg_attr(all(feature = "metal", target_arch = "aarch64", target_os = "macos"), macro_use)]
 extern crate alloc;
 
 #[cfg(feature = "std")]
 extern crate std;
 
-use core::marker::PhantomData;
-use std::println;
-#[cfg(feature = "std")]
-use std::time::Instant;
-
-use miden_air::{ProcessorAir, PublicInputs, ToElements};
-#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-use miden_gpu::HashFn;
-use miden_processor::{ExecutionTrace, Program};
-use p3_uni_stark::StarkGenericConfig;
+use miden_air::ProcessorAir;
+use miden_processor::Program;
 use tracing::instrument;
 
-mod gpu;
+// Config module for STARK configurations
+pub mod config;
 
-mod prove;
+// Trace and public input conversion utilities
+mod public_inputs;
+mod trace_adapter;
 
 // EXPORTS
 // ================================================================================================
-
-pub use miden_air::{
-    DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
-};
+pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
 };
+pub use public_inputs::{build_public_values, extract_public_values_from_trace};
+pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
 // ================================================================================================
 
-pub struct ExecutionProver<SC> {
-    config: SC,
-    public_inputs: PublicInputs,
-    _sc: PhantomData<SC>,
-}
-
-impl<SC> ExecutionProver<SC>
-where
-    SC: StarkGenericConfig,
-{
-    pub fn new(config: SC, public_inputs: PublicInputs) -> Self {
-        Self { config, public_inputs, _sc: PhantomData }
-    }
-
-    // HELPER FUNCTIONS
-    // --------------------------------------------------------------------------------------------
-
-    /// Validates the stack inputs against the provided execution trace and returns true if valid.
-    pub fn are_inputs_valid(&self, trace: &ExecutionTrace) -> bool {
-        self.public_inputs
-            .stack_inputs()
-            .iter()
-            .zip(trace.init_stack_state().iter())
-            .all(|(l, r)| l == r)
-    }
-
-    /// Validates the stack outputs against the provided execution trace and returns true if valid.
-    pub fn are_outputs_valid(&self, trace: &ExecutionTrace) -> bool {
-        self.public_inputs
-            .stack_outputs()
-            .iter()
-            .zip(trace.last_stack_state().iter())
-            .all(|(l, r)| l == r)
-    }
-
-    pub fn prove(&self, trace: ExecutionTrace) -> Proof<SC> where {
-        let _processor_air = ProcessorAir {};
-
-        //let mut public_inputs = self.public_inputs.stack_inputs().to_vec();
-        //public_inputs.extend_from_slice(&self.public_inputs.stack_outputs().to_vec() );
-        //public_inputs.extend_from_slice(&self.public_inputs.program_info().to_elements() );
-
-        //let public_inputs = vec![];
-        let _trace_row_major = to_row_major(&trace);
-        //prove_uni_stark(&self.config, &processor_air, trace_row_major, &public_inputs)
-        todo!()
-    }
-}
+// Note: The old ExecutionProver<SC> struct has been removed in favor of
+// the unified prove() function below that uses miden_prover_p3::prove() directly.
 
 #[instrument("program proving", skip_all)]
 pub fn prove(
@@ -96,64 +43,70 @@ pub fn prove(
 where
 {
     // execute the program to create an execution trace
-    #[cfg(feature = "std")]
-    let now = Instant::now();
-    let trace = miden_processor::execute(
-        program,
-        stack_inputs.clone(),
-        advice_inputs,
-        host,
-        *options.execution_options(),
-    )?;
-    #[cfg(feature = "std")]
+    let trace = {
+        let _span = tracing::info_span!("execute_program").entered();
+        miden_processor::execute(
+            program,
+            stack_inputs.clone(),
+            advice_inputs,
+            host,
+            *options.execution_options(),
+        )?
+    };
+
     tracing::event!(
         tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps ({}% padded) in {} ms",
-        trace.trace_len_summary().main_trace_len(),
+        "Generated execution trace of {} columns and {} steps (padded from {})",
+        miden_air::TRACE_WIDTH,
         trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().padding_percentage(),
-        now.elapsed().as_millis()
+        trace.trace_len_summary().main_trace_len()
     );
 
     let stack_outputs = trace.stack_outputs().clone();
     let hash_fn = options.hash_fn();
-    let _program_info = trace.program_info();
 
-    // generate STARK proof
-    let proof = match hash_fn {
-        HashFunction::Rpo256 => {
-            todo!()
-            // println!("rpo proving");
-            // let proof = prove_rpo(trace);
+    // Convert trace to row-major format
+    let trace_matrix = {
+        let _span = tracing::info_span!("execution_trace_to_row_major").entered();
+        execution_trace_to_row_major(&trace)
+    };
 
-            // ExecutionProof::new(proof, hash_fn)
-        },
+    // Build public values
+    let public_values = extract_public_values_from_trace(&trace);
+
+    // Create AIR with aux trace builders
+    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+
+    // Generate STARK proof using unified miden-prover
+    let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
-            println!("blake proving");
-            let proof = prove_blake(trace);
-
-            ExecutionProof::new(proof, hash_fn)
+            let config = config::create_blake3_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Keccak => {
-            println!("kecak proving");
-            let proof = prove_keccak(trace);
-
-            ExecutionProof::new(proof, hash_fn)
+            let config = config::create_keccak_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
         },
-        HashFunction::Rpx256 => {
-            unimplemented!()
+        HashFunction::Rpo256 => {
+            unimplemented!(
+                "RPO256 config not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
         },
         HashFunction::Poseidon2 => {
-            todo!()
-            // let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
-            //     options,
-            //     stack_inputs,
-            //     stack_outputs.clone(),
-            // );
-            // maybe_await!(prover.prove(trace))
+            unimplemented!(
+                "Poseidon2 config not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
+        },
+        HashFunction::Rpx256 => {
+            unimplemented!(
+                "RPX256 config not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
         },
     };
-    // let proof = ExecutionProof::new(proof, hash_fn);
+
+    let proof = miden_air::ExecutionProof::new(proof_bytes, hash_fn);
 
     Ok((stack_outputs, proof))
 }
@@ -161,7 +114,5 @@ where
 // HELPERS
 // ================================================================================================
 
-// HELPERS and TYPES are consolidated into prove/ submodules
-
-pub use crate::prove::types::{Commitments, OpenedValues, Proof};
-use crate::prove::{prove_blake, prove_keccak, utils::to_row_major};
+// Re-export proof types from miden-prover-p3
+pub use miden_prover_p3::{Commitments, OpenedValues, Proof};

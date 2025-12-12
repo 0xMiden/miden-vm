@@ -138,9 +138,6 @@ impl BlockHashTableRow {
             && op_code_next != OPCODE_REPEAT
             && op_code_next != OPCODE_HALT;
         let is_loop_body = main_trace.is_loop_body_flag(row).as_int() != 0;
-        // TODO(Al)
-        //.try_into()
-        //.expect("expected loop body flag to be a boolean");
 
         Self {
             parent_block_id,

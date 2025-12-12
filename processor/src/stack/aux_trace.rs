@@ -11,7 +11,7 @@ use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 /// Describes how to construct execution traces of stack-related auxiliary trace segment columns
 /// (used in multiset checks).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder;
 
 impl AuxTraceBuilder {

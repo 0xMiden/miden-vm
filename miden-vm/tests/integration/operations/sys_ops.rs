@@ -81,7 +81,6 @@ fn assert_eq_fail() {
 // ================================================================================================
 
 #[test]
-#[ignore = "fix-prover"]
 fn emit() {
     // Use stack-provided event id form to avoid immediate parsing constraints
     let mut test = build_op_test!("push.4242 emit drop", &[0, 0, 0, 0]);

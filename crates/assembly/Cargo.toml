@@ -36,6 +36,7 @@ smallvec.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+miden-assembly-syntax = { workspace = true, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 miden-stdlib = { path = "../../stdlib", default-features = false }
 insta.workspace = true

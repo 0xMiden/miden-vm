@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_prover::{prove, AdviceInputs, HashFunction, ProvingOptions, StackInputs};
+use miden_prover::{AdviceInputs, HashFunction, ProvingOptions, StackInputs, prove};
 use miden_verifier::verify;
 use miden_vm::DefaultHost;
 
@@ -28,33 +28,23 @@ fn test_blake3_prove_verify() {
     // Prepare inputs - start with 0 and 1 on the stack for Fibonacci
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
     let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default()
-        .with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
     // Create proving options with Blake3 (96-bit security)
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
 
     // Prove the program
     println!("Proving with Blake3...");
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    ).expect("Proving failed");
+    let (stack_outputs, proof) =
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
 
     println!("Proof generated successfully!");
 
     // Verify the proof
     println!("Verifying proof...");
 
-    let result = verify(
-        program.into(),
-        stack_inputs,
-        stack_outputs,
-        proof,
-    );
+    let result = verify(program.into(), stack_inputs, stack_outputs, proof);
 
     match result {
         Ok(security_level) => {
@@ -63,7 +53,7 @@ fn test_blake3_prove_verify() {
         Err(e) => {
             println!("Verification failed with error: {:?}", e);
             panic!("Verification failed");
-        }
+        },
     }
 }
 
@@ -85,33 +75,24 @@ fn test_keccak_prove_verify() {
     // Prepare inputs - start with 0 and 1 on the stack for Fibonacci
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
     let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default()
-        .with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
     // Create proving options with Keccak (96-bit security)
     let options = ProvingOptions::with_96_bit_security(HashFunction::Keccak);
 
     // Prove the program
     println!("Proving with Keccak...");
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    ).expect("Proving failed");
+    let (stack_outputs, proof) =
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
 
     // Verify the proof
     println!("Verifying proof...");
-    let security_level = verify(
-        program.into(),
-        stack_inputs,
-        stack_outputs,
-        proof,
-    ).expect("Verification failed");
+    let security_level =
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
     println!("Verification successful! Security level: {}", security_level);
 }
@@ -140,32 +121,23 @@ fn test_range_checker_constraints() {
 
     let advice_inputs = AdviceInputs::default();
 
-    let mut host = DefaultHost::default()
-        .with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
     // Create proving options with Blake3 (96-bit security)
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
 
     // Prove the program
     println!("Testing range checker constraints...");
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    ).expect("Proving failed - range checker constraints may be broken");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .expect("Proving failed - range checker constraints may be broken");
 
     println!("✓ Proof generated successfully!");
 
     // Verify the proof
     println!("Verifying proof...");
-    let security_level = verify(
-        program.into(),
-        stack_inputs,
-        stack_outputs,
-        proof,
-    ).expect("Verification failed - range checker constraints may be broken");
+    let security_level = verify(program.into(), stack_inputs, stack_outputs, proof)
+        .expect("Verification failed - range checker constraints may be broken");
 
     println!("✓ Verification successful! Security level: {}", security_level);
 }
@@ -192,8 +164,8 @@ fn benchmark_64k_trace() {
     // Prepare inputs
     let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
     let advice_inputs = AdviceInputs::default();
-    let mut host = DefaultHost::default()
-        .with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
     // Create proving options with Blake3 (96-bit security)
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
@@ -202,13 +174,8 @@ fn benchmark_64k_trace() {
     println!("Proving with Blake3 (96-bit security)...");
     let start = std::time::Instant::now();
 
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    ).expect("Proving failed");
+    let (stack_outputs, proof) =
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
 
     let proving_time = start.elapsed();
     println!("✓ Proof generated in {:.2?}", proving_time);
@@ -221,12 +188,8 @@ fn benchmark_64k_trace() {
     println!("\nVerifying proof...");
     let start = std::time::Instant::now();
 
-    let security_level = verify(
-        program.into(),
-        stack_inputs,
-        stack_outputs,
-        proof,
-    ).expect("Verification failed");
+    let security_level =
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
     let verification_time = start.elapsed();
     println!("✓ Verification successful in {:.2?}", verification_time);
@@ -278,23 +241,25 @@ fn blake3_1to1_benchmark() {
     println!("This benchmark matches the masm-examples/hashing/blake3_1to1 example\n");
 
     // Compile the program
-    let program = Assembler::default()
-        .with_debug_mode(false)
-        .assemble_program(source)
-        .unwrap();
+    let program = Assembler::default().with_debug_mode(false).assemble_program(source).unwrap();
 
     // Prepare inputs - all 0xFFFFFFFF values on stack, 100 iterations in advice
     let stack_inputs = StackInputs::try_from_ints([
-        u64::MAX, u64::MAX, u64::MAX, u64::MAX,
-        u64::MAX, u64::MAX, u64::MAX, u64::MAX,
-    ]).unwrap();
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+        u64::MAX,
+    ])
+    .unwrap();
 
-    let advice_inputs = AdviceInputs::default()
-        .with_stack_values(vec![100])
-        .unwrap();
+    let advice_inputs = AdviceInputs::default().with_stack_values(vec![100]).unwrap();
 
-    let mut host = DefaultHost::default()
-        .with_source_manager(Arc::new(DefaultSourceManager::default()));
+    let mut host =
+        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
     // Create proving options with Blake3 (96-bit security)
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
@@ -303,13 +268,8 @@ fn blake3_1to1_benchmark() {
     println!("Proving with Blake3 (96-bit security)...");
     let start = std::time::Instant::now();
 
-    let (stack_outputs, proof) = prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    ).expect("Proving failed");
+    let (stack_outputs, proof) =
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
 
     let proving_time = start.elapsed();
     println!("✓ Proof generated in {:.2?}", proving_time);
@@ -322,12 +282,8 @@ fn blake3_1to1_benchmark() {
     println!("\nVerifying proof...");
     let start = std::time::Instant::now();
 
-    let security_level = verify(
-        program.into(),
-        stack_inputs,
-        stack_outputs,
-        proof,
-    ).expect("Verification failed");
+    let security_level =
+        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
 
     let verification_time = start.elapsed();
     println!("✓ Verification successful in {:.2?}", verification_time);

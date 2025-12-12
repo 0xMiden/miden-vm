@@ -88,7 +88,7 @@ impl Ace {
 
 /// Stores metadata associated to an evaluated circuit needed for building the portion of the
 /// auxiliary trace segment relevant for the ACE chiplet.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EvaluatedCircuitsMetadata {
     ctx: u32,
     clk: u32,
@@ -132,7 +132,7 @@ impl EvaluatedCircuitsMetadata {
 /// and we also know the exact number of ACE chiplet rows per circuit evaluation and the exact
 /// number of rows per `READ` and `EVAL` portions, which allows us to avoid the need to compute
 /// selectors as part of the logic of auxiliary trace generation.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AceHints {
     offset_chiplet_trace: usize,
     pub sections: Vec<EvaluatedCircuitsMetadata>,

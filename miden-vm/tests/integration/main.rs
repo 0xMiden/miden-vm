@@ -18,14 +18,12 @@ fn simple_program() {
 }
 
 #[test]
-#[ignore = "fix-prover"]
 fn multi_output_program() {
     let test = build_test!("begin mul movup.2 drop end", &[1, 2, 3]);
     test.prove_and_verify(vec![1, 2, 3], false);
 }
 
 #[test]
-#[ignore = "fix-prover"]
 fn program_with_respan() {
     let source = "
         repeat.49

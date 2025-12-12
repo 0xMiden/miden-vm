@@ -14,8 +14,16 @@ pub mod stack;
 // CONSTANTS
 // ================================================================================================
 
-/// The minimum length of the execution trace. This is the minimum required to support range checks.
-pub const MIN_TRACE_LEN: usize = 64;
+/// The minimum length of the execution trace.
+///
+/// This must be large enough to satisfy FRI parameter constraints:
+/// log2(MIN_TRACE_LEN) > log_final_poly_len + log_blowup
+///
+/// With Blake3/Keccak configs using:
+/// - log_final_poly_len = 7 (final poly size 128)
+/// - log_blowup = 3 (blowup factor 8)
+/// We need: log2(MIN_TRACE_LEN) > 10, so MIN_TRACE_LEN >= 2048
+pub const MIN_TRACE_LEN: usize = 2048;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------

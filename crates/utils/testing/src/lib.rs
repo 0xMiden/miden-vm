@@ -38,17 +38,11 @@ use miden_processor::{
 };
 use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
-pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
+pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
-
-pub mod math {
-    pub use winter_prover::math::{
-        ExtensionOf, StarkField, ToElements, fft, fields::QuadExtension, polynom,
-    };
-}
 
 pub mod serde {
     pub use miden_core::utils::{

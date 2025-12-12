@@ -269,8 +269,6 @@ fn test_mmr_unpack() {
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
     mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
-    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
-    // TODO(Al)
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -394,8 +392,6 @@ fn test_mmr_unpack_large_mmr() {
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
     mmr_mem_repr.extend_from_slice(&[Felt::from_u64(number_of_leaves), ZERO, ZERO, ZERO]);
-    //mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
-    // TODO(Al)
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[

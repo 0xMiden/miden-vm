@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use miden_crypto::{Felt, PrimeCharacteristicRing, WORD_SIZE};
 use proptest::prelude::*;
-use winter_rand_utils::prng_array;
 
 use crate::{
     Kernel, ProgramInfo, Word,
@@ -10,6 +9,12 @@ use crate::{
     mast::DynNode,
     utils::{Deserializable, Serializable},
 };
+
+// Simple PRNG for tests (replaces winter_rand_utils::prng_array)
+fn prng_array(seed: [u8; 32]) -> [u8; 32] {
+    use miden_crypto::hash::blake::Blake3_256;
+    Blake3_256::hash(&seed).into()
+}
 
 #[test]
 fn dyn_hash_is_correct() {

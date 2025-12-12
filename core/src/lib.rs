@@ -65,9 +65,11 @@ pub use miden_crypto::{
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
-            EmptySubtreeRoots, InnerNodeInfo, LeafIndex, MerkleError, MerklePath, MerkleStore,
-            MerkleTree, Mmr, MmrPeaks, NodeIndex, PartialMerkleTree, SMT_DEPTH, SimpleSmt, Smt,
-            SmtProof, SmtProofError, StoreNode,
+            EmptySubtreeRoots, InnerNodeInfo, MerkleError, MerklePath, MerkleTree, NodeIndex,
+            PartialMerkleTree,
+            mmr::{Mmr, MmrPeaks},
+            smt::{LeafIndex, SMT_DEPTH, SimpleSmt, Smt, SmtProof, SmtProofError},
+            store::{MerkleStore, StoreNode},
         };
     }
 
@@ -88,7 +90,7 @@ pub mod crypto {
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::rpo_falcon512;
+        pub use miden_crypto::dsa::falcon512_rpo;
     }
 }
 
@@ -127,6 +129,25 @@ mod operations;
 pub use operations::{
     AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
 };
+
+// FIELD ELEMENT CONVERSION
+// ================================================================================================
+
+/// Converts a u64 value to a field element with validation.
+///
+/// # Errors
+/// Returns an error if the value is not in the canonical range (i.e., >= field modulus).
+pub fn felt_from_u64_checked(value: u64) -> Result<Felt, errors::InputError> {
+    // Check against field modulus before conversion to avoid expensive as_int() call
+    if value >= Felt::ORDER_U64 {
+        return Err(errors::InputError::NotFieldElement(
+            value,
+            format!("value {} exceeds field modulus {}", value, Felt::ORDER_U64),
+        ));
+    }
+
+    Ok(Felt::from_u64(value))
+}
 
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};

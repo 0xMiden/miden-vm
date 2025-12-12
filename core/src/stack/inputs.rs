@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 use core::{ops::Deref, slice};
 
-use miden_crypto::PrimeCharacteristicRing;
-
 use super::{super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
@@ -48,9 +46,7 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            // TODO(Al)
-            //.map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
-            .map(|v| Ok(Felt::from_u64(v)))
+            .map(crate::felt_from_u64_checked)
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)

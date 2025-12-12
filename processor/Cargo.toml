@@ -18,13 +18,12 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std", "winter-prover/concurrent"]
+concurrent = ["std"]
 default = ["std"]
 std = [
   "miden-core/std",
   "miden-debug-types/std",
   "miden-utils-diagnostics/std",
-  "winter-prover/std",
   "thiserror/std",
 ]
 testing = ["miden-air/testing", "tokio"]
@@ -47,7 +46,10 @@ tracing.workspace = true
 thiserror.workspace = true
 # For `testing`
 tokio = { workspace = true, features = ["rt"], optional = true }
-winter-prover.workspace = true
+
+# Plonky3 dependencies for aux trace building
+p3-matrix.workspace = true
+p3-util.workspace = true
 
 [dev-dependencies]
 miden-assembly.workspace = true
@@ -57,5 +59,3 @@ logtest = { version = "2.0", default-features = false }
 pretty_assertions = "1.4"
 rstest = { version = "0.26" }
 tokio = { workspace = true, features = ["rt"] }
-winter-fri.workspace = true
-winter-utils.workspace = true

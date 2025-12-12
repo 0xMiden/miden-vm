@@ -9,9 +9,7 @@ pub use miden_core::crypto::{
         EmptySubtreeRoots, LeafIndex, MerkleError, MerklePath, MerkleStore, MerkleTree, Mmr,
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
-};
-pub use winter_prover::crypto::{
-    BatchMerkleProof, DefaultRandomCoin as WinterRandomCoin, ElementHasher, Hasher, RandomCoin,
+    random::{RandomCoin, RpoRandomCoin as WinterRandomCoin},
 };
 
 use super::{Felt, Word, ZERO};

@@ -10,7 +10,6 @@ use miden_air::trace::{
 use miden_core::{
     ExtensionField, ProgramInfo, StackInputs, StackOutputs, Word, ZERO, stack::MIN_STACK_DEPTH,
 };
-use winter_prover::TraceInfo;
 
 use super::{
     AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
@@ -21,6 +20,9 @@ use super::{
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
+
+// Implementation of AuxTraceBuilder trait for integration with air crate
+mod aux_builder_impl;
 
 #[cfg(test)]
 mod tests;
@@ -33,15 +35,94 @@ use super::EMPTY_WORD;
 /// Number of rows at the end of an execution trace which are injected with random values.
 pub const NUM_RAND_ROWS: usize = 1;
 
+// TRACE METADATA
+// ================================================================================================
+
+/// Metadata about the execution trace dimensions.
+///
+/// This struct holds information about trace dimensions for documentation and debugging purposes.
+/// Unlike Winterfell's TraceInfo, this is a lightweight struct specific to Plonky3.
+#[derive(Debug, Clone)]
+pub struct TraceMetadata {
+    /// Number of columns in the main trace (padded to power of 2)
+    main_width: usize,
+    /// Number of columns in the auxiliary trace
+    aux_width: usize,
+    /// Number of random elements needed for auxiliary trace construction
+    num_rand_elements: usize,
+    /// Number of rows in the trace (power of 2)
+    trace_len: usize,
+}
+
+impl TraceMetadata {
+    /// Creates a new TraceMetadata instance.
+    pub fn new(
+        main_width: usize,
+        aux_width: usize,
+        num_rand_elements: usize,
+        trace_len: usize,
+    ) -> Self {
+        Self {
+            main_width,
+            aux_width,
+            num_rand_elements,
+            trace_len,
+        }
+    }
+
+    /// Returns the main trace width.
+    pub fn main_width(&self) -> usize {
+        self.main_width
+    }
+
+    /// Returns the auxiliary trace width.
+    pub fn aux_width(&self) -> usize {
+        self.aux_width
+    }
+
+    /// Returns the number of random elements needed.
+    pub fn num_rand_elements(&self) -> usize {
+        self.num_rand_elements
+    }
+
+    /// Returns the trace length (number of rows).
+    pub fn trace_len(&self) -> usize {
+        self.trace_len
+    }
+}
+
 // VM EXECUTION TRACE
 // ================================================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilders {
     pub(crate) decoder: DecoderAuxTraceBuilder,
     pub(crate) stack: StackAuxTraceBuilder,
     pub(crate) range: RangeCheckerAuxTraceBuilder,
     pub(crate) chiplets: ChipletsAuxTraceBuilder,
+}
+
+impl AuxTraceBuilders {
+    /// Builds auxiliary columns for all components given a MainTrace and challenges.
+    ///
+    /// Returns a vector of extension field columns in the order:
+    /// decoder, stack, range checker, chiplets.
+    pub fn build_aux_columns<E>(&self, main_trace: &MainTrace, challenges: &[E]) -> Vec<Vec<E>>
+    where
+        E: ExtensionField<Felt>,
+    {
+        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
+        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
+        let range_cols = self.range.build_aux_columns(main_trace, challenges);
+        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
+
+        decoder_cols
+            .into_iter()
+            .chain(stack_cols)
+            .chain(range_cols)
+            .chain(chiplets_cols)
+            .collect()
+    }
 }
 
 /// Execution trace which is generated when a program is executed on the VM.
@@ -50,11 +131,11 @@ pub struct AuxTraceBuilders {
 /// - Main traces of System, Decoder, Operand Stack, Range Checker, and Auxiliary Co-Processor
 ///   components.
 /// - Hints used during auxiliary trace segment construction.
-/// - Metadata needed by the STARK prover.
+/// - Metadata about trace dimensions.
 #[derive(Debug)]
 pub struct ExecutionTrace {
     meta: Vec<u8>,
-    trace_info: TraceInfo,
+    trace_metadata: TraceMetadata,
     pub main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
@@ -86,17 +167,16 @@ impl ExecutionTrace {
         let program_info = ProgramInfo::new(program_hash, kernel);
         let advice = mem::take(&mut process.advice);
         let (main_trace, aux_trace_builders, trace_len_summary) = finalize_trace(process, rng);
-        let trace_info = TraceInfo::new_multi_segment(
+        let trace_metadata = TraceMetadata::new(
             PADDED_TRACE_WIDTH,
             AUX_TRACE_WIDTH,
             AUX_TRACE_RAND_ELEMENTS,
             main_trace.num_rows(),
-            vec![],
         );
 
         Self {
             meta: Vec::new(),
-            trace_info,
+            trace_metadata,
             aux_trace_builders,
             main_trace,
             program_info,
@@ -108,6 +188,11 @@ impl ExecutionTrace {
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
+
+    /// Returns the trace metadata containing dimensions and other trace information.
+    pub fn trace_metadata(&self) -> &TraceMetadata {
+        &self.trace_metadata
+    }
 
     /// Returns the program info of this execution trace.
     pub fn program_info(&self) -> &ProgramInfo {
@@ -141,6 +226,14 @@ impl ExecutionTrace {
             *result = self.main_trace.get_column(i + STACK_TRACE_OFFSET)[last_step];
         }
         result.into()
+    }
+
+    /// Returns a reference to the auxiliary trace builders.
+    ///
+    /// These builders are used during proving to generate auxiliary trace columns
+    /// after the main trace has been committed and random challenges have been sampled.
+    pub fn aux_trace_builders(&self) -> &AuxTraceBuilders {
+        &self.aux_trace_builders
     }
 
     /// Returns helper registers state at the specified `clk` of the VM
@@ -232,20 +325,15 @@ impl ExecutionTrace {
             .build_aux_columns(&self.main_trace, rand_elements);
 
         // combine all auxiliary columns into a single vector
-        let mut aux_columns = decoder_aux_columns
+        let aux_columns = decoder_aux_columns
             .into_iter()
             .chain(stack_aux_columns)
             .chain(range_aux_columns)
             .chain(chiplets)
             .collect::<Vec<_>>();
 
-        // inject random values into the last rows of the trace
-        let mut rng = RpoRandomCoin::new(*self.program_hash());
-        for i in self.length() - NUM_RAND_ROWS..self.length() {
-            for column in aux_columns.iter_mut() {
-                column[i] = rng.draw_ext_field::<E>().expect("failed to draw a random value");
-            }
-        }
+        // NOTE: Random row injection removed - not needed for Plonky3's symbolic degree inference
+        // (Was only required for Winterfell's TransitionConstraintDegree inference)
 
         Some(ColMatrix::new(aux_columns))
     }
@@ -268,7 +356,7 @@ impl ExecutionTrace {
 ///   in turn, ensures that polynomial degrees of all columns are stable.
 fn finalize_trace(
     process: Process,
-    mut rng: RpoRandomCoin,
+    _rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
     let (system, decoder, stack, mut range, chiplets) = process.into_parts();
 
@@ -288,31 +376,29 @@ fn finalize_trace(
     // Get the trace length required to hold all execution trace steps.
     let max_len = range_table_len.max(clk.into()).max(chiplets.trace_len());
 
-    // Pad the trace length to the next power of two and ensure that there is space for the
-    // Rows to hold random values
-    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
-    assert!(
-        trace_len >= MIN_TRACE_LEN,
-        "trace length must be at least {MIN_TRACE_LEN}, but was {trace_len}",
-    );
+    // Pad the trace length to the next power of two, ensuring it meets MIN_TRACE_LEN
+    // NOTE: NUM_RAND_ROWS removed - not needed for Plonky3's symbolic degree inference
+    // NOTE: MIN_TRACE_LEN enforced to satisfy FRI parameter constraints (log_height >
+    // log_final_poly_len + log_blowup)
+    let trace_len = max_len.next_power_of_two().max(MIN_TRACE_LEN);
 
     // Get the lengths of the traces: main, range, and chiplets
     let trace_len_summary =
         TraceLenSummary::new(clk.into(), range_table_len, ChipletsLengths::new(&chiplets));
 
     // Combine all trace segments into the main trace
-    let system_trace = system.into_trace(trace_len, NUM_RAND_ROWS);
-    let decoder_trace = decoder.into_trace(trace_len, NUM_RAND_ROWS);
-    let stack_trace = stack.into_trace(trace_len, NUM_RAND_ROWS);
-    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS);
+    let system_trace = system.into_trace(trace_len, 0);
+    let decoder_trace = decoder.into_trace(trace_len, 0);
+    let stack_trace = stack.into_trace(trace_len, 0);
+    let chiplets_trace = chiplets.into_trace(trace_len, 0);
 
     // Combine the range trace segment using the support lookup table
-    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);
+    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, 0);
 
     // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
     let padding = vec![vec![ZERO; trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
-    let mut trace = system_trace
+    let trace = system_trace
         .into_iter()
         .chain(decoder_trace.trace)
         .chain(stack_trace.trace)
@@ -321,12 +407,8 @@ fn finalize_trace(
         .chain(padding)
         .collect::<Vec<_>>();
 
-    // Inject random values into the last rows of the trace
-    for i in trace_len - NUM_RAND_ROWS..trace_len {
-        for column in trace.iter_mut().take(TRACE_WIDTH) {
-            column[i] = rng.draw_basefield();
-        }
-    }
+    // NOTE: Random row injection removed - not needed for Plonky3's symbolic degree inference
+    // (Was only required for Winterfell's TransitionConstraintDegree inference)
 
     let aux_trace_hints = AuxTraceBuilders {
         decoder: decoder_trace.aux_builder,

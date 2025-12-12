@@ -17,35 +17,34 @@ edition.workspace = true
 bench = false
 doctest = false
 
-[[bench]]
-name = "compute_op_flags"
-harness = false
-
-[[bench]]
-name = "enforce_stack_constraint"
-harness = false
-
 [features]
 default = ["std"]
-std = ["miden-core/std", "winter-air/std", "thiserror/std"]
+std = ["miden-core/std", "thiserror/std"]
 testing = []
 
 [dependencies]
-thiserror.workspace = true
+# Miden dependencies
 miden-core.workspace = true
-winter-air.workspace = true
-winter-prover.workspace = true
 
+# External dependencies
+thiserror.workspace = true
+tracing.workspace = true
+
+# Plonky3 dependencies
 p3-air.workspace = true
 p3-commit.workspace = true
 p3-field.workspace = true
 p3-matrix.workspace = true
 p3-uni-stark.workspace = true
+p3-util.workspace = true
 
-serde = { version = "1.0", features = ["derive"] }
+# Miden-specific Plonky3 crates
+miden-air-trait.workspace = true
+
+# Serialization
+serde.workspace = true
 bincode = "1.3"
 
 [dev-dependencies]
 criterion.workspace = true
 proptest.workspace = true
-winter-rand-utils.workspace = true

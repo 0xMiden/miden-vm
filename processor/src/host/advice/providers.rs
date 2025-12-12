@@ -98,9 +98,7 @@ where
 
                 self.stack.extend(values.iter().rev());
                 if include_len {
-                    self.stack
-                        // TODO(Al) .push(Felt::try_from(values.len() as u64).expect("value length too big"));
-                    .push(Felt::from_u64(values.len() as u64))
+                    self.stack.push(Felt::from_u64(values.len() as u64))
                 }
             },
         }

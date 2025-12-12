@@ -47,6 +47,17 @@ impl ExecutionProof {
     }
 
     /// Returns conjectured security level of this proof in bits.
+    ///
+    /// TODO(Al): Migrate security estimator from Winterfell to 0xMiden/Plonky3
+    ///
+    /// Currently returns a hardcoded 128 bits. Once the security estimator is implemented
+    /// in Plonky3, this should calculate the actual conjectured security level based on:
+    /// - Proof parameters (FRI folding factor, number of queries, etc.)
+    /// - Hash function collision resistance
+    /// - Field size and extension degree
+    ///
+    /// The previous Winterfell implementation (commented out above) should serve as a
+    /// reference for the calculation logic.
     pub fn security_level(&self) -> u32 {
         /*
         let conjectured_security = match self.hash_fn {
@@ -74,8 +85,10 @@ impl ExecutionProof {
     }
 
     /// Reads the source bytes, parsing a new proof instance.
+    ///
+    /// The serialization format is: [hash_fn (1 byte)][proof bytes]
+    /// where hash_fn is prepended during to_bytes() via insert(0, ...).
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        // Question(ZZ): is there a bug here? the hash_fn comes last in the to_bytes function.
         if source.len() < 2 {
             return Err(DeserializationError::UnexpectedEOF);
         }
@@ -237,18 +250,28 @@ pub struct OpenedValues<Challenge> {
     pub quotient_chunks: Vec<Vec<Challenge>>,
 }
 
+// TODO(Al): Implement Proof<SC> serialization/deserialization using miden-crypto traits
+//
+// Currently, proof serialization uses bincode (see prover/src/lib.rs and verifier/src/lib.rs).
+// Once serialization traits are migrated from Winterfell to miden-crypto, implement these
+// methods to provide a proper serialization format for Proof<SC>.
+//
+// This will allow:
+// - Standardized proof serialization across the ecosystem
+// - Better control over proof format and versioning
+// - Removal of bincode dependency for proof serialization
 impl<SC: StarkGenericConfig> Serializable for Proof<SC> {
     fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-        todo!()
+        todo!("Implement once miden-crypto serialization traits are available")
     }
 
     fn get_size_hint(&self) -> usize {
-        todo!()
+        todo!("Implement once miden-crypto serialization traits are available")
     }
 }
 
 impl<SC: StarkGenericConfig> Deserializable for Proof<SC> {
     fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        todo!()
+        todo!("Implement once miden-crypto serialization traits are available")
     }
 }

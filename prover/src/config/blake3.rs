@@ -65,12 +65,12 @@ pub fn create_blake3_config() -> StarkConfigBlake3 {
     let dft = Dft::default();
 
     let fri_config = FriParameters {
-        log_blowup: 3,           // 8x blowup factor
-        log_final_poly_len: 7,   // Final polynomial degree 2^7 = 128
-        num_queries: 27,         // Number of FRI query repetitions (~100 bits security)
-        proof_of_work_bits: 16,  // Grinding parameter for extra security
+        log_blowup: 3,          // 8x blowup factor
+        log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
+        num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
+        proof_of_work_bits: 16, // Grinding parameter for extra security
         mmcs: challenge_mmcs,
-        log_folding_factor: 1,   // Binary folding (fold by 2 each round)
+        log_folding_factor: 1, // Binary folding (fold by 2 each round)
     };
 
     let pcs = FriPcs::new(dft, val_mmcs, fri_config);

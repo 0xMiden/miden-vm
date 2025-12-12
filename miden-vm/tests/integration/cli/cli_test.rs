@@ -34,7 +34,6 @@ fn bin_under_test() -> escargot::CargoRun {
 }
 
 #[test]
-#[ignore = "fix-prover"]
 // Tt test might be an overkill to test only that the 'run' cli command
 // outputs steps and ms.
 fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,7 +62,6 @@ use miden_assembly::Library;
 use miden_core::Decorator;
 
 #[test]
-#[ignore = "fix-prover"]
 fn cli_bundle_debug() {
     let output_file = std::env::temp_dir().join("cli_bundle_debug.masl");
 
@@ -83,7 +81,6 @@ fn cli_bundle_debug() {
 }
 
 #[test]
-#[ignore = "fix-prover"]
 fn cli_bundle_no_exports() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle").arg("./tests/integration/cli/data/lib_noexports");
@@ -93,7 +90,6 @@ fn cli_bundle_no_exports() {
 }
 
 #[test]
-#[ignore = "fix-prover"]
 fn cli_bundle_kernel() {
     let output_file = std::env::temp_dir().join("cli_bundle_kernel.masl");
 
@@ -110,7 +106,6 @@ fn cli_bundle_kernel() {
 
 /// A kernel can bundle with a library w/o exports.
 #[test]
-#[ignore = "fix-prover"]
 fn cli_bundle_kernel_noexports() {
     let output_file = std::env::temp_dir().join("cli_bundle_kernel_noexports.masl");
 
@@ -126,7 +121,6 @@ fn cli_bundle_kernel_noexports() {
 }
 
 #[test]
-#[ignore = "fix-prover"]
 fn cli_bundle_output() {
     let mut cmd = bin_under_test().command();
     cmd.arg("bundle")

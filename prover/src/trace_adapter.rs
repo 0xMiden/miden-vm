@@ -5,8 +5,10 @@
 
 use alloc::vec;
 
-use miden_air::trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, ColMatrix};
-use miden_air::Felt;
+use miden_air::{
+    Felt,
+    trace::{AUX_TRACE_WIDTH, ColMatrix, TRACE_WIDTH},
+};
 use miden_processor::ExecutionTrace;
 use p3_field::{ExtensionField, PrimeCharacteristicRing};
 use p3_matrix::dense::RowMajorMatrix;
@@ -29,7 +31,7 @@ use tracing::instrument;
 /// - Cache-oblivious transposition
 /// - SIMD vectorization
 /// - GPU acceleration
-#[instrument("transpose main trace", skip_all)]
+#[instrument(skip_all, fields(rows = trace.get_trace_len(), cols = TRACE_WIDTH))]
 pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let trace_len = trace.get_trace_len();
     let mut result = RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * trace_len], TRACE_WIDTH);
@@ -59,13 +61,14 @@ pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Fe
 /// # Type Parameters
 ///
 /// * `E` - The extension field type (e.g., `BinomialExtensionField<Felt, 2>`)
-#[instrument("transpose aux trace", skip_all)]
+#[instrument(skip_all, fields(rows = trace.num_rows(), cols = AUX_TRACE_WIDTH))]
 pub fn aux_trace_to_row_major<E>(trace: &ColMatrix<E>) -> RowMajorMatrix<E>
 where
     E: ExtensionField<Felt>,
 {
     let trace_len = trace.num_rows();
-    let mut result = RowMajorMatrix::new(vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
+    let mut result =
+        RowMajorMatrix::new(vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
 
     result.rows_mut().enumerate().for_each(|(row_idx, row)| {
         for col_idx in 0..AUX_TRACE_WIDTH {
@@ -78,8 +81,6 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // TODO: Add tests for trace conversion
     // - Test round-trip conversion
     // - Test with various trace sizes

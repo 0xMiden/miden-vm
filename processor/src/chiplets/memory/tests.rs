@@ -548,7 +548,6 @@ fn build_trace_row(
 
     let (word, idx1, idx0) = {
         let addr: u32 = addr.as_int() as u32;
-        //let addr: u32 = addr.try_into().unwrap(); TODO(Al)
         let remainder = addr % WORD_SIZE as u32;
         let word = Felt::from_u32(addr - remainder);
 

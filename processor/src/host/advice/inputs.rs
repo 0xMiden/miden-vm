@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    AdviceMap, Felt, PrimeCharacteristicRing, Word,
+    AdviceMap, Felt, Word,
     crypto::merkle::MerkleStore,
     errors::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -40,10 +40,8 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            //.map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
-            //.collect::<Result<Vec<_>, _>>()?;
-            // TODO(Al)
-            .map(Felt::from_u64).collect::<Vec<_>>();
+            .map(miden_core::felt_from_u64_checked)
+            .collect::<Result<Vec<_>, _>>()?;
 
         self.stack.extend(stack.iter());
         Ok(self)
@@ -85,25 +83,20 @@ impl AdviceInputs {
 }
 
 impl Serializable for AdviceInputs {
-    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-
-        /* TODO(Al)
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let Self { stack, map, store } = self;
         stack.write_into(target);
         map.write_into(target);
         store.write_into(target);
-        */
     }
 }
 
 impl Deserializable for AdviceInputs {
-    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        /*
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let stack = Vec::<Felt>::read_from(source)?;
         let map = AdviceMap::read_from(source)?;
         let store = MerkleStore::read_from(source)?;
-        Ok(Self { stack, map, store }) */
-        todo!()
+        Ok(Self { stack, map, store })
     }
 }
 
@@ -112,7 +105,7 @@ impl Deserializable for AdviceInputs {
 
 #[cfg(test)]
 mod tests {
-    use winter_utils::{Deserializable, Serializable};
+    use miden_core::utils::{Deserializable, Serializable};
 
     use crate::AdviceInputs;
 
@@ -130,7 +123,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "need-fix-serial"]
     fn test_advice_inputs_serialization() {
         let advice1 = AdviceInputs::default().with_stack_values([1, 2, 3].iter().copied()).unwrap();
         let bytes = advice1.to_bytes();

@@ -2,8 +2,11 @@ use alloc::vec::Vec;
 use core::{
     fmt::Debug,
     ops::{Bound, Range},
+    slice,
 };
 
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
 use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
 // RE-EXPORTS
 // ================================================================================================
@@ -14,14 +17,22 @@ pub use miden_crypto::{
         uninit_vector,
     },
 };
-#[cfg(feature = "std")]
-pub use winter_utils::ReadAdapter;
-pub use winter_utils::group_slice_elements;
 
 use crate::{Felt, Word};
 
-pub mod math {
-    pub use winter_math::batch_inversion;
+// UTILITY FUNCTIONS (from winter-utils v0.13.1)
+// ================================================================================================
+
+/// Transmutes a slice of `n` elements into a slice of `n` / `N` elements,
+/// each of which is an array of `N` elements.
+///
+/// # Panics
+/// Panics if `n` is not divisible by `N`.
+pub fn group_slice_elements<T, const N: usize>(source: &[T]) -> &[[T; N]] {
+    assert_eq!(source.len() % N, 0, "source length must be divisible by {N}");
+    let p = source.as_ptr();
+    let len = source.len() / N;
+    unsafe { slice::from_raw_parts(p as *const [T; N], len) }
 }
 
 // TO ELEMENTS

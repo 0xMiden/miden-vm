@@ -33,11 +33,7 @@ pub fn build_public_values(
     stack_inputs: &StackInputs,
     stack_outputs: &StackOutputs,
 ) -> Vec<Felt> {
-    let public_inputs = PublicInputs::new(
-        program_info.clone(),
-        *stack_inputs,
-        *stack_outputs,
-    );
+    let public_inputs = PublicInputs::new(program_info.clone(), *stack_inputs, *stack_outputs);
 
     public_inputs.to_elements()
 }
@@ -54,9 +50,7 @@ pub fn build_public_values(
 /// # Returns
 ///
 /// A vector of field elements representing the public inputs.
-pub fn extract_public_values_from_trace(
-    trace: &miden_processor::ExecutionTrace,
-) -> Vec<Felt> {
+pub fn extract_public_values_from_trace(trace: &miden_processor::ExecutionTrace) -> Vec<Felt> {
     let stack_inputs = trace.init_stack_state();
     let stack_outputs = *trace.stack_outputs();
     let program_info = trace.program_info().clone();
@@ -66,8 +60,6 @@ pub fn extract_public_values_from_trace(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     // TODO: Add tests for public input conversion
     // - Test encoding order
     // - Test with various stack sizes

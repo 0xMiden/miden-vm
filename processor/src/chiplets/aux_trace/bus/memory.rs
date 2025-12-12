@@ -23,7 +23,6 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-// TODO(Al)
 lazy_static! {
     static ref FOUR: Felt = Felt::from_u8(4);
 }

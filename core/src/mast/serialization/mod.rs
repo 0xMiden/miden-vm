@@ -210,9 +210,7 @@ impl Deserializable for MastForest {
         let mast_node_infos: Vec<MastNodeInfo> = node_infos_iter(source, node_count)
             .collect::<Result<Vec<MastNodeInfo>, DeserializationError>>()?;
 
-        // TODO(Al)
-        //let advice_map = AdviceMap::read_from(source)?;
-        let advice_map = AdviceMap::default();
+        let advice_map = AdviceMap::read_from(source)?;
 
         let error_codes: BTreeMap<u64, String> = Deserializable::read_from(source)?;
         let error_codes: BTreeMap<u64, Arc<str>> =

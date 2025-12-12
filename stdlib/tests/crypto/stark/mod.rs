@@ -1,6 +1,6 @@
 use std::array;
 
-use miden_air::{FieldExtension, HashFunction, PublicInputs};
+use miden_air::{HashFunction, PublicInputs};
 use miden_assembly::Assembler;
 use miden_core::{Felt,  QuadFelt, WORD_SIZE, Word, ZERO};
 use miden_processor::{
@@ -81,8 +81,7 @@ pub fn generate_recursive_verifier_data(
     let advice_inputs = AdviceInputs::default();
     let mut host = DefaultHost::default();
 
-    let options =
-        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
+    let options = ProvingOptions::new(HashFunction::Rpo256);
 
     let (stack_outputs, proof) =
         prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();

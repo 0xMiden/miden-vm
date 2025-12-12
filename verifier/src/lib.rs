@@ -5,37 +5,17 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec;
-use std::println;
-
-// use air::{Felt, HashFunction, ProcessorAir, Proof, PublicInputs};
-use miden_air::{Felt, HashFunction, ProcessorAir, Proof, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-};
-use p3_blake3::Blake3;
-use p3_challenger::{DuplexChallenger, HashChallenger, SerializingChallenger64};
-use p3_commit::ExtensionMmcs;
-use p3_dft::Radix2DitParallel;
-use p3_field::{Field, extension::BinomialExtensionField};
-use p3_fri::{FriParameters, TwoAdicFriPcs};
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_symmetric::{
-    CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher, TruncatedPermutation,
-};
-use p3_uni_stark::StarkConfig;
-
-mod verify;
+use miden_air::{HashFunction, ProcessorAir, PublicInputs};
 // EXPORTS
 // ================================================================================================
 pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
-use verify::verify as verify_proof;
-pub use winter_verifier::{AcceptableOptions, VerifierError};
 pub mod math {
     pub use miden_core::Felt;
 }
 pub use miden_air::ExecutionProof;
+// Re-export config factories from prover
+// (The verifier uses the same STARK configs as the prover)
+use miden_prover::config;
 
 // VERIFIER
 // ================================================================================================
@@ -79,67 +59,46 @@ pub fn verify(
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
-    // build public inputs and try to verify the proof
+    // Build public inputs
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
-    let (hash_fn, proof) = proof.into_parts();
-    let processor_air = ProcessorAir {};
+    let public_values = pub_inputs.to_elements();
 
-    type Val = Felt;
-    type Challenge = BinomialExtensionField<Val, 2>;
+    // Deserialize proof and verify using unified miden-prover
+    let (hash_fn, proof_bytes) = proof.into_parts();
+    let air = ProcessorAir::new();
 
     match hash_fn {
         HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
-            println!("blake verifying");
-            type H = Blake3;
-            type FieldHash = SerializingHasher<H>;
-            type Compress<H> = CompressionFunctionFromHasher<H, 2, 32>;
-            type ValMmcs<H> = MerkleTreeMmcs<Val, u8, FieldHash, Compress<H>, 32>;
-            type ChallengeMmcs<H> = ExtensionMmcs<Val, Challenge, ValMmcs<H>>;
-            type Pcs = TwoAdicFriPcs<Val, Dft, ValMmcs<H>, ChallengeMmcs<H>>;
-            type Dft = Radix2DitParallel<Val>;
+            let config = config::create_blake3_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::InputNotFieldElement(88888))?;
 
-            type Challenger<H> = SerializingChallenger64<Val, HashChallenger<u8, H, 32>>;
-            type Config = StarkConfig<Pcs, Challenge, Challenger<H>>;
-
-            let field_hash = FieldHash::new(H {});
-            let compress = Compress::new(H {});
-
-            let val_mmcs = ValMmcs::new(field_hash, compress);
-            let challenge_mmcs = ChallengeMmcs::new(val_mmcs.clone());
-
-            let dft = Dft::default();
-
-            let fri_config = FriParameters {
-                log_blowup: 3,
-                log_final_poly_len: 7,
-                num_queries: 27,
-                proof_of_work_bits: 16,
-                mmcs: challenge_mmcs,
-            };
-
-            let pcs = Pcs::new(dft, val_mmcs, fri_config);
-
-            let challenger = Challenger::from_hasher(vec![], H {});
-
-            let config = Config::new(pcs, challenger);
-
-            let proof: Proof<Config> = bincode::deserialize(&proof).unwrap();
-            verify_proof(&config, &processor_air, &proof, &vec![])
-        },
-        HashFunction::Rpo256 => {
-            todo!()
-        },
-        HashFunction::Rpx256 => {
-            todo!()
-        },
-        HashFunction::Poseidon2 => {
-            todo!()
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Keccak => {
-            todo!()
+            let config = config::create_keccak_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-    }
-    .map_err(|_source| VerificationError::ProgramVerificationError(program_hash))?;
+        HashFunction::Rpo256 => {
+            unimplemented!(
+                "RPO256 verification not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
+        },
+        HashFunction::Poseidon2 => {
+            unimplemented!(
+                "Poseidon2 verification not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
+        },
+        HashFunction::Rpx256 => {
+            unimplemented!(
+                "RPX256 verification not yet implemented (requires miden-crypto Plonky3 migration)"
+            )
+        },
+    }?;
 
     Ok(security_level)
 }
@@ -157,8 +116,3 @@ pub enum VerificationError {
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
 }
-
-/*
-pub enum VerificationError {
-    FailedVerification,
-} */

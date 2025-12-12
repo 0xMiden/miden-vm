@@ -17,7 +17,7 @@ pub use virtual_table::ChipletsVTableColBuilder;
 mod wiring_bus;
 
 /// Constructs the execution trace for chiplets-related auxiliary columns (used in multiset checks).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder {
     kernel: Kernel,
     ace_hints: AceHints,

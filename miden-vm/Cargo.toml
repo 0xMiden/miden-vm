@@ -55,7 +55,6 @@ executable = [
   "serde",
   "std",
 ]
-metal = ["miden-prover/metal", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
   "hex?/std",
@@ -109,6 +108,5 @@ miden-utils-testing.workspace = true
 num-bigint = "0.4"
 predicates = "3.1"
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-winter-fri.workspace = true
 rand_chacha = "0.9"
 walkdir = "2.5"

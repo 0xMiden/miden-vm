@@ -153,7 +153,6 @@ fn locaddr() {
 // ================================================================================================
 
 #[test]
-#[ignore = "fix-prover"]
 fn caller() {
     let kernel_source = "
         export.foo

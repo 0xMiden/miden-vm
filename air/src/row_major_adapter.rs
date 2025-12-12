@@ -1,14 +1,18 @@
 //! Utilities for converting between row-major and column-major matrix formats.
 
 use alloc::vec::Vec;
-use miden_core::{Felt, ExtensionField, PrimeCharacteristicRing};
+
+use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use tracing::instrument;
+
 use crate::trace::{ColMatrix, main_trace::MainTrace};
 
 /// Converts a row-major Felt matrix to column-major MainTrace format.
 ///
 /// This extracts columns from the row-major matrix and packages them as a MainTrace
 /// which is needed by the auxiliary trace builders in the processor crate.
+#[instrument(skip_all, fields(rows = matrix.height(), cols = matrix.width()))]
 pub fn row_major_to_main_trace(matrix: &RowMajorMatrix<Felt>) -> MainTrace {
     let num_cols = matrix.width();
     let num_rows = matrix.height();
@@ -56,11 +60,14 @@ fn find_last_program_row(matrix: &RowMajorMatrix<Felt>) -> usize {
 /// 2. Flattens extension field elements to base field representation
 ///
 /// The input is a vector of EF columns (each column is a Vec<EF>).
-/// The output is a row-major matrix where each EF element is expanded to its base field coefficients.
+/// The output is a row-major matrix where each EF element is expanded to its base field
+/// coefficients.
 ///
 /// For example, with 2 EF columns and 3 rows:
 /// - Input: [[A0, A1, A2], [B0, B1, B2]] where Ai, Bi are EF elements
-/// - Output: Row-major matrix with rows [A0_coeffs..., B0_coeffs...], [A1_coeffs..., B1_coeffs...], etc.
+/// - Output: Row-major matrix with rows [A0_coeffs..., B0_coeffs...], [A1_coeffs..., B1_coeffs...],
+///   etc.
+#[instrument(skip_all, fields(num_cols = aux_columns.len(), trace_len))]
 pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     aux_columns: Vec<Vec<EF>>,
     trace_len: usize,

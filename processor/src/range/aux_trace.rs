@@ -16,7 +16,7 @@ use super::{Felt, NUM_RAND_ROWS, uninit_vector};
 
 /// Describes how to construct the execution trace of columns related to the range checker in the
 /// auxiliary segment of the trace. These are used in multiset checks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder {
     /// A list of the unique values for which range checks are performed.
     lookup_values: Vec<u16>,
