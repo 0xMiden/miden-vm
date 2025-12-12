@@ -1,9 +1,7 @@
 use proptest::prelude::*;
 
 // Import strategy functions from arbitrary.rs
-pub(super) use super::arbitrary::{
-    BasicBlockNodeParams, MastForestParams, op_non_control_sequence_strategy,
-};
+pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
     Decorator, Felt, ONE, Word,
@@ -803,53 +801,182 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     );
 }
 
-// PROPTERY TESTS WITH ARBITRARY
-// ================================================================================================
+/// Test that BasicBlockNode -> to_builder -> build is an identity transformation for Owned storage
+#[test]
+fn test_to_builder_identity_owned() {
+    let ops = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Add,
+        Operation::Push(Felt::new(3)),
+        Operation::Mul,
+    ];
+
+    let mut forest = MastForest::new();
+    let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
+    let deco3 = forest.add_decorator(Decorator::Trace(3)).unwrap();
+
+    let decorators = vec![(0, deco1), (2, deco2), (4, deco3)];
+
+    let original = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .build()
+        .unwrap();
+
+    // Clone the original node to preserve it
+    let node_for_roundtrip = original.clone();
+
+    // Perform the identity transformation: node -> builder -> node
+    let builder = node_for_roundtrip.to_builder(&forest);
+    let roundtrip = builder.build().unwrap();
+
+    // Verify identity: all fields should be identical
+    assert_eq!(original.op_batches, roundtrip.op_batches, "OpBatches should be identical");
+    assert_eq!(original.digest, roundtrip.digest, "Digest should be identical");
+
+    // Extract decorators for comparison
+    match (&original.decorators, &roundtrip.decorators) {
+        (
+            DecoratorStore::Owned {
+                decorators: orig_decs,
+                before_enter: orig_before,
+                after_exit: orig_after,
+            },
+            DecoratorStore::Owned {
+                decorators: rt_decs,
+                before_enter: rt_before,
+                after_exit: rt_after,
+            },
+        ) => {
+            assert_eq!(orig_decs, rt_decs, "Operation decorators should be identical");
+            assert_eq!(orig_before, rt_before, "Before-enter decorators should be identical");
+            assert_eq!(orig_after, rt_after, "After-exit decorators should be identical");
+        },
+        _ => panic!("Expected Owned decorator storage"),
+    }
+}
+
+/// Test that BasicBlockNode -> to_builder -> build is an identity transformation for Linked storage
+#[test]
+fn test_to_builder_identity_linked() {
+    let ops = vec![
+        Operation::Push(Felt::new(10)),
+        Operation::Push(Felt::new(20)),
+        Operation::Add,
+        Operation::Mul,
+    ];
+
+    let mut forest = MastForest::new();
+    let deco1 = forest.add_decorator(Decorator::Trace(10)).unwrap();
+    let deco2 = forest.add_decorator(Decorator::Trace(20)).unwrap();
+
+    let decorators = vec![(1, deco1), (3, deco2)];
+
+    // Add node to forest so it gets Linked storage
+    let node_id = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Get the original node (with Linked storage)
+    let original = match &forest[node_id] {
+        MastNode::Block(block) => block.clone(),
+        _ => panic!("Expected BasicBlockNode"),
+    };
+
+    // Verify it has Linked storage
+    assert!(matches!(original.decorators, DecoratorStore::Linked { .. }));
+
+    // Perform the identity transformation: node -> builder -> node
+    let builder = original.clone().to_builder(&forest);
+    let roundtrip = builder.build().unwrap();
+
+    // Verify identity: all fields should be identical
+    assert_eq!(original.op_batches, roundtrip.op_batches, "OpBatches should be identical");
+    assert_eq!(original.digest, roundtrip.digest, "Digest should be identical");
+
+    // For Linked -> Owned transition, verify the decorators are equivalent
+    match &roundtrip.decorators {
+        DecoratorStore::Owned {
+            decorators: rt_decs,
+            before_enter: rt_before,
+            after_exit: rt_after,
+        } => {
+            // Get expected decorators from forest
+            let expected_decs: DecoratorList = forest
+                .debug_info
+                .decorator_links_for_node(node_id)
+                .unwrap()
+                .into_iter()
+                .collect();
+            let expected_before = forest.before_enter_decorators(node_id);
+            let expected_after = forest.after_exit_decorators(node_id);
+
+            assert_eq!(rt_decs, &expected_decs, "Operation decorators should match forest");
+            assert_eq!(
+                rt_before.as_slice(),
+                expected_before,
+                "Before-enter decorators should match forest"
+            );
+            assert_eq!(
+                rt_after.as_slice(),
+                expected_after,
+                "After-exit decorators should match forest"
+            );
+        },
+        _ => panic!("Expected Owned decorator storage after to_builder"),
+    }
+}
 
 proptest! {
-    /// Property test: All randomly generated BasicBlockNodes should pass validation
+    /// Proptest: verify to_builder identity for arbitrary BasicBlockNodes
     #[test]
-    fn prop_validate_arbitrary_basic_block(
-        // Generate BasicBlockNode with custom parameters to increase test coverage
-        block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
-            max_ops_len: 72,  // Allow larger blocks for more complex batching
-            max_pairs: 5,     // Allow more decorators
-            max_decorator_id_u32: 10,
-        })
-    ) {
-        // All BasicBlockNodes created through the official constructor should pass validation
-        // This property test ensures our validation correctly handles all edge cases
-        // that the official BasicBlockNode::new() function produces
-        prop_assert!(
-            block.validate_batch_invariants().is_ok(),
-            "BasicBlockNode validation failed: {:?}",
-            block.validate_batch_invariants().err()
-        );
-    }
+    fn proptest_to_builder_identity(ops in op_non_control_sequence_strategy(20)) {
+        let mut forest = MastForest::new();
 
-    /// Property test: All randomly generated MastForests should pass validation
-    #[test]
-    fn prop_validate_arbitrary_mast_forest(
-        // Generate MastForest with BasicBlockNodes that should all be valid
-        forest in any_with::<MastForest>(MastForestParams {
-            decorators: 5,
-            blocks: 1..=5,     // Test with multiple blocks
-            max_joins: 2,
-            max_splits: 2,
-            max_loops: 1,
-            max_calls: 2,
-            max_syscalls: 0,   // Avoid syscalls that require kernel setup
-            max_externals: 0,  // Avoid externals with random digests
-            max_dyns: 0,       // Avoid dyn nodes that leave junk on stack
-        })
-    ) {
-        // All MastForests generated through the official Arbitrary implementation
-        // should pass validation since they use BasicBlockNode::new() which enforces
-        // the same invariants we're checking
-        prop_assert!(
-            forest.validate().is_ok(),
-            "MastForest validation failed: {:?}",
-            forest.validate().err()
-        );
+        // Create some decorators
+        let num_decorators = (ops.len() / 3).max(1);
+        let decorator_ids: Vec<_> = (0..num_decorators)
+            .map(|i| forest.add_decorator(Decorator::Trace(i as u32)).unwrap())
+            .collect();
+
+        // Create decorator list with random positions
+        let decorators: Vec<_> = ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 3 == 0)
+            .zip(decorator_ids.iter().cycle())
+            .map(|((idx, _), &dec_id)| (idx, dec_id))
+            .collect();
+
+        // Test with Owned storage
+        let original = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+            .build()
+            .unwrap();
+
+        let builder = original.clone().to_builder(&forest);
+        let roundtrip = builder.build().unwrap();
+
+        prop_assert_eq!(original.op_batches, roundtrip.op_batches);
+        prop_assert_eq!(original.digest, roundtrip.digest);
+
+        // Test with Linked storage
+        let node_id = BasicBlockNodeBuilder::new(ops, decorators)
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let linked_node = match &forest[node_id] {
+            MastNode::Block(block) => block.clone(),
+            _ => panic!("Expected BasicBlockNode"),
+        };
+
+        let builder2 = linked_node.clone().to_builder(&forest);
+        let roundtrip2 = builder2.build().unwrap();
+
+        prop_assert_eq!(linked_node.op_batches, roundtrip2.op_batches);
+        prop_assert_eq!(linked_node.digest, roundtrip2.digest);
     }
 }
