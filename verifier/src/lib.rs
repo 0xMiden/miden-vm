@@ -55,7 +55,6 @@ pub fn verify(
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> where
 {
-
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
@@ -70,9 +69,10 @@ pub fn verify(
 
     match hash_fn {
         HashFunction::Blake3_192 => {
-            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of 24-byte).
-            // Proper 192-bit support requires Plonky3 to implement CryptographicHasher<u8, [u8; 24]>
-            // for Blake3. Create an issue in 0xMiden/Plonky3 to add this support.
+            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of
+            // 24-byte). Proper 192-bit support requires Plonky3 to implement
+            // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
+            // 0xMiden/Plonky3 to add this support.
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;

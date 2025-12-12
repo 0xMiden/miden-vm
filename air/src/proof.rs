@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use p3_uni_stark::StarkGenericConfig;
@@ -69,7 +69,7 @@ impl ExecutionProof {
         };
         conjectured_security.bits()
          */
-        128
+        96
     }
 
     // SERIALIZATION / DESERIALIZATION
@@ -110,11 +110,12 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(bound = "")]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 192-bit output.
+    #[default]
     Blake3_192 = 0x00,
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
@@ -126,12 +127,6 @@ pub enum HashFunction {
     Keccak = 0x04,
     /// Poseidon hash function with 256-bit output.
     Poseidon2 = 0x05,
-}
-
-impl Default for HashFunction {
-    fn default() -> Self {
-        Self::Blake3_192
-    }
 }
 
 impl HashFunction {
@@ -248,30 +243,4 @@ pub struct OpenedValues<Challenge> {
     pub aux_trace_local: Vec<Challenge>,
     pub aux_trace_next: Vec<Challenge>,
     pub quotient_chunks: Vec<Vec<Challenge>>,
-}
-
-// TODO(Al): Implement Proof<SC> serialization/deserialization using miden-crypto traits
-//
-// Currently, proof serialization uses bincode (see prover/src/lib.rs and verifier/src/lib.rs).
-// Once serialization traits are migrated from Winterfell to miden-crypto, implement these
-// methods to provide a proper serialization format for Proof<SC>.
-//
-// This will allow:
-// - Standardized proof serialization across the ecosystem
-// - Better control over proof format and versioning
-// - Removal of bincode dependency for proof serialization
-impl<SC: StarkGenericConfig> Serializable for Proof<SC> {
-    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-        todo!("Implement once miden-crypto serialization traits are available")
-    }
-
-    fn get_size_hint(&self) -> usize {
-        todo!("Implement once miden-crypto serialization traits are available")
-    }
-}
-
-impl<SC: StarkGenericConfig> Deserializable for Proof<SC> {
-    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        todo!("Implement once miden-crypto serialization traits are available")
-    }
 }

@@ -29,8 +29,7 @@ pub const MIN_STACK_DEPTH: usize = 16;
 // ================================================================================================
 
 /// Get the number of non-zero stack elements.
-#[allow(dead_code)]
-fn get_num_stack_values(values: &[Felt; MIN_STACK_DEPTH]) -> u8 {
+pub(super) fn get_num_stack_values(values: &[Felt; MIN_STACK_DEPTH]) -> u8 {
     let mut num_trailing_zeros = 0;
     for v in values.iter().rev() {
         if v.as_int() == 0 {

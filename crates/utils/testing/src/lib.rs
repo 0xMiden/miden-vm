@@ -264,7 +264,7 @@ impl Test {
         // execute the test
         let mut process = Process::new(
             program.kernel().clone(),
-            self.stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
@@ -364,7 +364,7 @@ impl Test {
         // slow processor
         let mut process = Process::new(
             program.kernel().clone(),
-            self.stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
@@ -393,7 +393,7 @@ impl Test {
 
         let mut process = Process::new(
             program.kernel().clone(),
-            self.stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
@@ -421,7 +421,7 @@ impl Test {
 
         let mut process = Process::new(
             program.kernel().clone(),
-            self.stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
@@ -449,14 +449,14 @@ impl Test {
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
         let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
-            stack_inputs.clone(),
+            stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
             ProvingOptions::default(),
         )
         .unwrap();
 
-        self.assert_outputs_with_fast_processor(stack_outputs.clone());
+        self.assert_outputs_with_fast_processor(stack_outputs);
 
         let program_info = ProgramInfo::from(program);
 
@@ -480,7 +480,7 @@ impl Test {
 
         let mut process = Process::new(
             program.kernel().clone(),
-            self.stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
@@ -533,7 +533,7 @@ impl Test {
     /// processor's stack outputs.
     fn assert_outputs_with_fast_processor(&self, slow_stack_outputs: StackOutputs) {
         let (program, mut host) = self.get_program_and_host();
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
         let advice_inputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_stack_outputs = fast_process.execute_sync(&program, &mut host).unwrap();
@@ -551,7 +551,7 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let fast_result = fast_process.execute_sync(&program, &mut host);

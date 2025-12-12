@@ -22,6 +22,7 @@ pub mod stack;
 /// With Blake3/Keccak configs using:
 /// - log_final_poly_len = 7 (final poly size 128)
 /// - log_blowup = 3 (blowup factor 8)
+///
 /// We need: log2(MIN_TRACE_LEN) > 10, so MIN_TRACE_LEN >= 2048
 pub const MIN_TRACE_LEN: usize = 2048;
 

@@ -47,7 +47,7 @@ where
         let _span = tracing::info_span!("execute_program").entered();
         miden_processor::execute(
             program,
-            stack_inputs.clone(),
+            stack_inputs,
             advice_inputs,
             host,
             *options.execution_options(),
@@ -62,7 +62,7 @@ where
         trace.trace_len_summary().main_trace_len()
     );
 
-    let stack_outputs = trace.stack_outputs().clone();
+    let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
 
     // Convert trace to row-major format
@@ -80,9 +80,10 @@ where
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_192 => {
-            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of 24-byte).
-            // Proper 192-bit support requires Plonky3 to implement CryptographicHasher<u8, [u8; 24]>
-            // for Blake3. Create an issue in 0xMiden/Plonky3 to add this support.
+            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of
+            // 24-byte). Proper 192-bit support requires Plonky3 to implement
+            // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
+            // 0xMiden/Plonky3 to add this support.
             let config = config::create_blake3_256_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")

@@ -53,12 +53,12 @@ pub type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
 ///
 /// # Advantages of RPO over Blake3
 ///
-/// - **Native to Miden VM**: RPO is an algebraic hash function that can be efficiently
-///   verified within the Miden VM itself, enabling recursive proof verification.
-/// - **STARK-friendly**: Being algebraic (defined over the same field as the trace),
-///   RPO constraints are more efficient to represent and verify.
-/// - **Smaller proof size**: RPO's algebraic nature typically results in more compact
-///   Merkle authentication paths.
+/// - **Native to Miden VM**: RPO is an algebraic hash function that can be efficiently verified
+///   within the Miden VM itself, enabling recursive proof verification.
+/// - **STARK-friendly**: Being algebraic (defined over the same field as the trace), RPO
+///   constraints are more efficient to represent and verify.
+/// - **Smaller proof size**: RPO's algebraic nature typically results in more compact Merkle
+///   authentication paths.
 ///
 /// # Returns
 ///

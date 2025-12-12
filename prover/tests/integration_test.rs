@@ -11,8 +11,8 @@ extern crate alloc;
 
 #[test]
 fn test_blake3_192_prove_verify() {
-    // NOTE: Blake3_192 currently uses Blake3_256 config internally (32-byte output instead of 24-byte)
-    // until Plonky3 adds support for CryptographicHasher<u8, [u8; 24]>.
+    // NOTE: Blake3_192 currently uses Blake3_256 config internally (32-byte output instead of
+    // 24-byte) until Plonky3 adds support for CryptographicHasher<u8, [u8; 24]>.
     // TODO: Create an issue in 0xMiden/Plonky3 to add Blake3_192 support.
 
     // Compute many Fibonacci iterations to generate a trace >= 2048 rows

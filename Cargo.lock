@@ -37,12 +37,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "allocator-api2"
-version = "0.2.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
-
-[[package]]
 name = "anes"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -818,12 +812,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "foldhash"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
-
-[[package]]
 name = "fs-err"
 version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1003,14 +991,6 @@ name = "hashbrown"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
-dependencies = [
- "allocator-api2",
- "equivalent",
- "foldhash",
- "rayon",
- "serde",
- "serde_core",
-]
 
 [[package]]
 name = "heck"
@@ -1399,6 +1379,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#7c42c7c975a0e5b1dcbfed8f23e881212cc0c945"
 dependencies = [
  "blake3",
  "cc",
@@ -1407,7 +1388,6 @@ dependencies = [
  "ed25519-dalek",
  "flume",
  "glob",
- "hashbrown",
  "hkdf",
  "k256",
  "miden-air 0.3.0",
@@ -1424,21 +1404,18 @@ dependencies = [
  "rand_chacha",
  "rand_core 0.9.3",
  "rand_hc",
- "rayon",
  "serde",
  "sha2",
  "sha3",
  "subtle",
  "thiserror",
- "winter-crypto",
- "winter-math",
- "winter-utils",
  "x25519-dalek",
 ]
 
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#7c42c7c975a0e5b1dcbfed8f23e881212cc0c945"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -3814,28 +3791,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "winter-crypto"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cdb247bc142438798edb04067ab72a22cf815f57abbd7b78a6fa986fc101db8"
-dependencies = [
- "blake3",
- "sha3",
- "winter-math",
- "winter-utils",
-]
-
-[[package]]
-name = "winter-math"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7aecfb48ee6a8b4746392c8ff31e33e62df8528a3b5628c5af27b92b14aef1ea"
-dependencies = [
- "serde",
- "winter-utils",
 ]
 
 [[package]]

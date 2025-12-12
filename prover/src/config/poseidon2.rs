@@ -53,12 +53,12 @@ pub type StarkConfigPoseidon2 = StarkConfig<FriPcs, Challenge, Challenger>;
 ///
 /// # Advantages of Poseidon2
 ///
-/// - **STARK-friendly**: Poseidon2 is an algebraic hash function optimized for
-///   STARK circuits, with efficient constraint representation.
-/// - **Improved performance**: Compared to Poseidon (original), Poseidon2 offers
-///   better performance with similar security guarantees.
-/// - **Native to field arithmetic**: Being algebraic, Poseidon2 constraints are
-///   more efficient to verify within the VM.
+/// - **STARK-friendly**: Poseidon2 is an algebraic hash function optimized for STARK circuits, with
+///   efficient constraint representation.
+/// - **Improved performance**: Compared to Poseidon (original), Poseidon2 offers better performance
+///   with similar security guarantees.
+/// - **Native to field arithmetic**: Being algebraic, Poseidon2 constraints are more efficient to
+///   verify within the VM.
 ///
 /// # Returns
 ///
@@ -79,9 +79,11 @@ pub fn create_poseidon2_config() -> StarkConfigPoseidon2 {
         num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
         proof_of_work_bits: 16, // Grinding parameter for extra security
         mmcs: challenge_mmcs,
-        log_folding_factor: 1, // Binary folding (fold by 2 each round)
-        // NOTE: Octary folding (log_folding_factor: 3) causes RootMismatch errors
-        // in verification. This appears to be a bug in the 0xMiden/Plonky3 fork.
+        log_folding_factor: 1, /* Binary folding (fold by 2 each round)
+                                * NOTE: Octary folding (log_folding_factor: 3) causes
+                                * RootMismatch errors
+                                * in verification. This appears to be a bug in the
+                                * 0xMiden/Plonky3 fork. */
     };
 
     let pcs = FriPcs::new(dft, val_mmcs, fri_config);

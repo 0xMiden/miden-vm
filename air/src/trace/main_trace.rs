@@ -80,7 +80,7 @@ impl<E: Clone + Copy> ColMatrix<E> {
     /// # Panics
     /// Panics if either `col_idx` or `row_idx` are out of bounds for this matrix.
     pub fn get(&self, col_idx: usize, row_idx: usize) -> E {
-        self.columns[col_idx][row_idx].clone()
+        self.columns[col_idx][row_idx]
     }
 
     /// Returns a reference to the column at the specified index.

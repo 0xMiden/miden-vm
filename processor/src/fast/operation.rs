@@ -438,7 +438,7 @@ fn eval_circuit_fast_(
     }
 
     // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
+    if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
         return Err(ExecutionError::failed_arithmetic_evaluation(
             err_ctx,
             AceError::CircuitNotEvaluateZero,

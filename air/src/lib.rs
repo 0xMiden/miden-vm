@@ -1,5 +1,4 @@
 #![no_std]
-#![allow(dead_code)]
 
 #[macro_use]
 extern crate alloc;
@@ -40,17 +39,14 @@ mod utils;
 // ================================================================================================
 
 pub use errors::ExecutionOptionsError;
-//use utils::TransitionConstraintRange;
 pub use miden_core::{
     Felt,
-    utils::{DeserializationError, ToElements},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
+    },
 };
 pub use options::{ExecutionOptions, ProvingOptions};
 pub use proof::{ExecutionProof, HashFunction};
-
-/// Selects whether to include all existing constraints or only the ones currently encoded in
-/// the ACE circuit in the recursive verifier.
-const IS_FULL_CONSTRAINT_SET: bool = false;
 
 // PROCESSOR AIR
 // ================================================================================================
@@ -104,15 +100,6 @@ impl PublicInputs {
     }
 }
 
-// TODO: Implement serialization for PublicInputs using miden-crypto traits
-// This was previously implemented using Winterfell's Serializable/Deserializable traits.
-// Once serialization traits are moved to miden-crypto, re-implement:
-// - Serializable trait for PublicInputs (write_into method)
-// - Deserializable trait for PublicInputs (read_from method)
-// This will allow us to drop all Winterfell dependencies.
-//
-// Previous Winterfell implementation (for reference):
-/*
 impl Serializable for PublicInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.program_info.write_into(target);
@@ -126,10 +113,13 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
-        Ok(PublicInputs { program_info, stack_inputs, stack_outputs })
+        Ok(PublicInputs {
+            program_info,
+            stack_inputs,
+            stack_outputs,
+        })
     }
 }
-*/
 
 /// Miden VM Processor AIR implementation.
 ///
@@ -138,6 +128,12 @@ impl Deserializable for PublicInputs {
 pub struct ProcessorAir<B = ()> {
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
+}
+
+impl Default for ProcessorAir<()> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ProcessorAir<()> {

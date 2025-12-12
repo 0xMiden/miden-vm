@@ -1,10 +1,3 @@
-// TODO(Al): Re-enable these tests once serialization traits are migrated from Winterfell to
-// miden-crypto
-//
-// These tests verify StackInputs/StackOutputs serialization using Serializable/Deserializable
-// traits. Once miden-crypto provides these traits (currently in Winterfell), uncomment this file
-// and update the imports to use miden-crypto instead of winter-utils.
-/*
 use alloc::vec::Vec;
 
 use crate::{
@@ -135,4 +128,3 @@ fn test_outputs_empty() {
 
     assert_eq!(*inputs, *result);
 }
- */

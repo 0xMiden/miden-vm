@@ -89,19 +89,15 @@ impl IntoIterator for StackInputs {
 // ================================================================================================
 
 impl Serializable for StackInputs {
-    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-        todo!()
-        /*
-        let num_stack_values = get_num_stack_values(self);
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let num_stack_values = super::get_num_stack_values(&self.elements);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
-        */
     }
 }
 
 impl Deserializable for StackInputs {
-    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        /*
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_elements = source.read_u8()?;
 
         let mut elements = source.read_many::<Felt>(num_elements.into())?;
@@ -110,8 +106,5 @@ impl Deserializable for StackInputs {
         StackInputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!("failed to create stack inputs: {err}",))
         })
-         */
-
-        todo!()
     }
 }

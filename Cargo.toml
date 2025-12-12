@@ -58,7 +58,7 @@ miden-verifier = { path = "./verifier", version = "0.19", default-features = fal
 # Miden crates
 # miden-crypto = { version = "0.17", default-features = false }
 
-miden-crypto = { path = "/Users/al/Code/crypto/miden-crypto" }
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "al-e2e-plonky3", default-features = false }
 
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }

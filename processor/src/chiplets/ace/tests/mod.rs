@@ -87,7 +87,7 @@ fn test_bool_check() {
     for input in &inputs {
         let _ = verify_circuit_eval(&circuit, input, |_| QuadFelt::ZERO);
         let encoded_circuit = verify_encoded_circuit_eval(&circuit, input, &err_ctx);
-        let _ = verify_eval_circuit(&encoded_circuit, input);
+        verify_eval_circuit(&encoded_circuit, input);
     }
 }
 

@@ -127,19 +127,15 @@ impl From<[Felt; MIN_STACK_DEPTH]> for StackOutputs {
 // ================================================================================================
 
 impl Serializable for StackOutputs {
-    fn write_into<W: ByteWriter>(&self, _target: &mut W) {
-        /*
-        let num_stack_values = get_num_stack_values(self);
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let num_stack_values = super::get_num_stack_values(&self.elements);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
-         */
-        todo!()
     }
 }
 
 impl Deserializable for StackOutputs {
-    fn read_from<R: ByteReader>(_source: &mut R) -> Result<Self, DeserializationError> {
-        /*
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_elements = source.read_u8()?;
 
         let elements = source.read_many::<Felt>(num_elements.into())?;
@@ -147,7 +143,5 @@ impl Deserializable for StackOutputs {
         StackOutputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!("failed to create stack outputs: {err}",))
         })
-         */
-        todo!()
     }
 }

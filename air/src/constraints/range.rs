@@ -30,7 +30,7 @@ where
     let mut val = two_f;
     for _ in 0..15 {
         // 2^16 = 2 * 2 * ... (16 times)
-        val = val * two_f;
+        val *= two_f;
     }
     let sixty_five_k = val - one_f; // 2^16 - 1 = 65535
     builder.when_last_row().assert_eq(local.range[1].clone(), sixty_five_k);
@@ -113,21 +113,17 @@ where
         let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
         let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
         // The range checker bus is at auxiliary trace index 4
-        let b_local = aux_local[4].clone();
-        let b_next = aux_next[4].clone();
+        let b_local = aux_local[4];
+        let b_next = aux_next[4];
 
         let challenges = builder.permutation_randomness();
-        let alpha = challenges[0].clone();
+        let alpha = challenges[0];
         (b_local, b_next, alpha)
     };
 
     // Boundary constraints: b_range must start and end at 0
-    builder
-        .when_first_row()
-        .assert_zero_ext(AB::ExprEF::from(b_local_val.clone().into()));
-    builder
-        .when_last_row()
-        .assert_zero_ext(AB::ExprEF::from(b_local_val.clone().into()));
+    builder.when_first_row().assert_zero_ext(b_local_val.into());
+    builder.when_last_row().assert_zero_ext(b_local_val.into());
 
     let alpha = &alpha_val;
     let b_local = b_local_val;
@@ -137,24 +133,17 @@ where
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[14], mv1 = alpha + chiplets[15]
-    let mv0 = AB::ExprEF::from(alpha.clone().into())
-        + AB::ExprEF::from(local.chiplets[14].clone().into());
-    let mv1 = AB::ExprEF::from(alpha.clone().into())
-        + AB::ExprEF::from(local.chiplets[15].clone().into());
+    let mv0 = (*alpha).into() + AB::ExprEF::from(local.chiplets[14].clone().into());
+    let mv1 = (*alpha).into() + AB::ExprEF::from(local.chiplets[15].clone().into());
 
     // Stack lookups: sv0-sv3 = alpha + decoder[10-13]
-    let sv0 =
-        AB::ExprEF::from(alpha.clone().into()) + AB::ExprEF::from(local.decoder[10].clone().into());
-    let sv1 =
-        AB::ExprEF::from(alpha.clone().into()) + AB::ExprEF::from(local.decoder[11].clone().into());
-    let sv2 =
-        AB::ExprEF::from(alpha.clone().into()) + AB::ExprEF::from(local.decoder[12].clone().into());
-    let sv3 =
-        AB::ExprEF::from(alpha.clone().into()) + AB::ExprEF::from(local.decoder[13].clone().into());
+    let sv0 = (*alpha).into() + AB::ExprEF::from(local.decoder[10].clone().into());
+    let sv1 = (*alpha).into() + AB::ExprEF::from(local.decoder[11].clone().into());
+    let sv2 = (*alpha).into() + AB::ExprEF::from(local.decoder[12].clone().into());
+    let sv3 = (*alpha).into() + AB::ExprEF::from(local.decoder[13].clone().into());
 
     // Range check value: alpha + range[1]
-    let range_check =
-        AB::ExprEF::from(alpha.clone().into()) + AB::ExprEF::from(local.range[1].clone().into());
+    let range_check = (*alpha).into() + AB::ExprEF::from(local.range[1].clone().into());
 
     // Combined lookup denominators
     let memory_lookups = mv0.clone() * mv1.clone();
@@ -177,8 +166,8 @@ where
     let mflag_rc_stack = range_check.clone() * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms
-    let b_next_term = AB::ExprEF::from(b_next.into()) * lookups.clone();
-    let b_term = AB::ExprEF::from(b_local.into()) * lookups.clone();
+    let b_next_term = b_next.into() * lookups.clone();
+    let b_term = b_local.into() * lookups.clone();
     let rc_term = stack_lookups.clone()
         * memory_lookups.clone()
         * AB::ExprEF::from(local.range[0].clone().into());

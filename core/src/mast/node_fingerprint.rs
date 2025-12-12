@@ -1,9 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_crypto::hash::{
-    Digest,
-    blake::{Blake3_256, Blake3Digest},
-};
+use miden_crypto::hash::blake::{Blake3_256, Blake3Digest};
 
 use crate::{
     Operation, Word,

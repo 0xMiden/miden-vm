@@ -276,8 +276,8 @@ impl WireColumn {
     fn push(&mut self, id: Felt, v: QuadFelt) {
         self.id.push(id);
         let v: &[Felt] = v.as_basis_coefficients_slice();
-        self.v_0.push(v[0].clone());
-        self.v_1.push(v[1].clone());
+        self.v_0.push(v[0]);
+        self.v_1.push(v[1]);
     }
 }
 

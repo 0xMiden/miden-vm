@@ -9,7 +9,6 @@ pub use miden_core::crypto::{
         EmptySubtreeRoots, LeafIndex, MerkleError, MerklePath, MerkleStore, MerkleTree, Mmr,
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
-    random::{RandomCoin, RpoRandomCoin as WinterRandomCoin},
 };
 
 use super::{Felt, Word, ZERO};

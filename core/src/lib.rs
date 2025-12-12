@@ -75,7 +75,6 @@ pub mod crypto {
 
     pub mod hash {
         pub use miden_crypto::hash::{
-            Digest, ElementHasher, Hasher,
             blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
             poseidon2::Poseidon2,
             rpo::Rpo256,
@@ -84,9 +83,7 @@ pub mod crypto {
     }
 
     pub mod random {
-        pub use miden_crypto::rand::{
-            RandomCoin, RandomCoinError, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin,
-        };
+        pub use miden_crypto::rand::{RpoRandomCoin, RpxRandomCoin};
     }
 
     pub mod dsa {
