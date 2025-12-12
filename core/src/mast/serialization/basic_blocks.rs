@@ -4,10 +4,10 @@
 //!
 //! - Padded operations (variable size)
 //! - Batch count (4 bytes)
-//! - Indptr array per batch (9 bytes each)
+//! - Delta-encoded indptr per batch (4 bytes each: 8 deltas × 4 bits, packed)
 //! - Padding flags per batch (1 byte each, bit-packed)
 //!
-//! **Total**: `ops_size + 4 + (10 * num_batches)` bytes
+//! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
 
 use alloc::vec::Vec;
 
