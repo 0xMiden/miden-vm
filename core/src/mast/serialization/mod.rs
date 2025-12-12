@@ -99,7 +99,12 @@ const MAGIC: &[u8; 5] = b"MAST\0";
 /// If future modifications are made to this format, the version should be incremented by 1. A
 /// version of `[255, 255, 255]` is reserved for future extensions that require extending the
 /// version field itself, but should be considered invalid for now.
-const VERSION: [u8; 3] = [0, 0, 0];
+///
+/// Version history:
+/// - [0, 0, 0]: Initial format
+/// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
+///   indptr, padding, and group metadata for exact OpBatch reconstruction)
+const VERSION: [u8; 3] = [0, 0, 1];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -149,8 +154,10 @@ impl Serializable for MastForest {
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {
                     let ops_offset = basic_block_data_builder.encode_basic_block(basic_block);
 
-                    basic_block_decorators
-                        .push((mast_node_id, basic_block.raw_op_indexed_decorators(self)));
+                    // Serialize decorators with padded indices
+                    let padded_decorators: Vec<(usize, crate::mast::DecoratorId)> =
+                        basic_block.indexed_decorator_iter(self).collect();
+                    basic_block_decorators.push((mast_node_id, padded_decorators));
 
                     ops_offset
                 } else {

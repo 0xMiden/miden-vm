@@ -116,6 +116,27 @@ impl OpBatch {
         self.num_groups
     }
 
+    /// Creates a new OpBatch from its constituent parts.
+    ///
+    /// This constructor is used during deserialization to reconstruct OpBatches with the exact
+    /// structure they had when serialized.
+    ///
+    /// # Arguments
+    /// * `ops` - The operations in this batch (including padding NOOPs)
+    /// * `indptr` - Array of group boundary indices
+    /// * `padding` - Array of padding flags for each group
+    /// * `groups` - Array of group hashes and immediate values
+    /// * `num_groups` - Number of groups in this batch
+    pub(crate) fn new_from_parts(
+        ops: Vec<Operation>,
+        indptr: [usize; Self::BATCH_SIZE_PLUS_ONE],
+        padding: [bool; BATCH_SIZE],
+        groups: [Felt; BATCH_SIZE],
+        num_groups: usize,
+    ) -> Self {
+        Self { ops, indptr, padding, groups, num_groups }
+    }
+
     /// Returns the (op_group_idx, op_idx_in_group) given an operation index in the batch. Returns
     /// `None` if the index is out of bounds.
     ///

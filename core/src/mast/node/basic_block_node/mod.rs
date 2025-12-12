@@ -1253,11 +1253,30 @@ fn batch_ops(ops: Vec<Operation>) -> Vec<OpBatch> {
 }
 
 // ------------------------------------------------------------------------------------------------
+/// Represents the operation data for a [`BasicBlockNodeBuilder`].
+///
+/// The decorators are bundled with the operation data to maintain the invariant that
+/// decorator indices match the format of the operations:
+/// - `Raw`: decorators have raw (unpadded) indices
+/// - `Batched`: decorators have padded indices
+#[derive(Debug)]
+enum OperationData {
+    /// Raw operations with raw decorator indices
+    Raw {
+        operations: Vec<Operation>,
+        decorators: DecoratorList,
+    },
+    /// Pre-batched operations with padded decorator indices
+    Batched {
+        op_batches: Vec<OpBatch>,
+        decorators: DecoratorList,
+    },
+}
+
 /// Builder for creating [`BasicBlockNode`] instances with decorators.
 #[derive(Debug)]
 pub struct BasicBlockNodeBuilder {
-    operations: Vec<Operation>,
-    decorators: DecoratorList,
+    operation_data: OperationData,
     before_enter: Vec<DecoratorId>,
     after_exit: Vec<DecoratorId>,
     digest: Option<Word>,
@@ -1265,45 +1284,84 @@ pub struct BasicBlockNodeBuilder {
 
 impl BasicBlockNodeBuilder {
     /// Creates a new builder for a BasicBlockNode with the specified operations and decorators.
+    ///
+    /// The decorators must use raw (unpadded) operation indices.
     pub fn new(operations: Vec<Operation>, decorators: DecoratorList) -> Self {
         Self {
-            operations,
-            decorators,
+            operation_data: OperationData::Raw { operations, decorators },
             before_enter: Vec::new(),
             after_exit: Vec::new(),
             digest: None,
         }
     }
 
+    /// Creates a builder from pre-existing OpBatches with padded decorator indices.
+    ///
+    /// This constructor is used during deserialization where operations are already batched
+    /// and decorators already use padded indices. The digest must also be provided.
+    ///
+    /// The decorators must use padded operation indices that match the batched operations.
+    pub(crate) fn from_op_batches(
+        op_batches: Vec<OpBatch>,
+        decorators: DecoratorList,
+        digest: Word,
+    ) -> Self {
+        Self {
+            operation_data: OperationData::Batched { op_batches, decorators },
+            before_enter: Vec::new(),
+            after_exit: Vec::new(),
+            digest: Some(digest),
+        }
+    }
+
     /// Used to initialize decorators for the [`BasicBlockNodeBuilder`]. Replaces the existing
     /// decorators with the given ['DecoratorList'].
     pub(crate) fn set_decorators(&mut self, decorators: DecoratorList) {
-        self.decorators = decorators;
+        match &mut self.operation_data {
+            OperationData::Raw { decorators: dec, .. } => *dec = decorators,
+            OperationData::Batched { decorators: dec, .. } => *dec = decorators,
+        }
     }
 
     /// Builds the BasicBlockNode with the specified decorators.
     pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
-        if self.operations.is_empty() {
-            return Err(MastForestError::EmptyBasicBlock);
-        }
+        let (op_batches, digest, padded_decorators) = match self.operation_data {
+            OperationData::Raw { operations, decorators } => {
+                if operations.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
 
-        // Validate decorators list (only in debug mode).
-        #[cfg(debug_assertions)]
-        validate_decorators(self.operations.len(), &self.decorators);
+                // Validate decorators list (only in debug mode).
+                #[cfg(debug_assertions)]
+                validate_decorators(operations.len(), &decorators);
 
-        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations);
-        // the prior line may have inserted some padding Noops in the op_batches
-        // the decorator mapping should still point to the correct operation when that happens
-        let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+                // Batch operations (adds padding NOOPs)
+                // Adjust decorators from raw to padded indices
+                let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
 
-        // Use the forced digest if provided, otherwise use the computed digest
-        let digest = self.digest.unwrap_or(computed_digest);
+                // Use the forced digest if provided, otherwise use the computed digest
+                let digest = self.digest.unwrap_or(computed_digest);
+
+                (op_batches, digest, padded_decorators)
+            },
+            OperationData::Batched { op_batches, decorators } => {
+                if op_batches.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
+
+                // Decorators are already padded - no adjustment needed!
+                let digest = self.digest.expect("digest must be set for batched operations");
+
+                (op_batches, digest, decorators)
+            },
+        };
 
         Ok(BasicBlockNode {
             op_batches,
             digest,
             decorators: DecoratorStore::Owned {
-                decorators: reflowed_decorators,
+                decorators: padded_decorators,
                 before_enter: self.before_enter.clone(),
                 after_exit: self.after_exit.clone(),
             },
@@ -1334,31 +1392,47 @@ impl BasicBlockNodeBuilder {
 
 impl MastForestContributor for BasicBlockNodeBuilder {
     fn add_to_forest(self, forest: &mut MastForest) -> Result<MastNodeId, MastForestError> {
-        if self.operations.is_empty() {
-            return Err(MastForestError::EmptyBasicBlock);
-        }
-
-        // Validate decorators list (only in debug mode).
-        #[cfg(debug_assertions)]
-        validate_decorators(self.operations.len(), &self.decorators);
-
         // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Process operations and decorators directly without creating an intermediate Owned node
-        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations);
+        // Process based on operation data type
+        let (op_batches, digest, padded_decorators) = match self.operation_data {
+            OperationData::Raw { operations, decorators } => {
+                if operations.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
 
-        // Use the forced digest if provided, otherwise use the computed digest
-        let digest = self.digest.unwrap_or(computed_digest);
+                // Validate decorators list (only in debug mode).
+                #[cfg(debug_assertions)]
+                validate_decorators(operations.len(), &decorators);
 
-        // Adjust decorator indices from raw to padded using the same logic as
-        // BasicBlockNode::adjust_decorators
-        let reflowed_decorators = BasicBlockNode::adjust_decorators(self.decorators, &op_batches);
+                // Batch operations (adds padding NOOPs)
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+
+                // Use the forced digest if provided, otherwise use the computed digest
+                let digest = self.digest.unwrap_or(computed_digest);
+
+                // Adjust decorator indices from raw to padded
+                let padded_decorators = BasicBlockNode::adjust_decorators(decorators, &op_batches);
+
+                (op_batches, digest, padded_decorators)
+            },
+            OperationData::Batched { op_batches, decorators } => {
+                if op_batches.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
+
+                // Decorators are already padded - no adjustment needed!
+                let digest = self.digest.expect("digest must be set for batched operations");
+
+                (op_batches, digest, decorators)
+            },
+        };
 
         // Add decorator info to the forest storage
         forest
             .debug_info
-            .register_op_indexed_decorators(future_node_id, reflowed_decorators)
+            .register_op_indexed_decorators(future_node_id, padded_decorators)
             .map_err(MastForestError::DecoratorError)?;
 
         // Add node-level decorators to the centralized NodeToDecoratorIds for efficient access
@@ -1385,9 +1459,37 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
         // decorator handling with operation indices that other nodes don't have
 
-        // Compute digest - use forced digest if available, otherwise compute normally
-        let (op_batches, computed_digest) = batch_and_hash_ops(self.operations.clone());
-        let digest = self.digest.unwrap_or(computed_digest);
+        // Process based on operation data type
+        let (op_batches, digest, raw_decorators) = match &self.operation_data {
+            OperationData::Raw { operations, decorators } => {
+                // Compute digest - use forced digest if available, otherwise compute normally
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations.clone());
+                let digest = self.digest.unwrap_or(computed_digest);
+
+                // Decorators are already in raw form - no conversion needed
+                #[cfg(debug_assertions)]
+                {
+                    validate_decorators(operations.len(), decorators);
+                }
+
+                (op_batches, digest, decorators.clone())
+            },
+            OperationData::Batched { op_batches, decorators } => {
+                let digest = self.digest.expect("digest must be set for batched operations");
+
+                // Convert from padded to raw indices for fingerprinting
+                let pad2raw = PaddedToRawPrefix::new(op_batches);
+                let raw_decorators: Vec<(usize, DecoratorId)> = decorators
+                    .iter()
+                    .map(|(padded_idx, decorator_id)| {
+                        let raw_idx = padded_idx - pad2raw[*padded_idx];
+                        (raw_idx, *decorator_id)
+                    })
+                    .collect();
+
+                (op_batches.clone(), digest, raw_decorators)
+            },
+        };
 
         // Collect before_enter decorator fingerprints
         let before_enter_bytes: Vec<[u8; 32]> = self
@@ -1396,21 +1498,8 @@ impl MastForestContributor for BasicBlockNodeBuilder {
             .map(|&id| forest[id].fingerprint().as_bytes())
             .collect();
 
-        // Hash op-indexed decorators using the same logic as node.indexed_decorator_iter()
-        #[cfg(debug_assertions)]
-        {
-            validate_decorators(self.operations.len(), &self.decorators);
-        }
-        // For BasicBlockNodeBuilder, convert from padded to raw indices
-        let pad2raw = PaddedToRawPrefix::new(&op_batches);
-        let adjusted_decorators: Vec<(usize, DecoratorId)> = self
-            .decorators
-            .iter()
-            .map(|(padded_idx, decorator_id)| {
-                let raw_idx = padded_idx - pad2raw[*padded_idx];
-                (raw_idx, *decorator_id)
-            })
-            .collect();
+        // Collect op-indexed decorator data (using raw indices)
+        let adjusted_decorators = raw_decorators;
 
         // Collect op-indexed decorator data
         let mut op_decorator_data = Vec::with_capacity(adjusted_decorators.len() * 33);

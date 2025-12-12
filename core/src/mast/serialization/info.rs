@@ -48,9 +48,12 @@ impl MastNodeInfo {
     ) -> Result<MastNodeBuilder, DeserializationError> {
         match self.ty {
             MastNodeType::Block { ops_offset } => {
-                let operations = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let builder = crate::mast::node::BasicBlockNodeBuilder::new(operations, Vec::new())
-                    .with_digest(self.digest);
+                let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
+                let builder = crate::mast::node::BasicBlockNodeBuilder::from_op_batches(
+                    op_batches,
+                    Vec::new(), // decorators set later
+                    self.digest,
+                );
                 Ok(MastNodeBuilder::BasicBlock(builder))
             },
             MastNodeType::Join { left_child_id, right_child_id } => {
