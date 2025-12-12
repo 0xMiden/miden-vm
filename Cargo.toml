@@ -106,3 +106,6 @@ miden-prover-p3 = { package = "miden-prover", branch = "zz/migrate-plonky3", def
 
 
 rand = { version = "0.9", default-features = false }
+
+# WASM support
+getrandom = { version = "0.2", default-features = false, features = ["js"] }

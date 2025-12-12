@@ -84,9 +84,11 @@ pub fn verify(
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
-            unimplemented!(
-                "RPO256 verification not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_rpo_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
             unimplemented!(

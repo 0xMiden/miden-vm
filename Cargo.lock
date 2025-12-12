@@ -957,9 +957,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "r-efi",
  "wasip2",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -1414,8 +1416,10 @@ dependencies = [
  "num",
  "num-complex",
  "p3-air",
+ "p3-challenger",
  "p3-field",
  "p3-goldilocks",
+ "p3-symmetric",
  "rand",
  "rand_chacha",
  "rand_core 0.9.3",
@@ -1570,6 +1574,8 @@ name = "miden-prover"
 version = "0.19.0"
 dependencies = [
  "bincode",
+ "getrandom 0.2.16",
+ "getrandom 0.3.4",
  "miden-air 0.19.0",
  "miden-air 0.3.0",
  "miden-assembly",

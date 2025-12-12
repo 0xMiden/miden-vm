@@ -90,9 +90,9 @@ where
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpo256 => {
-            unimplemented!(
-                "RPO256 config not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_rpo_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
             unimplemented!(
