@@ -616,8 +616,8 @@ mod tests {
     // HELPER FUNCTIONS
     // --------------------------------------------------------------------------------------------
 
-    fn build_expected(values: &[u64]) -> [Felt; 16] {
-        let mut expected = [ZERO; 16];
+    fn build_expected(values: &[u64]) -> [Felt; MIN_STACK_DEPTH] {
+        let mut expected = [ZERO; MIN_STACK_DEPTH];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
             *result = Felt::new(value);
         }

@@ -646,8 +646,8 @@ mod tests {
         (Felt::new(a), Felt::new(b), Felt::new(c))
     }
 
-    fn build_expected(values: &[Felt]) -> [Felt; 16] {
-        let mut expected = [ZERO; 16];
+    fn build_expected(values: &[Felt]) -> [Felt; MIN_STACK_DEPTH] {
+        let mut expected = [ZERO; MIN_STACK_DEPTH];
         for (&value, result) in values.iter().zip(expected.iter_mut()) {
             *result = value;
         }
