@@ -327,6 +327,14 @@ impl OpBatchAccumulator {
         self.pad_if_needed();
         self.finalize_indptr();
 
+        // Fill the unused tail of indptr array with the final value to maintain monotonicity
+        // This is required for delta encoding which expects indptr to be monotonically
+        // non-decreasing
+        let final_ops_count = self.ops.len();
+        for i in self.next_group_idx..OpBatch::BATCH_SIZE_PLUS_ONE {
+            self.indptr[i] = final_ops_count;
+        }
+
         OpBatch {
             ops: self.ops,
             indptr: self.indptr,

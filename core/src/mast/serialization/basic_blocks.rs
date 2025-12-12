@@ -189,14 +189,11 @@ impl BasicBlockDataDecoder<'_> {
         let num_batches: u32 = ops_data_reader.read()?;
         let num_batches = num_batches as usize;
 
-        // Read indptr arrays (9 u8s per batch)
+        // Read delta-encoded indptr arrays (4 bytes per batch)
         let mut batch_indptrs: Vec<[usize; 9]> = Vec::with_capacity(num_batches);
         for _ in 0..num_batches {
-            let mut indptr = [0usize; 9];
-            for idx in indptr.iter_mut() {
-                let val: u8 = ops_data_reader.read()?;
-                *idx = val as usize;
-            }
+            let packed: [u8; 4] = ops_data_reader.read()?;
+            let indptr = unpack_indptr_deltas(&packed)?;
             batch_indptrs.push(indptr);
         }
 
