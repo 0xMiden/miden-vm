@@ -59,6 +59,13 @@ runs:
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
 
+    # Clean packaging directory to avoid stale/corrupted tmp-registry state
+    - name: Clean packaging directory
+      shell: bash
+      run: |
+        echo "Cleaning target/package directory to ensure fresh state"
+        rm -rf target/package
+
     # Dry-run vs real publish
     - name: Dry-run workspace publish
       if: ${{ inputs.mode == 'dry-run' }}
