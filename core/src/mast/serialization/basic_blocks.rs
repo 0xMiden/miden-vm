@@ -85,23 +85,11 @@ impl BasicBlockDataBuilder {
 // INDPTR DELTA ENCODING
 // ================================================================================================
 
-/// Packs indptr array deltas into 4 bytes using 4-bit encoding.
+/// Packs 8 indptr deltas into 4 bytes (4 bits each). Elides indptr[0] which is always 0.
 ///
-/// The indptr array has 9 elements [0, a, b, c, d, e, f, g, h] where the first element
-/// is always 0. We encode 8 deltas: [a-0, b-a, c-b, d-c, e-d, f-e, g-f, h-g].
-/// Each delta is guaranteed to be in [0, 9] (fits in 4 bits).
-///
-/// # Format
-///
-/// Byte layout (4 bytes total):
-/// ```text
-/// Byte 0: [delta1_low_4bits | delta0_low_4bits]
-/// Byte 1: [delta3_low_4bits | delta2_low_4bits]
-/// Byte 2: [delta5_low_4bits | delta4_low_4bits]
-/// Byte 3: [delta7_low_4bits | delta6_low_4bits]
-/// ```
-///
-/// Returns 4 bytes with packed deltas in little-endian nibble order.
+/// Requires full array monotonicity. OpBatch only semantically uses the `[0..num_groups+1]`
+/// prefix, but the tail must be filled (with final ops count) to avoid underflow when
+/// computing deltas for serialization.
 fn pack_indptr_deltas(indptr: &[usize; 9]) -> [u8; 4] {
     debug_assert_eq!(indptr[0], 0, "indptr must start at 0");
 
