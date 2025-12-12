@@ -526,7 +526,7 @@ impl BasicBlockNode {
             let indptr = batch.indptr();
             let ops = batch.ops();
 
-            // indptr should be monotonic non-decreasing
+            // indptr should be monotonic non-decreasing in valid prefix
             for i in 0..batch.num_groups() {
                 if indptr[i] > indptr[i + 1] {
                     return Err(format!(
@@ -540,8 +540,32 @@ impl BasicBlockNode {
                 }
             }
 
+            // Full array must be monotonic for serialization (delta encoding)
+            for i in 0..indptr.len() - 1 {
+                if indptr[i] > indptr[i + 1] {
+                    return Err(format!(
+                        "Batch {}: indptr[{}] {} > indptr[{}] {} - full array not monotonic (required for serialization)",
+                        batch_idx,
+                        i,
+                        indptr[i],
+                        i + 1,
+                        indptr[i + 1]
+                    ));
+                }
+            }
+
             // All indptr values should be within ops bounds
             let ops_len = ops.len();
+
+            // Final indptr value must equal ops.len()
+            if indptr[indptr.len() - 1] != ops_len {
+                return Err(format!(
+                    "Batch {}: final indptr value {} doesn't match ops.len() {}",
+                    batch_idx,
+                    indptr[indptr.len() - 1],
+                    ops_len
+                ));
+            }
             for (i, &indptr_val) in indptr.iter().enumerate().take(batch.num_groups() + 1) {
                 if indptr_val > ops_len {
                     return Err(format!(
