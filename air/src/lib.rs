@@ -22,6 +22,9 @@ pub use aux_builder::AuxTraceBuilder;
 // Row-major to column-major adapter
 mod row_major_adapter;
 
+// Optimized matrix transposition
+pub mod transpose;
+
 pub mod trace;
 use trace::*;
 pub use trace::{TRACE_WIDTH, rows::RowIndex};

@@ -3,14 +3,15 @@
 //! This module provides functions to convert between miden-processor's `ExecutionTrace`
 //! format (column-major) and Plonky3's `RowMajorMatrix` format (row-major).
 
-use alloc::vec;
+use alloc::vec::Vec;
 
 use miden_air::{
     Felt,
     trace::{AUX_TRACE_WIDTH, ColMatrix, TRACE_WIDTH},
+    transpose,
 };
 use miden_processor::ExecutionTrace;
-use p3_field::{ExtensionField, PrimeCharacteristicRing};
+use p3_field::ExtensionField;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 
@@ -24,25 +25,28 @@ use tracing::instrument;
 ///
 /// A `RowMajorMatrix` containing the same trace data in row-major format.
 ///
-/// # Performance
+/// # Implementation
 ///
-/// This performs a naive transposition which requires O(rows * cols) operations.
-/// For large traces, this can be expensive. Future optimizations could include:
-/// - Cache-oblivious transposition
-/// - SIMD vectorization
-/// - GPU acceleration
+/// Uses cache-blocked transposition to improve memory layout:
+/// - Cache-oblivious blocked transposition (64×64 blocks)
+/// - Improved spatial locality for downstream operations
+/// - Better cache behavior throughout the proving pipeline
 #[instrument(skip_all, fields(rows = trace.get_trace_len(), cols = TRACE_WIDTH))]
 pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let trace_len = trace.get_trace_len();
-    let mut result = RowMajorMatrix::new(vec![Felt::ZERO; TRACE_WIDTH * trace_len], TRACE_WIDTH);
 
-    result.rows_mut().enumerate().for_each(|(row_idx, row)| {
-        for col_idx in 0..TRACE_WIDTH {
-            row[col_idx] = trace.main_trace.get(col_idx, row_idx);
+    // Extract column-major data into a flat buffer
+    let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
+    for col_idx in 0..TRACE_WIDTH {
+        for row_idx in 0..trace_len {
+            col_major_data.push(trace.main_trace.get(col_idx, row_idx));
         }
-    });
+    }
 
-    result
+    // Use optimized cache-blocked transposition: column-major -> row-major
+    let row_major_data = transpose::col_major_to_row_major(&col_major_data, trace_len, TRACE_WIDTH);
+
+    RowMajorMatrix::new(row_major_data, TRACE_WIDTH)
 }
 
 /// Converts an auxiliary trace from column-major to row-major format.
@@ -68,7 +72,7 @@ where
 {
     let trace_len = trace.num_rows();
     let mut result =
-        RowMajorMatrix::new(vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
+        RowMajorMatrix::new(alloc::vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
 
     result.rows_mut().enumerate().for_each(|(row_idx, row)| {
         for col_idx in 0..AUX_TRACE_WIDTH {

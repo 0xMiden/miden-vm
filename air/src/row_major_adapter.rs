@@ -6,24 +6,33 @@ use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;
 
-use crate::trace::{ColMatrix, main_trace::MainTrace};
+use crate::{
+    trace::{ColMatrix, main_trace::MainTrace},
+    transpose,
+};
 
 /// Converts a row-major Felt matrix to column-major MainTrace format.
 ///
 /// This extracts columns from the row-major matrix and packages them as a MainTrace
 /// which is needed by the auxiliary trace builders in the processor crate.
+///
+/// Uses cache-blocked transposition to improve memory layout for better cache behavior
+/// in downstream operations.
 #[instrument(skip_all, fields(rows = matrix.height(), cols = matrix.width()))]
 pub fn row_major_to_main_trace(matrix: &RowMajorMatrix<Felt>) -> MainTrace {
     let num_cols = matrix.width();
     let num_rows = matrix.height();
 
+    // Use optimized cache-blocked transposition: row-major -> column-major
+    let col_major_data =
+        transpose::row_major_to_col_major(matrix.as_view().values, num_rows, num_cols);
+
+    // Split the column-major data into individual column vectors
     let mut columns = Vec::with_capacity(num_cols);
     for col_idx in 0..num_cols {
-        let mut column = Vec::with_capacity(num_rows);
-        for row_idx in 0..num_rows {
-            column.push(matrix.get(row_idx, col_idx).expect("valid indices"));
-        }
-        columns.push(column);
+        let start = col_idx * num_rows;
+        let end = start + num_rows;
+        columns.push(col_major_data[start..end].to_vec());
     }
 
     let col_matrix = ColMatrix::new(columns);
@@ -56,7 +65,7 @@ fn find_last_program_row(matrix: &RowMajorMatrix<Felt>) -> usize {
 /// Converts column-major extension field columns to row-major base field matrix.
 ///
 /// This function performs two operations:
-/// 1. Transposes from column-major to row-major layout
+/// 1. Transposes from column-major to row-major layout (using cache-blocked transposition)
 /// 2. Flattens extension field elements to base field representation
 ///
 /// The input is a vector of EF columns (each column is a Vec<EF>).
@@ -67,6 +76,9 @@ fn find_last_program_row(matrix: &RowMajorMatrix<Felt>) -> usize {
 /// - Input: [[A0, A1, A2], [B0, B1, B2]] where Ai, Bi are EF elements
 /// - Output: Row-major matrix with rows [A0_coeffs..., B0_coeffs...], [A1_coeffs..., B1_coeffs...],
 ///   etc.
+///
+/// Uses cache-blocked transposition to improve memory layout for better cache behavior
+/// in downstream operations.
 #[instrument(skip_all, fields(num_cols = aux_columns.len(), trace_len))]
 pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     aux_columns: Vec<Vec<EF>>,
@@ -80,14 +92,15 @@ pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
 
     let num_ef_cols = aux_columns.len();
 
-    // Convert column-major EF to row-major EF
-    // For each row, concatenate all EF values from that row across columns
-    let mut row_major_ef_data = Vec::with_capacity(trace_len * num_ef_cols);
-    for row_idx in 0..trace_len {
-        for col in &aux_columns {
-            row_major_ef_data.push(col[row_idx]);
-        }
+    // Flatten column-major data into a contiguous buffer for efficient transposition
+    let mut col_major_ef_data = Vec::with_capacity(trace_len * num_ef_cols);
+    for col in aux_columns {
+        col_major_ef_data.extend_from_slice(&col);
     }
+
+    // Use optimized cache-blocked transposition: column-major EF -> row-major EF
+    let row_major_ef_data =
+        transpose::col_major_to_row_major(&col_major_ef_data, trace_len, num_ef_cols);
 
     // Flatten row-major EF to row-major base field
     // flatten_to_base expands each EF element into its base field coefficients

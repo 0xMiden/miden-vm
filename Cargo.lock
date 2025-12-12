@@ -1320,6 +1320,7 @@ dependencies = [
  "p3-commit",
  "p3-field",
  "p3-matrix",
+ "p3-maybe-rayon",
  "p3-uni-stark",
  "p3-util",
  "proptest",
