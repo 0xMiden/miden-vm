@@ -79,8 +79,16 @@ where
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
-        HashFunction::Blake3_256 | HashFunction::Blake3_192 => {
-            let config = config::create_blake3_config();
+        HashFunction::Blake3_192 => {
+            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of 24-byte).
+            // Proper 192-bit support requires Plonky3 to implement CryptographicHasher<u8, [u8; 24]>
+            // for Blake3. Create an issue in 0xMiden/Plonky3 to add this support.
+            let config = config::create_blake3_256_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
+        },
+        HashFunction::Blake3_256 => {
+            let config = config::create_blake3_256_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
@@ -95,14 +103,14 @@ where
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
-            unimplemented!(
-                "Poseidon2 config not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_poseidon2_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpx256 => {
-            unimplemented!(
-                "RPX256 config not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_rpx_config();
+            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            bincode::serialize(&proof).expect("Failed to serialize proof")
         },
     };
 

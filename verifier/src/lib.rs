@@ -55,6 +55,7 @@ pub fn verify(
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> where
 {
+
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
@@ -68,11 +69,20 @@ pub fn verify(
     let air = ProcessorAir::new();
 
     match hash_fn {
-        HashFunction::Blake3_192 | HashFunction::Blake3_256 => {
-            let config = config::create_blake3_config();
+        HashFunction::Blake3_192 => {
+            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of 24-byte).
+            // Proper 192-bit support requires Plonky3 to implement CryptographicHasher<u8, [u8; 24]>
+            // for Blake3. Create an issue in 0xMiden/Plonky3 to add this support.
+            let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::InputNotFieldElement(88888))?;
-
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Blake3_256 => {
+            let config = config::create_blake3_256_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
             miden_prover_p3::verify(&config, &air, &proof, &public_values)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
@@ -91,14 +101,18 @@ pub fn verify(
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
-            unimplemented!(
-                "Poseidon2 verification not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_poseidon2_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpx256 => {
-            unimplemented!(
-                "RPX256 verification not yet implemented (requires miden-crypto Plonky3 migration)"
-            )
+            let config = config::create_rpx_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
     }?;
 
@@ -117,4 +131,6 @@ pub enum VerificationError {
     InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
+    #[error("verification error: {0}")]
+    DetailedError(alloc::string::String),
 }

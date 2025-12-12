@@ -7,12 +7,12 @@
 
 mod blake3;
 mod keccak;
+mod poseidon2;
 mod rpo;
+mod rpx;
 
-pub use blake3::create_blake3_config;
+pub use blake3::create_blake3_256_config;
 pub use keccak::create_keccak_config;
+pub use poseidon2::create_poseidon2_config;
 pub use rpo::create_rpo_config;
-
-// TODO: Implement these configs (requires additional miden-crypto support)
-// pub use rpx::create_rpx_config;
-// pub use poseidon2::create_poseidon2_config;
+pub use rpx::create_rpx_config;

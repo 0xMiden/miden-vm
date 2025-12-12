@@ -4,7 +4,7 @@
 //! hash function, which is Miden's native algebraic hash function.
 
 use miden_air::Felt;
-use miden_crypto::hash::algebraic_sponge::rescue::rpo::p3::{
+use miden_crypto::hash::algebraic_sponge::rescue::rpo::{
     RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256,
 };
 use p3_commit::ExtensionMmcs;
@@ -49,7 +49,7 @@ pub type StarkConfigRpo = StarkConfig<FriPcs, Challenge, Challenger>;
 /// - FRI with 8x blowup (log_blowup = 3)
 /// - 27 query repetitions for ~100 bits of security
 /// - 16 bits of proof-of-work
-/// - Octary folding (log_folding_factor = 3) - fold by 8 each round
+/// - Binary folding (log_folding_factor = 1) - fold by 2 each round
 ///
 /// # Advantages of RPO over Blake3
 ///
@@ -79,7 +79,7 @@ pub fn create_rpo_config() -> StarkConfigRpo {
         num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
         proof_of_work_bits: 16, // Grinding parameter for extra security
         mmcs: challenge_mmcs,
-        log_folding_factor: 3, // Octary folding (fold by 8 each round)
+        log_folding_factor: 1, // Binary folding (fold by 2 each round)
     };
 
     let pcs = FriPcs::new(dft, val_mmcs, fri_config);

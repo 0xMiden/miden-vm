@@ -81,7 +81,7 @@ pub fn create_keccak_config() -> StarkConfigKeccak {
         num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
         proof_of_work_bits: 16, // Grinding parameter for extra security
         mmcs: challenge_mmcs,
-        log_folding_factor: 3, // Octary folding (fold by 8 each round)
+        log_folding_factor: 1, // Binary folding (fold by 2 each round)
     };
 
     let pcs = FriPcs::new(dft, val_mmcs, fri_config);
