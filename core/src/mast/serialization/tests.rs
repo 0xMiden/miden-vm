@@ -655,162 +655,46 @@ fn mast_forest_serialize_deserialize_multiple_procedure_names() {
 // OPBATCH PRESERVATION TESTS
 // ================================================================================================
 
-/// Tests that OpBatch structure is exactly preserved during round-trip serialization.
-///
-/// Verifies that all OpBatch fields match after deserialization:
-/// - ops (including padding NOOPs)
-/// - indptr arrays
-/// - padding flags
-/// - groups arrays
-/// - num_groups
+/// Tests that OpBatch structure is preserved during round-trip serialization
 #[test]
-fn test_opbatch_roundtrip_exact_preservation() {
-    let mut forest = MastForest::new();
-
-    // Create operations that will result in specific batching
-    let operations = vec![
-        Operation::Add,
-        Operation::Mul,
-        Operation::Push(Felt::new(100)),
-        Operation::Push(Felt::new(200)),
-        Operation::Drop,
-        Operation::Dup0,
-    ];
-
-    let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    // Get original OpBatch structure
-    let original_node = forest[basic_block_id].unwrap_basic_block();
-    let original_batches = original_node.op_batches();
-
-    // Serialize and deserialize
-    let serialized = forest.to_bytes();
-    let deserialized_forest = MastForest::read_from_bytes(&serialized).unwrap();
-
-    // Get deserialized OpBatch structure
-    let deserialized_node = deserialized_forest[basic_block_id].unwrap_basic_block();
-    let deserialized_batches = deserialized_node.op_batches();
-
-    // Verify exact OpBatch structure match
-    assert_eq!(
-        original_batches.len(),
-        deserialized_batches.len(),
-        "Number of batches should match"
-    );
-
-    for (i, (orig_batch, deser_batch)) in
-        original_batches.iter().zip(deserialized_batches).enumerate()
-    {
-        // Check operations match (including padding NOOPs)
-        assert_eq!(orig_batch.ops(), deser_batch.ops(), "Batch {i}: Operations don't match");
-
-        // Check indptr arrays match
-        assert_eq!(
-            orig_batch.indptr(),
-            deser_batch.indptr(),
-            "Batch {i}: Indptr arrays don't match"
-        );
-
-        // Check padding metadata matches
-        assert_eq!(
-            orig_batch.padding(),
-            deser_batch.padding(),
-            "Batch {i}: Padding metadata doesn't match"
-        );
-
-        // Check groups array matches
-        assert_eq!(
-            orig_batch.groups(),
-            deser_batch.groups(),
-            "Batch {i}: Groups arrays don't match"
-        );
-
-        // Check num_groups matches
-        assert_eq!(
-            orig_batch.num_groups(),
-            deser_batch.num_groups(),
-            "Batch {i}: num_groups doesn't match"
-        );
-    }
-}
-
-/// Tests round-trip with multiple PUSH operations in the same group.
-///
-/// Verifies that immediate values are correctly stored and retrieved.
-#[test]
-fn test_multiple_push_immediates_roundtrip() {
+fn test_opbatch_roundtrip_preservation() {
     let mut forest = MastForest::new();
 
     let operations = vec![
+        Operation::Add,
         Operation::Push(Felt::new(100)),
         Operation::Push(Felt::new(200)),
-        Operation::Push(Felt::new(300)),
         Operation::Mul,
-        Operation::Add,
     ];
-
-    let block_id = BasicBlockNodeBuilder::new(operations.clone(), Vec::new())
-        .add_to_forest(&mut forest)
-        .unwrap();
-
-    let serialized = forest.to_bytes();
-    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
-
-    let original_node = forest[block_id].unwrap_basic_block();
-    let deserialized_node = deserialized[block_id].unwrap_basic_block();
-
-    // Verify operations match
-    let original_ops: Vec<_> = original_node.operations().collect();
-    let deserialized_ops: Vec<_> = deserialized_node.operations().collect();
-    assert_eq!(original_ops, deserialized_ops);
-
-    // Verify OpBatch structure is preserved
-    assert_eq!(
-        original_node.op_batches(),
-        deserialized_node.op_batches(),
-        "OpBatch structures should be identical"
-    );
-}
-
-/// Tests round-trip with operations spanning multiple batches (>72 operations).
-#[test]
-fn test_multi_batch_roundtrip() {
-    let mut forest = MastForest::new();
-
-    // Create 80 operations to span multiple batches
-    let mut operations = Vec::new();
-    for i in 0..80 {
-        operations.push(Operation::Push(Felt::new(i as u64)));
-    }
 
     let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
         .add_to_forest(&mut forest)
         .unwrap();
 
-    let serialized = forest.to_bytes();
-    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+    let original = forest[block_id].unwrap_basic_block();
+    let deserialized_forest = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
+    let deserialized = deserialized_forest[block_id].unwrap_basic_block();
 
-    let original_node = forest[block_id].unwrap_basic_block();
-    let deserialized_node = deserialized[block_id].unwrap_basic_block();
+    assert_eq!(original.op_batches(), deserialized.op_batches());
+}
 
-    // Verify multiple batches exist
-    assert!(
-        original_node.op_batches().len() > 1,
-        "Should have multiple batches for 80 operations"
-    );
+/// Tests OpBatch preservation with multiple batches (>72 operations)
+#[test]
+fn test_multi_batch_roundtrip() {
+    let mut forest = MastForest::new();
+    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new(i))).collect();
 
-    // Verify OpBatch structure is preserved
-    assert_eq!(
-        original_node.op_batches().len(),
-        deserialized_node.op_batches().len(),
-        "Number of batches should match"
-    );
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
 
-    for (orig, deser) in original_node.op_batches().iter().zip(deserialized_node.op_batches()) {
-        assert_eq!(orig, deser, "Each OpBatch should be identical");
-    }
+    let original = forest[block_id].unwrap_basic_block();
+    assert!(original.op_batches().len() > 1, "Should have multiple batches");
+
+    let deserialized_forest = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
+    let deserialized = deserialized_forest[block_id].unwrap_basic_block();
+
+    assert_eq!(original.op_batches(), deserialized.op_batches());
 }
 
 /// Tests that decorator indices remain correct after round-trip with padded operations.
@@ -1043,74 +927,38 @@ mod proptests {
                     "Node {:?} digest mismatch", node_id
                 );
 
-                // For basic blocks, verify OpBatch structure is preserved
-                if let MastNode::Block(original_block) = original && let MastNode::Block(deserialized_block) = deserialized_node {
-                        let orig_batches = original_block.op_batches();
-                        let deser_batches = deserialized_block.op_batches();
+                // For basic blocks, verify OpBatch structure and decorators are preserved
+                if let MastNode::Block(original_block) = original
+                    && let MastNode::Block(deserialized_block) = deserialized_node
+                {
+                    prop_assert_eq!(
+                        original_block.op_batches(),
+                        deserialized_block.op_batches(),
+                        "Node {:?}: OpBatch mismatch", node_id
+                    );
 
+                    let orig_decorators: Vec<_> =
+                        original_block.indexed_decorator_iter(&forest).collect();
+                    let deser_decorators: Vec<_> =
+                        deserialized_block.indexed_decorator_iter(&deserialized).collect();
+
+                    prop_assert_eq!(
+                        orig_decorators.len(),
+                        deser_decorators.len(),
+                        "Node {:?}: Decorator count mismatch", node_id
+                    );
+
+                    for ((orig_idx, orig_dec_id), (deser_idx, deser_dec_id)) in
+                        orig_decorators.iter().zip(&deser_decorators)
+                    {
+                        prop_assert_eq!(orig_idx, deser_idx, "Node {:?}: Decorator index mismatch", node_id);
                         prop_assert_eq!(
-                            orig_batches.len(),
-                            deser_batches.len(),
-                            "Node {:?}: Batch count mismatch", node_id
+                            forest.decorator_by_id(*orig_dec_id),
+                            deserialized.decorator_by_id(*deser_dec_id),
+                            "Node {:?}: Decorator content mismatch", node_id
                         );
-
-                        for (batch_idx, (orig_batch, deser_batch)) in
-                            orig_batches.iter().zip(deser_batches).enumerate()
-                        {
-                            prop_assert_eq!(
-                                orig_batch.ops(),
-                                deser_batch.ops(),
-                                "Node {:?} Batch {}: Operations mismatch", node_id, batch_idx
-                            );
-                            prop_assert_eq!(
-                                orig_batch.indptr(),
-                                deser_batch.indptr(),
-                                "Node {:?} Batch {}: Indptr mismatch", node_id, batch_idx
-                            );
-                            prop_assert_eq!(
-                                orig_batch.padding(),
-                                deser_batch.padding(),
-                                "Node {:?} Batch {}: Padding mismatch", node_id, batch_idx
-                            );
-                            prop_assert_eq!(
-                                orig_batch.groups(),
-                                deser_batch.groups(),
-                                "Node {:?} Batch {}: Groups mismatch", node_id, batch_idx
-                            );
-                            prop_assert_eq!(
-                                orig_batch.num_groups(),
-                                deser_batch.num_groups(),
-                                "Node {:?} Batch {}: num_groups mismatch", node_id, batch_idx
-                            );
-                        }
-
-                        // Verify decorators are preserved
-                        let orig_decorators: Vec<_> =
-                            original_block.indexed_decorator_iter(&forest).collect();
-                        let deser_decorators: Vec<_> =
-                            deserialized_block.indexed_decorator_iter(&deserialized).collect();
-
-                        prop_assert_eq!(
-                            orig_decorators.len(),
-                            deser_decorators.len(),
-                            "Node {:?}: Decorator count mismatch", node_id
-                        );
-
-                        for ((orig_idx, orig_dec_id), (deser_idx, deser_dec_id)) in
-                            orig_decorators.iter().zip(&deser_decorators)
-                        {
-                            prop_assert_eq!(
-                                orig_idx,
-                                deser_idx,
-                                "Node {:?}: Decorator index mismatch", node_id
-                            );
-                            prop_assert_eq!(
-                                forest.decorator_by_id(*orig_dec_id),
-                                deserialized.decorator_by_id(*deser_dec_id),
-                                "Node {:?}: Decorator content mismatch", node_id
-                            );
-                        }
                     }
+                }
 
             }
         }
