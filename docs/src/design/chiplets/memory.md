@@ -214,7 +214,7 @@ $$
 - $f_{mem\_fr}$ is set to 1 when the next row is the first row of the memory chiplet.
 
 $$
-f_{mem\_fr} = (1 - s_0) \cdot f_{mem}' \text{ | degree} = 4
+f_{mem\_fr} = (1 - s_1) \cdot f_{mem}' \text{ | degree} = 4
 $$
 
 To simplify description of constraints, we'll define two variables $n_0$ and $n_1$ as follows:
@@ -268,7 +268,7 @@ $$
 To enforce the values of context ID, word address, and clock cycle grow monotonically as described in the previous section, we define the following constraint.
 
 $$
-f_{mem\_nl} \cdot \left(n_0 \cdot \Delta ctx + (1 - n_0) \cdot (n_1 \cdot \Delta a + (1 - n_1) \cdot \Delta clk) \right) - (2^{16} \cdot d_1' + d_0') = 0 \text{ | degree} = 8
+f_{mem\_nl} \cdot \left(n_0 \cdot \Delta ctx + (1 - n_0) \cdot (n_1 \cdot \Delta a + (1 - n_1) \cdot \Delta clk) - (2^{16} \cdot d_1' + d_0') \right) = 0 \text{ | degree} = 8
 $$
 
 In addition to this constraint, we also need to make sure that the values in registers $d_0$ and $d_1$ are less than $2^{16}$, and this can be done with [range checks](../range.md).
@@ -292,17 +292,17 @@ Finally, we need to constrain the `v0, v1, v2, v3` columns. We will define a few
 
 $$
 \begin{align*}
-f_0 &= (1 - idx1) \cdot (1 - idx0) \text{ | degree} = 2
-f_1 &= (1 - idx1) \cdot idx0 \text{ | degree} = 2
-f_2 &= idx1 \cdot (1 - idx0) \text{ | degree} = 2
-f_3 &= idx1 \cdot idx0 \text{ | degree} = 2
+f_0 &= (1 - idx1') \cdot (1 - idx0') \text{ | degree} = 2 \\
+f_1 &= (1 - idx1') \cdot idx0' \text{ | degree} = 2 \\
+f_2 &= idx1' \cdot (1 - idx0') \text{ | degree} = 2 \\
+f_3 &= idx1' \cdot idx0' \text{ | degree} = 2
 \end{align*}
 $$
 
-The flag $f_i$ is set to $1$ when $v_i$ is being accessed, and $0$ otherwise. Next, for $0 \leq i < 4$,
+The flag $f_i$ is set to $1$ when $v_i'$ is being accessed, and $0$ otherwise. Next, for $0 \leq i < 4$,
 
 $$
-c_i = rw' + (1 - rw') \cdot (1 - ew') \cdot (1 - f_i') \text{ | degree} = 4
+c_i = rw' + (1 - rw') \cdot (1 - ew') \cdot (1 - f_i) \text{ | degree} = 4
 $$
 
 which is set to $1$ when $v_i$ is *not* written to, and $0$ otherwise.
