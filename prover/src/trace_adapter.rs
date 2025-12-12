@@ -24,13 +24,6 @@ use tracing::instrument;
 /// # Returns
 ///
 /// A `RowMajorMatrix` containing the same trace data in row-major format.
-///
-/// # Implementation
-///
-/// Uses cache-blocked transposition to improve memory layout:
-/// - Cache-oblivious blocked transposition (64×64 blocks)
-/// - Improved spatial locality for downstream operations
-/// - Better cache behavior throughout the proving pipeline
 #[instrument(skip_all, fields(rows = trace.get_trace_len(), cols = TRACE_WIDTH))]
 pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let trace_len = trace.get_trace_len();
@@ -75,19 +68,10 @@ where
         RowMajorMatrix::new(alloc::vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
 
     result.rows_mut().enumerate().for_each(|(row_idx, row)| {
-        for col_idx in 0..AUX_TRACE_WIDTH {
-            row[col_idx] = trace.get(col_idx, row_idx);
+        for (col_idx, elem) in row.iter_mut().enumerate() {
+            *elem = trace.get(col_idx, row_idx);
         }
     });
 
     result
-}
-
-#[cfg(test)]
-mod tests {
-    // TODO: Add tests for trace conversion
-    // - Test round-trip conversion
-    // - Test with various trace sizes
-    // - Test with empty traces
-    // - Verify element-by-element correctness
 }

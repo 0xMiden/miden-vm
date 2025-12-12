@@ -112,7 +112,6 @@ where
 /// * A valid value could not be generated after 1000 tries.
 pub fn prng_array<R: Debug + Default, const N: usize>(seed: [u8; 32]) -> [R; N]
 where
-    R: Default,
     StandardUniform: Distribution<R>,
 {
     let elements = prng_vector(seed, N);

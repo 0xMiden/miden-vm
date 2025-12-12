@@ -52,9 +52,6 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            //.map(Felt::try_from)
-            // .collect::<Result<Vec<Felt>, _>>();
-            //.map_err(OutputError::InvalidStackElement)?;
             .map(Felt::from_u64)
             .collect::<Vec<Felt>>();
 
