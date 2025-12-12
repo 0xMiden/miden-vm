@@ -1,3 +1,14 @@
+//! Basic block serialization format.
+//!
+//! ## Wire Format
+//!
+//! - Padded operations (variable size)
+//! - Batch count (4 bytes)
+//! - Indptr array per batch (9 bytes each)
+//! - Padding flags per batch (1 byte each, bit-packed)
+//!
+//! **Total**: `ops_size + 4 + (10 * num_batches)` bytes
+
 use alloc::vec::Vec;
 
 use super::NodeDataOffset;
