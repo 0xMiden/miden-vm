@@ -6,25 +6,41 @@ use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
 
 #[test]
 fn test_issue_2456_call_with_push_before() {
-    let assembler = Assembler::default();
-
-    // This program should trigger the "DecoratorId out of bounds" issue
-    let source = "
-        proc foo
-            push.1
-            push.2
+    use miden_assembly::diagnostics::NamedSource;
+    use std::sync::Arc;
+    use miden_assembly::DefaultSourceManager;
+    use miden_core_lib::CoreLibrary;
+    
+    let test_module_source = "
+        pub proc foo
+            push.3.4
             add
-            drop
-        end
-
-        begin
-            push.1.2
-            call.foo
-            dropw dropw dropw dropw
+            swapw dropw
         end
     ";
 
-    let program = assembler.assemble_program(source).expect("Compilation should succeed");
+    let source = NamedSource::new("test::module_1", test_module_source);
+    let source_manager = Arc::new(DefaultSourceManager::default());
+    let mut assembler = Assembler::new(source_manager)            
+        .with_dynamic_library(CoreLibrary::default())
+        .expect("failed to load std-lib");
+
+    let library = assembler.clone().assemble_library([source]).unwrap();
+
+    // This program should trigger the "DecoratorId out of bounds" issue
+    let source = "
+        use test::module_1
+        use miden::core::sys
+
+        begin
+            push.1.2
+            call.module_1::foo
+            exec.sys::truncate_stack
+        end
+    ";
+
+    assembler.link_static_library(library).unwrap();
+    let program = assembler.assemble_program(source).unwrap();
 
     // Execute the program - this is where the DecoratorId error might occur
     let stack_inputs = StackInputs::default();
