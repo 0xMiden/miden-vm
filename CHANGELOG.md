@@ -13,6 +13,8 @@
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
 - Added new `pad_and_hash_elements` procedure to the `std::crypto::hashes::rpo` module ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
 - Added padding option for the `adv.push_mapvaln` instruction ([#2398](https://github.com/0xMiden/miden-vm/pull/2398)).
+- Added new `FastProcessor::step()` method that executes a single clock cycle ([#2440](https://github.com/0xMiden/miden-vm/pull/2440))
+- Fix issue where calling procesures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
 
 #### Changes
 
