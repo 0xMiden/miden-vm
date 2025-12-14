@@ -40,13 +40,14 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, string::{String, ToString}, sync::Arc, vec::Vec};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
+use crate::utils::{ByteWriter, Serializable};
 use crate::{LexicographicWord, Word};
 
 mod decorator_storage;
@@ -352,6 +353,97 @@ impl DebugInfo {
     #[cfg(test)]
     pub(crate) fn op_decorator_storage(&self) -> &OpToDecoratorIds {
         &self.op_decorator_storage
+    }
+}
+
+impl Serializable for DebugInfo {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        use crate::mast::serialization::decorator::DecoratorDataBuilder;
+
+        // 1. Serialize decorators (data, string table, infos)
+        let mut decorator_data_builder = DecoratorDataBuilder::new();
+        for decorator in self.decorators.iter() {
+            decorator_data_builder.add_decorator(decorator);
+        }
+        let (decorator_data, decorator_infos, string_table) = decorator_data_builder.finalize();
+
+        decorator_data.write_into(target);
+        string_table.write_into(target);
+
+        // Write decorator count and infos
+        target.write_usize(decorator_infos.len());
+        for decorator_info in decorator_infos {
+            decorator_info.write_into(target);
+        }
+
+        // 2. Serialize error codes
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> = self
+            .error_codes
+            .iter()
+            .map(|(k, v)| (*k, v.to_string()))
+            .collect();
+        error_codes.write_into(target);
+
+        // 3. Serialize OpToDecoratorIds CSR (dense representation)
+        // Dense representation: serialize indptr arrays as-is (no sparse encoding).
+        // Analysis shows sparse saves <1KB even with 90% empty nodes, not worth complexity.
+        // See measurement: https://gist.github.com/huitseeker/7379e2eecffd7020ae577e986057a400
+
+        // decorator_ids as Vec<u32>
+        let decorator_ids_u32: Vec<u32> = self
+            .op_decorator_storage
+            .decorator_ids
+            .iter()
+            .map(|id| u32::from(*id))
+            .collect();
+        decorator_ids_u32.write_into(target);
+
+        // op_indptr_for_dec_ids
+        self.op_decorator_storage.op_indptr_for_dec_ids.write_into(target);
+
+        // node_indptr_for_op_idx as Vec<usize>
+        let node_indptr_vec: Vec<usize> = self
+            .op_decorator_storage
+            .node_indptr_for_op_idx
+            .as_slice()
+            .to_vec();
+        node_indptr_vec.write_into(target);
+
+        // 4. Serialize NodeToDecoratorIds CSR (dense representation)
+
+        // before_enter_decorators as Vec<u32>
+        let before_decorators_u32: Vec<u32> = self
+            .node_decorator_storage
+            .before_enter_decorators
+            .iter()
+            .map(|id| u32::from(*id))
+            .collect();
+        before_decorators_u32.write_into(target);
+
+        // after_exit_decorators as Vec<u32>
+        let after_decorators_u32: Vec<u32> = self
+            .node_decorator_storage
+            .after_exit_decorators
+            .iter()
+            .map(|id| u32::from(*id))
+            .collect();
+        after_decorators_u32.write_into(target);
+
+        // node_indptr_for_before as Vec<usize>
+        let before_indptr_vec: Vec<usize> = self
+            .node_decorator_storage
+            .node_indptr_for_before
+            .as_slice()
+            .to_vec();
+        before_indptr_vec.write_into(target);
+
+        // node_indptr_for_after as Vec<usize>
+        let after_indptr_vec: Vec<usize> = self
+            .node_decorator_storage
+            .node_indptr_for_after
+            .as_slice()
+            .to_vec();
+        after_indptr_vec.write_into(target);
     }
 }
 

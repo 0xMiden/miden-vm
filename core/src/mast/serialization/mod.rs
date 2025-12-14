@@ -58,7 +58,7 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-mod decorator;
+pub(crate) mod decorator;
 
 mod info;
 use info::MastNodeInfo;
