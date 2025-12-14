@@ -13,9 +13,9 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex, MainTraceCols};
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadFelt,
     StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
@@ -25,11 +25,10 @@ pub use miden_core::{
     utils::DeserializationError,
 };
 use miden_core::{
-    Decorator, FieldElement,
+    Decorator,
     mast::{BasicBlockNode, ExternalNode, OpBatch},
 };
 use miden_debug_types::SourceSpan;
-pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
 
@@ -93,18 +92,17 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
-    pub use winter_prover::math::fft;
+    pub use miden_core::{Felt};
 }
 
 pub mod crypto {
     pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
+        hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,
         },
-        random::{RandomCoin, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
+        random::{ RpoRandomCoin, RpxRandomCoin},
     };
 }
 

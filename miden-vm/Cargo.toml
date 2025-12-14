@@ -52,7 +52,6 @@ path = "tests/integration/main.rs"
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
-metal = ["miden-prover/metal", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -68,7 +67,7 @@ std = [
 # maximal performance.
 no_err_ctx = ["miden-processor/no_err_ctx"]
 # For internal use, not meant to be used by users
-internal = ["dep:hex", "serde", "std"]
+internal = ["dep:hex", "serde"]
 
 [dependencies]
 # Miden dependencies
@@ -101,6 +100,5 @@ num-bigint = { version = "0.4" }
 predicates = { version = "3.1" }
 pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-winter-fri.workspace = true
 rand_chacha = { version = "0.9" }
 walkdir = { version = "2.5" }

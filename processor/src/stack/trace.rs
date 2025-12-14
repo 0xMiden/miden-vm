@@ -4,7 +4,7 @@ use miden_air::{
     RowIndex,
     trace::stack::{H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use miden_core::{FieldElement, stack::MIN_STACK_DEPTH};
+use miden_core::{ PrimeCharacteristicRing, stack::MIN_STACK_DEPTH};
 use miden_utils_indexing::IndexVec;
 
 // TRACE LENGTH TRAIT EXTENSION

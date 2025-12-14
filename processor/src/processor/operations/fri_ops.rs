@@ -1,5 +1,5 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{ExtensionOf, Felt, FieldElement, ONE, QuadFelt, StarkField, ZERO};
+use miden_core::{BasedVectorSpace, Felt, Field, PrimeCharacteristicRing, ONE, QuadFelt, ZERO};
 
 use crate::{
     ExecutionError,
@@ -23,13 +23,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let prev_value = {
         let pe1 = processor.stack().get(11);
         let pe0 = processor.stack().get(12);
-        QuadFelt::new(pe0, pe1)
+        QuadFelt::new([pe0, pe1])
     };
     // the verifier challenge for the current layer
     let alpha = {
         let a1 = processor.stack().get(13);
         let a0 = processor.stack().get(14);
-        QuadFelt::new(a0, a1)
+        QuadFelt::new([a0, a1])
     };
     // the memory address of the current layer
     let layer_ptr = processor.stack().get(15);
@@ -47,16 +47,16 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
     let x = poe * f_tau * DOMAIN_OFFSET;
-    let x_inv = x.inv();
+    let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
     let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
 
     // --- write the relevant values into the next state of the stack -----
-    let tmp0 = tmp0.to_base_elements();
-    let tmp1 = tmp1.to_base_elements();
+    let tmp0 = tmp0.as_basis_coefficients_slice();
+    let tmp1 = tmp1.as_basis_coefficients_slice();
     let ds = get_domain_segment_flags(d_seg);
-    let folded_value = folded_value.to_base_elements();
+    let folded_value = folded_value.as_basis_coefficients_slice();
 
     let poe2 = poe.square();
     let poe4 = poe2.square();
@@ -90,10 +90,10 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
     let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
 
     [
-        QuadFelt::new(v0, v1),
-        QuadFelt::new(v2, v3),
-        QuadFelt::new(v4, v5),
-        QuadFelt::new(v6, v7),
+        QuadFelt::new([v0, v1]),
+        QuadFelt::new([v2, v3]),
+        QuadFelt::new([v4, v5]),
+        QuadFelt::new([v6, v7]),
     ]
 }
 
@@ -136,7 +136,7 @@ fn get_domain_segment_flags(domain_segment: usize) -> [Felt; 4] {
 
 /// Computes 2 evaluation points needed for [fold4] function.
 fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFelt) {
-    let ev = alpha.mul_base(x_inv);
+    let ev = alpha * (x_inv);
     let es = ev.square();
     (ev, es)
 }
@@ -147,7 +147,7 @@ fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFel
 /// - es = (alpha / x)^2
 fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFelt, QuadFelt) {
     let tmp0 = fold2(values[0], values[2], ev);
-    let tmp1 = fold2(values[1], values[3], ev.mul_base(TAU_INV));
+    let tmp1 = fold2(values[1], values[3], ev * (TAU_INV));
     let folded_value = fold2(tmp0, tmp1, es);
     (folded_value, tmp0, tmp1)
 }
@@ -155,5 +155,5 @@ fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFe
 /// Performs folding by a factor of 2. ep is a value computed based on x and verifier challenge
 /// alpha.
 fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
-    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)).mul_base(TWO_INV)
+    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * (TWO_INV)
 }

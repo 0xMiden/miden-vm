@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{Word, precompile::PrecompileTranscriptState};
 
 use super::super::{
-    CHIPLETS_OFFSET, EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree,
+    CHIPLETS_OFFSET, EvaluationFrame, Felt, TransitionConstraintDegree,
 };
 use crate::{
     Assertion, AuxRandElements,
@@ -50,25 +50,25 @@ pub fn get_aux_assertions_first_step<E>(
     aux_rand_elements: &AuxRandElements<E>,
     pc_transcript_state: PrecompileTranscriptState,
 ) where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let reduced_kernel_digests = reduce_kernel_digests(kernel_digests, aux_rand_elements);
     result.push(Assertion::single(
         CHIPLETS_BUS_AUX_TRACE_OFFSET,
         0,
-        reduced_kernel_digests.inv(),
+        reduced_kernel_digests.inverse(),
     ));
 
     // Anchor hasher vtable init against PI-provided transcript state (empty/final).
     let alphas = aux_rand_elements.rand_elements();
     let state: [Felt; 4] = pc_transcript_state.into();
     let label: Felt = Felt::from(LOG_PRECOMPILE_LABEL);
-    let empty_msg = alphas[0] + alphas[1].mul_base(label);
+    let empty_msg = alphas[0] + alphas[1] * (label);
     let mut final_msg = empty_msg;
     for (i, c) in state.iter().enumerate() {
-        final_msg += alphas[2 + i].mul_base(*c);
+        final_msg += alphas[2 + i] * (*c);
     }
-    let vtable_init_ratio = empty_msg * final_msg.inv();
+    let vtable_init_ratio = empty_msg * final_msg.inverse();
     result.push(Assertion::single(P1_COL_IDX, 0, vtable_init_ratio));
 }
 
@@ -100,7 +100,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the chiplets module and all chiplet components.
-pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -142,7 +142,7 @@ pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
 
 /// Constraint evaluation function to enforce that the Chiplets module's selector columns must be
 /// binary during the portion of the trace when they're being used as selectors.
-fn enforce_selectors<E: FieldElement>(frame: &EvaluationFrame<E>, result: &mut [E]) {
+fn enforce_selectors<E: >(frame: &EvaluationFrame<E>, result: &mut [E]) {
     // --- Selector flags must be binary ----------------------------------------------------------
 
     // Selector flag s0 must be binary for the entire trace.
@@ -171,7 +171,7 @@ fn enforce_selectors<E: FieldElement>(frame: &EvaluationFrame<E>, result: &mut [
 
 /// Trait to allow easy access to column values and intermediate variables used in constraint
 /// calculations for the Chiplets module and its Hasher, Bitwise, and Memory chiplets.
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Column accessors -----------------------------------------------------------------------
 
     /// Returns the current value of the specified selector column. It assumes that the index is a
@@ -207,7 +207,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn memory_flag_first_row(&self) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Column accessors -----------------------------------------------------------------------
 
     fn s(&self, idx: usize) -> E {
@@ -256,12 +256,12 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
 
 /// Trait to allow other processors to easily access the chiplet values they need for constraint
 /// calculations.
-pub trait ChipletsFrameExt<E: FieldElement> {
+pub trait ChipletsFrameExt<E: > {
     /// Flag to indicate whether the frame is in the memory chiplet.
     fn chiplets_memory_flag(&self) -> E;
 }
 
-impl<E: FieldElement> ChipletsFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > ChipletsFrameExt<E> for &EvaluationFrame<E> {
     #[inline(always)]
     fn chiplets_memory_flag(&self) -> E {
         self.memory_flag()
@@ -274,7 +274,7 @@ impl<E: FieldElement> ChipletsFrameExt<E> for &EvaluationFrame<E> {
 /// Reduces kernel procedures digests using auxiliary randomness.
 fn reduce_kernel_digests<E>(kernel_digests: &[Word], aux_rand_elements: &AuxRandElements<E>) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let alphas = aux_rand_elements.rand_elements();
     kernel_digests.iter().fold(E::ONE, |acc, digest: &Word| {
@@ -284,7 +284,7 @@ where
             .iter()
             .skip(2)
             .zip(digest.iter())
-            .map(|(alpha, coef)| alpha.mul_base(*coef))
+            .map(|(alpha, coef)| alpha * (*coef))
             .fold(affine_term, |acc, term| acc + term);
 
         acc * cur

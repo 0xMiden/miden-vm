@@ -24,7 +24,7 @@ use winter_prover::{
 };
 
 use crate::{
-    ExecutionProver, ExecutionTrace, Felt, FieldElement, ProcessorAir, PublicInputs,
+    ExecutionProver, ExecutionTrace, Felt, ProcessorAir, PublicInputs,
     WinterProofOptions,
     crypto::{RandomCoin, Rpo256},
     math::fft,
@@ -80,10 +80,10 @@ where
     type VC = MerkleTree<Self::HashFn>;
     type HashFn = H;
     type RandomCoin = R;
-    type TraceLde<E: FieldElement<BaseField = Felt>> = MetalTraceLde<E, H>;
-    type ConstraintEvaluator<'a, E: FieldElement<BaseField = Felt>> =
+    type TraceLde<E: ExtensionField<Felt>> = MetalTraceLde<E, H>;
+    type ConstraintEvaluator<'a, E: ExtensionField<Felt>> =
         DefaultConstraintEvaluator<'a, ProcessorAir, E>;
-    type ConstraintCommitment<E: FieldElement<BaseField = Felt>> = MetalConstraintCommitment<E, H>;
+    type ConstraintCommitment<E: ExtensionField<Felt>> = MetalConstraintCommitment<E, H>;
 
     fn get_pub_inputs(&self, trace: &ExecutionTrace) -> PublicInputs {
         self.execution_prover.get_pub_inputs(trace)
@@ -94,7 +94,7 @@ where
     }
 
     #[maybe_async]
-    fn build_aux_trace<E: FieldElement<BaseField = Self::BaseField>>(
+    fn build_aux_trace<E: <BaseField = Self::BaseField>>(
         &self,
         trace: &Self::Trace,
         aux_rand_elements: &AuxRandElements<E>,
@@ -103,7 +103,7 @@ where
     }
 
     #[maybe_async]
-    fn new_trace_lde<E: FieldElement<BaseField = Felt>>(
+    fn new_trace_lde<E: ExtensionField<Felt>>(
         &self,
         trace_info: &TraceInfo,
         main_trace: &ColMatrix<Felt>,
@@ -114,7 +114,7 @@ where
     }
 
     #[maybe_async]
-    fn new_evaluator<'a, E: FieldElement<BaseField = Felt>>(
+    fn new_evaluator<'a, E: ExtensionField<Felt>>(
         &self,
         air: &'a ProcessorAir,
         aux_rand_elements: Option<AuxRandElements<E>>,
@@ -128,7 +128,7 @@ where
     }
 
     #[maybe_async]
-    fn build_constraint_commitment<E: FieldElement<BaseField = Felt>>(
+    fn build_constraint_commitment<E: ExtensionField<Felt>>(
         &self,
         composition_poly_trace: CompositionPolyTrace<E>,
         num_constraint_composition_columns: usize,
@@ -155,7 +155,7 @@ where
 ///   will always be elements in the base field (even when an extension field is used).
 /// - Auxiliary segments: a list of 0 or more segments for traces generated after the prover commits
 ///   to the first trace segment. Currently, at most 1 auxiliary segment is possible.
-pub struct MetalTraceLde<E: FieldElement<BaseField = Felt>, H: Hasher> {
+pub struct MetalTraceLde<E: ExtensionField<Felt>, H: Hasher> {
     // low-degree extension of the main segment of the trace
     main_segment_lde: RowMatrix<Felt>,
     // commitment to the main segment of the trace
@@ -171,7 +171,7 @@ pub struct MetalTraceLde<E: FieldElement<BaseField = Felt>, H: Hasher> {
 
 impl<E, H, D> MetalTraceLde<E, H>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     H: Hasher<Digest = D> + ElementHasher<BaseField = E::BaseField>,
     D: Digest + for<'a> From<&'a [Felt; DIGEST_SIZE]>,
 {
@@ -235,7 +235,7 @@ where
 
 impl<E, H, D> TraceLde<E> for MetalTraceLde<E, H>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     H: Hasher<Digest = D> + ElementHasher<BaseField = E::BaseField>,
     D: Digest + for<'a> From<&'a [Felt; DIGEST_SIZE]>,
 {
@@ -375,7 +375,7 @@ fn build_trace_commitment<E, H, D>(
     hash_fn: HashFn,
 ) -> (RowMatrix<E>, MerkleTree<H>, ColMatrix<E>)
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     H: Hasher<Digest = D> + ElementHasher<BaseField = E::BaseField>,
     D: Digest + for<'a> From<&'a [Felt; DIGEST_SIZE]>,
 {
@@ -424,14 +424,14 @@ where
 // CONSTRAINT COMMITMENT (METAL)
 // ================================================================================================
 
-pub struct MetalConstraintCommitment<E: FieldElement, H: ElementHasher<BaseField = E::BaseField>> {
+pub struct MetalConstraintCommitment<E: , H: ElementHasher<BaseField = E::BaseField>> {
     evaluations: RowMatrix<E>,
     vector_commitment: MerkleTree<H>,
 }
 
 impl<E, H, D> MetalConstraintCommitment<E, H>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     H: Hasher<Digest = D> + ElementHasher<BaseField = E::BaseField>,
     D: Digest + for<'a> From<&'a [Felt; DIGEST_SIZE]>,
 {
@@ -469,7 +469,7 @@ where
 
 impl<E, H> ConstraintCommitment<E> for MetalConstraintCommitment<E, H>
 where
-    E: FieldElement,
+    E: ,
     H: ElementHasher<BaseField = E::BaseField> + core::marker::Sync,
 {
     type HashFn = H;
@@ -531,7 +531,7 @@ fn build_constraint_commitment<E, H, D>(
     hash_fn: HashFn,
 ) -> (RowMatrix<E>, MerkleTree<H>, CompositionPoly<E>)
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     H: Hasher<Digest = D> + ElementHasher<BaseField = E::BaseField>,
     D: Digest + for<'a> From<&'a [Felt; DIGEST_SIZE]>,
 {
@@ -555,7 +555,7 @@ where
     // build constraint evaluation commitment
     let now = Instant::now();
     let lde_domain_size = domain.lde_domain_size();
-    let num_base_columns = composition_poly.num_columns() * <E as FieldElement>::EXTENSION_DEGREE;
+    let num_base_columns = composition_poly.num_columns() * <E as >::EXTENSION_DEGREE;
 
     let mut row_hasher = RowHasher::new(lde_domain_size, num_base_columns, hash_fn);
     for segment in segments.iter() {
@@ -583,7 +583,7 @@ where
 
 struct SegmentGenerator<'a, E, I, const N: usize>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     I: IntoIterator<Item = Vec<E>>,
 {
     poly_iter: I::IntoIter,
@@ -595,7 +595,7 @@ where
 
 impl<'a, E, I, const N: usize> SegmentGenerator<'a, E, I, N>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     I: IntoIterator<Item = Vec<E>>,
 {
     fn new(polys: I, domain: &'a StarkDomain<Felt>) -> Self {
@@ -664,7 +664,7 @@ fn build_segment_queries<E, H, V>(
     positions: &[usize],
 ) -> Queries
 where
-    E: FieldElement,
+    E: ,
     H: ElementHasher<BaseField = E::BaseField>,
     V: VectorCommitment<H>,
 {
@@ -683,12 +683,12 @@ where
 
 struct SegmentIterator<'a, 'b, E, I, const N: usize>(&'b mut SegmentGenerator<'a, E, I, N>)
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     I: IntoIterator<Item = Vec<E>>;
 
 impl<E, I, const N: usize> Iterator for SegmentIterator<'_, '_, E, I, N>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
     I: IntoIterator<Item = Vec<E>>,
 {
     type Item = Segment<Felt, N>;
@@ -704,7 +704,7 @@ fn build_aligned_segments<E, const N: usize>(
     offsets: &[Felt],
 ) -> Vec<Segment<Felt, N>>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     assert!(N > 0, "batch size N must be greater than zero");
     debug_assert_eq!(polys.num_rows(), twiddles.len() * 2);
@@ -728,7 +728,7 @@ fn build_aligned_segment<E, const N: usize>(
     twiddles: &[Felt],
 ) -> Segment<Felt, N>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let poly_size = polys.num_rows();
     let domain_size = offsets.len();

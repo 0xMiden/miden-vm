@@ -58,8 +58,6 @@ rstest = { version = "0.26" }
 serde_json.workspace = true
 sha2 = { version = "0.10" }
 sha3 = { version = "0.10" }
-winter-air.workspace = true
-winter-fri.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true

@@ -2,8 +2,12 @@ use alloc::vec::Vec;
 use core::{
     fmt::Debug,
     ops::{Bound, Range},
+    slice,
 };
 
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
+use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -13,14 +17,26 @@ pub use miden_crypto::{
         uninit_vector,
     },
 };
-#[cfg(feature = "std")]
-pub use winter_utils::ReadAdapter;
-pub use winter_utils::group_slice_elements;
 
 use crate::{Felt, Word};
 
 pub mod math {
-    pub use winter_math::batch_inversion;
+    pub use miden_crypto::batch_multiplicative_inverse as batch_inversion;
+}
+
+// UTILITY FUNCTIONS (from winter-utils v0.13.1)
+// ================================================================================================
+
+/// Transmutes a slice of `n` elements into a slice of `n` / `N` elements,
+/// each of which is an array of `N` elements.
+///
+/// # Panics
+/// Panics if `n` is not divisible by `N`.
+pub fn group_slice_elements<T, const N: usize>(source: &[T]) -> &[[T; N]] {
+    assert_eq!(source.len() % N, 0, "source length must be divisible by {N}");
+    let p = source.as_ptr();
+    let len = source.len() / N;
+    unsafe { slice::from_raw_parts(p as *const [T; N], len) }
 }
 
 // TO ELEMENTS
@@ -32,13 +48,13 @@ pub trait ToElements {
 
 impl<const N: usize> ToElements for [u64; N] {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
 impl ToElements for Vec<u64> {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
@@ -147,3 +163,24 @@ fn debug_assert_is_checked() {
 // ================================================================================================
 
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+
+pub fn serial_batch_inversion<E: ExtensionField<Felt>>(values: &[E], result: &mut [E]) {
+    let mut last = E::ONE;
+    for (result, &value) in result.iter_mut().zip(values.iter()) {
+        *result = last;
+        if value != E::ZERO {
+            last *= value;
+        }
+    }
+
+    last = last.inverse();
+
+    for i in (0..values.len()).rev() {
+        if values[i] == E::ZERO {
+            result[i] = E::ZERO;
+        } else {
+            result[i] *= last;
+            last *= values[i];
+        }
+    }
+}

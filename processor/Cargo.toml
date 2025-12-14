@@ -19,13 +19,12 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std", "winter-prover/concurrent"]
+concurrent = ["std"]
 default = ["std"]
 std = [
     "miden-core/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
-    "winter-prover/std",
     "thiserror/std",
 ]
 testing = ["miden-air/testing"]
@@ -49,7 +48,6 @@ rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
-winter-prover.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
@@ -58,5 +56,3 @@ miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { version = "1.4" }
 rstest = { version = "0.26" }
-winter-fri.workspace = true
-winter-utils.workspace = true

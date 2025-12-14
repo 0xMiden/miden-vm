@@ -1,4 +1,4 @@
-//! Precompile framework for deferred verification in the Miden VM.
+//! Precompile frameork for deferred verification in the Miden VM.
 //!
 //! This module provides the infrastructure for executing computationally expensive operations
 //! (precompiles) during VM execution while deferring their verification until proof generation.

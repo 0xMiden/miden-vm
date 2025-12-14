@@ -20,7 +20,7 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, FieldElement, ONE, StackInputs, StackOutputs, StarkField, WORD_SIZE, Word,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word,
     ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
@@ -46,7 +46,7 @@ use winter_prover::Trace;
 
 pub mod math {
     pub use winter_prover::math::{
-        ExtensionOf, FieldElement, StarkField, ToElements, fft, fields::QuadExtension, polynom,
+        ExtensionOf, ToElements, fft, fields::QuadExtension, polynom,
     };
 }
 

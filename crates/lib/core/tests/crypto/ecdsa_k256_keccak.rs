@@ -6,7 +6,7 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    EventName, Felt, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable},
 };

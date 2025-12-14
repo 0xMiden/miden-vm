@@ -7,7 +7,7 @@ use miden_air::{
 };
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
     HASH_CYCLE_LEN, NUM_RAND_ROWS, ONE, Operation, Trace, build_trace_from_ops, rand_array,
     rand_value,
 };
@@ -73,7 +73,7 @@ fn b_chip_trace_bitwise() {
         Felt::from(b),
         Felt::from(a & b),
     );
-    let mut expected = value.inv();
+    let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -90,7 +90,7 @@ fn b_chip_trace_bitwise() {
         Felt::from(b),
         Felt::from(a & b),
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[5]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -101,7 +101,7 @@ fn b_chip_trace_bitwise() {
     // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
     // from bitwise lookups, just set it explicitly and save the multiplied-in value for later.
     assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inv();
+    let span_result = b_chip[8] * b_chip[7].inverse();
     expected = b_chip[8];
 
     // Nothing changes during user operations with no requests to the Chiplets.
@@ -125,7 +125,7 @@ fn b_chip_trace_bitwise() {
         Felt::from(b),
         Felt::from(a ^ b),
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     expected *=
         build_expected_bitwise_from_trace(&trace, &rand_elements, (response_1_row - 1).into());
     assert_eq!(expected, b_chip[response_1_row]);
@@ -138,7 +138,7 @@ fn b_chip_trace_bitwise() {
     // At cycle 21 the decoder requests the span hash. We set this as the inverse of the previously
     // identified `span_result`, since this test is for consistency of the bitwise lookups.
     assert_ne!(expected, b_chip[22]);
-    expected *= span_result.inv();
+    expected *= span_result.inverse();
     assert_eq!(expected, b_chip[22]);
 
     // Nothing changes until the next time the Bitwise chiplet responds.

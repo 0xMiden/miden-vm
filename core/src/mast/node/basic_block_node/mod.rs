@@ -3,7 +3,7 @@ use core::{fmt, iter::repeat_n};
 
 use miden_crypto::{
     Felt, Word, ZERO,
-    hash::{Digest, blake::Blake3_256},
+    hash::{ blake::Blake3_256},
 };
 use miden_formatting::prettier::PrettyPrint;
 

@@ -28,8 +28,7 @@ pub use node::{
 
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    crypto::hash::Hasher,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word}, AlgebraicSponge,
 };
 
 mod debuginfo;
@@ -1015,7 +1014,7 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     {
         // Deserialize bytes, then use winter-utils Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
+        let mut slice_reader = miden_crypto::utils::SliceReader::new(&bytes);
         crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
     }
 }

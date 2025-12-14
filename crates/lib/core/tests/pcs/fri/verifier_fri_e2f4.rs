@@ -1,9 +1,9 @@
 use core::{marker::PhantomData, mem};
 
-use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
+use miden_core::{EMPTY_WORD, Felt, QuadFelt, Word};
 use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
 use miden_utils_testing::{
-    MerkleTreeVC, StarkField,
+    MerkleTreeVC,
     crypto::{MerklePath, NodeIndex, PartialMerkleTree, Rpo256 as MidenHasher},
     group_slice_elements,
     math::fft,
@@ -128,7 +128,7 @@ pub fn build_prover_channel(
 pub fn build_evaluations(trace_length: usize, lde_blowup: usize) -> Vec<QuadFelt> {
     let mut p = (0..trace_length as u32)
         .map(|i| (i, i))
-        .map(|(i, j)| QuadFelt::new(i.into(), j.into()))
+        .map(|(i, j)| QuadFelt::new([i.into(), j.into()]))
         .collect::<Vec<_>>();
     let domain_size = trace_length * lde_blowup;
     p.resize(domain_size, QuadFelt::ZERO);
@@ -312,7 +312,7 @@ fn iterate_query_fold_4_quad_ext(
     let get_domain_offset = Felt::GENERATOR;
 
     let initial_domain_generator = *domain_generator;
-    let norm_cst = Felt::get_root_of_unity(2).inv();
+    let norm_cst = Felt::get_root_of_unity(2).inverse();
     let mut init_exp = initial_domain_generator.exp(position as u64);
 
     let arr = vec![evaluation];
@@ -342,10 +342,10 @@ fn iterate_query_fold_4_quad_ext(
             .1;
 
         let query_values = [
-            QuadFelt::new(query_values[0], query_values[1]),
-            QuadFelt::new(query_values[2], query_values[3]),
-            QuadFelt::new(query_values[4], query_values[5]),
-            QuadFelt::new(query_values[6], query_values[7]),
+            QuadFelt::new([query_values[0], query_values[1]]),
+            QuadFelt::new([query_values[2], query_values[3]]),
+            QuadFelt::new([query_values[4], query_values[5]]),
+            QuadFelt::new([query_values[6], query_values[7]]),
         ];
 
         let query_value = query_values[cur_pos / target_domain_size];
@@ -375,7 +375,7 @@ fn iterate_query_fold_4_quad_ext(
             let f_x = query_values[1];
             let alpha = layer_alphas[depth];
 
-            let tmp1 = fri_2(f_x, f_minus_x, x_star * QuadFelt::from(norm_cst.inv()), alpha);
+            let tmp1 = fri_2(f_x, f_minus_x, x_star * QuadFelt::from(norm_cst.inverse()), alpha);
 
             fri_2(tmp0, tmp1, x_star * x_star, alpha * alpha)
         };
@@ -458,15 +458,15 @@ impl UnBatch<QuadFelt, MidenHasher> for MidenFriVerifierChannel<QuadFelt, MidenH
 
 fn fri_2<E, B>(f_x: E, f_minus_x: E, x_star: E, alpha: E) -> E
 where
-    B: StarkField,
-    E: FieldElement<BaseField = B>,
+    B: ,
+    E: <BaseField = B>,
 {
     (f_x + f_minus_x + ((f_x - f_minus_x) * alpha / x_star)) / E::ONE.double()
 }
 
 pub fn eval_horner_rev<E>(p: &[E], x: E::BaseField) -> E
 where
-    E: FieldElement,
+    E: ,
 {
     p.iter().fold(E::ZERO, |acc, &coeff| acc * E::from(x) + coeff)
 }

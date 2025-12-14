@@ -50,9 +50,9 @@ mod tests {
 
         // multiply the top two values
         process.execute_op(Operation::Ext2Mul, program, &mut host).unwrap();
-        let a = QuadFelt::new(a0, a1);
-        let b = QuadFelt::new(b0, b1);
-        let c = (b * a).to_base_elements();
+        let a = QuadFelt::new([a0, a1]);
+        let b = QuadFelt::new([b0, b1]);
+        let c = (b * a).as_basis_coefficients_slice();
         let expected = build_expected(&[b1, b0, c[1], c[0]]);
 
         assert_eq!(MIN_STACK_DEPTH, process.stack.depth());

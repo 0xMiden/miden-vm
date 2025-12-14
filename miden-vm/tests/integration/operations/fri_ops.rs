@@ -1,5 +1,5 @@
 use miden_utils_testing::{
-    Felt, FieldElement, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
+    Felt, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
 };
 
 // FRI_EXT2FOLD4

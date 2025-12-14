@@ -9,7 +9,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Rpo256};
+use miden_core::{AlgebraicSponge, Word, crypto::hash::Rpo256};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 

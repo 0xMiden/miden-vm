@@ -57,7 +57,12 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+pub use miden_crypto::{
+    AlgebraicSponge, BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt,
+    Field, ONE, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO,
+    batch_multiplicative_inverse, word::LexicographicWord,
+};
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
@@ -71,7 +76,6 @@ pub mod crypto {
 
     pub mod hash {
         pub use miden_crypto::hash::{
-            Digest, ElementHasher, Hasher,
             blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
             poseidon2::Poseidon2,
             rpo::Rpo256,
@@ -80,24 +84,36 @@ pub mod crypto {
     }
 
     pub mod random {
-        pub use miden_crypto::rand::{
-            RandomCoin, RandomCoinError, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin,
-        };
+        pub use miden_crypto::rand::{RpoRandomCoin, RpxRandomCoin};
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_rpo};
+        pub use miden_crypto::dsa::falcon512_rpo;
     }
 }
 
+pub type QuadFelt = BinomialExtensionField<Felt, 2>;
+
 pub mod mast;
 
-pub use winter_math::{
-    ExtensionOf, FieldElement, StarkField, ToElements,
-    fields::{QuadExtension, f64::BaseElement as Felt},
-    polynom,
-};
-pub type QuadFelt = QuadExtension<Felt>;
+// FIELD ELEMENT CONVERSION
+// ================================================================================================
+
+/// Converts a u64 value to a field element with validation.
+///
+/// # Errors
+/// Returns an error if the value is not in the canonical range (i.e., >= field modulus).
+pub fn felt_from_u64_checked(value: u64) -> Result<Felt, errors::InputError> {
+    // Check against field modulus before conversion to avoid expensive as_int() call
+    if value >= Felt::ORDER_U64 {
+        return Err(errors::InputError::Not(
+            value,
+            format!("value {} exceeds field modulus {}", value, Felt::ORDER_U64),
+        ));
+    }
+
+    Ok(Felt::from_u64(value))
+}
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

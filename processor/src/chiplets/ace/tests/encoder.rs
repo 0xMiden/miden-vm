@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, FieldElement, QuadFelt};
+use miden_core::{Felt, QuadFelt};
 use winter_prover::crypto::ElementHasher;
 
 use super::*;
@@ -86,7 +86,7 @@ impl EncodedCircuit {
 
         // Add constants encoded as `QuadFelt`s
         encoded_circuit
-            .extend(circuit.constants.iter().flat_map(|c| QuadFelt::from(*c).to_base_elements()));
+            .extend(circuit.constants.iter().flat_map(|c| QuadFelt::from(*c).as_basis_coefficients_slice()));
         // Pad with zero constants.
         let encoded_constants_size = 2 * layout.num_constants;
         encoded_circuit.resize(encoded_constants_size, Felt::ZERO);

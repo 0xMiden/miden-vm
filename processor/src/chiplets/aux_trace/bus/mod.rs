@@ -26,14 +26,10 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT,
-    OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE,
-    OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
-    OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
-    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, ZERO,
+    ExtensionField, Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE, OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, PrimeCharacteristicRing, ZERO
 };
 
-use super::{Felt, FieldElement};
+use super::{Felt};
 use crate::{
     chiplets::aux_trace::bus::memory::{
         build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
@@ -68,7 +64,7 @@ impl<'a> BusColumnBuilder<'a> {
 
 impl<E> AuxColumnBuilder<E> for BusColumnBuilder<'_>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     /// Constructs the requests made by the VM-components to the chiplets at `row`.
     fn get_requests_at(
@@ -189,7 +185,7 @@ fn build_dyn_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req_value =
         build_control_block_request(main_trace, [ZERO; 8], op_code_felt, alphas, row, _debugger);
@@ -214,7 +210,7 @@ fn build_dyncall_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req_value =
         build_control_block_request(main_trace, [ZERO; 8], op_code_felt, alphas, row, _debugger);
@@ -241,7 +237,7 @@ fn build_call_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req_value = build_control_block_request(
         main_trace,
@@ -267,7 +263,7 @@ fn build_syscall_block_request<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let control_block_req = ControlBlockRequestMessage {
         transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
@@ -297,5 +293,5 @@ where
 /// Returns the operation unique label.
 #[inline(always)]
 fn get_op_label(s0: Felt, s1: Felt, s2: Felt, s3: Felt) -> Felt {
-    s3.mul_small(1 << 3) + s2.mul_small(1 << 2) + s1.mul_small(2) + s0 + ONE
+    s3 * Felt::from_u16(1 << 3) + s2 * Felt::from_u16(1 << 2) + s1 * Felt::from_u16(2) + s0 + ONE
 }

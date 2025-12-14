@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use winter_air::TransitionConstraintDegree;
 
-use super::{EvaluationFrame, FieldElement};
+use super::{EvaluationFrame};
 use crate::{
     trace::chiplets::{
         MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_D_INV_COL_IDX, MEMORY_D0_COL_IDX,
@@ -58,7 +58,7 @@ pub fn get_transition_constraint_count() -> usize {
 ///   chiplet, but excludes the last row of the chiplet,
 /// - `memory_flag_first_row`: a flag that is set to 1 when the *next* row is the first row of the
 ///   memory chiplet.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_all_rows: E,
@@ -92,7 +92,7 @@ pub fn enforce_constraints<E: FieldElement>(
 // TRANSITION CONSTRAINT HELPERS
 // ================================================================================================
 
-fn enforce_binary_columns<E: FieldElement>(
+fn enforce_binary_columns<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag: E,
@@ -108,7 +108,7 @@ fn enforce_binary_columns<E: FieldElement>(
 /// A constraint evaluation function to enforce that the `d_inv` "delta inverse" column used to
 /// constrain the delta between two consecutive contexts, addresses, or clock cycles is updated
 /// correctly.
-fn enforce_d_inv<E: FieldElement>(
+fn enforce_d_inv<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_not_last_row: E,
@@ -130,7 +130,7 @@ fn enforce_d_inv<E: FieldElement>(
 
 /// A constraint evaluation function to enforce that the delta between two consecutive context IDs,
 /// addresses, or clock cycles is updated and decomposed into the `d1` and `d0` columns correctly.
-fn enforce_delta<E: FieldElement>(
+fn enforce_delta<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_not_last_row: E,
@@ -154,7 +154,7 @@ fn enforce_delta<E: FieldElement>(
 
 /// A constraint evaluation function to enforce that the `f_scw` flag is set to 1 when the next row
 /// is in the same context and word, and 0 otherwise.
-fn enforce_flag_same_context_and_word<E: FieldElement>(
+fn enforce_flag_same_context_and_word<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_not_last_row: E,
@@ -166,7 +166,7 @@ fn enforce_flag_same_context_and_word<E: FieldElement>(
 
 /// Enforces that when memory is accessed in the same context, word, and clock cycle, the access is
 /// a read.
-fn enforce_same_context_word_addr_and_clock<E: FieldElement>(
+fn enforce_same_context_word_addr_and_clock<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_not_last_row: E,
@@ -195,7 +195,7 @@ fn enforce_same_context_word_addr_and_clock<E: FieldElement>(
 ///   property" that what was previously written must be read. Therefore, the values that are not
 ///   being written need to be equal to the values in the previous row (i.e. were either previously
 ///   written or are still initialized to 0).
-fn enforce_values<E: FieldElement>(
+fn enforce_values<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     memory_flag_no_last: E,
@@ -265,7 +265,7 @@ fn enforce_values<E: FieldElement>(
 
 /// Trait to allow easy access to column values and intermediate variables used in constraint
 /// calculations for the Memory chiplet.
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Column accessors -----------------------------------------------------------------------
 
     /// The value of the read/write column in the current row.
@@ -334,7 +334,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn delta_next(&self) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Column accessors -----------------------------------------------------------------------
 
     #[inline(always)]

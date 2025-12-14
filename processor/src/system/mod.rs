@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
+use miden_core::PrimeCharacteristicRing;
 use core::fmt::{self, Display};
 
 use miden_air::RowIndex;
 
-use super::{EMPTY_WORD, ExecutionError, Felt, FieldElement, SysTrace, Word, ZERO};
+use super::{EMPTY_WORD, ExecutionError, Felt, SysTrace, Word, ZERO};
 
 #[cfg(test)]
 mod tests;

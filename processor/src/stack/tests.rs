@@ -4,7 +4,7 @@ use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use miden_core::FieldElement;
+use miden_core::;
 
 use super::*;
 use crate::stack::OverflowTableRow;
@@ -493,7 +493,7 @@ fn build_stack(stack_inputs: &[u64]) -> [Felt; MIN_STACK_DEPTH] {
 fn build_helpers(stack_depth: u64, next_overflow_addr: u64) -> StackHelpersState {
     let b0 = Felt::new(stack_depth);
     let b1 = Felt::new(next_overflow_addr);
-    let h0 = (b0 - Felt::new(MIN_STACK_DEPTH as u64)).inv();
+    let h0 = (b0 - Felt::new(MIN_STACK_DEPTH as u64)).inverse();
 
     [b0, b1, h0]
 }

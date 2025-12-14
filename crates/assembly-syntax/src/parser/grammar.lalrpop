@@ -1878,7 +1878,7 @@ IntOrHexImm: Immediate<IntValue> = {
 
 IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n >= Felt::MODULUS {
+        if n >= Felt::ORDER_U64 {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral {
                 span: span!(source_id, l, r),
                 kind: LiteralErrorKind::FeltOverflow

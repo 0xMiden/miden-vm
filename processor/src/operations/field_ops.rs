@@ -1,6 +1,6 @@
-use miden_core::{ONE, Operation, ZERO};
+use miden_core::{ONE, Operation, Field, ZERO};
 
-use super::{ExecutionError, Felt, FieldElement, Process, utils::assert_binary};
+use super::{ExecutionError, Felt, Process, utils::assert_binary};
 use crate::ErrorContext;
 
 // FIELD OPERATIONS
@@ -49,7 +49,7 @@ impl Process {
             return Err(ExecutionError::divide_by_zero(self.system.clk(), err_ctx));
         }
 
-        self.stack.set(0, a.inv());
+        self.stack.set(0, a.inverse());
         self.stack.copy_state(1);
         Ok(())
     }
@@ -133,7 +133,7 @@ impl Process {
             self.stack.set(0, ZERO);
             // setting h0 to the inverse of the difference between the top two elements of the
             // stack.
-            h0 = (b - a).inv();
+            h0 = (b - a).inverse();
         }
 
         // save h0 in the decoder helper register.
@@ -156,7 +156,7 @@ impl Process {
             self.stack.set(0, ONE);
         } else {
             // setting h0 to the inverse of the top element of the stack.
-            h0 = a.inv();
+            h0 = a.inverse();
             self.stack.set(0, ZERO);
         }
 
@@ -232,7 +232,7 @@ mod tests {
     use miden_utils_testing::rand::rand_value;
 
     use super::{
-        super::{Felt, FieldElement, MIN_STACK_DEPTH, Operation},
+        super::{Felt, MIN_STACK_DEPTH, Operation},
         Process,
     };
     use crate::{AdviceInputs, DefaultHost, StackInputs};
@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn op_inv() {
+    fn op_inverse() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
         let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
@@ -314,7 +314,7 @@ mod tests {
         // invert the top value
         if b != ZERO {
             process.execute_op(Operation::Inv, program, &mut host).unwrap();
-            let expected = build_expected(&[a.inv(), b, c]);
+            let expected = build_expected(&[a.inverse(), b, c]);
 
             assert_eq!(MIN_STACK_DEPTH, process.stack.depth());
             assert_eq!(2, process.stack.current_clk());

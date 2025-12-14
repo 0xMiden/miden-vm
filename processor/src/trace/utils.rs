@@ -1,11 +1,12 @@
 use alloc::{string::ToString, vec::Vec};
+use miden_core::ExtensionField;
 use core::slice;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
 #[cfg(test)]
 use miden_core::{Operation, utils::ToElements};
 
-use super::{Felt, FieldElement, NUM_RAND_ROWS};
+use super::{Felt, NUM_RAND_ROWS};
 use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 
 // TRACE FRAGMENT
@@ -205,7 +206,7 @@ impl ChipletsLengths {
 
 /// Defines a builder responsible for building a single column in an auxiliary segment of the
 /// execution trace.
-pub trait AuxColumnBuilder<E: FieldElement<BaseField = Felt>> {
+pub trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -272,7 +273,7 @@ pub trait AuxColumnBuilder<E: FieldElement<BaseField = Felt>> {
 
         // Use batch-inversion method to compute running product of `response[i]/request[i]`.
         let mut result_aux_column = responses_prod;
-        let mut requests_running_divisor = requests_running_prod.inv();
+        let mut requests_running_divisor = requests_running_prod.inverse();
         for i in (0..main_trace.num_rows()).rev() {
             result_aux_column[i] *= requests_running_divisor;
             requests_running_divisor *= requests[i];

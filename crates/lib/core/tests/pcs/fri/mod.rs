@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_utils_testing::{Felt, StarkField, crypto::MerkleStore};
+use miden_utils_testing::{Felt, crypto::MerkleStore};
 
 mod channel;
 

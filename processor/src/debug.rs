@@ -6,7 +6,7 @@ use alloc::{
 use core::fmt;
 
 use miden_air::RowIndex;
-use miden_core::{AssemblyOp, FieldElement, Operation, StackOutputs};
+use miden_core::{AssemblyOp, ExtensionField, Operation, StackOutputs};
 
 use crate::{
     Chiplets, ChipletsLengths, Decoder, ExecutionError, Felt, MemoryAddress, Process, Stack,
@@ -316,7 +316,7 @@ impl AsRef<AssemblyOp> for AsmOpInfo {
 // =================================================================
 
 /// A message that can be sent on a bus.
-pub(crate) trait BusMessage<E: FieldElement<BaseField = Felt>>: fmt::Display {
+pub(crate) trait BusMessage<E: ExtensionField<Felt>>: fmt::Display {
     /// The concrete value that this message evaluates to.
     fn value(&self, alphas: &[E]) -> E;
 
@@ -329,7 +329,7 @@ pub(crate) trait BusMessage<E: FieldElement<BaseField = Felt>>: fmt::Display {
 /// Note: we use `Vec` internally instead of a `BTreeMap`, since messages can have collisions (i.e.
 /// 2 messages sent with the same key), which results in relatively complex insertion/deletion
 /// logic. Since this is only used in debug/test code, the performance hit is acceptable.
-pub(crate) struct BusDebugger<E: FieldElement<BaseField = Felt>> {
+pub(crate) struct BusDebugger<E: ExtensionField<Felt>> {
     pub bus_name: String,
     pub outstanding_requests: Vec<(E, Box<dyn BusMessage<E>>)>,
     pub outstanding_responses: Vec<(E, Box<dyn BusMessage<E>>)>,
@@ -337,7 +337,7 @@ pub(crate) struct BusDebugger<E: FieldElement<BaseField = Felt>> {
 
 impl<E> BusDebugger<E>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     pub fn new(bus_name: String) -> Self {
         Self {
@@ -350,7 +350,7 @@ where
 
 impl<E> BusDebugger<E>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     /// Attempts to match the request with an existing response. If a match is found, the response
     /// is removed from the list of outstanding responses. Otherwise, the request is added to the
@@ -397,7 +397,7 @@ where
 
 impl<E> fmt::Display for BusDebugger<E>
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.is_empty() {

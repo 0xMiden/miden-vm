@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{WORD_SIZE, Word, ZERO};
+use miden_crypto::{PrimeCharacteristicRing, WORD_SIZE, Word, ZERO};
 
-use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
+use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 
 // STACK OUTPUTS
@@ -16,7 +16,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 /// `stack` is expected to be ordered as if the elements were popped off the stack one by one.
 /// Thus, the value at the top of the stack is expected to be in the first position, and the order
 /// of the rest of the output elements will also match the order on the stack.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
 pub struct StackOutputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -52,9 +52,8 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            .map(Felt::try_from)
-            .collect::<Result<Vec<Felt>, _>>()
-            .map_err(OutputError::InvalidStackElement)?;
+            .map(Felt::from_u64)
+            .collect::<Vec<Felt>>();
 
         Self::new(stack)
     }
@@ -68,16 +67,10 @@ impl StackOutputs {
         self.elements.get(idx).cloned()
     }
 
-    /// Returns the word located starting at the specified Felt position on the stack in big-endian
-    /// (reversed) order, or `None` if out of bounds.
-    ///
-    /// For example, passing in `0` returns the word at the top of the stack, and passing in `4`
-    /// returns the word starting at element index `4`.
-    ///
-    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
-    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
-    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
-    pub fn get_stack_word_be(&self, idx: usize) -> Option<Word> {
+    /// Returns the word located starting at the specified Felt position on the stack or `None` if
+    /// out of bounds. For example, passing in `0` returns the word at the top of the stack, and
+    /// passing in `4` returns the word starting at element index `4`.
+    pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
         let word_elements: [Felt; WORD_SIZE] = {
             let word_elements: Vec<Felt> = range(idx, 4)
                 .map(|idx| self.get_stack_item(idx))
@@ -90,38 +83,6 @@ impl StackOutputs {
         };
 
         Some(word_elements.into())
-    }
-
-    /// Returns the word located starting at the specified Felt position on the stack in
-    /// little-endian (memory) order, or `None` if out of bounds.
-    ///
-    /// For example, passing in `0` returns the word at the top of the stack, and passing in `4`
-    /// returns the word starting at element index `4`.
-    ///
-    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
-    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
-    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
-    pub fn get_stack_word_le(&self, idx: usize) -> Option<Word> {
-        self.get_stack_word_be(idx).map(|mut word| {
-            word.reverse();
-            word
-        })
-    }
-
-    /// Returns the word located starting at the specified Felt position on the stack or `None` if
-    /// out of bounds.
-    ///
-    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
-    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
-    /// ordering expectations clear.
-    ///
-    /// See [`Self::get_stack_word_be`] for detailed documentation.
-    #[deprecated(
-        since = "0.19.0",
-        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
-    )]
-    pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
-        self.get_stack_word_be(idx)
     }
 
     /// Returns the number of requested stack outputs or returns the full stack if fewer than the
@@ -164,7 +125,7 @@ impl From<[Felt; MIN_STACK_DEPTH]> for StackOutputs {
 
 impl Serializable for StackOutputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let num_stack_values = get_num_stack_values(self);
+        let num_stack_values = super::get_num_stack_values(&self.elements);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
     }

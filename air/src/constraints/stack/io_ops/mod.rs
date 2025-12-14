@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame, TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{stack::EvaluationFrameExt, utils::are_equal};
 
 #[cfg(test)]
@@ -36,7 +36,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the input/output operations.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -51,7 +51,7 @@ pub fn enforce_constraints<E: FieldElement>(
 /// Enforces constraints of the SDEPTH operation. The SDEPTH operation pushes the depth of
 /// the stack onto the stack. Therefore, the following constraints are enforced:
 /// - The depth of the stack should be equal to the top element in the next frame.
-pub fn enforce_sdepth_constraint<E: FieldElement>(
+pub fn enforce_sdepth_constraint<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,

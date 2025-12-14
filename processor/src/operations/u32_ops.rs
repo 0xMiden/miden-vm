@@ -4,9 +4,10 @@ use paste::paste;
 
 use super::{
     super::utils::{split_element, split_u32_into_u16},
-    ExecutionError, Felt, FieldElement, Operation, Process,
+    ExecutionError, Felt, Operation, Process,
 };
 use crate::{ErrorContext, ZERO};
+use miden_core::Field;
 
 const U32_MAX: u64 = u32::MAX as u64;
 
@@ -229,7 +230,7 @@ impl Process {
             [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO];
 
         if check_element_validity {
-            let m = (Felt::from(u32::MAX) - hi).inv();
+            let m = (Felt::from(u32::MAX) - hi).inverse();
             helper_values[4] = m;
         }
 

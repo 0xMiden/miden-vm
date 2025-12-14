@@ -1,4 +1,5 @@
 use alloc::{borrow::Cow, string::String};
+use miden_core::{PrimeCharacteristicRing};
 use core::{num::IntErrorKind, ops::Range};
 
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
@@ -7,7 +8,7 @@ use super::{
     BinEncodedValue, BinErrorKind, DocumentationType, HexErrorKind, IntValue, LiteralErrorKind,
     ParsingError, Scanner, Token, WordValue,
 };
-use crate::Felt;
+use crate::{FIELD_MODULUS, Felt};
 
 /// The value produced by the [Lexer] when iterated
 ///
@@ -626,7 +627,6 @@ fn parse_hex<'input>(
     span: SourceSpan,
     hex_digits: &'input str,
 ) -> Result<Token<'input>, ParsingError> {
-    use miden_core::{FieldElement, StarkField};
 
     // Handle odd-length hex strings by padding with a leading zero
     let hex_digits = pad_hex_if_needed(hex_digits);
@@ -643,7 +643,7 @@ fn parse_hex<'input>(
                     ),
                 }
             })?;
-            if value >= Felt::MODULUS {
+            if value >= FIELD_MODULUS {
                 return Err(ParsingError::InvalidLiteral {
                     span,
                     kind: LiteralErrorKind::FeltOverflow,
@@ -671,7 +671,7 @@ fn parse_hex<'input>(
                     })?;
                 }
                 let value = u64::from_le_bytes(felt_bytes);
-                if value >= Felt::MODULUS {
+                if value >= FIELD_MODULUS {
                     return Err(ParsingError::InvalidLiteral {
                         span,
                         kind: LiteralErrorKind::FeltOverflow,

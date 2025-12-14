@@ -14,7 +14,7 @@ use miden_core::{WORD_SIZE, Word, assert_matches};
 use super::{
     super::ZERO,
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    FieldElement, Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    , Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError};
@@ -591,7 +591,7 @@ fn build_trace_row(
     let (hi, lo) = super::split_element_u32_into_u16(delta);
     row[D0_COL_IDX] = lo;
     row[D1_COL_IDX] = hi;
-    row[D_INV_COL_IDX] = delta.inv();
+    row[D_INV_COL_IDX] = delta.inverse();
 
     if row[WORD_COL_IDX] == prev_row[WORD_COL_IDX] && row[CTX_COL_IDX] == prev_row[CTX_COL_IDX] {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ONE;

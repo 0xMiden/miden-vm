@@ -1,10 +1,9 @@
 use miden_air::RowIndex;
 use miden_core::{
-    OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
-    OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO,
+    ExtensionField, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP, OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO
 };
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace, ONE};
+use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
 use crate::debug::BusDebugger;
 
 // BLOCK HASH TABLE COLUMN BUILDER
@@ -24,7 +23,7 @@ use crate::debug::BusDebugger;
 #[derive(Default)]
 pub struct BlockHashTableColumnBuilder {}
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
     fn init_responses(
         &self,
         main_trace: &MainTrace,
@@ -137,10 +136,13 @@ impl BlockHashTableRow {
         let is_first_child = op_code_next != OPCODE_END
             && op_code_next != OPCODE_REPEAT
             && op_code_next != OPCODE_HALT;
+        
+        // TODO(Al)
         let is_loop_body = main_trace
-            .is_loop_body_flag(row)
-            .try_into()
-            .expect("expected loop body flag to be a boolean");
+            .is_loop_body_flag(row);
+            //.try_into()
+            //.expect("expected loop body flag to be a boolean");
+        let is_loop_body = is_loop_body.as_int() != 0;
 
         Self {
             parent_block_id,
@@ -246,17 +248,17 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
         alphas[0]
-            + alphas[1].mul_base(self.parent_block_id)
-            + alphas[2].mul_base(self.child_block_hash[0])
-            + alphas[3].mul_base(self.child_block_hash[1])
-            + alphas[4].mul_base(self.child_block_hash[2])
-            + alphas[5].mul_base(self.child_block_hash[3])
-            + alphas[6].mul_base(is_first_child)
-            + alphas[7].mul_base(is_loop_body)
+            + alphas[1] * (self.parent_block_id)
+            + alphas[2] * (self.child_block_hash[0])
+            + alphas[3] * (self.child_block_hash[1])
+            + alphas[4] * (self.child_block_hash[2])
+            + alphas[5] * (self.child_block_hash[3])
+            + alphas[6] * (is_first_child)
+            + alphas[7] * (is_loop_body)
     }
 
     // TEST
