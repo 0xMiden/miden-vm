@@ -46,7 +46,6 @@ use alloc::{
 };
 
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
-use string_table::StringTable;
 
 use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
@@ -65,7 +64,8 @@ use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
 
 use crate::DecoratorList;
 
-mod string_table;
+pub(crate) mod string_table;
+pub(crate) use string_table::StringTable;
 
 #[cfg(test)]
 mod tests;
