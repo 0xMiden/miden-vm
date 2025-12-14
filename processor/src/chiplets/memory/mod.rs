@@ -366,7 +366,7 @@ impl Memory {
                     trace.set(row, D0_COL_IDX, delta_lo);
                     trace.set(row, D1_COL_IDX, delta_hi);
                     // TODO: switch to batch inversion to improve efficiency.
-                    trace.set(row, D_INV_COL_IDX, delta.inverse());
+                    trace.set(row, D_INV_COL_IDX, delta.try_inverse().unwrap_or(ZERO));
 
                     if prev_ctx == ctx && prev_addr == felt_addr {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);

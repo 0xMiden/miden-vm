@@ -363,7 +363,6 @@ fn test_masm_errors_consistency(
 fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Rpo256;
 
-
     // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
     // Taking into account big-endian encoding, the stack is [COMM, TAG]
     let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);

@@ -6,8 +6,7 @@ use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;
 
-use crate::main_trace::ColMatrix;
-use crate::{trace::main_trace::MainTrace, transpose};
+use crate::{main_trace::ColMatrix, trace::main_trace::MainTrace, transpose};
 
 /// Converts a row-major Felt matrix to column-major MainTrace format.
 ///

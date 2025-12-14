@@ -5,7 +5,7 @@ use std::{
 };
 
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_core::{Felt, WORD_SIZE};
+use miden_core::{Felt, WORD_SIZE, felt_from_u64_checked};
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 
@@ -271,7 +271,12 @@ impl InputFile {
             .map_err(|e| format!("failed to decode `Word` from hex {word_hex} - {e}"))?;
         let mut word = [ZERO; WORD_SIZE];
         for (i, value) in word_data.chunks(8).enumerate() {
-            word[i] = Felt::try_from(value).map_err(|e| {
+            // Convert 8-byte slice to [u8; 8] array, then to u64 (little-endian), then to Felt
+            let bytes: [u8; 8] = value.try_into().map_err(|_| {
+                format!("failed to convert `Word` data {word_hex} (element {i}) - expected 8 bytes")
+            })?;
+            let value_u64 = u64::from_le_bytes(bytes);
+            word[i] = felt_from_u64_checked(value_u64).map_err(|e| {
                 format!("failed to convert `Word` data {word_hex} (element {i}) to Felt - {e}")
             })?;
         }

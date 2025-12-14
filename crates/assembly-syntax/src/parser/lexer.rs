@@ -1,7 +1,7 @@
 use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
-use miden_core::PrimeCharacteristicRing;
 
+use miden_core::PrimeCharacteristicRing;
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
 
 use super::{

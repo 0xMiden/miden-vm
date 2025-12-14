@@ -17,7 +17,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector
+    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
 
@@ -233,11 +233,7 @@ fn generate_core_trace_columns(
             .par_chunks_mut(fragment_size)
             .enumerate()
             .for_each(|(chunk_idx, chunk)| {
-                invert_column_allow_zeros(
-                    chunk,
-                    "stack.h0",
-                    chunk_idx * fragment_size,
-                );
+                invert_column_allow_zeros(chunk, "stack.h0", chunk_idx * fragment_size);
             });
     }
 
@@ -460,16 +456,16 @@ fn initialize_chiplets(
     for hasher_op in hasher_for_chiplet.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
-                chiplets.hasher.permute(input_state);
+                let _ = chiplets.hasher.permute(input_state);
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
-                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
-                chiplets.hasher.build_merkle_root(value, &path, index);
+                let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
                 chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
@@ -481,13 +477,13 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32xor(a, b, &())
                     .expect("bitwise XOR operation failed when populating chiplet");
@@ -530,7 +526,7 @@ fn initialize_chiplets(
             .kmerge_by(|a, b| a.clk() < b.clk())
             .for_each(|mem_access| match mem_access {
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read(ctx, addr, clk, &())
                         .expect("memory read element failed when populating chiplet");

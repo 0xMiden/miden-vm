@@ -8,7 +8,12 @@ use miden_air::{
     },
 };
 use miden_core::{
-  BasedVectorSpace, Field, ONE, OPCODE_PUSH, Operation, PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO, mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch}, precompile::PrecompileTranscriptState, stack::MIN_STACK_DEPTH, utils::range
+    BasedVectorSpace, Field, ONE, OPCODE_PUSH, Operation, PrimeField64, QuadFelt, WORD_SIZE, Word,
+    ZERO,
+    mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
+    stack::MIN_STACK_DEPTH,
+    utils::range,
 };
 
 use crate::{
@@ -320,7 +325,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             MastNode::Call(call_node) => {
                 self.context.state.decoder.replay_node_start(&mut self.context.replay);
 
-                self.context.state.stack.start_context();
+                let _ = self.context.state.stack.start_context();
 
                 // Set up new context for the call
                 if call_node.is_syscall() {
@@ -739,7 +744,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inverse();
+        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -765,8 +770,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         x: Felt,
         x_inv: Felt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
-        let ev_felts =ev.as_basis_coefficients_slice();
-        let es_felts =es.as_basis_coefficients_slice();
+        let ev_felts = ev.as_basis_coefficients_slice();
+        let es_felts = es.as_basis_coefficients_slice();
 
         [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], x, x_inv]
     }

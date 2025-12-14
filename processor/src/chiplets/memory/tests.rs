@@ -9,7 +9,7 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{WORD_SIZE, Word, assert_matches, Field, ZERO, ONE};
+use miden_core::{Field, ONE, WORD_SIZE, Word, ZERO, assert_matches};
 
 use super::{
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
@@ -17,7 +17,6 @@ use super::{
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError};
-
 
 #[test]
 fn mem_init() {
@@ -105,7 +104,7 @@ fn mem_read() {
         4.into(),
         EMPTY_WORD,
     );
-    verify_memory_access(&trace, 3, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 3, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -254,7 +253,7 @@ fn mem_write() {
         5.into(),
         word1234,
     );
-    verify_memory_access(&trace, 5, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 5, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -431,7 +430,7 @@ fn mem_write_read() {
         clk,
         [1_u32, 2, 42, 4].into(),
     );
-    verify_memory_access(&trace, 8, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 8, memory_access, prev_row);
 }
 
 #[test]

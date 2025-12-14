@@ -27,11 +27,11 @@ pub use miden_core::{
 };
 use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionTrace, ProcessState,
+    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionOptions,
+    ExecutionTrace, Process, ProcessState, VmStateIterator,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, EventHandler, Program,
-    fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
+    DefaultDebugHandler, DefaultHost, EventHandler, Program, fast::FastProcessor,
     parallel::build_trace,
 };
 use miden_prover::utils::range;
@@ -264,22 +264,23 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
-        let processor = if self.in_debug_mode {
-            FastProcessor::new_debug(&stack_inputs, self.advice_inputs.clone())
-        } else {
-            FastProcessor::new_with_advice_inputs(&stack_inputs, self.advice_inputs.clone())
-        };
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
+        );
+        process.execute(&program, &mut host).unwrap();
 
         // validate the memory state
         for (addr, mem_value) in
             (range(mem_start_addr as usize, expected_mem.len())).zip(expected_mem.iter())
         {
-            let mem_state = execution_output
+            let mem_state = process
+                .chiplets
                 .memory
-                .read_element(ContextId::root(), Felt::from(addr as u32), &())
-                .unwrap();
+                .get_value(ContextId::root(), addr as u32)
+                .unwrap_or(ZERO);
             assert_eq!(
                 *mem_value,
                 mem_state.as_int(),
@@ -363,51 +364,57 @@ impl Test {
     /// outputs.
     #[track_caller]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
-        // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
-        // with these tests (which are tested separately), but rather only the per-fragment trace
-        // generation logic - though not too big so as to over-allocate memory.
-        const FRAGMENT_SIZE: usize = 1 << 16;
-
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let fast_stack_result = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
-            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-            let fast_processor =
-                FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-            fast_processor.execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE)
-        };
-
-        // compare fast and slow processors' stack outputs
-        self.assert_result_with_step_execution(&fast_stack_result);
-
-        fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(
-                execution_output,
-                trace_generation_ctx,
-                program.hash(),
-                program.kernel().clone(),
-            );
-
-            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-            trace
-        })
-    }
-
-    /// Compiles the test's source to a Program and executes it with the tests inputs.
-    ///
-    /// Returns the [`ExecutionOutput`] once execution is finished.
-    pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
-        let (program, host) = self.get_program_and_host();
-        let mut host = host.with_source_manager(self.source_manager.clone());
-
-        let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().rev().collect::<Vec<Felt>>(),
+        // slow processor
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
 
-        processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        let slow_stack_result = process.execute(&program, &mut host);
+
+        // compare fast and slow processors' stack outputs
+        self.assert_result_with_fast_processor(&slow_stack_result);
+
+        match slow_stack_result {
+            Ok(slow_stack_outputs) => {
+                let trace = ExecutionTrace::new(process, slow_stack_outputs);
+                assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
+
+                // Check that the core trace generated by the parallel trace generator is consistent
+                // with the slow processor's trace.
+                self.assert_trace_with_parallel_trace_generator(&trace);
+
+                Ok(trace)
+            },
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns the
+    /// process once execution is finished.
+    pub fn execute_process(&self) -> Result<(Process, DefaultHost), ExecutionError> {
+        let (program, host) = self.get_program_and_host();
+        let mut host = host.with_source_manager(self.source_manager.clone());
+
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
+        );
+
+        let stack_result = process.execute(&program, &mut host);
+        self.assert_result_with_fast_processor(&stack_result);
+
+        match stack_result {
+            Ok(_) => Ok((process, host)),
+            Err(err) => Err(err),
+        }
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
@@ -422,17 +429,19 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().rev().collect::<Vec<Felt>>(),
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
         );
 
-        let stack_result = processor.execute_sync(&program, &mut host);
+        let stack_result = process.execute(&program, &mut host);
 
         let debug_output = host.debug_handler().writer().buffer.clone();
 
         match stack_result {
-            Ok(exec_output) => Ok((exec_output.stack, debug_output)),
+            Ok(stack_output) => Ok((stack_output, debug_output)),
             Err(err) => {
                 // If we get an error, we print the output as an error
                 #[cfg(feature = "std")]
@@ -450,12 +459,31 @@ impl Test {
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
         let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
-            stack_inputs.clone(),
+            self.stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
             ProvingOptions::default(),
         )
         .unwrap();
+
+        self.assert_outputs_with_fast_processor(stack_outputs);
+
+        // Check that the core trace generated by the parallel trace generator is consistent
+        // with the slow processor's trace.
+        {
+            let (program, mut host) = self.get_program_and_host();
+
+            let slow_trace = miden_processor::execute(
+                &program,
+                self.stack_inputs,
+                self.advice_inputs.clone(),
+                &mut host,
+                ExecutionOptions::default().with_debugging(self.in_debug_mode),
+            )
+            .unwrap();
+
+            self.assert_trace_with_parallel_trace_generator(&slow_trace);
+        }
 
         let program_info = ProgramInfo::from(program);
         if test_fail {
@@ -467,6 +495,33 @@ impl Test {
             let result = miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof);
             assert!(result.is_ok(), "error: {result:?}");
         }
+    }
+
+    /// Compiles the test's source to a Program and executes it with the tests inputs. Returns a
+    /// VmStateIterator that allows us to iterate through each clock cycle and inspect the process
+    /// state.
+    pub fn execute_iter(&self) -> VmStateIterator {
+        let (program, host) = self.get_program_and_host();
+        let mut host = host.with_source_manager(self.source_manager.clone());
+
+        let mut process = Process::new(
+            program.kernel().clone(),
+            self.stack_inputs,
+            self.advice_inputs.clone(),
+            ExecutionOptions::default().with_debugging(self.in_debug_mode),
+        );
+        let result = process.execute(&program, &mut host);
+
+        self.assert_result_with_fast_processor(&result);
+
+        if result.is_ok() {
+            assert_eq!(
+                program.hash(),
+                process.decoder.program_hash().into(),
+                "inconsistent program hash"
+            );
+        }
+        VmStateIterator::new(process, result)
     }
 
     /// Returns the last state of the stack after executing a test.
@@ -506,12 +561,27 @@ impl Test {
         (program, host)
     }
 
-    fn assert_result_with_step_execution(
+    /// Runs the program on the fast processor, and asserts that the stack outputs match the slow
+    /// processor's stack outputs.
+    fn assert_outputs_with_fast_processor(&self, slow_stack_outputs: StackOutputs) {
+        let (program, mut host) = self.get_program_and_host();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
+        let advice_inputs = self.advice_inputs.clone();
+        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let fast_stack_outputs = fast_process.execute_sync(&program, &mut host).unwrap();
+
+        assert_eq!(
+            slow_stack_outputs, fast_stack_outputs,
+            "stack outputs do not match between slow and fast processors"
+        );
+    }
+
+    fn assert_result_with_fast_processor(
         &self,
-        fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
+        slow_result: &Result<StackOutputs, ExecutionError>,
     ) {
         fn compare_results(
-            left_result: Result<StackOutputs, &ExecutionError>,
+            left_result: &Result<StackOutputs, ExecutionError>,
             right_result: &Result<StackOutputs, ExecutionError>,
             left_name: &str,
             right_name: &str,
@@ -519,7 +589,7 @@ impl Test {
             match (left_result, right_result) {
                 (Ok(left_stack_outputs), Ok(right_stack_outputs)) => {
                     assert_eq!(
-                        left_stack_outputs, *right_stack_outputs,
+                        left_stack_outputs, right_stack_outputs,
                         "stack outputs do not match between {left_name} and {right_name}"
                     );
                 },
@@ -555,19 +625,99 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
+        let fast_result = {
+            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
+            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
+            let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+            fast_process.execute_sync(&program, &mut host)
+        };
+
         let fast_result_by_step = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack.clone()),
+            &fast_result,
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
         );
+
+        compare_results(slow_result, &fast_result, "slow processor", "fast processor");
+    }
+
+    fn assert_trace_with_parallel_trace_generator(
+        &self,
+        trace_from_slow_processor: &ExecutionTrace,
+    ) {
+        // Skip large traces in CI, which fail due to memory constraints.
+        #[cfg(feature = "std")]
+        if std::env::var("CI") == Ok("true".to_string())
+            && trace_from_slow_processor.main_segment().num_rows() >= (1 << 21)
+        {
+            return;
+        }
+
+        // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
+        // with these tests (which are tested separately), but rather only the per-fragment trace
+        // generation logic - though not too big so as to over-allocate memory.
+        const FRAGMENT_SIZE: usize = 1 << 16;
+
+        let (program, mut host) = self.get_program_and_host();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
+        let advice_inputs: AdviceInputs = self.advice_inputs.clone();
+        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let (execution_output, trace_fragment_contexts) =
+            fast_process.execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE).unwrap();
+
+        let trace_from_parallel = build_trace(
+            execution_output,
+            trace_fragment_contexts,
+            program.hash(),
+            program.kernel().clone(),
+        );
+
+        // Compare the main trace columns
+        for col_idx in 0..miden_air::trace::PADDED_TRACE_WIDTH {
+            let slow_column = trace_from_slow_processor.main_segment().get_column(col_idx);
+            let parallel_column = trace_from_parallel.main_segment().get_column(col_idx);
+
+            // Since the parallel trace generator only generates core traces, its column length will
+            // be lower than the slow processor's trace in the case where the range checker or
+            // chiplets column length exceeds the core trace length. We also ignore the last element
+            // in the column, since it is a random value inserted at the end of trace generation,
+            // and will not match when the 2 traces don't have the same length.
+            let len = parallel_column.len() - 1;
+
+            if slow_column[..len] != parallel_column[..len] {
+                // Find the first row where the columns disagree
+                for (row_idx, (slow_val, parallel_val)) in
+                    slow_column.iter().zip(parallel_column.iter()).enumerate()
+                {
+                    if slow_val != parallel_val {
+                        panic!(
+                            "Core trace columns do not match between slow and parallel processors at column {} ({}) row {}: slow={}, parallel={}",
+                            col_idx,
+                            get_column_name(col_idx),
+                            row_idx,
+                            slow_val,
+                            parallel_val
+                        );
+                    }
+                }
+                // If we reach here, the columns have different lengths
+                panic!(
+                    "Core trace columns do not match between slow and parallel processors at column {} ({}): different lengths (slow={}, parallel={})",
+                    col_idx,
+                    get_column_name(col_idx),
+                    slow_column.len(),
+                    parallel_column.len()
+                );
+            }
+        }
     }
 }
 

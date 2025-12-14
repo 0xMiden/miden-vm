@@ -6,6 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
+
 use miden_air::{HashFunction, ProcessorAir, PublicInputs};
 // EXPORTS
 // ================================================================================================
@@ -61,7 +62,7 @@ pub fn verify(
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
-    let (hash_fn, proof_bytes, _, _) = proof.into_parts();
+    let (hash_fn, proof_bytes, ..) = proof.into_parts();
     verify_stark(program_info, stack_inputs, stack_outputs, hash_fn, proof_bytes)?;
     Ok(security_level)
 }

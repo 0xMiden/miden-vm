@@ -41,6 +41,7 @@ fn bench_merge_varied_sizes(c: &mut Criterion) {
         let gen_params = MastForestParams {
             decorators: 32,                                // IDs in [0, 32)
             blocks: blocks_per_forest..=blocks_per_forest, // fixed size per forest
+            ..Default::default()
         };
 
         // Pre-generate inputs (excluded from timing).

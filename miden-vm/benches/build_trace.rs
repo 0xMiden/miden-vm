@@ -107,7 +107,7 @@ fn build_trace(c: &mut Criterion) {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
-                            let stack_inputs = stack_inputs.clone();
+                            let stack_inputs = self.stack_inputs;
                             let advice_inputs = advice_inputs.clone();
 
                             (host, stack_inputs, advice_inputs, program.clone())
