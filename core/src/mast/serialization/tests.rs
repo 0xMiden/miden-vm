@@ -1120,3 +1120,137 @@ mod proptests {
         }
     }
 }
+
+// COMPREHENSIVE DEBUGINFO ROUND-TRIP TESTS
+// ================================================================================================
+
+/// Test DebugInfo serialization with empty decorators (no decorators at all)
+#[test]
+fn test_debuginfo_serialization_empty() {
+    use crate::{
+        Operation,
+        mast::{BasicBlockNodeBuilder, MastForest},
+    };
+
+    // Create forest with no decorators
+    let mut forest = MastForest::new();
+
+    // Add a simple basic block with no decorators
+    let ops = vec![Operation::Noop; 4];
+    let block_id = BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(block_id);
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify
+    assert_eq!(forest.num_nodes(), deserialized.num_nodes());
+    assert_eq!(forest.decorators().len(), 0);
+    assert_eq!(deserialized.decorators().len(), 0);
+}
+
+/// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
+#[test]
+fn test_debuginfo_serialization_sparse() {
+    use crate::{
+        Decorator, Operation,
+        mast::{BasicBlockNodeBuilder, MastForest},
+    };
+
+    let mut forest = MastForest::new();
+
+    // Create 10 blocks, only 2 with decorators (20% sparse)
+    for i in 0..10 {
+        let ops = vec![Operation::Noop; 4];
+
+        if i % 5 == 0 {
+            // Add decorator at position 0 for nodes 0 and 5
+            let decorator_id = forest.add_decorator(Decorator::Trace(i)).unwrap();
+            BasicBlockNodeBuilder::new(ops, vec![(0, decorator_id)])
+                .add_to_forest(&mut forest)
+                .unwrap();
+        } else {
+            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+        }
+    }
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify decorator count
+    assert_eq!(forest.decorators().len(), 2);
+    assert_eq!(deserialized.decorators().len(), 2);
+
+    // Verify decorators are at correct nodes
+    for i in 0..10 {
+        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
+        let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
+
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+    }
+}
+
+/// Test DebugInfo serialization with dense decorators (80% of nodes have decorators)
+#[test]
+fn test_debuginfo_serialization_dense() {
+    use crate::{
+        Decorator, Operation,
+        mast::{BasicBlockNodeBuilder, MastForest},
+    };
+
+    let mut forest = MastForest::new();
+
+    // Create 10 blocks, 8 with decorators (80% dense)
+    for i in 0..10 {
+        let ops = vec![Operation::Noop; 4];
+
+        if i < 8 {
+            // Add decorator at position 0 for first 8 nodes
+            let decorator_id = forest.add_decorator(Decorator::Trace(i)).unwrap();
+            BasicBlockNodeBuilder::new(ops, vec![(0, decorator_id)])
+                .add_to_forest(&mut forest)
+                .unwrap();
+        } else {
+            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+        }
+    }
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify decorator count
+    assert_eq!(forest.decorators().len(), 8);
+    assert_eq!(deserialized.decorators().len(), 8);
+
+    // Verify decorators are at correct nodes
+    for i in 0..10 {
+        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
+        let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
+
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+
+        // Verify expected decorator presence
+        if i < 8 {
+            assert_eq!(orig_decorators.len(), 1, "Node {} should have 1 decorator", i);
+            assert_eq!(
+                deser_decorators.len(),
+                1,
+                "Node {} should have 1 decorator after deserialization",
+                i
+            );
+        } else {
+            assert_eq!(orig_decorators.len(), 0, "Node {} should have no decorators", i);
+            assert_eq!(
+                deser_decorators.len(),
+                0,
+                "Node {} should have no decorators after deserialization",
+                i
+            );
+        }
+    }
+}

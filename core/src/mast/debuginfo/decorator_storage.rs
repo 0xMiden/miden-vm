@@ -1,4 +1,7 @@
-use alloc::{string::{String, ToString}, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "arbitrary")]
@@ -145,7 +148,7 @@ impl OpToDecoratorIds {
         op_indptr_for_dec_ids: Vec<usize>,
         node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
     ) -> Result<Self, DecoratorIndexError> {
-        // Empty structures are valid (no nodes, no decorators)
+        // Completely empty structures are valid (no nodes, no decorators)
         if decorator_ids.is_empty()
             && op_indptr_for_dec_ids.is_empty()
             && node_indptr_for_op_idx.is_empty()
@@ -157,8 +160,9 @@ impl OpToDecoratorIds {
             });
         }
 
-        // Nodes but no decorators: empty decorator_ids/op_indptr, node_indptr with all zeros
+        // Nodes with no decorators are valid
         if decorator_ids.is_empty() && op_indptr_for_dec_ids.is_empty() {
+            // All node pointers must be 0
             if node_indptr_for_op_idx.iter().all(|&ptr| ptr == 0) {
                 return Ok(Self {
                     decorator_ids,
@@ -203,6 +207,7 @@ impl OpToDecoratorIds {
         let Some(&last_node_ptr) = node_slice.last() else {
             return Err(DecoratorIndexError::InternalStructure);
         };
+        // Node pointers must be valid indices into op_indptr
         if last_node_ptr > op_indptr_for_dec_ids.len() - 1 {
             return Err(DecoratorIndexError::InternalStructure);
         }
@@ -234,11 +239,31 @@ impl OpToDecoratorIds {
     /// - op_indptr_for_dec_ids is monotonic, starts at 0, ends at decorator_ids.len()
     /// - node_indptr_for_op_idx is monotonic, starts at 0, ends <= op_indptr_for_dec_ids.len()-1
     pub(crate) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+        // Completely empty structures are valid (no nodes, no decorators)
+        if self.decorator_ids.is_empty()
+            && self.op_indptr_for_dec_ids.is_empty()
+            && self.node_indptr_for_op_idx.is_empty()
+        {
+            return Ok(());
+        }
+
+        // Nodes with no decorators are valid
+        if self.decorator_ids.is_empty() && self.op_indptr_for_dec_ids.is_empty() {
+            // All node pointers must be 0
+            if !self.node_indptr_for_op_idx.iter().all(|&ptr| ptr == 0) {
+                return Err("node pointers must all be 0 when there are no decorators".to_string());
+            }
+            return Ok(());
+        }
+
         // Validate all decorator IDs
         for &dec_id in &self.decorator_ids {
             if dec_id.to_usize() >= decorator_count {
-                return Err(format!("Invalid decorator ID {}: exceeds decorator count {}",
-                    dec_id.to_usize(), decorator_count));
+                return Err(format!(
+                    "Invalid decorator ID {}: exceeds decorator count {}",
+                    dec_id.to_usize(),
+                    decorator_count
+                ));
             }
         }
 
@@ -287,6 +312,7 @@ impl OpToDecoratorIds {
             }
         }
 
+        // Node pointers must be valid indices into op_indptr
         let max_node_ptr = self.op_indptr_for_dec_ids.len().saturating_sub(1);
         if *node_slice.last().unwrap() > max_node_ptr {
             return Err(format!(
@@ -367,8 +393,15 @@ impl OpToDecoratorIds {
         }
 
         if decorators_info.is_empty() {
-            // Empty node: no operations at all, just set the end pointer equal to start
-            // This creates a node with an empty operations range
+            // Empty node needs sentinel if it follows decorated nodes
+            // CSR requires all node_indptr values to be valid op_indptr indices.
+            // If op_start == op_indptr.len(), add a sentinel so the pointer stays in bounds.
+            if op_start == self.op_indptr_for_dec_ids.len()
+                && !self.op_indptr_for_dec_ids.is_empty()
+            {
+                self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
+            }
+
             self.node_indptr_for_op_idx
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
@@ -387,7 +420,8 @@ impl OpToDecoratorIds {
             // final sentinel for this node
             self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
 
-            // Push end pointer for this node (index of last op pointer)
+            // Push end pointer for this node (index of last op pointer, which is the sentinel)
+            // This is len()-1 because we just pushed the sentinel above
             let end_ops = self.op_indptr_for_dec_ids.len() - 1;
             self.node_indptr_for_op_idx
                 .push(end_ops)
@@ -836,7 +870,7 @@ mod tests {
 
     #[test]
     fn test_from_components_invalid_structure() {
-        // Empty structures are now valid
+        // Empty structures are valid
         let result = OpToDecoratorIds::from_components(vec![], vec![], IndexVec::new());
         assert!(result.is_ok());
 
@@ -1182,14 +1216,20 @@ mod tests {
         assert!(range0.end > range0.start, "Node with decorators should have non-empty range");
         assert!(range1.end > range1.start, "Node with decorators should have non-empty range");
 
-        // Empty node should have range pointing to the end of op_indptr_for_dec_ids array
-        // This is expected behavior: empty nodes get the range at the end of the array
+        // Empty node should have range pointing to a sentinel that was added when the empty node
+        // was created. The sentinel is added at the position that would have been "past the end"
+        // before the empty node was added, making the empty node's range valid.
         let op_indptr_len = storage.op_indptr_for_dec_ids.len();
+        // The empty node should point to the sentinel (which is now at len()-1 after being added)
+        let expected_empty_pos = op_indptr_len - 1;
         assert_eq!(
-            range2.start, op_indptr_len,
-            "Empty node should point to end of op_indptr array"
+            range2.start, expected_empty_pos,
+            "Empty node should point to the sentinel that was added for it"
         );
-        assert_eq!(range2.end, op_indptr_len, "Empty node should have empty range at array end");
+        assert_eq!(
+            range2.end, expected_empty_pos,
+            "Empty node should have empty range at the sentinel"
+        );
 
         // Test 2: decorator_ids_for_node() should work for empty nodes
         // This should not panic - the iterator should be empty even though the range points to
@@ -1449,5 +1489,114 @@ mod tests {
                 prop_assert_eq!(collected, expected_items);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sparse_debug_tests {
+    use alloc::vec;
+
+    use super::*;
+
+    fn test_decorator_id(value: u32) -> DecoratorId {
+        DecoratorId(value)
+    }
+
+    #[test]
+    fn test_sparse_case_manual() {
+        // Manually create what should be produced by sparse decorator case:
+        // 10 nodes, decorators only at nodes 0 and 5
+
+        // Just node 0 with decorator at op 0
+        let decorator_ids = vec![test_decorator_id(0)];
+        let op_indptr_for_dec_ids = vec![0, 1, 1]; // op 0: [0,1), sentinel
+        let mut node_indptr = IndexVec::new();
+        node_indptr.push(0).unwrap(); // node 0 starts at op index 0
+        node_indptr.push(2).unwrap(); // node 0 ends at op index 2 (sentinel)
+
+        // Validate this structure
+        let result =
+            OpToDecoratorIds::from_components(decorator_ids, op_indptr_for_dec_ids, node_indptr);
+
+        assert!(result.is_ok(), "Single node with decorator should validate: {:?}", result);
+    }
+
+    #[test]
+    fn test_sparse_case_two_nodes() {
+        // Two nodes: node 0 with decorator, node 1 empty
+        let decorator_ids = vec![test_decorator_id(0)];
+        let op_indptr_for_dec_ids = vec![0, 1, 1]; // op 0: [0,1), sentinel at 1
+        let mut node_indptr = IndexVec::new();
+        node_indptr.push(0).unwrap(); // node 0 starts at op index 0
+        node_indptr.push(2).unwrap(); // node 0 ends at op index 2
+        node_indptr.push(2).unwrap(); // node 1 (empty) points to same location
+
+        let result =
+            OpToDecoratorIds::from_components(decorator_ids, op_indptr_for_dec_ids, node_indptr);
+
+        assert!(
+            result.is_ok(),
+            "Two nodes (one with decorator, one empty) should validate: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sparse_debuginfo_round_trip() {
+        use alloc::collections::BTreeMap;
+
+        use crate::{
+            Decorator,
+            mast::debuginfo::{DebugInfo, NodeToDecoratorIds},
+            utils::{Deserializable, Serializable},
+        };
+
+        // Create a sparse CSR structure like we'd see with 10 nodes where only 0 and 5 have
+        // decorators
+        let decorator_ids = vec![test_decorator_id(0), test_decorator_id(1)];
+
+        // Node 0: op 0 has decorator 0
+        // Nodes 1-4: empty
+        // Node 5: op 0 has decorator 1
+        let op_indptr_for_dec_ids = vec![0, 1, 1, 1, 2, 2]; // ops with their decorator ranges
+        let mut node_indptr_for_op_idx = IndexVec::new();
+        node_indptr_for_op_idx.push(0).unwrap(); // node 0
+        node_indptr_for_op_idx.push(2).unwrap(); // node 0 end
+        node_indptr_for_op_idx.push(2).unwrap(); // node 1 (empty)
+        node_indptr_for_op_idx.push(2).unwrap(); // node 2 (empty)
+        node_indptr_for_op_idx.push(2).unwrap(); // node 3 (empty)
+        node_indptr_for_op_idx.push(2).unwrap(); // node 4 (empty)
+        node_indptr_for_op_idx.push(4).unwrap(); // node 5
+
+        let op_storage = OpToDecoratorIds::from_components(
+            decorator_ids.clone(),
+            op_indptr_for_dec_ids,
+            node_indptr_for_op_idx,
+        )
+        .expect("CSR structure should be valid");
+
+        // Create a minimal DebugInfo
+        let mut decorators = crate::mast::debuginfo::IndexVec::new();
+        decorators.push(Decorator::Trace(0)).unwrap();
+        decorators.push(Decorator::Trace(5)).unwrap();
+
+        let node_storage = NodeToDecoratorIds::new();
+        let error_codes = BTreeMap::new();
+
+        let debug_info = DebugInfo {
+            decorators,
+            op_decorator_storage: op_storage,
+            node_decorator_storage: node_storage,
+            error_codes,
+            procedure_names: BTreeMap::new(),
+        };
+
+        // Serialize and deserialize
+        let bytes = debug_info.to_bytes();
+        let deserialized =
+            DebugInfo::read_from_bytes(&bytes).expect("Should deserialize successfully");
+
+        // Verify
+        assert_eq!(debug_info.num_decorators(), deserialized.num_decorators());
     }
 }

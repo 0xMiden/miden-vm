@@ -40,7 +40,12 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, string::{String, ToString}, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
@@ -379,11 +384,8 @@ impl Serializable for DebugInfo {
         }
 
         // 2. Serialize error codes
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> = self
-            .error_codes
-            .iter()
-            .map(|(k, v)| (*k, v.to_string()))
-            .collect();
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> =
+            self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
         // 3. Serialize OpToDecoratorIds CSR (dense representation)
@@ -404,12 +406,11 @@ impl Serializable for DebugInfo {
         self.op_decorator_storage.op_indptr_for_dec_ids.write_into(target);
 
         // node_indptr_for_op_idx as Vec<usize>
-        let node_indptr_vec: Vec<usize> = self
-            .op_decorator_storage
+        self.op_decorator_storage
             .node_indptr_for_op_idx
             .as_slice()
-            .to_vec();
-        node_indptr_vec.write_into(target);
+            .to_vec()
+            .write_into(target);
 
         // 4. Serialize NodeToDecoratorIds CSR (dense representation)
 
@@ -432,19 +433,13 @@ impl Serializable for DebugInfo {
         after_decorators_u32.write_into(target);
 
         // node_indptr_for_before as Vec<usize>
-        let before_indptr_vec: Vec<usize> = self
-            .node_decorator_storage
-            .node_indptr_for_before
-            .as_slice()
-            .to_vec();
+        let before_indptr_vec: Vec<usize> =
+            self.node_decorator_storage.node_indptr_for_before.as_slice().to_vec();
         before_indptr_vec.write_into(target);
 
         // node_indptr_for_after as Vec<usize>
-        let after_indptr_vec: Vec<usize> = self
-            .node_decorator_storage
-            .node_indptr_for_after
-            .as_slice()
-            .to_vec();
+        let after_indptr_vec: Vec<usize> =
+            self.node_decorator_storage.node_indptr_for_after.as_slice().to_vec();
         after_indptr_vec.write_into(target);
     }
 }
@@ -455,7 +450,8 @@ impl Deserializable for DebugInfo {
 
         // 1. Read decorator data and string table
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
-        let string_table: crate::mast::serialization::StringTable = Deserializable::read_from(source)?;
+        let string_table: crate::mast::serialization::StringTable =
+            Deserializable::read_from(source)?;
 
         let decorator_count: usize = source.read_usize()?;
         let mut decorator_infos = Vec::with_capacity(decorator_count);
@@ -466,8 +462,7 @@ impl Deserializable for DebugInfo {
         // 2. Reconstruct decorators
         let mut decorators = IndexVec::new();
         for decorator_info in decorator_infos {
-            let decorator = decorator_info
-                .try_into_decorator(&string_table, &decorator_data)?;
+            let decorator = decorator_info.try_into_decorator(&string_table, &decorator_data)?;
             decorators.push(decorator).map_err(|_| {
                 DeserializationError::InvalidValue(
                     "Failed to add decorator to IndexVec".to_string(),
@@ -478,11 +473,10 @@ impl Deserializable for DebugInfo {
         // 3. Read error codes
         let error_codes_raw: alloc::collections::BTreeMap<u64, alloc::string::String> =
             Deserializable::read_from(source)?;
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> =
-            error_codes_raw
-                .into_iter()
-                .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
-                .collect();
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> = error_codes_raw
+            .into_iter()
+            .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
+            .collect();
 
         // 4. Read OpToDecoratorIds CSR (dense representation)
 
@@ -582,9 +576,9 @@ impl Deserializable for DebugInfo {
             procedure_names,
         };
 
-        debug_info
-            .validate()
-            .map_err(|e| DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e)))?;
+        debug_info.validate().map_err(|e| {
+            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e))
+        })?;
 
         Ok(debug_info)
     }
