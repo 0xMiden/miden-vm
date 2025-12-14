@@ -1,12 +1,13 @@
 use alloc::vec::Vec;
 
-use super::*;
-use crate::stack::OverflowTableRow;
 use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
 use miden_core::Field;
+
+use super::*;
+use crate::stack::OverflowTableRow;
 
 // TYPE ALIASES
 // ================================================================================================
@@ -196,7 +197,7 @@ fn start_restore_context() {
     stack.advance_clock();
 
     // start context
-    stack.start_context();
+    let _ = stack.start_context();
     stack.copy_state(0);
     stack.advance_clock();
     assert_eq!(16, stack.depth());
@@ -492,7 +493,7 @@ fn build_stack(stack_inputs: &[u64]) -> [Felt; MIN_STACK_DEPTH] {
 fn build_helpers(stack_depth: u64, next_overflow_addr: u64) -> StackHelpersState {
     let b0 = Felt::new(stack_depth);
     let b1 = Felt::new(next_overflow_addr);
-    let h0 = (b0 - Felt::new(MIN_STACK_DEPTH as u64)).inverse();
+    let h0 = (b0 - Felt::new(MIN_STACK_DEPTH as u64)).try_inverse().unwrap_or(ZERO);
 
     [b0, b1, h0]
 }

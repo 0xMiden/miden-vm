@@ -1,7 +1,7 @@
-use miden_core::{Felt, Field, ZERO};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::utils::*;
+use miden_core::{Felt, Field, ZERO};
 
 /// The number of rows in the execution trace required to compute a permutation of Rescue Prime
 /// Optimized, represented as a field element.

@@ -1,4 +1,3 @@
-use crate::{Felt, utils::hash_string_to_word};
 use alloc::{borrow::Cow, string::String};
 use core::fmt::{Display, Formatter};
 
@@ -7,6 +6,8 @@ use miden_crypto::utils::{
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::{Felt, utils::hash_string_to_word};
 
 // EVENT ID
 // ================================================================================================

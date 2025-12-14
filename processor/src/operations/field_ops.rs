@@ -228,7 +228,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{ONE, ZERO, mast::MastForest, Field};
+    use miden_core::{Field, ONE, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
 
     use super::{
@@ -236,7 +236,6 @@ mod tests {
         Process,
     };
     use crate::{AdviceInputs, DefaultHost, StackInputs};
-
 
     // ARITHMETIC OPERATIONS
     // --------------------------------------------------------------------------------------------

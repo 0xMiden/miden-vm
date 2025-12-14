@@ -3,9 +3,7 @@ use alloc::vec::Vec;
 use miden_air::RowIndex;
 use miden_core::{Word, stack::MIN_STACK_DEPTH};
 
-use super::{
-    ExecutionError, Felt, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO,
-};
+use super::{ExecutionError, Felt, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO};
 
 mod trace;
 use trace::StackTrace;
@@ -281,7 +279,7 @@ impl Stack {
     pub fn shift_left_and_start_context(&mut self) -> (usize, Felt) {
         const START_POSITION: usize = 1;
 
-        self.shift_left_no_helpers(START_POSITION);
+        let _ = self.shift_left_no_helpers(START_POSITION);
 
         // resets the helper columns to their default value, and write those to the trace in the
         // next row.

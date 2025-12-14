@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use miden_core::Field;
 use paste::paste;
 
 use super::{
@@ -7,7 +8,6 @@ use super::{
     ExecutionError, Felt, Operation, Process,
 };
 use crate::{ErrorContext, ZERO};
-use miden_core::Field;
 
 const U32_MAX: u64 = u32::MAX as u64;
 
@@ -230,7 +230,7 @@ impl Process {
             [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO];
 
         if check_element_validity {
-            let m = (Felt::from(u32::MAX) - hi).inverse();
+            let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
             helper_values[4] = m;
         }
 

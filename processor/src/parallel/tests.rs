@@ -324,12 +324,14 @@ fn test_trace_generation_at_fragment_boundaries(
         .zip(trace_from_single_fragment.main_segment().columns())
         .enumerate()
     {
-        let effective_len_fragments = col_from_fragments.len().saturating_sub(crate::trace::NUM_RAND_ROWS);
+        let effective_len_fragments =
+            col_from_fragments.len().saturating_sub(crate::trace::NUM_RAND_ROWS);
         let effective_len_single =
             col_from_single_fragment.len().saturating_sub(crate::trace::NUM_RAND_ROWS);
 
         assert_eq!(
-            effective_len_fragments, effective_len_single,
+            effective_len_fragments,
+            effective_len_single,
             "Trace columns lengths (excluding random rows) differ at column {} ({})",
             col_idx,
             get_column_name(col_idx)
@@ -355,7 +357,8 @@ fn test_trace_generation_at_fragment_boundaries(
             let tail_start = effective_len_fragments;
             for row_idx in tail_start..col_from_fragments.len() {
                 assert_eq!(
-                    col_from_fragments[row_idx], col_from_single_fragment[row_idx],
+                    col_from_fragments[row_idx],
+                    col_from_single_fragment[row_idx],
                     "Random-row mismatch at column {} ({}) row {}",
                     col_idx,
                     get_column_name(col_idx),

@@ -76,7 +76,7 @@ impl Process {
         // compute x corresponding to the query position
         let f_tau = get_tau_factor(d_seg);
         let x = poe * f_tau * DOMAIN_OFFSET;
-        let x_inv = x.inverse();
+        let x_inv = x.try_inverse().unwrap_or(ZERO);
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
@@ -234,7 +234,7 @@ fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
 
 // TESTS
 // ================================================================================================
-/* 
+/*
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
@@ -334,7 +334,7 @@ mod tests {
         // perform layer folding
         let f_tau = super::get_tau_factor(d_seg.as_int() as usize);
         let x = poe * f_tau * super::DOMAIN_OFFSET;
-        let x_inv = x.inverse();
+        let x_inv = x.try_inverse().unwrap_or(ZERO);
 
         let (ev, es) = super::compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = super::fold4(query_values, ev, es);

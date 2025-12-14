@@ -5,7 +5,6 @@ use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 use super::{Felt, Kernel, KernelRom, TRACE_WIDTH, TraceFragment};
 use crate::{ONE, ZERO};
 
-
 // CONSTANTS
 // ================================================================================================
 

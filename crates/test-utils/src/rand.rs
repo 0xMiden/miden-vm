@@ -33,7 +33,7 @@ pub fn seeded_word(seed: &mut u64) -> Word {
 }
 
 pub fn seeded_element(seed: &mut u64) -> Felt {
-    *seed = (*seed).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    *seed = (*seed).wrapping_add(0x9e37_79b9_7f4a_7c15);
     Felt::new(splitmix64(*seed))
 }
 
@@ -85,7 +85,7 @@ fn next_u64() -> u64 {
 
     let mut current = STATE.load(Ordering::Relaxed);
     loop {
-        let next = current.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let next = current.wrapping_add(0x9e37_79b9_7f4a_7c15);
         match STATE.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
             Ok(_) => return splitmix64(next),
             Err(observed) => current = observed,
@@ -94,7 +94,7 @@ fn next_u64() -> u64 {
 }
 
 fn splitmix64(mut z: u64) -> u64 {
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
     z ^ (z >> 31)
 }

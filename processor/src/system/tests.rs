@@ -9,13 +9,14 @@ fn cycles_num_exceeded() {
     let mut host = DefaultHost::default();
     let program = &MastForest::default();
 
+    let max_cycles = 2048;
     let mut process = Process::new(
         Kernel::default(),
         stack,
         AdviceInputs::default(),
-        ExecutionOptions::new(Some(64), 64, false, false).unwrap(),
+        ExecutionOptions::new(Some(max_cycles), max_cycles as u32, false, false).unwrap(),
     );
-    for _ in 0..64 {
+    for _ in 0..max_cycles {
         process.execute_op(Operation::Noop, program, &mut host).unwrap();
     }
     assert!(process.execute_op(Operation::Noop, program, &mut host).is_err());
