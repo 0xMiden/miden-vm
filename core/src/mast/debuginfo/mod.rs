@@ -47,8 +47,10 @@ use miden_utils_indexing::{Idx, IndexVec};
 use serde::{Deserialize, Serialize};
 
 use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
-use crate::utils::{ByteWriter, Serializable};
-use crate::{LexicographicWord, Word};
+use crate::{
+    LexicographicWord, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -444,6 +446,147 @@ impl Serializable for DebugInfo {
             .as_slice()
             .to_vec();
         after_indptr_vec.write_into(target);
+    }
+}
+
+impl Deserializable for DebugInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use crate::mast::serialization::decorator::DecoratorInfo;
+
+        // 1. Read decorator data and string table
+        let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
+        let string_table: crate::mast::serialization::StringTable = Deserializable::read_from(source)?;
+
+        let decorator_count: usize = source.read_usize()?;
+        let mut decorator_infos = Vec::with_capacity(decorator_count);
+        for _ in 0..decorator_count {
+            decorator_infos.push(DecoratorInfo::read_from(source)?);
+        }
+
+        // 2. Reconstruct decorators
+        let mut decorators = IndexVec::new();
+        for decorator_info in decorator_infos {
+            let decorator = decorator_info
+                .try_into_decorator(&string_table, &decorator_data)?;
+            decorators.push(decorator).map_err(|_| {
+                DeserializationError::InvalidValue(
+                    "Failed to add decorator to IndexVec".to_string(),
+                )
+            })?;
+        }
+
+        // 3. Read error codes
+        let error_codes_raw: alloc::collections::BTreeMap<u64, alloc::string::String> =
+            Deserializable::read_from(source)?;
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> =
+            error_codes_raw
+                .into_iter()
+                .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
+                .collect();
+
+        // 4. Read OpToDecoratorIds CSR (dense representation)
+
+        // decorator_ids from Vec<u32>
+        let decorator_ids_u32: Vec<u32> = Deserializable::read_from(source)?;
+        let decorator_ids: Vec<DecoratorId> = decorator_ids_u32
+            .into_iter()
+            .map(|id| {
+                if id as usize >= decorators.len() {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "DecoratorId {} exceeds decorator count {}",
+                        id,
+                        decorators.len()
+                    )));
+                }
+                Ok(DecoratorId(id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // op_indptr_for_dec_ids
+        let op_indptr_for_dec_ids: Vec<usize> = Deserializable::read_from(source)?;
+
+        // node_indptr_for_op_idx from Vec<usize>
+        let node_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_op_idx = IndexVec::from_raw(node_indptr_vec);
+
+        let op_decorator_storage = OpToDecoratorIds::from_components(
+            decorator_ids,
+            op_indptr_for_dec_ids,
+            node_indptr_for_op_idx,
+        )
+        .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+
+        // 5. Read NodeToDecoratorIds CSR (dense representation)
+
+        // before_enter_decorators from Vec<u32>
+        let before_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
+        let before_enter_decorators: Vec<DecoratorId> = before_decorators_u32
+            .into_iter()
+            .map(|id| {
+                if id as usize >= decorators.len() {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "DecoratorId {} exceeds decorator count {}",
+                        id,
+                        decorators.len()
+                    )));
+                }
+                Ok(DecoratorId(id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // after_exit_decorators from Vec<u32>
+        let after_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
+        let after_exit_decorators: Vec<DecoratorId> = after_decorators_u32
+            .into_iter()
+            .map(|id| {
+                if id as usize >= decorators.len() {
+                    return Err(DeserializationError::InvalidValue(format!(
+                        "DecoratorId {} exceeds decorator count {}",
+                        id,
+                        decorators.len()
+                    )));
+                }
+                Ok(DecoratorId(id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // node_indptr_for_before from Vec<usize>
+        let before_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_before = IndexVec::from_raw(before_indptr_vec);
+
+        // node_indptr_for_after from Vec<usize>
+        let after_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_after = IndexVec::from_raw(after_indptr_vec);
+
+        let node_decorator_storage = NodeToDecoratorIds::from_components(
+            before_enter_decorators,
+            after_exit_decorators,
+            node_indptr_for_before,
+            node_indptr_for_after,
+        )
+        .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+
+        // 6. Read procedure names (marked serde(skip) but we deserialize manually)
+        let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
+        let procedure_names: BTreeMap<LexicographicWord, Arc<str>> = procedure_names_raw
+            .into_iter()
+            .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
+            .collect();
+
+        // 7. Construct and validate DebugInfo
+        let debug_info = DebugInfo {
+            decorators,
+            op_decorator_storage,
+            node_decorator_storage,
+            error_codes,
+            procedure_names,
+        };
+
+        debug_info
+            .validate()
+            .map_err(|e| DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e)))?;
+
+        Ok(debug_info)
     }
 }
 

@@ -145,6 +145,15 @@ impl<I: Idx, T> IndexVec<I, T> {
         self.raw
     }
 
+    /// Create an IndexVec from a raw Vec.
+    ///
+    /// This is useful for deserialization or when reconstructing an IndexVec
+    /// from previously extracted components.
+    #[inline]
+    pub fn from_raw(raw: Vec<T>) -> Self {
+        Self { raw, _m: PhantomData }
+    }
+
     /// Remove an element at the specified index and return it.
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.raw.swap_remove(index)
