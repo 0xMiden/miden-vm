@@ -1,4 +1,4 @@
-use alloc::vec::Vec;
+use alloc::{string::{String, ToString}, vec::Vec};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "arbitrary")]
@@ -175,6 +175,11 @@ impl OpToDecoratorIds {
             return Err(DecoratorIndexError::InternalStructure);
         }
 
+        // Check that op_indptr_for_dec_ids starts at 0
+        if op_indptr_for_dec_ids[0] != 0 {
+            return Err(DecoratorIndexError::InternalStructure);
+        }
+
         // Check that the last operation pointer doesn't exceed decorator IDs length
         let Some(&last_op_ptr) = op_indptr_for_dec_ids.last() else {
             return Err(DecoratorIndexError::InternalStructure);
@@ -189,6 +194,12 @@ impl OpToDecoratorIds {
         }
 
         let node_slice = node_indptr_for_op_idx.as_slice();
+
+        // Check that node_indptr_for_op_idx starts at 0
+        if node_slice[0] != 0 {
+            return Err(DecoratorIndexError::InternalStructure);
+        }
+
         let Some(&last_node_ptr) = node_slice.last() else {
             return Err(DecoratorIndexError::InternalStructure);
         };
@@ -214,6 +225,78 @@ impl OpToDecoratorIds {
             op_indptr_for_dec_ids,
             node_indptr_for_op_idx,
         })
+    }
+
+    /// Validate CSR structure integrity.
+    ///
+    /// Checks:
+    /// - All decorator IDs are valid (< decorator_count)
+    /// - op_indptr_for_dec_ids is monotonic, starts at 0, ends at decorator_ids.len()
+    /// - node_indptr_for_op_idx is monotonic, starts at 0, ends <= op_indptr_for_dec_ids.len()-1
+    pub(crate) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+        // Validate all decorator IDs
+        for &dec_id in &self.decorator_ids {
+            if dec_id.to_usize() >= decorator_count {
+                return Err(format!("Invalid decorator ID {}: exceeds decorator count {}",
+                    dec_id.to_usize(), decorator_count));
+            }
+        }
+
+        // Validate op_indptr_for_dec_ids
+        if self.op_indptr_for_dec_ids.is_empty() {
+            return Err("op_indptr_for_dec_ids cannot be empty".to_string());
+        }
+
+        if self.op_indptr_for_dec_ids[0] != 0 {
+            return Err("op_indptr_for_dec_ids must start at 0".to_string());
+        }
+
+        for window in self.op_indptr_for_dec_ids.windows(2) {
+            if window[0] > window[1] {
+                return Err(format!(
+                    "op_indptr_for_dec_ids not monotonic: {} > {}",
+                    window[0], window[1]
+                ));
+            }
+        }
+
+        if *self.op_indptr_for_dec_ids.last().unwrap() != self.decorator_ids.len() {
+            return Err(format!(
+                "op_indptr_for_dec_ids end {} doesn't match decorator_ids length {}",
+                self.op_indptr_for_dec_ids.last().unwrap(),
+                self.decorator_ids.len()
+            ));
+        }
+
+        // Validate node_indptr_for_op_idx
+        let node_slice = self.node_indptr_for_op_idx.as_slice();
+        if node_slice.is_empty() {
+            return Err("node_indptr_for_op_idx cannot be empty".to_string());
+        }
+
+        if node_slice[0] != 0 {
+            return Err("node_indptr_for_op_idx must start at 0".to_string());
+        }
+
+        for window in node_slice.windows(2) {
+            if window[0] > window[1] {
+                return Err(format!(
+                    "node_indptr_for_op_idx not monotonic: {} > {}",
+                    window[0], window[1]
+                ));
+            }
+        }
+
+        let max_node_ptr = self.op_indptr_for_dec_ids.len().saturating_sub(1);
+        if *node_slice.last().unwrap() > max_node_ptr {
+            return Err(format!(
+                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
+                node_slice.last().unwrap(),
+                max_node_ptr
+            ));
+        }
+
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -1274,6 +1357,56 @@ mod tests {
                 node_id
             );
         }
+    }
+
+    #[test]
+    fn test_validate_csr_valid() {
+        let storage = create_standard_test_storage();
+        assert!(storage.validate_csr(6).is_ok());
+    }
+
+    #[test]
+    fn test_validate_csr_invalid_decorator_id() {
+        let storage = create_standard_test_storage();
+        // decorator_count=3 but storage has IDs up to 5
+        let result = storage.validate_csr(3);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid decorator ID"));
+    }
+
+    #[test]
+    fn test_validate_csr_not_monotonic() {
+        let decorator_ids = vec![test_decorator_id(0), test_decorator_id(1)];
+        let op_indptr_for_dec_ids = vec![0, 2, 1]; // Not monotonic!
+        let mut node_indptr_for_op_idx = IndexVec::new();
+        node_indptr_for_op_idx.push(0).unwrap();
+        node_indptr_for_op_idx.push(2).unwrap();
+
+        let storage = OpToDecoratorIds::from_components(
+            decorator_ids,
+            op_indptr_for_dec_ids,
+            node_indptr_for_op_idx,
+        );
+
+        // from_components should catch this
+        assert!(storage.is_err());
+    }
+
+    #[test]
+    fn test_validate_csr_wrong_start() {
+        let decorator_ids = vec![test_decorator_id(0)];
+        let op_indptr_for_dec_ids = vec![1, 1]; // Should start at 0!
+        let mut node_indptr_for_op_idx = IndexVec::new();
+        node_indptr_for_op_idx.push(0).unwrap();
+        node_indptr_for_op_idx.push(1).unwrap();
+
+        let storage = OpToDecoratorIds::from_components(
+            decorator_ids,
+            op_indptr_for_dec_ids,
+            node_indptr_for_op_idx,
+        );
+
+        assert!(storage.is_err());
     }
 
     #[cfg(feature = "arbitrary")]
