@@ -12,7 +12,6 @@ use miden_core::{
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
-use winter_prover::Trace;
 
 use super::*;
 use crate::{DefaultHost, HostLibrary, fast::FastProcessor};
@@ -325,30 +324,44 @@ fn test_trace_generation_at_fragment_boundaries(
         .zip(trace_from_single_fragment.main_segment().columns())
         .enumerate()
     {
-        if col_from_fragments != col_from_single_fragment {
-            // Find the first row where the columns disagree
-            for (row_idx, (val_from_fragments, val_from_single_fragment)) in
-                col_from_fragments.iter().zip(col_from_single_fragment.iter()).enumerate()
-            {
-                if val_from_fragments != val_from_single_fragment {
-                    panic!(
-                        "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}) row {}: multiple={}, single={}",
-                        col_idx,
-                        get_column_name(col_idx),
-                        row_idx,
-                        val_from_fragments,
-                        val_from_single_fragment
-                    );
-                }
+        let effective_len_fragments = col_from_fragments.len().saturating_sub(crate::trace::NUM_RAND_ROWS);
+        let effective_len_single =
+            col_from_single_fragment.len().saturating_sub(crate::trace::NUM_RAND_ROWS);
+
+        assert_eq!(
+            effective_len_fragments, effective_len_single,
+            "Trace columns lengths (excluding random rows) differ at column {} ({})",
+            col_idx,
+            get_column_name(col_idx)
+        );
+
+        for row_idx in 0..effective_len_fragments {
+            let val_from_fragments = col_from_fragments[row_idx];
+            let val_from_single_fragment = col_from_single_fragment[row_idx];
+            if val_from_fragments != val_from_single_fragment {
+                panic!(
+                    "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}) row {}: multiple={}, single={}",
+                    col_idx,
+                    get_column_name(col_idx),
+                    row_idx,
+                    val_from_fragments,
+                    val_from_single_fragment
+                );
             }
-            // If we reach here, the columns have different lengths
-            panic!(
-                "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}): different lengths (slow={}, parallel={})",
-                col_idx,
-                get_column_name(col_idx),
-                col_from_fragments.len(),
-                col_from_single_fragment.len()
-            );
+        }
+
+        // random rows should be zero after padding; check they’re equal as well
+        if crate::trace::NUM_RAND_ROWS > 0 {
+            let tail_start = effective_len_fragments;
+            for row_idx in tail_start..col_from_fragments.len() {
+                assert_eq!(
+                    col_from_fragments[row_idx], col_from_single_fragment[row_idx],
+                    "Random-row mismatch at column {} ({}) row {}",
+                    col_idx,
+                    get_column_name(col_idx),
+                    row_idx
+                );
+            }
         }
     }
 

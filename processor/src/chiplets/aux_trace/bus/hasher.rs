@@ -18,7 +18,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, PrimeCharacteristicRing, ZERO, utils::range
+    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
+    PrimeCharacteristicRing, ZERO, utils::range,
 };
 
 use super::get_op_label;
@@ -669,13 +670,9 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1] * (self.transition_label)
-            + alphas[2] * (self.addr_next);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next);
 
-        header
-            + alphas[5] * (self.op_code)
-            + build_value(&alphas[8..16], self.decoder_hasher_state)
+        header + alphas[5] * (self.op_code) + build_value(&alphas[8..16], self.decoder_hasher_state)
     }
 
     fn source(&self) -> &str {
@@ -756,9 +753,7 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1] * (self.transition_label)
-            + alphas[2] * (self.addr_next);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -792,9 +787,8 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1] * (self.transition_label)
-            + alphas[2] * (self.addr_next - ONE);
+        let header =
+            alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr_next - ONE);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -828,8 +822,7 @@ where
     E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header =
-            alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr);
+        let header = alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr);
 
         header + build_value(&alphas[8..12], self.digest)
     }

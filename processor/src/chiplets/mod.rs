@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
-use miden_core::{Kernel, PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState};
+use miden_core::{
+    Kernel, PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+};
 
 use super::{
-    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, ONE,
-    RangeChecker, TraceFragment, Word, ZERO, crypto::MerklePath, utils,
+    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, ExecutionError, Felt, ONE, RangeChecker,
+    TraceFragment, Word, ZERO, crypto::MerklePath, utils,
 };
 
 mod bitwise;

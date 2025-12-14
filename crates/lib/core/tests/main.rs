@@ -26,13 +26,21 @@ macro_rules! build_debug_test {
     }}
 }
 
+#[cfg(feature = "core-lib-extra-tests")]
 mod collections;
+#[cfg(feature = "core-lib-extra-tests")]
 mod crypto;
 mod helpers;
+#[cfg(feature = "core-lib-extra-tests")]
 mod mast_forest_merge;
+#[cfg(feature = "core-lib-extra-tests")]
 mod math;
+#[cfg(feature = "core-lib-extra-tests")]
 mod mem;
+#[cfg(feature = "legacy-stark-tests")]
 mod pcs;
+#[cfg(feature = "legacy-stark-tests")]
 mod stark;
 mod sys;
+#[cfg(feature = "core-lib-extra-tests")]
 mod word;

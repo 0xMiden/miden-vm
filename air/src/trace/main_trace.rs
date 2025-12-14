@@ -93,6 +93,11 @@ impl<E: Clone + Copy> ColMatrix<E> {
         &mut self.columns[col_idx]
     }
 
+    /// Returns an iterator over all columns in this matrix.
+    pub fn columns(&self) -> impl Iterator<Item = &[E]> {
+        self.columns.iter().map(|col| col.as_slice())
+    }
+
     /// Copies values of all columns at the specified row into the specified row slice.
     ///
     /// # Panics

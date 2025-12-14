@@ -3,7 +3,8 @@ use miden_air::trace::{
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 use miden_core::{
-    BasedVectorSpace, Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest, stack::MIN_STACK_DEPTH, utils::range
+    BasedVectorSpace, Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
+    stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
@@ -297,8 +298,10 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     let c0 = QuadFelt::from(coef[7]);
 
     // Read the current accumulator
-    let acc =
-        QuadFelt::new([processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX)]);
+    let acc = QuadFelt::new([
+        processor.stack().get(ACC_LOW_INDEX),
+        processor.stack().get(ACC_HIGH_INDEX),
+    ]);
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
     let tmp0 = (acc * alpha + c0) * alpha + c1;

@@ -24,7 +24,7 @@ testing = []
 
 [dependencies]
 # Miden dependencies
-miden-core.workspace = true
+miden-core = { workspace = true, features = ["serde"] }
 miden-utils-indexing.workspace = true
 
 # External dependencies

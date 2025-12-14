@@ -24,7 +24,6 @@ use rayon::prelude::*;
 use crate::{
     ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
     chiplets::Chiplets,
-    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -110,14 +109,8 @@ pub fn build_trace(
         || pad_trace_columns(&mut core_trace_columns, main_trace_len),
         || {
             rayon::join(
-                || {
-                    range_checker.into_trace_with_table(
-                        range_table_len,
-                        main_trace_len,
-                        NUM_RAND_ROWS,
-                    )
-                },
-                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS, final_pc_transcript.state()),
+                || range_checker.into_trace_with_table(range_table_len, main_trace_len, 0),
+                || chiplets.into_trace(main_trace_len, 0, final_pc_transcript.state()),
             )
         },
     );
@@ -133,13 +126,10 @@ pub fn build_trace(
         .chain(padding_columns)
         .collect();
 
-    // Initialize random element generator using program hash
-    let mut rng = RpoRandomCoin::new(program_hash);
-
-    // Inject random values into the last NUM_RAND_ROWS rows for all columns
+    // Fill the random rows with zeros (Plonky3 doesn’t require random padding yet).
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            //column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = ZERO;
         }
     }
 

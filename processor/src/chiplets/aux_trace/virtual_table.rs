@@ -7,11 +7,11 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState};
-
-use super::{
-     build_ace_memory_read_element_request, build_ace_memory_read_word_request,
+use miden_core::{
+    ExtensionField, Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState,
 };
+
+use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},

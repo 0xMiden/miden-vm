@@ -5,11 +5,11 @@ use miden_air::{
         bitwise::{BITWISE_AND, BITWISE_AND_LABEL, BITWISE_XOR, BITWISE_XOR_LABEL, OP_CYCLE_LEN},
     },
 };
+use miden_core::{Field};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    HASH_CYCLE_LEN, NUM_RAND_ROWS, ONE, Operation, Trace, build_trace_from_ops, rand_array,
-    rand_value,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
+    NUM_RAND_ROWS, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It

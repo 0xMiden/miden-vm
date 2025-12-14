@@ -5,10 +5,16 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use alloc::vec::Vec;
 use miden_air::{HashFunction, ProcessorAir, PublicInputs};
 // EXPORTS
 // ================================================================================================
-pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
+pub use miden_core::{
+    Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+    precompile::{
+        PrecompileTranscriptDigest, PrecompileVerificationError, PrecompileVerifierRegistry,
+    },
+};
 pub mod math {
     pub use miden_core::Felt;
 }
@@ -53,26 +59,56 @@ pub fn verify(
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-) -> Result<u32, VerificationError> where
-{
-    // get security level of the proof
+) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
-    let program_hash = *program_info.program_hash();
+    let (hash_fn, proof_bytes, _, _) = proof.into_parts();
+    verify_stark(program_info, stack_inputs, stack_outputs, hash_fn, proof_bytes)?;
+    Ok(security_level)
+}
 
-    // Build public inputs
+/// Verifies the proof together with all deferred precompile requests.
+///
+/// This helper recomputes the precompile commitments using the supplied
+/// [`PrecompileVerifierRegistry`], rebuilds the transcript, compares it against the digest
+/// committed inside the proof, and then verifies the STARK proof.
+pub fn verify_with_precompiles(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    proof: ExecutionProof,
+    registry: &PrecompileVerifierRegistry,
+) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
+    let security_level = proof.security_level();
+    let (hash_fn, proof_bytes, precompile_requests, expected_digest) = proof.into_parts();
+
+    let transcript = registry.requests_transcript(&precompile_requests)?;
+    let recomputed_digest = transcript.finalize();
+
+    if recomputed_digest != expected_digest {
+        return Err(VerificationError::PrecompileTranscriptMismatch {
+            expected: expected_digest,
+            actual: recomputed_digest,
+        });
+    }
+
+    verify_stark(program_info, stack_inputs, stack_outputs, hash_fn, proof_bytes)?;
+    Ok((security_level, recomputed_digest))
+}
+
+fn verify_stark(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    hash_fn: HashFunction,
+    proof_bytes: Vec<u8>,
+) -> Result<(), VerificationError> {
+    let program_hash = *program_info.program_hash();
     let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
     let public_values = pub_inputs.to_elements();
-
-    // Deserialize proof and verify using unified miden-prover
-    let (hash_fn, proof_bytes) = proof.into_parts();
     let air = ProcessorAir::new();
 
     match hash_fn {
         HashFunction::Blake3_192 => {
-            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of
-            // 24-byte). Proper 192-bit support requires Plonky3 to implement
-            // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
-            // 0xMiden/Plonky3 to add this support.
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
@@ -116,7 +152,7 @@ pub fn verify(
         },
     }?;
 
-    Ok(security_level)
+    Ok(())
 }
 
 // ERRORS
@@ -127,6 +163,15 @@ pub fn verify(
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
     ProgramVerificationError(Word),
+    #[error("precompile verification failed: {0}")]
+    PrecompileVerification(#[from] PrecompileVerificationError),
+    #[error(
+        "precompile transcript mismatch (proof digest: {expected:?}, recomputed digest: {actual:?})"
+    )]
+    PrecompileTranscriptMismatch {
+        expected: PrecompileTranscriptDigest,
+        actual: PrecompileTranscriptDigest,
+    },
     #[error("the input {0} is not a valid field element")]
     InputNot(u64),
     #[error("the output {0} is not a valid field element")]

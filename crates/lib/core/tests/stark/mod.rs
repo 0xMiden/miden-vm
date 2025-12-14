@@ -1,11 +1,9 @@
-#![cfg(feature = "legacy-stark-tests")]
-
 use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, QuadFelt, WORD_SIZE, Word, ZERO, precompile::PrecompileTranscriptState,
+    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, precompile::PrecompileTranscriptState,
 };
 use miden_processor::{
     DefaultHost, Program, ProgramInfo,
@@ -19,7 +17,7 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 use verifier_recursive::{VerifierData, generate_advice_inputs};
 
-mod verifier_recursive;
+//mod verifier_recursive;
 
 // Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
 // in `crates/lib/core/asm/sys/vm/mod.masm` are violated.
@@ -168,12 +166,12 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     // 5) Compute the expected randomness-reduced value of all the kernel procedures digests
 
     let beta =
-        QuadFelt::new([Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1])]);
+        QuadFelt::new(Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1]));
     let alpha =
-        QuadFelt::new([Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3])]);
+        QuadFelt::new(Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3]));
     let reduced_value_inv =
-        reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inverse();
-    let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.as_basis_coefficients_slice();
+        reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inv();
+    let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.to_base_elements();
 
     // 6) Run the test
 
@@ -312,7 +310,7 @@ fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
         + KERNEL_OP_LABEL.into()
         + beta
             * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
-                acc * beta + QuadFelt::new([Felt::new(*coef), ZERO])
+                acc * beta + QuadFelt::new(Felt::new(*coef), ZERO)
             })
 }
 

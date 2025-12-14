@@ -3,7 +3,7 @@ use std::{sync::Arc, vec};
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{
-    EventName, ZERO,
+    EventName, StarkField, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
     utils::Deserializable,
 };
@@ -125,7 +125,7 @@ fn test_falcon512_diff_mod_m() {
         exec.falcon512rpo::diff_mod_M
     end
     ";
-    let v = Felt::ORDER_U64 - 1;
+    let v = Felt::MODULUS - 1;
     let (v_lo, v_hi) = (v as u32, v >> 32);
 
     // test largest possible value given v
@@ -161,7 +161,7 @@ fn test_falcon512_diff_mod_m() {
 
 proptest! {
     #[test]
-    fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
+    fn diff_mod_m_proptest(v in 0..Felt::MODULUS, w in 0..J, u in 0..J) {
 
           let source = "
     use miden::core::crypto::dsa::falcon512rpo

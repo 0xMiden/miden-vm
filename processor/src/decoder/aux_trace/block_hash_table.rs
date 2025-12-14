@@ -1,6 +1,7 @@
 use miden_air::RowIndex;
 use miden_core::{
-    ExtensionField, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP, OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO
+    ExtensionField, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN,
+    OPCODE_LOOP, OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO,
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
@@ -136,12 +137,11 @@ impl BlockHashTableRow {
         let is_first_child = op_code_next != OPCODE_END
             && op_code_next != OPCODE_REPEAT
             && op_code_next != OPCODE_HALT;
-        
+
         // TODO(Al)
-        let is_loop_body = main_trace
-            .is_loop_body_flag(row);
-            //.try_into()
-            //.expect("expected loop body flag to be a boolean");
+        let is_loop_body = main_trace.is_loop_body_flag(row);
+        //.try_into()
+        //.expect("expected loop body flag to be a boolean");
         let is_loop_body = is_loop_body.as_int() != 0;
 
         Self {

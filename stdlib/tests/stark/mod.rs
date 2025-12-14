@@ -99,7 +99,7 @@ pub fn generate_recursive_verifier_data(
         stack_outputs,
         PrecompileTranscriptState::default(),
     );
-    let (_, proof, _precompile_requests) = proof.into_parts();
+    let (_, proof, _precompile_requests, _precompile_digest) = proof.into_parts();
     Ok(generate_advice_inputs(proof, pub_inputs).unwrap())
 }
 

@@ -2,7 +2,9 @@ use miden_air::{
     RowIndex,
     trace::decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use miden_core::{ExtensionField, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN, PrimeCharacteristicRing};
+use miden_core::{
+    ExtensionField, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN, PrimeCharacteristicRing,
+};
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
 use crate::debug::BusDebugger;
@@ -84,10 +86,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         })
     } else if op_batch_flag == OP_BATCH_2_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
-        alphas[0]
-            + alphas[1] * (block_id)
-            + alphas[2] * (group_count - ONE)
-            + alphas[3] * (h[1])
+        alphas[0] + alphas[1] * (block_id) + alphas[2] * (group_count - ONE) + alphas[3] * (h[1])
     } else {
         E::ONE
     }
@@ -114,8 +113,5 @@ fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
         }
     };
 
-    alphas[0]
-        + alphas[1] * (block_id)
-        + alphas[2] * (group_count)
-        + alphas[3] * (group_value)
+    alphas[0] + alphas[1] * (block_id) + alphas[2] * (group_count) + alphas[3] * (group_value)
 }

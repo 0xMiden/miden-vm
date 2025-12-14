@@ -63,6 +63,8 @@ where
     );
 
     let stack_outputs = *trace.stack_outputs();
+    let precompile_requests = trace.precompile_requests().to_vec();
+    let precompile_transcript_digest = trace.final_precompile_transcript().finalize();
     let hash_fn = options.hash_fn();
 
     // Convert trace to row-major format
@@ -115,7 +117,12 @@ where
         },
     };
 
-    let proof = miden_air::ExecutionProof::new(proof_bytes, hash_fn);
+    let proof = miden_air::ExecutionProof::new(
+        proof_bytes,
+        hash_fn,
+        precompile_requests,
+        precompile_transcript_digest,
+    );
 
     Ok((stack_outputs, proof))
 }

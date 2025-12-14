@@ -5,11 +5,10 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    mast::{
+   Field, ExtensionField, ONE, Operation, Program, Word, ZERO, mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
-    },
-    ONE, Operation, Program, Word, ZERO,
+    }
 };
 use miden_utils_testing::rand::rand_array;
 

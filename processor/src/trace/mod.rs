@@ -8,16 +8,14 @@ use miden_air::trace::{
     main_trace::{ColMatrix, MainTrace},
 };
 use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    ExtensionField, Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
-    ExtensionField,
 };
 
 use super::{
-    AdviceProvider, Felt, Process,
-    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -37,7 +35,7 @@ use super::EMPTY_WORD;
 // ================================================================================================
 
 /// Number of rows at the end of an execution trace which are injected with random values.
-pub const NUM_RAND_ROWS: usize = 1;
+pub const NUM_RAND_ROWS: usize = 0;
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -355,9 +353,8 @@ impl ExecutionTrace {
     where
         E: ExtensionField<Felt>,
     {
-        let aux_columns = self
-            .aux_trace_builders
-            .build_aux_columns(&self.main_trace, rand_elements);
+        let aux_columns =
+            self.aux_trace_builders.build_aux_columns(&self.main_trace, rand_elements);
 
         // NOTE: We no longer inject randomizers into auxiliary columns; Plonky3’s symbolic
         // degree tracking does not require them (they were only needed for Winterfell).
