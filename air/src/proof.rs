@@ -2,7 +2,10 @@ use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    precompile::{PrecompileRequest, PrecompileTranscriptDigest},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+    },
 };
 use p3_uni_stark::StarkGenericConfig;
 use serde::{Deserialize, Serialize};
@@ -21,6 +24,8 @@ use serde::{Deserialize, Serialize};
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
+    pub precompile_requests: Vec<PrecompileRequest>,
+    pub precompile_transcript_digest: PrecompileTranscriptDigest,
 }
 
 impl ExecutionProof {
@@ -29,8 +34,18 @@ impl ExecutionProof {
 
     /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
     /// function.
-    pub const fn new(proof: Vec<u8>, hash_fn: HashFunction) -> Self {
-        Self { proof, hash_fn }
+    pub const fn new(
+        proof: Vec<u8>,
+        hash_fn: HashFunction,
+        precompile_requests: Vec<PrecompileRequest>,
+        precompile_transcript_digest: PrecompileTranscriptDigest,
+    ) -> Self {
+        Self {
+            proof,
+            hash_fn,
+            precompile_requests,
+            precompile_transcript_digest,
+        }
     }
 
     // PUBLIC ACCESSORS
@@ -72,37 +87,47 @@ impl ExecutionProof {
         96
     }
 
+    /// Returns the precompile requests queued during program execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.precompile_requests
+    }
+
+    /// Returns the finalized precompile transcript digest committed inside the proof.
+    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
+        self.precompile_transcript_digest
+    }
+
     // SERIALIZATION / DESERIALIZATION
     // --------------------------------------------------------------------------------------------
 
     /// Serializes this proof into a vector of bytes.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.proof.to_bytes();
-        assert!(!bytes.is_empty(), "invalid STARK proof");
-        // TODO: ideally we should write hash function into the proof first to avoid reallocations
-        bytes.insert(0, self.hash_fn as u8);
+        let mut bytes = Vec::new();
+        self.write_into(&mut bytes);
         bytes
     }
 
     /// Reads the source bytes, parsing a new proof instance.
     ///
-    /// The serialization format is: [hash_fn (1 byte)][proof bytes]
-    /// where hash_fn is prepended during to_bytes() via insert(0, ...).
+    /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
-        if source.len() < 2 {
-            return Err(DeserializationError::UnexpectedEOF);
-        }
-        let hash_fn = HashFunction::try_from(source[0])?;
-        let proof = Vec::<u8>::read_from_bytes(&source[1..])?;
-        Ok(Self::new(proof, hash_fn))
+        let mut reader = SliceReader::new(source);
+        Self::read_from(&mut reader)
     }
 
     // DESTRUCTOR
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Vec<u8>) {
-        (self.hash_fn, self.proof)
+    pub fn into_parts(
+        self,
+    ) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>, PrecompileTranscriptDigest) {
+        (
+            self.hash_fn,
+            self.proof,
+            self.precompile_requests,
+            self.precompile_transcript_digest,
+        )
     }
 }
 
@@ -197,6 +222,8 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
+        self.precompile_transcript_digest.write_into(target);
+        self.precompile_requests.write_into(target);
     }
 }
 
@@ -204,8 +231,15 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
+        let precompile_transcript_digest = PrecompileTranscriptDigest::read_from(source)?;
+        let precompile_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn })
+        Ok(ExecutionProof {
+            proof,
+            hash_fn,
+            precompile_requests,
+            precompile_transcript_digest,
+        })
     }
 }
 

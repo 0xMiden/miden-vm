@@ -27,7 +27,7 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, AlgebraicSponge, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
+    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 

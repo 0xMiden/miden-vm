@@ -1,4 +1,4 @@
-use miden_core::{ONE, Operation, Field, ZERO};
+use miden_core::{Field, ONE, Operation, ZERO};
 
 use super::{ExecutionError, Felt, Process, utils::assert_binary};
 use crate::ErrorContext;

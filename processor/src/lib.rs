@@ -13,7 +13,7 @@ use miden_air::trace::{
     CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
     SYS_TRACE_WIDTH,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex, MainTraceCols};
+pub use miden_air::{ExecutionOptions, ExecutionOptionsError, MainTraceCols, RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadFelt,
     StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
@@ -92,7 +92,7 @@ pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt};
+    pub use miden_core::Felt;
 }
 
 pub mod crypto {
@@ -102,7 +102,7 @@ pub mod crypto {
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,
         },
-        random::{ RpoRandomCoin, RpxRandomCoin},
+        random::{RpoRandomCoin, RpxRandomCoin},
     };
 }
 

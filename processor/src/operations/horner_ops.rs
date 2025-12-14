@@ -529,7 +529,10 @@ mod tests {
         // create the expected operand stack
         let mut expected = Vec::new();
         // updated accumulators
-        expected.extend_from_slice(&[acc_new.as_basis_coefficients_slice()[0], acc_new.as_basis_coefficients_slice()[1]]);
+        expected.extend_from_slice(&[
+            acc_new.as_basis_coefficients_slice()[0],
+            acc_new.as_basis_coefficients_slice()[1],
+        ]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
         let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
@@ -588,7 +591,10 @@ mod tests {
         // create the expected operand stack
         let mut expected = Vec::new();
         // updated accumulators
-        expected.extend_from_slice(&[acc_new.as_basis_coefficients_slice()[0], acc_new.as_basis_coefficients_slice()[1]]);
+        expected.extend_from_slice(&[
+            acc_new.as_basis_coefficients_slice()[0],
+            acc_new.as_basis_coefficients_slice()[1],
+        ]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
         let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();

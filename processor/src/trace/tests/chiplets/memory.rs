@@ -11,11 +11,11 @@ use miden_air::{
         },
     },
 };
-use miden_core::WORD_SIZE;
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    NUM_RAND_ROWS, ONE, Operation, Trace, Word, ZERO, build_trace_from_ops, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS,
+    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It

@@ -13,7 +13,10 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, PrimeCharacteristicRing, ZERO};
+use miden_core::{
+    ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, PrimeCharacteristicRing,
+    ZERO,
+};
 
 use crate::{
     chiplets::aux_trace::build_value,

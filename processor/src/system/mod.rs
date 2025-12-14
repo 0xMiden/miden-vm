@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
-use miden_core::PrimeCharacteristicRing;
 use core::fmt::{self, Display};
+use miden_core::PrimeCharacteristicRing;
 
 use miden_air::RowIndex;
 

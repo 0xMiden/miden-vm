@@ -1,9 +1,7 @@
-#![cfg(feature = "legacy-stark-tests")]
-
 use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;
-use miden_core::{Felt, QuadFelt, Word};
+use miden_core::{Felt, FieldElement, QuadFelt, StarkField, Word};
 use miden_utils_testing::{
     MerkleTreeVC, VerifierError,
     crypto::{BatchMerkleProof, PartialMerkleTree, Rpo256},

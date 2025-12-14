@@ -1,11 +1,12 @@
 use alloc::vec::Vec;
 
+use super::*;
+use crate::stack::OverflowTableRow;
 use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use super::*;
-use crate::stack::OverflowTableRow;
+use miden_core::Field;
 
 // TYPE ALIASES
 // ================================================================================================

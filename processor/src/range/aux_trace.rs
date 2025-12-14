@@ -153,10 +153,7 @@ impl AuxTraceBuilder {
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
 /// mappings of x to 1/(alpha + x).
-fn get_divisors<E: ExtensionField<Felt>>(
-    lookup_values: &[u16],
-    alpha: E,
-) -> BTreeMap<u16, E> {
+fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
     // run batch inversion on the lookup values
     let mut values = unsafe { uninit_vector(lookup_values.len()) };
     let mut inv_values = unsafe { uninit_vector(lookup_values.len()) };

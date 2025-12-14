@@ -1,14 +1,12 @@
-#![cfg(feature = "legacy-stark-tests")]
-
 use miden_core::Word;
 use miden_utils_testing::{
-    Felt, MerkleTreeVC,
+    Felt, FieldElement, MerkleTreeVC,
     crypto::{BatchMerkleProof, ElementHasher, Hasher as HasherTrait, PartialMerkleTree},
     serde::DeserializationError,
 };
 use winter_fri::{FriProof, VerifierError};
 
-pub trait UnBatch<E: , H: ElementHasher> {
+pub trait UnBatch<E: FieldElement, H: ElementHasher> {
     fn unbatch<const N: usize, const W: usize>(
         &mut self,
         positions: &[usize],
@@ -18,7 +16,7 @@ pub trait UnBatch<E: , H: ElementHasher> {
 }
 
 pub struct MidenFriVerifierChannel<
-    E: ExtensionField<Felt>,
+    E: FieldElement<BaseField = Felt>,
     H: ElementHasher<BaseField = E::BaseField> + ElementHasher,
 > {
     layer_commitments: Vec<H::Digest>,
@@ -29,7 +27,7 @@ pub struct MidenFriVerifierChannel<
 
 impl<E, H> MidenFriVerifierChannel<E, H>
 where
-    E: ExtensionField<Felt>,
+    E: FieldElement<BaseField = Felt>,
     H: ElementHasher<BaseField = E::BaseField> + ElementHasher,
 {
     /// Builds a new verifier channel from the specified [FriProof].

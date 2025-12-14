@@ -35,3 +35,4 @@
 
 ## Additional Guidance
 - Field arithmetic must use the Plonky3 traits (`p3_field`’s `Field`, `ExtensionField`, etc.) as done in `al-e2e-p3-integration-backup-2025-12-13`; do not reintroduce `winter_math::` / ``.
+- Regularly compare against `next` and keep code identical unless a deviation is required for the Plonky3 migration; document any intentional differences.

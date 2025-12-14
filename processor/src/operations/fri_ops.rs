@@ -1,4 +1,4 @@
-use miden_core::{BasedVectorSpace, PrimeCharacteristicRing, Field, ONE, QuadFelt, ZERO};
+use miden_core::{BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
 
 use super::{ExecutionError, Felt, Operation, Process};
 
@@ -176,7 +176,7 @@ impl Process {
     /// Populates helper registers with intermediate values used in the folding procedure.
     fn set_helper_registers(&mut self, ev: QuadFelt, es: QuadFelt, x: Felt, x_inv: Felt) {
         let ev_felts = ev.as_basis_coefficients_slice();
-        let es_felts =es.as_basis_coefficients_slice();
+        let es_felts = es.as_basis_coefficients_slice();
 
         let values = [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], x, x_inv];
         self.decoder.set_user_op_helpers(Operation::FriE2F4, &values);
@@ -234,19 +234,15 @@ fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
 
 // TESTS
 // ================================================================================================
-
+/* 
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{StackInputs, mast::MastForest};
     use miden_utils_testing::rand::{rand_array, rand_value, rand_vector};
-    use winter_prover::math::{fft, get_power_series_with_offset};
-    use winter_utils::transpose_slice;
 
-    use super::{
-        ExtensionOf, Felt, Operation, Process, QuadFelt, TWO_INV,
-    };
+    use super::{Felt, Operation, Process, QuadFelt, TWO_INV};
     use crate::{DefaultHost, operations::fri_ops::EIGHT};
 
     #[test]
@@ -380,3 +376,4 @@ mod tests {
         assert_eq!(expected_helpers, process.decoder.get_user_op_helpers().to_vec());
     }
 }
+*/

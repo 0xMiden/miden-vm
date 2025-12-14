@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    AlgebraicSponge, Felt, PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256, sys_events::SystemEvent, Field, BasedVectorSpace
+    AlgebraicSponge, BasedVectorSpace, Felt, Field, PrimeCharacteristicRing, QuadFelt, WORD_SIZE,
+    Word, ZERO, crypto::hash::Rpo256, sys_events::SystemEvent,
 };
 
 use crate::{AdviceError, ExecutionError, ProcessState, errors::ErrorContext};
