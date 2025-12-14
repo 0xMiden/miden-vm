@@ -113,12 +113,6 @@ impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
-        // Set up "before enter" and "after exit" decorators by `MastNodeId`
-        let mut before_enter_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
-        let mut after_exit_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
-
-        let mut basic_block_decorators: Vec<(usize, Vec<DecoratedOpLink>)> = Vec::new();
-
         // magic & version
         target.write_bytes(MAGIC);
         target.write_bytes(&VERSION);
@@ -140,26 +134,8 @@ impl Serializable for MastForest {
             .map(|(mast_node_id, mast_node)| {
                 let node_id = MastNodeId::new_unchecked(mast_node_id as u32);
 
-                // Use centralized NodeToDecoratorIds for node-level decorators
-                let before_decorators = self.before_enter_decorators(node_id);
-                if !before_decorators.is_empty() {
-                    before_enter_decorators.push((mast_node_id, before_decorators.to_vec()));
-                }
-
-                let after_decorators = self.after_exit_decorators(node_id);
-                if !after_decorators.is_empty() {
-                    after_exit_decorators.push((mast_node_id, after_decorators.to_vec()));
-                }
-
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {
-                    let ops_offset = basic_block_data_builder.encode_basic_block(basic_block);
-
-                    // Serialize decorators with padded indices
-                    let padded_decorators: Vec<(usize, crate::mast::DecoratorId)> =
-                        basic_block.indexed_decorator_iter(self).collect();
-                    basic_block_decorators.push((mast_node_id, padded_decorators));
-
-                    ops_offset
+                    basic_block_data_builder.encode_basic_block(basic_block)
                 } else {
                     0
                 };
@@ -177,38 +153,10 @@ impl Serializable for MastForest {
         }
 
         self.advice_map.write_into(target);
-        let error_codes: BTreeMap<u64, String> =
-            self.debug_info.error_codes().map(|(k, v)| (*k, v.to_string())).collect();
-        error_codes.write_into(target);
 
-        // Write procedure names
-        let procedure_names: BTreeMap<crate::Word, String> =
-            self.debug_info.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
-        procedure_names.write_into(target);
-
-        // write all decorator data below
-
-        let mut decorator_data_builder = DecoratorDataBuilder::new();
-        for decorator in self.debug_info.decorators() {
-            decorator_data_builder.add_decorator(decorator)
-        }
-
-        let (decorator_data, decorator_infos, string_table) = decorator_data_builder.finalize();
-
-        // decorator data buffers
-        decorator_data.write_into(target);
-        string_table.write_into(target);
-
-        // Write decorator infos
-        for decorator_info in decorator_infos {
-            decorator_info.write_into(target);
-        }
-
-        basic_block_decorators.write_into(target);
-
-        // Write "before enter" and "after exit" decorators
-        before_enter_decorators.write_into(target);
-        after_exit_decorators.write_into(target);
+        // Serialize DebugInfo directly (includes decorators, error_codes, CSR structures,
+        // and procedure_names)
+        self.debug_info.write_into(target);
     }
 }
 
