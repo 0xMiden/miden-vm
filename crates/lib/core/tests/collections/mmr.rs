@@ -67,7 +67,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let advice_stack: Vec<u64> = merkle_root.iter().map(::as_int).collect();
+    let advice_stack: Vec<u64> = merkle_root.iter().map(|value| value.as_int()).collect();
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -90,7 +90,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
         let leaf = merkle_store.get_node(merkle_root, NodeIndex::new(2, pos)?)?;
 
         // the stack should be first the leaf followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(::as_int).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(|value| value.as_int()).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -114,8 +114,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(::as_int)
-        .chain(merkle_root2.iter().map(::as_int))
+        .map(|value| value.as_int())
+        .chain(merkle_root2.iter().map(|value| value.as_int()))
         .collect();
 
     let examples = [

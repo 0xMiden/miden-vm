@@ -2,7 +2,7 @@ use core::ops::Neg;
 
 use miden_core::{Felt, ONE, Operation, ZERO};
 use proptest::prelude::*;
-use winter_rand_utils::rand_value;
+use miden_utils_testing::rand::rand_value;
 
 use super::{
     super::{DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET},

@@ -115,7 +115,7 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            Felt::from(false),
+            felt_from_bool(false),
             Felt::from(addr_range.end),
         ])]);
     }
@@ -158,7 +158,7 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::from(was_key_found),
+        felt_from_bool(was_key_found),
         Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }
@@ -172,8 +172,8 @@ fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
     match key_size {
         KeySize::Full => LexicographicWord::new(word),
         KeySize::Half => {
-            word[0] = Felt::ZERO;
-            word[1] = Felt::ZERO;
+            word[0] = Felt::new(0);
+            word[1] = Felt::new(0);
 
             LexicographicWord::new(word)
         },
@@ -201,4 +201,8 @@ pub enum SortedArrayError {
     /// Last key or value is an incomplete word.
     #[error("key-value array must have size divisible by 4 or 8, but was {size}")]
     InvalidKeyValueRange { size: u32 },
+}
+
+fn felt_from_bool(value: bool) -> Felt {
+    if value { Felt::new(1) } else { Felt::new(0) }
 }

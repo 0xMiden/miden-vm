@@ -27,8 +27,8 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word}, AlgebraicSponge,
+    AdviceMap, AlgebraicSponge, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
+    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
 mod debuginfo;

@@ -5,6 +5,7 @@ use miden_utils_testing::{
     assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
     proptest::prelude::*, rand::rand_value,
 };
+use miden_core::{Field, PrimeCharacteristicRing, PrimeField64};
 
 // FIELD OPS ARITHMETIC - MANUAL TESTS
 // ================================================================================================

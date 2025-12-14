@@ -2,10 +2,11 @@ use crate::{Felt, utils::hash_string_to_word};
 use alloc::{borrow::Cow, string::String};
 use core::fmt::{Display, Formatter};
 
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use miden_crypto::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
-
 
 // EVENT ID
 // ================================================================================================

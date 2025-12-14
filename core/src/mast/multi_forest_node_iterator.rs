@@ -314,9 +314,10 @@ mod tests {
             MastForestContributor, SplitNodeBuilder,
         },
     };
+    use miden_utils_testing::rand::rand_value;
 
     fn random_digest() -> Word {
-        Word::new([winter_rand_utils::rand_value(); 4])
+        Word::new([rand_value(); 4])
     }
 
     #[test]

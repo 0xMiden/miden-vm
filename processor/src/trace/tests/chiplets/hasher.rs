@@ -18,17 +18,18 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
+    Program, Word,
 };
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    , NUM_RAND_ROWS, ONE, Operation, Trace, ZERO, build_span_with_respan_ops,
-    build_trace_from_ops_with_inputs, build_trace_from_program, init_state_from_words, rand_array,
+    build_span_with_respan_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
+    init_state_from_words, rand_array, AdviceInputs, AUX_TRACE_RAND_ELEMENTS,
+    CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS, ONE, Operation, Trace,
+    ZERO,
 };
 use crate::StackInputs;
 

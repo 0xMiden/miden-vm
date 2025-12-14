@@ -1,17 +1,14 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
+    chiplets::hasher::P1_COL_IDX, main_trace::MainTrace, AUX_TRACE_RAND_ELEMENTS,
 };
-use miden_core::{
-    ,
-    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-};
+use miden_core::crypto::merkle::{MerkleStore, MerkleTree, NodeIndex};
 use rstest::rstest;
 
 use super::{
-    super::NUM_RAND_ROWS, AdviceInputs, Felt, ONE, Operation, Word, ZERO,
-    build_trace_from_ops_with_inputs, rand_array,
+    build_trace_from_ops_with_inputs, rand_array, AdviceInputs, Felt, ONE, Operation, Word, ZERO,
+    super::NUM_RAND_ROWS,
 };
 use crate::StackInputs;
 

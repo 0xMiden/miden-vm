@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
+use miden_crypto::test_utils::prng_array;
 use miden_crypto::{PrimeCharacteristicRing, WORD_SIZE};
 use proptest::prelude::*;
-use miden_crypto::test_utils::prng_array;
 
 use crate::{
     AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,

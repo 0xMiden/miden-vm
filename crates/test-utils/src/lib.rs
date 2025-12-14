@@ -20,8 +20,7 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word,
-    ZERO,
+    EMPTY_WORD, Felt, ONE, QuadFelt, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
@@ -36,19 +35,12 @@ use miden_processor::{
     parallel::build_trace,
 };
 use miden_prover::utils::range;
-pub use miden_prover::{MerkleTreeVC, ProvingOptions, prove};
-pub use miden_verifier::{AcceptableOptions, VerifierError, verify};
+pub use miden_prover::{ProvingOptions, prove};
+pub use miden_verifier::verify;
 pub use pretty_assertions::{assert_eq, assert_ne, assert_str_eq};
 #[cfg(not(target_family = "wasm"))]
 use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
-use winter_prover::Trace;
-
-pub mod math {
-    pub use winter_prover::math::{
-        ExtensionOf, ToElements, fft, fields::QuadExtension, polynom,
-    };
-}
 
 pub mod serde {
     pub use miden_core::utils::{

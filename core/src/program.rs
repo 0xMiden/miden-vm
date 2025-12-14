@@ -1,7 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, PrimeCharacteristicRing, WORD_SIZE, Word, utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}};
+use miden_crypto::{
+    Felt, PrimeCharacteristicRing, WORD_SIZE, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

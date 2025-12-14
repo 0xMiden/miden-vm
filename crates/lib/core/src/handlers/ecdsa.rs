@@ -33,7 +33,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    EventName,
+    AlgebraicSponge, EventName, Felt,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -109,7 +109,7 @@ impl EventHandler for EcdsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([felt_from_bool(result)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -197,7 +197,7 @@ impl EcdsaRequest {
     /// the commitment generated during execution.
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
         // Compute tag: [event_id, result, 0, 0]
-        let result = self.result().into();
+        let result = felt_from_bool(self.result());
         let tag = [ECDSA_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         // Convert serialized bytes to field elements and hash
@@ -242,6 +242,10 @@ impl From<EcdsaRequest> for PrecompileRequest {
     fn from(request: EcdsaRequest) -> Self {
         request.as_precompile_request()
     }
+}
+
+fn felt_from_bool(value: bool) -> Felt {
+    if value { Felt::new(1) } else { Felt::new(0) }
 }
 
 // ERROR TYPES

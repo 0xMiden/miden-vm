@@ -1,10 +1,12 @@
 use alloc::vec::Vec;
 
 use miden_core::{Felt, QuadFelt};
-use winter_prover::crypto::ElementHasher;
 
 use super::*;
-use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
+use crate::{
+    chiplets::ace::instruction::{ID_BITS, MAX_ID},
+    crypto::ElementHasher,
+};
 
 #[derive(Debug)]
 pub enum EncodingError {

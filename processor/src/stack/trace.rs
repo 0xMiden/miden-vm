@@ -29,7 +29,7 @@ impl TraceLen for [Vec<Felt>] {
 }
 
 use super::{Felt, MAX_TOP_IDX, ONE, STACK_TRACE_WIDTH, ZERO};
-use crate::utils::math::batch_inversion;
+use crate::utils::invert_column_allow_zeros;
 
 // STACK TRACE
 // ================================================================================================
@@ -205,7 +205,7 @@ impl StackTrace {
 
         // compute inverses in the h0 helper column using batch inversion; any ZERO in the vector
         // will remain unchanged
-        trace[H0_COL_IDX] = batch_inversion(&trace[H0_COL_IDX]);
+        invert_column_allow_zeros(&mut trace[H0_COL_IDX], "stack.h0", 0);
 
         trace.try_into().expect("Failed to convert vector to an array")
     }

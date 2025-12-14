@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-stark-tests")]
+
 use alloc::vec::Vec;
 
 use miden_air::ProcessorAir;

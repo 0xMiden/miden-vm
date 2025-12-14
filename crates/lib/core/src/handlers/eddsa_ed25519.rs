@@ -11,7 +11,7 @@ use alloc::{vec, vec::Vec};
 use core::convert::TryInto;
 
 use miden_core::{
-    EventName,
+    AlgebraicSponge, EventName, Felt,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
@@ -75,7 +75,7 @@ impl EventHandler for EddsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([felt_from_bool(result)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -127,7 +127,7 @@ impl EddsaRequest {
     }
 
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
-        let result = self.result().into();
+        let result = felt_from_bool(self.result());
         let tag = [EDDSA25519_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         let pk_comm = {
@@ -170,6 +170,10 @@ impl From<EddsaRequest> for PrecompileRequest {
     fn from(request: EddsaRequest) -> Self {
         request.as_precompile_request()
     }
+}
+
+fn felt_from_bool(value: bool) -> Felt {
+    if value { Felt::new(1) } else { Felt::new(0) }
 }
 
 // ERRORS

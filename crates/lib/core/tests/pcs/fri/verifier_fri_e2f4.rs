@@ -458,8 +458,8 @@ impl UnBatch<QuadFelt, MidenHasher> for MidenFriVerifierChannel<QuadFelt, MidenH
 
 fn fri_2<E, B>(f_x: E, f_minus_x: E, x_star: E, alpha: E) -> E
 where
-    B: ,
-    E: <BaseField = B>,
+    B: Field ,
+    E: ExtensionField< B>,
 {
     (f_x + f_minus_x + ((f_x - f_minus_x) * alpha / x_star)) / E::ONE.double()
 }
