@@ -89,11 +89,12 @@ impl MastNodeInfo {
                 Ok(MastNodeBuilder::Call(builder))
             },
             MastNodeType::Dyn => {
-                let builder = crate::mast::node::DynNodeBuilder::new_dyn();
+                let builder = crate::mast::node::DynNodeBuilder::new_dyn().with_digest(self.digest);
                 Ok(MastNodeBuilder::Dyn(builder))
             },
             MastNodeType::Dyncall => {
-                let builder = crate::mast::node::DynNodeBuilder::new_dyncall();
+                let builder =
+                    crate::mast::node::DynNodeBuilder::new_dyncall().with_digest(self.digest);
                 Ok(MastNodeBuilder::Dyn(builder))
             },
             MastNodeType::External => {
