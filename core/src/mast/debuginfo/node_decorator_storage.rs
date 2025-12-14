@@ -99,8 +99,18 @@ impl NodeToDecoratorIds {
     /// - All decorator IDs are valid (< decorator_count)
     /// - Both indptr arrays are monotonic, start at 0, end at respective decorator vector lengths
     pub(crate) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+        // Completely empty structures are valid (no nodes, no decorators)
+        if self.before_enter_decorators.is_empty()
+            && self.after_exit_decorators.is_empty()
+            && self.node_indptr_for_before.is_empty()
+            && self.node_indptr_for_after.is_empty()
+        {
+            return Ok(());
+        }
+
         // Validate all decorator IDs
-        for &dec_id in self.before_enter_decorators.iter().chain(self.after_exit_decorators.iter()) {
+        for &dec_id in self.before_enter_decorators.iter().chain(self.after_exit_decorators.iter())
+        {
             if dec_id.to_usize() >= decorator_count {
                 return Err(format!(
                     "Invalid decorator ID {}: exceeds decorator count {}",
@@ -332,12 +342,8 @@ mod tests {
         after_indptr.push(0).unwrap();
         after_indptr.push(1).unwrap();
 
-        let storage = NodeToDecoratorIds::from_components(
-            before,
-            after,
-            before_indptr,
-            after_indptr,
-        );
+        let storage =
+            NodeToDecoratorIds::from_components(before, after, before_indptr, after_indptr);
 
         assert!(storage.is_ok());
     }
@@ -357,7 +363,8 @@ mod tests {
             vec![test_decorator_id(1)],
             before_indptr,
             after_indptr,
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(storage.validate_csr(3).is_ok());
     }
@@ -373,11 +380,12 @@ mod tests {
         after_indptr.push(0).unwrap();
 
         let storage = NodeToDecoratorIds::from_components(
-            vec![test_decorator_id(5)],  // ID too high
+            vec![test_decorator_id(5)], // ID too high
             vec![],
             before_indptr,
             after_indptr,
-        ).unwrap();
+        )
+        .unwrap();
 
         let result = storage.validate_csr(3);
         assert!(result.is_err());
