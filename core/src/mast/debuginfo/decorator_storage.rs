@@ -57,7 +57,7 @@ use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
 pub struct OpToDecoratorIds {
     /// All the decorator IDs per operation per node, in a CSR relationship with
     /// node_indptr_for_op_idx and op_indptr_for_dec_ids
-    decorator_ids: Vec<DecoratorId>,
+    pub(crate) decorator_ids: Vec<DecoratorId>,
     /// For the node whose operation indices are in
     /// `op_indptr_for_dec_ids[node_start..node_end]`,
     /// the indices of its i-th operation are at:
@@ -65,10 +65,10 @@ pub struct OpToDecoratorIds {
     /// decorator_ids[op_indptr_for_dec_ids[node_start + i]..
     ///               op_indptr_for_dec_ids[node_start + i + 1]]
     /// ```
-    op_indptr_for_dec_ids: Vec<usize>,
+    pub(crate) op_indptr_for_dec_ids: Vec<usize>,
     /// The decorated operation indices for the n-th node are at
     /// `op_indptr_for_dec_ids[node_indptr_for_op_idx[n]..node_indptr_for_op_idx[n+1]]`
-    node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
+    pub(crate) node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
 }
 
 /// Error type for decorator index mapping operations
