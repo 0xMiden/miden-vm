@@ -12,7 +12,6 @@ fn test_issue_2456_statically_linked_library_call() {
     use std::sync::Arc;
 
     use miden_assembly::{DefaultSourceManager, diagnostics::NamedSource};
-    use miden_core_lib::CoreLibrary;
 
     let test_module_source = "
         pub proc foo
@@ -24,15 +23,12 @@ fn test_issue_2456_statically_linked_library_call() {
 
     let source = NamedSource::new("test::module_1", test_module_source);
     let source_manager = Arc::new(DefaultSourceManager::default());
-    let mut assembler = Assembler::new(source_manager)
-        .with_dynamic_library(CoreLibrary::default())
-        .expect("failed to load std-lib");
+    let mut assembler = Assembler::new(source_manager);
 
     let library = assembler.clone().assemble_library([source]).unwrap();
 
-    // This program should trigger the "DecoratorId out of bounds" issue
-    // Note: We use simple cleanup operations instead of sys::truncate_stack to avoid
-    // needing the core library during execution
+    // This program calls a procedure from a statically linked library, which
+    // triggers the DecoratorId remapping issue.
     let source = "
         use test::module_1
 
