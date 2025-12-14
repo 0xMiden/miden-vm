@@ -1347,15 +1347,6 @@ impl BasicBlockNodeBuilder {
         }
     }
 
-    /// Used to initialize decorators for the [`BasicBlockNodeBuilder`]. Replaces the existing
-    /// decorators with the given ['DecoratorList'].
-    pub(crate) fn set_decorators(&mut self, decorators: DecoratorList) {
-        match &mut self.operation_data {
-            OperationData::Raw { decorators: dec, .. } => *dec = decorators,
-            OperationData::Batched { decorators: dec, .. } => *dec = decorators,
-        }
-    }
-
     /// Builds the BasicBlockNode with the specified decorators.
     pub fn build(self) -> Result<BasicBlockNode, MastForestError> {
         let (op_batches, digest, padded_decorators) = match self.operation_data {
@@ -1417,9 +1408,50 @@ impl BasicBlockNodeBuilder {
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        // BasicBlockNode doesn't have child dependencies, so relaxed validation is the same
-        // as normal validation. We delegate to the normal method for consistency.
-        self.add_to_forest(forest)
+        // For deserialization: decorators are already in forest.debug_info,
+        // so we don't register them again. We just create the node.
+
+        let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
+
+        // Process based on operation data type
+        let (op_batches, digest) = match self.operation_data {
+            OperationData::Raw { operations, decorators: _ } => {
+                if operations.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
+
+                // Batch operations (adds padding NOOPs)
+                let (op_batches, computed_digest) = batch_and_hash_ops(operations);
+
+                // Use the forced digest if provided, otherwise use the computed digest
+                let digest = self.digest.unwrap_or(computed_digest);
+
+                (op_batches, digest)
+            },
+            OperationData::Batched { op_batches, decorators: _ } => {
+                if op_batches.is_empty() {
+                    return Err(MastForestError::EmptyBasicBlock);
+                }
+
+                // For batched operations, digest must be set
+                let digest = self.digest.expect("digest must be set for batched operations");
+
+                (op_batches, digest)
+            },
+        };
+
+        // Create the node in the forest with Linked variant
+        // Note: Decorators are already in forest.debug_info from deserialization
+        let node_id = forest
+            .nodes
+            .push(MastNode::Block(BasicBlockNode {
+                op_batches,
+                digest,
+                decorators: DecoratorStore::Linked { id: future_node_id },
+            }))
+            .map_err(|_| MastForestError::TooManyNodes)?;
+
+        Ok(node_id)
     }
 }
 

@@ -360,17 +360,12 @@ impl ExternalNodeBuilder {
     ///
     /// Note: This is not part of the `MastForestContributor` trait because it's only
     /// intended for internal use during deserialization.
-    ///
-    /// For ExternalNode, this is equivalent to the normal `add_to_forest` since external nodes
-    /// don't have child nodes to validate.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
+        // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
