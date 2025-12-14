@@ -98,7 +98,9 @@ const MAGIC: &[u8; 5] = b"MAST\0";
 /// Version history:
 /// - [0, 0, 0]: Initial format
 /// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
-///   indptr, padding, and group metadata for exact OpBatch reconstruction)
+///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
+///   serialization in CSR format (eliminates per-node decorator sections and round-trip
+///   conversions).
 const VERSION: [u8; 3] = [0, 0, 1];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
