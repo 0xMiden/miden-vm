@@ -1,18 +1,14 @@
 use core::ops::ControlFlow;
 
 use miden_air::{
-    Felt, FieldElement, RowIndex,
+    Felt, RowIndex,
     trace::{
         STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };
 use miden_core::{
-    ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
-    mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
-    precompile::PrecompileTranscriptState,
-    stack::MIN_STACK_DEPTH,
-    utils::range,
+  BasedVectorSpace, Field, ONE, OPCODE_PUSH, Operation, PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO, mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch}, precompile::PrecompileTranscriptState, stack::MIN_STACK_DEPTH, utils::range
 };
 
 use crate::{
@@ -603,7 +599,7 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
     }
 
     fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
-        const SENTINEL_VALUE: Felt = Felt::new(Felt::MODULUS - 1);
+        const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
         {
@@ -733,7 +729,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let h0 = if stack_second == stack_first {
             ZERO
         } else {
-            (stack_first - stack_second).inv()
+            (stack_first - stack_second).inverse()
         };
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
@@ -743,7 +739,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -752,7 +748,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // h0 is a helper variable provided by the prover. If the top element is zero, then, h0 can
         // be set to anything otherwise set it to the inverse of the top element in the stack.
-        let h0 = if top == ZERO { ZERO } else { top.inv() };
+        let h0 = if top == ZERO { ZERO } else { top.inverse() };
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
@@ -769,11 +765,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         x: Felt,
         x_inv: Felt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
-        let ev_arr = [ev];
-        let ev_felts = QuadFelt::slice_as_base_elements(&ev_arr);
-
-        let es_arr = [es];
-        let es_felts = QuadFelt::slice_as_base_elements(&es_arr);
+        let ev_felts =ev.as_basis_coefficients_slice();
+        let es_felts =es.as_basis_coefficients_slice();
 
         [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], x, x_inv]
     }
@@ -810,7 +803,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -820,7 +813,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let m = (Felt::from(u32::MAX) - hi).inverse();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
@@ -860,12 +853,12 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         tmp1: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
         [
-            alpha.base_element(0),
-            alpha.base_element(1),
-            tmp1.to_base_elements()[0],
-            tmp1.to_base_elements()[1],
-            tmp0.to_base_elements()[0],
-            tmp0.to_base_elements()[1],
+            alpha.as_basis_coefficients_slice()[0],
+            alpha.as_basis_coefficients_slice()[1],
+            tmp1.as_basis_coefficients_slice()[0],
+            tmp1.as_basis_coefficients_slice()[1],
+            tmp0.as_basis_coefficients_slice()[0],
+            tmp0.as_basis_coefficients_slice()[1],
         ]
     }
 
@@ -876,12 +869,12 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         acc_tmp: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
         [
-            alpha.base_element(0),
-            alpha.base_element(1),
+            alpha.as_basis_coefficients_slice()[0],
+            alpha.as_basis_coefficients_slice()[1],
             k0,
             k1,
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp.as_basis_coefficients_slice()[0],
+            acc_tmp.as_basis_coefficients_slice()[1],
         ]
     }
 

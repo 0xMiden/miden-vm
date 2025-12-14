@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame, TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{
     stack::EvaluationFrameExt,
     utils::{are_equal, binary_not},
@@ -46,7 +46,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the stack manipulation operations.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -82,7 +82,7 @@ pub fn enforce_constraints<E: FieldElement>(
 /// The PAD operation pushes a ZERO onto the stack. Therefore, the following constraints are
 /// enforced:
 /// - The top element in the next frame should be ZERO. s0` = 0.
-pub fn enforce_pad_constraints<E: FieldElement>(
+pub fn enforce_pad_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -100,7 +100,7 @@ pub fn enforce_pad_constraints<E: FieldElement>(
 /// Therefore, the following constraints are enforced:
 /// - The top element in the next frame should be equal to the element at depth n in the current
 ///   frame. s0` - sn = 0.
-pub fn enforce_dup_movup_n_constraints<E: FieldElement>(
+pub fn enforce_dup_movup_n_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -176,7 +176,7 @@ pub fn enforce_dup_movup_n_constraints<E: FieldElement>(
 ///   frame.
 /// - The second element in the current frame should be equal to the first element in the next
 ///   frame.
-pub fn enforce_swap_constraints<E: FieldElement>(
+pub fn enforce_swap_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -208,7 +208,7 @@ pub fn enforce_swap_constraints<E: FieldElement>(
 ///   of the stack gets replaced with the 12 items and vice versa, therefore, only SWAPW3 transition
 ///   will be ONE and rest all flags would be ZERO.
 #[expect(clippy::needless_range_loop)]
-pub fn enforce_swapwx_constraints<E: FieldElement>(
+pub fn enforce_swapwx_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -253,7 +253,7 @@ pub fn enforce_swapwx_constraints<E: FieldElement>(
 /// to depth n in the stack. Therefore, the following constraints are enforced:
 /// - The top element in the current frame should be equal to the element at depth n in the next
 ///   frame. s0 - sn` = 0.
-pub fn enforce_movdnn_constraints<E: FieldElement>(
+pub fn enforce_movdnn_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -282,7 +282,7 @@ pub fn enforce_movdnn_constraints<E: FieldElement>(
 /// Therefore, the following constraints are enforced:
 /// - The top two elements or elements 1,2,3,4 should be swapped in the case of CSWAP and CSWAPW
 ///   respectively if the top element is 1, the state remains the same if the top element is 0.
-pub fn enforce_cswapx_constraints<E: FieldElement>(
+pub fn enforce_cswapx_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,

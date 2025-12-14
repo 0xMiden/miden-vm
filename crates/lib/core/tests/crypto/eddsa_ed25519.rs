@@ -9,7 +9,7 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    EventName, Felt, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };

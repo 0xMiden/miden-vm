@@ -5,36 +5,20 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec;
-
-use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-};
-use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
-
+use miden_air::{HashFunction, ProcessorAir, PublicInputs};
 // EXPORTS
 // ================================================================================================
-mod exports {
-    pub use miden_core::{
-        Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-        precompile::{
-            PrecompileError, PrecompileTranscriptDigest, PrecompileVerificationError,
-            PrecompileVerifierRegistry,
-        },
-    };
-    pub use winter_verifier::{AcceptableOptions, VerifierError};
-    pub mod math {
-        pub use miden_core::{Felt, FieldElement, StarkField};
-    }
-    pub use miden_air::ExecutionProof;
+pub use miden_core::{Kernel, ProgramInfo, StackInputs, StackOutputs, Word};
+pub mod math {
+    pub use miden_core::Felt;
 }
-pub use exports::*;
+pub use miden_air::ExecutionProof;
+// Re-export config factories from prover
+// (The verifier uses the same STARK configs as the prover)
+use miden_prover::config;
 
 // VERIFIER
 // ================================================================================================
-
 /// Returns the security level of the proof if the specified program was executed correctly against
 /// the specified inputs and outputs.
 ///
@@ -63,125 +47,90 @@ pub use exports::*;
 /// - The provided proof does not prove a correct execution of the program.
 /// - The protocol parameters used to generate the proof are not in the set of acceptable
 ///   parameters.
-/// - The proof contains one or more precompile requests. When precompile requests are present, use
-///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
-///   verify the precompile computations.
+//#[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-) -> Result<u32, VerificationError> {
-    let (security_level, _commitment) = verify_with_precompiles(
-        program_info,
-        stack_inputs,
-        stack_outputs,
-        proof,
-        &PrecompileVerifierRegistry::new(),
-    )?;
-    Ok(security_level)
-}
-
-/// Identical to [`verify`], with additional verification of any precompile requests made during the
-/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
-/// against the commitment computed by the VM.
-///
-/// # Returns
-/// Returns a tuple `(security_level, aggregated_commitment)` where:
-/// - `security_level`: The security level (in bits) of the verified proof
-/// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
-///   precompile requests, computed by recomputing and recording each precompile commitment in a
-///   transcript. This value is the finalized digest of the recomputed precompile transcript.
-///
-/// # Errors
-/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
-/// verification.
-#[tracing::instrument("verify_program", skip_all)]
-pub fn verify_with_precompiles(
-    program_info: ProgramInfo,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-    proof: ExecutionProof,
-    precompile_verifiers: &PrecompileVerifierRegistry,
-) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
+) -> Result<u32, VerificationError> where
+{
     // get security level of the proof
     let security_level = proof.security_level();
     let program_hash = *program_info.program_hash();
 
-    let (hash_fn, proof, precompile_requests) = proof.into_parts();
+    // Build public inputs
+    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
+    let public_values = pub_inputs.to_elements();
 
-    // recompute the precompile transcript by verifying all precompile requests and recording the
-    // commitments.
-    // if no verifiers were provided (e.g. when this function was called from `verify()`),
-    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_transcript = precompile_verifiers
-        .requests_transcript(&precompile_requests)
-        .map_err(VerificationError::PrecompileVerificationError)?;
-
-    // build public inputs, explicitly passing the recomputed precompile transcript state
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
+    // Deserialize proof and verify using unified miden-prover
+    let (hash_fn, proof_bytes) = proof.into_parts();
+    let air = ProcessorAir::new();
 
     match hash_fn {
         HashFunction::Blake3_192 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
-            verify_proof::<ProcessorAir, Blake3_192, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of
+            // 24-byte). Proper 192-bit support requires Plonky3 to implement
+            // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
+            // 0xMiden/Plonky3 to add this support.
+            let config = config::create_blake3_256_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Blake3_256 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_128_BITS]);
-            verify_proof::<ProcessorAir, Blake3_256, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            let config = config::create_blake3_256_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Keccak => {
+            let config = config::create_keccak_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpo256, RpoRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Rpx256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpx256, RpxRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            let config = config::create_rpo_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::REGULAR_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Poseidon2, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
+            let config = config::create_poseidon2_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-    }
-    .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
+        HashFunction::Rpx256 => {
+            let config = config::create_rpx_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            miden_prover_p3::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+    }?;
 
-    // finalize transcript to return the digest
-    let digest = recomputed_transcript.finalize();
-    Ok((security_level, digest))
+    Ok(security_level)
 }
 
 // ERRORS
 // ================================================================================================
 
-/// Errors that can occur during proof verification.
+/// TODO: add docs
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word, #[source] VerifierError),
+    ProgramVerificationError(Word),
     #[error("the input {0} is not a valid field element")]
-    InputNotFieldElement(u64),
+    InputNot(u64),
     #[error("the output {0} is not a valid field element")]
-    OutputNotFieldElement(u64),
-    #[error("failed to verify precompile calls")]
-    PrecompileVerificationError(#[source] PrecompileVerificationError),
+    OutputNot(u64),
+    #[error("verification error: {0}")]
+    DetailedError(alloc::string::String),
 }

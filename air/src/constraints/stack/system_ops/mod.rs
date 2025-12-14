@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame, TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{stack::EvaluationFrameExt, utils::are_equal};
 
 #[cfg(test)]
@@ -36,7 +36,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints of all the system operations.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -55,7 +55,7 @@ pub fn enforce_constraints<E: FieldElement>(
 /// Enforces unique constraints of the ASSERT operation. The ASSERT operation asserts the top
 /// element in the stack to ONE. Therefore, the following constraints are enforced:
 /// - The first element in the current frame should be ONE. s0 = 1.
-pub fn enforce_assert_constraints<E: FieldElement>(
+pub fn enforce_assert_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -72,7 +72,7 @@ pub fn enforce_assert_constraints<E: FieldElement>(
 /// constraints are enforced:
 /// - The first element in the next frame should be equal to the current cycle number. s0' - (cycle)
 ///   = 0.
-pub fn enforce_clk_constraints<E: FieldElement>(
+pub fn enforce_clk_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,

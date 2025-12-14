@@ -1,4 +1,4 @@
-use miden_core::{Felt, FieldElement, ONE, Operation, ZERO};
+use miden_core::{Felt, ONE, Operation, ZERO};
 
 use super::{B0_COL_IDX, EvaluationFrame};
 use crate::{
@@ -67,7 +67,7 @@ const DEGREE_4_OPCODE_ENDS: usize = DEGREE_4_OPCODE_STARTS + 31;
 /// operations. Only one flag will be set to ONE and rest all would be ZERO for an execution trace.
 /// It also computes the composite flags using individual stack operation flags for generic stack
 /// constraints.
-pub struct OpFlags<E: FieldElement> {
+pub struct OpFlags<E: > {
     degree7_op_flags: [E; NUM_DEGREE_7_OPS],
     degree6_op_flags: [E; NUM_DEGREE_6_OPS],
     degree5_op_flags: [E; NUM_DEGREE_5_OPS],
@@ -84,7 +84,7 @@ pub struct OpFlags<E: FieldElement> {
     u32_rc_op: E,
 }
 
-impl<E: FieldElement> OpFlags<E> {
+impl<E: > OpFlags<E> {
     // CONSTRUCTOR
     // =================================================================================================
 
@@ -1020,7 +1020,7 @@ impl<E: FieldElement> OpFlags<E> {
     }
 }
 
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Operation bit accessors ----------------------------------------------------------------
 
     /// Returns the current value of the specified operation bit in the decoder. It assumes that
@@ -1042,7 +1042,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn is_loop_end(&self) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Operation bit accessors ----------------------------------------------------------------
 
     #[inline]

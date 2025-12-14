@@ -10,10 +10,10 @@ use miden_air::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{WORD_SIZE, ZERO};
+use miden_core::{WORD_SIZE, ZERO, Field};
 
 use super::{
-    EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker, TraceFragment, Word,
+    EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
 use crate::{MemoryAddress, errors::ErrorContext, system::ContextId};
@@ -366,7 +366,7 @@ impl Memory {
                     trace.set(row, D0_COL_IDX, delta_lo);
                     trace.set(row, D1_COL_IDX, delta_hi);
                     // TODO: switch to batch inversion to improve efficiency.
-                    trace.set(row, D_INV_COL_IDX, delta.inv());
+                    trace.set(row, D_INV_COL_IDX, delta.inverse());
 
                     if prev_ctx == ctx && prev_addr == felt_addr {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);

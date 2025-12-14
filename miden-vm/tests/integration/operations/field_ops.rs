@@ -1,7 +1,7 @@
 use miden_assembly::testing::regex;
 use miden_processor::{ExecutionError, RowIndex};
 use miden_utils_testing::{
-    Felt, FieldElement, ONE, StarkField, WORD_SIZE, ZERO, assert_assembler_diagnostic,
+    Felt, ONE, WORD_SIZE, ZERO, assert_assembler_diagnostic,
     assert_diagnostic_lines, build_op_test, expect_exec_error_matches, prop_randw,
     proptest::prelude::*, rand::rand_value,
 };
@@ -21,7 +21,7 @@ fn add() {
     test.expect_stack(&[13]);
 
     // --- test overflow --------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[Felt::MODULUS - 1, 9]);
+    let test = build_op_test!(asm_op, &[Felt::ORDER_U64 - 1, 9]);
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -48,7 +48,7 @@ fn add_b() {
     test.expect_stack(&[13]);
 
     // --- test overflow --------------------------------------------------------------------------
-    let test = build_op_test!(build_asm_op(9), &[Felt::MODULUS - 1]);
+    let test = build_op_test!(build_asm_op(9), &[Felt::ORDER_U64 - 1]);
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -70,7 +70,7 @@ fn sub() {
 
     // --- test underflow -------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[0, 1]);
-    test.expect_stack(&[Felt::MODULUS - 1]);
+    test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
@@ -91,7 +91,7 @@ fn sub_b() {
 
     // --- test underflow -------------------------------------------------------------------------
     let test = build_op_test!(build_asm_op(1), &[0]);
-    test.expect_stack(&[Felt::MODULUS - 1]);
+    test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
@@ -111,9 +111,9 @@ fn mul() {
     test.expect_stack(&[5]);
 
     // --- test overflow --------------------------------------------------------------------------
-    let high_number = Felt::MODULUS - 1;
+    let high_number = Felt::ORDER_U64 - 1;
     let test = build_op_test!(asm_op, &[high_number, 2]);
-    let expected = high_number as u128 * 2_u128 % Felt::MODULUS as u128;
+    let expected = high_number as u128 * 2_u128 % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -137,9 +137,9 @@ fn mul_b() {
     test.expect_stack(&[10]);
 
     // --- test overflow --------------------------------------------------------------------------
-    let high_number = Felt::MODULUS - 1;
+    let high_number = Felt::ORDER_U64 - 1;
     let test = build_op_test!(build_asm_op(2), &[high_number]);
-    let expected = high_number as u128 * 2_u128 % Felt::MODULUS as u128;
+    let expected = high_number as u128 * 2_u128 % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -161,7 +161,7 @@ fn div() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[5, 2]);
-    let expected = (Felt::new(2).inv().as_int() as u128 * 5_u128) % Felt::MODULUS as u128;
+    let expected = (Felt::new(2).inverse().as_int() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -198,7 +198,7 @@ fn div_b() {
 
     // --- test remainder -------------------------------------------------------------------------
     let test = build_op_test!(build_asm_op(2), &[5]);
-    let expected = (Felt::new(2).inv().as_int() as u128 * 5_u128) % Felt::MODULUS as u128;
+    let expected = (Felt::new(2).inverse().as_int() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
@@ -225,10 +225,10 @@ fn neg() {
 
     // --- simple cases ---------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1]);
-    test.expect_stack(&[Felt::MODULUS - 1]);
+    test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     let test = build_op_test!(asm_op, &[64]);
-    test.expect_stack(&[Felt::MODULUS - 64]);
+    test.expect_stack(&[Felt::ORDER_U64 - 64]);
 
     let test = build_op_test!(asm_op, &[0]);
     test.expect_stack(&[0]);
@@ -236,7 +236,7 @@ fn neg() {
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[c, 5]);
-    test.expect_stack(&[Felt::MODULUS - 5, c]);
+    test.expect_stack(&[Felt::ORDER_U64 - 5, c]);
 }
 
 #[test]
@@ -260,20 +260,20 @@ fn neg_fail() {
 }
 
 #[test]
-fn inv() {
+fn inverse() {
     let asm_op = "inv";
 
     // --- simple cases ---------------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[1]);
-    test.expect_stack(&[ONE.inv().as_int()]);
+    test.expect_stack(&[ONE.inverse().as_int()]);
 
     let test = build_op_test!(asm_op, &[64]);
-    test.expect_stack(&[Felt::new(64).inv().as_int()]);
+    test.expect_stack(&[Felt::new(64).inverse().as_int()]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[c, 5]);
-    test.expect_stack(&[Felt::new(5).inv().as_int(), c]);
+    test.expect_stack(&[Felt::new(5).inverse().as_int(), c]);
 }
 
 #[test]
@@ -397,7 +397,7 @@ fn ilog2() {
     build_op_test!(asm_op, &[1]).expect_stack(&[0]);
     build_op_test!(asm_op, &[8]).expect_stack(&[3]);
     build_op_test!(asm_op, &[15]).expect_stack(&[3]);
-    build_op_test!(asm_op, &[Felt::MODULUS - 1]).expect_stack(&[63]);
+    build_op_test!(asm_op, &[Felt::ORDER_U64 - 1]).expect_stack(&[63]);
 }
 
 #[test]
@@ -651,7 +651,7 @@ proptest! {
         let asm_op = "add";
 
         // allow a possible overflow then mod by the Felt Modulus
-        let expected = (a as u128 + b as u128) % Felt::MODULUS as u128;
+        let expected = (a as u128 + b as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack
         let test = build_op_test!(asm_op, &[a, b]);
@@ -682,7 +682,7 @@ proptest! {
 
         // underflow by a provided via the stack
         let test = build_op_test!(asm_op, &[b, a]);
-        test.prop_expect_stack(&[Felt::MODULUS - expected])?;
+        test.prop_expect_stack(&[Felt::ORDER_U64 - expected])?;
 
         // b provided as a parameter
         let asm_op_b = format!("{asm_op}.{b}");
@@ -692,7 +692,7 @@ proptest! {
         // underflow by a provided as a parameter
         let asm_op_b = format!("{asm_op}.{a}");
         let test = build_op_test!(asm_op_b, &[b]);
-        test.prop_expect_stack(&[Felt::MODULUS - expected])?;
+        test.prop_expect_stack(&[Felt::ORDER_U64 - expected])?;
     }
 
     #[test]
@@ -700,7 +700,7 @@ proptest! {
         let asm_op = "mul";
 
         // allow a possible overflow then mod by the Felt Modulus
-        let expected = (a as u128 * b as u128) % Felt::MODULUS as u128;
+        let expected = (a as u128 * b as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack
         let test = build_op_test!(asm_op, &[a, b]);
@@ -717,7 +717,7 @@ proptest! {
         let asm_op = "div";
 
         // allow a possible overflow then mod by the Felt Modulus
-        let expected = (Felt::new(b).inv().as_int() as u128 * a as u128) % Felt::MODULUS as u128;
+        let expected = (Felt::new(b).inverse().as_int() as u128 * a as u128) % Felt::ORDER_U64 as u128;
 
         // b provided via the stack
         let test = build_op_test!(asm_op, &[a, b]);
@@ -734,7 +734,7 @@ proptest! {
         let asm_op = "neg";
 
         let expected = if a > 0 {
-            Felt::MODULUS - a
+            Felt::ORDER_U64 - a
         } else {
             0
         };
@@ -747,7 +747,7 @@ proptest! {
     fn inv_proptest(a in 1..u64::MAX) {
         let asm_op = "inv";
 
-        let expected = Felt::new(a).inv().as_int();
+        let expected = Felt::new(a).inverse().as_int();
 
         let test = build_op_test!(asm_op, &[a]);
         test.prop_expect_stack(&[expected])?;
@@ -784,7 +784,7 @@ proptest! {
     }
 
     #[test]
-    fn ilog2_proptest(a in 1..Felt::MODULUS) {
+    fn ilog2_proptest(a in 1..Felt::ORDER_U64) {
         let asm_op = "ilog2";
         let expected = a.ilog2();
 
@@ -801,7 +801,7 @@ proptest! {
     fn eq_proptest(a in any::<u64>(), b in any::<u64>()) {
         let asm_op = "eq";
         // compare the random a & b values modulo the field modulus to get the expected result
-        let expected_result = if a % Felt::MODULUS == b % Felt::MODULUS { 1 } else { 0 };
+        let expected_result = if a % Felt::ORDER_U64 == b % Felt::ORDER_U64 { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[a,b]);
         test.prop_expect_stack(&[expected_result])?;
@@ -819,7 +819,7 @@ proptest! {
         let mut inputs_equal = true;
         for (i, (a, b)) in w1.iter().zip(w2.iter()).enumerate() {
             // if any of the values are unequal in the field, then the words will be unequal
-            if *a % Felt::MODULUS != *b % Felt::MODULUS {
+            if *a % Felt::ORDER_U64 != *b % Felt::ORDER_U64 {
                 inputs_equal = false;
             }
             // add the values to the vector
@@ -842,7 +842,7 @@ proptest! {
         // test the less-than assembly operation with randomized inputs
         let asm_op = "lt";
         // compare the random a & b values modulo the field modulus to get the expected result
-        let expected_result = if a % Felt::MODULUS < b % Felt::MODULUS { 1 } else { 0 };
+        let expected_result = if a % Felt::ORDER_U64 < b % Felt::ORDER_U64 { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[a,b]);
         test.prop_expect_stack(&[expected_result])?;
@@ -853,7 +853,7 @@ proptest! {
         // test the less-than-or-equal assembly operation with randomized inputs
         let asm_op = "lte";
         // compare the random a & b values modulo the field modulus to get the expected result
-        let expected_result = if a % Felt::MODULUS <= b % Felt::MODULUS { 1 } else { 0 };
+        let expected_result = if a % Felt::ORDER_U64 <= b % Felt::ORDER_U64 { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[a,b]);
         test.prop_expect_stack(&[expected_result])?;
@@ -864,7 +864,7 @@ proptest! {
         // test the greater-than assembly operation with randomized inputs
         let asm_op = "gt";
         // compare the random a & b values modulo the field modulus to get the expected result
-        let expected_result = if a % Felt::MODULUS > b % Felt::MODULUS { 1 } else { 0 };
+        let expected_result = if a % Felt::ORDER_U64 > b % Felt::ORDER_U64 { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[a,b]);
         test.prop_expect_stack(&[expected_result])?;
@@ -875,7 +875,7 @@ proptest! {
         // test the greater-than-or-equal assembly operation with randomized inputs
         let asm_op = "gte";
         // compare the random a & b values modulo the field modulus to get the expected result
-        let expected_result = if a % Felt::MODULUS >= b % Felt::MODULUS { 1 } else { 0 };
+        let expected_result = if a % Felt::ORDER_U64 >= b % Felt::ORDER_U64 { 1 } else { 0 };
 
         let test = build_op_test!(asm_op, &[a,b]);
         test.prop_expect_stack(&[expected_result])?;

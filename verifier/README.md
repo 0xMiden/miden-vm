@@ -17,8 +17,6 @@ Stack outputs are expected to be ordered as if they would be popped off the stac
 
 The function returns `Result<u32, VerificationError>` which will be `Ok(security_level)` if verification passes, or `Err(VerificationError)` if verification fails, with `VerificationError` describing the reason for the failure.
 
-> **Note:** Programs using precompiles require `verify_with_precompiles()` which accepts a [`PrecompileVerifierRegistry`](https://docs.rs/miden-core/latest/miden_core/precompile/struct.PrecompileVerifierRegistry.html). Precompile verification is experimental and subject to change.
-
 Verifying execution proof of a program basically means the following:
 
 > If a program with the provided hash is executed against some secret inputs and the provided public inputs, it will produce the provided outputs.

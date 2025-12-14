@@ -3,7 +3,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use miden_core::{, Operation::*, sys_events::SystemEvent};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
@@ -106,7 +106,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inv()), Mul]);
+        span_builder.push_ops([Push(imm.into_inner().inverse()), Mul]);
     }
     Ok(())
 }

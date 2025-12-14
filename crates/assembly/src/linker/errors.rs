@@ -9,7 +9,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
-use miden_core::{FieldElement, utils::to_hex};
+use miden_core::{, utils::to_hex};
 
 // LINKER ERROR
 // ================================================================================================

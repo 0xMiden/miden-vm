@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame, TransitionConstraintDegree, op_flags::OpFlags};
 use crate::{
     stack::EvaluationFrameExt,
     utils::{are_equal, is_binary},
@@ -50,7 +50,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints of the Field operations.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -67,7 +67,7 @@ pub fn enforce_constraints<E: FieldElement>(
     index += enforce_mul_constraints(frame, &mut result[index..], op_flag.mul());
 
     // Enforce constaints of the INV operation.
-    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inv());
+    index += enforce_inv_constraints(frame, &mut result[index..], op_flag.inverse());
 
     // Enforce constaints of the INCR operation.
     index += enforce_incr_constraints(frame, &mut result[index..], op_flag.incr());
@@ -105,7 +105,7 @@ pub fn enforce_constraints<E: FieldElement>(
 /// constraints are enforced:
 /// - The first element in the trace frame should be the addition of the first two elements in the
 ///   current trace. s0` - s0 - s1 = 0.
-pub fn enforce_add_constraints<E: FieldElement>(
+pub fn enforce_add_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -126,7 +126,7 @@ pub fn enforce_add_constraints<E: FieldElement>(
 /// following constraints are enforced:
 /// - The first element in the next frame should be the negation of first element in the current
 ///   frame, therefore, their sum should be 0. s0` + s0 = 0.
-pub fn enforce_neg_constraints<E: FieldElement>(
+pub fn enforce_neg_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -144,7 +144,7 @@ pub fn enforce_neg_constraints<E: FieldElement>(
 /// following constraints are enforced:
 /// - The first element in the next frame should be the product of the first two elements in the
 ///   current frame. s0` - s0 * s1 = 0
-pub fn enforce_mul_constraints<E: FieldElement>(
+pub fn enforce_mul_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -165,7 +165,7 @@ pub fn enforce_mul_constraints<E: FieldElement>(
 /// following constraints are enforced:
 /// - The next element in the next frame should be the inverse of first element in the current
 ///   frame. s0` * s0 = 1.
-pub fn enforce_inv_constraints<E: FieldElement>(
+pub fn enforce_inv_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -183,7 +183,7 @@ pub fn enforce_inv_constraints<E: FieldElement>(
 /// constraints are enforced:
 /// - The next element in the next frame should be equal to the addition of first element in the
 ///   current frame with 1. s0` - s0 - 1 = 0.
-pub fn enforce_incr_constraints<E: FieldElement>(
+pub fn enforce_incr_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -201,7 +201,7 @@ pub fn enforce_incr_constraints<E: FieldElement>(
 /// - The top element should be a binary. It is enforced as a general constraint.
 /// - The first element of the next frame should be a binary not of the first element of the current
 ///   frame. s0` + s0 = 1.
-pub fn enforce_not_constraints<E: FieldElement>(
+pub fn enforce_not_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -224,7 +224,7 @@ pub fn enforce_not_constraints<E: FieldElement>(
 ///   s1 = 0. The top element is binary or not is enforced as a general constraint.
 /// - The first element of the next frame should be a binary and of the first two elements in the
 ///   current frame. s0` - s0 * s1 = 0.
-pub fn enforce_and_constraints<E: FieldElement>(
+pub fn enforce_and_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -253,7 +253,7 @@ pub fn enforce_and_constraints<E: FieldElement>(
 ///   s1 = 0. The top element is binary or not is enforced as a general constraint.
 /// - The first element of the next frame should be a binary or of the first two elements in the
 ///   current frame. s0` - ( s0 + s1 - s0 * s1 ) = 0.
-pub fn enforce_or_constraints<E: FieldElement>(
+pub fn enforce_or_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -280,7 +280,7 @@ pub fn enforce_or_constraints<E: FieldElement>(
 /// Therefore, the following constraints are enforced:
 /// - (s0 - s1) * s0' = 0
 /// - s0` - (1 - (s0 - s1) * h0) = 0
-pub fn enforce_eq_constraints<E: FieldElement>(
+pub fn enforce_eq_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -314,7 +314,7 @@ pub fn enforce_eq_constraints<E: FieldElement>(
 /// following constraints are enforced:
 /// - s0 * s0` = 0.
 /// - s0` - (1 - h0 * s0) = 0.
-pub fn enforce_eqz_constraints<E: FieldElement>(
+pub fn enforce_eqz_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -348,7 +348,7 @@ pub fn enforce_eqz_constraints<E: FieldElement>(
 /// - The accumulation value in the next frame is the product of the accumulation value in the
 ///   current frame and the value which needs to be included in this turn.
 /// - The b value is right shifted by 1 bit.
-pub fn enforce_expacc_constraints<E: FieldElement>(
+pub fn enforce_expacc_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,
@@ -411,7 +411,7 @@ pub fn enforce_expacc_constraints<E: FieldElement>(
 /// - The second element in the next frame should be a0.
 /// - The third element in the next frame should be equal to $(b0 + b1)(a0 + a1) - a0 \cdot b0$.
 /// - The fourth element in the next frame should be equal to $a0 \cdot b0 - 2 \cdot a1 \cdot b1$.
-pub fn enforce_ext2mul_constraints<E: FieldElement>(
+pub fn enforce_ext2mul_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: E,

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use gpu::metal::{DIGEST_SIZE, MetalExecutionProver};
-use miden_air::{PartitionOptions, ProvingOptions, StarkField};
+use miden_air::{PartitionOptions, ProvingOptions, };
 use miden_processor::{
     StackInputs, StackOutputs, Word,
     crypto::{Hasher, Rpo256, RpoRandomCoin, Rpx256},
@@ -229,7 +229,7 @@ fn gen_random_trace(num_rows: usize, num_cols: usize) -> ColMatrix<Felt> {
     ColMatrix::new((0..num_cols as u64).map(|col| vec![Felt::new(col); num_rows]).collect())
 }
 
-fn get_random_values<E: FieldElement>(num_rows: usize) -> Vec<E> {
+fn get_random_values<E: >(num_rows: usize) -> Vec<E> {
     (0..num_rows).map(|i| E::from(i as u32)).collect()
 }
 

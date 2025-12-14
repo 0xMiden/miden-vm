@@ -12,7 +12,6 @@ use miden_core::{
 };
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
-use winter_prover::ProverError;
 
 use crate::{
     AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
@@ -247,7 +246,7 @@ pub enum ExecutionError {
     #[error("a program has already been executed in this process")]
     ProgramAlreadyExecuted,
     #[error("proof generation failed")]
-    ProverError(#[source] ProverError),
+    ProverError,
     #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
     SmtNodeNotFound {
         #[label]

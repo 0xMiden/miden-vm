@@ -18,8 +18,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Felt, FieldElement, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
-    utils::range,
+    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, PrimeCharacteristicRing, ZERO, utils::range
 };
 
 use super::get_op_label;
@@ -32,7 +31,7 @@ use crate::{
 // ==============================================================================================
 
 /// Builds requests made to the hasher chiplet at the start of a control block.
-pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     decoder_hasher_state: [Felt; 8],
     op_code_felt: Felt,
@@ -56,7 +55,7 @@ pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a span block.
-pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -77,7 +76,7 @@ pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a respan block.
-pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -98,7 +97,7 @@ pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the end of a block.
-pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -119,7 +118,7 @@ pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HPERM` requests made to the hash chiplet.
-pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -197,7 +196,7 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
 /// - `s0..s3`: `R1[3..0]`
 /// - `s4..s7`: `R0[3..0]`
 /// - `s8..s11`: `CAP_NEXT[3..0]`
-pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -280,7 +279,7 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MPVERIFY` requests made to the hash chiplet.
-pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -327,7 +326,7 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
 
     let output = HasherMessage {
         transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + node_depth.mul_small(8) - ONE,
+        addr_next: helper_0 + node_depth * Felt::from_u16(8) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -358,7 +357,7 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MRUPDATE` requests made to the hash chiplet.
-pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -416,7 +415,7 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
 
     let output_old = HasherMessage {
         transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8) - ONE,
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -437,7 +436,7 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
 
     let input_new = HasherMessage {
         transition_label: Felt::from(MR_UPDATE_NEW_LABEL + 16),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8),
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8),
         node_index,
         hasher_state: [
             ZERO,
@@ -458,7 +457,7 @@ pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
 
     let output_new = HasherMessage {
         transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(16) - ONE,
+        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(16) - ONE,
         node_index: ZERO,
         hasher_state: [
             ZERO,
@@ -504,7 +503,7 @@ pub(super) fn build_hasher_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let mut multiplicand = E::ONE;
     let selector0 = main_trace.chiplet_selector_0(row);
@@ -667,15 +666,15 @@ pub struct ControlBlockRequestMessage {
 
 impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+            + alphas[1] * (self.transition_label)
+            + alphas[2] * (self.addr_next);
 
         header
-            + alphas[5].mul_base(self.op_code)
+            + alphas[5] * (self.op_code)
             + build_value(&alphas[8..16], self.decoder_hasher_state)
     }
 
@@ -716,13 +715,13 @@ pub struct HasherMessage {
 
 impl<E> BusMessage<E> for HasherMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next)
-            + alphas[3].mul_base(self.node_index);
+            + alphas[1] * (self.transition_label)
+            + alphas[2] * (self.addr_next)
+            + alphas[3] * (self.node_index);
 
         header
             + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], self.hasher_state)
@@ -754,12 +753,12 @@ pub struct SpanBlockMessage {
 
 impl<E> BusMessage<E> for SpanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+            + alphas[1] * (self.transition_label)
+            + alphas[2] * (self.addr_next);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -790,12 +789,12 @@ pub struct RespanBlockMessage {
 
 impl<E> BusMessage<E> for RespanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next - ONE);
+            + alphas[1] * (self.transition_label)
+            + alphas[2] * (self.addr_next - ONE);
 
         header + build_value(&alphas[8..16], self.state)
     }
@@ -826,11 +825,11 @@ pub struct EndBlockMessage {
 
 impl<E> BusMessage<E> for EndBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header =
-            alphas[0] + alphas[1].mul_base(self.transition_label) + alphas[2].mul_base(self.addr);
+            alphas[0] + alphas[1] * (self.transition_label) + alphas[2] * (self.addr);
 
         header + build_value(&alphas[8..12], self.digest)
     }

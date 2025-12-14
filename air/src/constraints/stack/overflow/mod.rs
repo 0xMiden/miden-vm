@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, FieldElement, TransitionConstraintDegree, op_flags::OpFlags};
+use super::{EvaluationFrame, TransitionConstraintDegree, op_flags::OpFlags};
 use crate::stack::EvaluationFrameExt;
 
 #[cfg(test)]
@@ -36,7 +36,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the stack overflow.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -70,7 +70,7 @@ pub fn enforce_constraints<E: FieldElement>(
 ///
 /// TODO: This skips the operation when `END` is exiting for a `CALL` or a `SYSCALL` block. It
 /// should be handled later in multiset constraints.
-pub fn enforce_stack_depth_constraints<E: FieldElement>(
+pub fn enforce_stack_depth_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -97,7 +97,7 @@ pub fn enforce_stack_depth_constraints<E: FieldElement>(
 /// Enforces constraints on the overflow flag h0. Therefore, the following constraints
 /// are enforced:
 /// - If overflow table has values, then, h0 should be set to ONE, otherwise it should be ZERO.
-pub fn enforce_overflow_flag_constraints<E: FieldElement>(
+pub fn enforce_overflow_flag_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,
@@ -114,7 +114,7 @@ pub fn enforce_overflow_flag_constraints<E: FieldElement>(
 ///   value.
 /// - In the case of a left shift operation, the last stack item should be set to ZERO when the
 ///   depth of the stack is 16.
-pub fn enforce_overflow_index_constraints<E: FieldElement>(
+pub fn enforce_overflow_index_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &OpFlags<E>,

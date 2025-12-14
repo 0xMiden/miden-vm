@@ -1,9 +1,7 @@
 use alloc::vec::Vec;
 use core::{ops::Deref, slice};
 
-use super::{
-    super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
-};
+use super::{super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 // STACK INPUTS
@@ -13,7 +11,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError};
 ///
 /// The values in the struct are stored in the "stack order" - i.e., the last input is at the top
 /// of the stack (in position 0).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StackInputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -48,7 +46,7 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(crate::felt_from_u64_checked)
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)
@@ -92,7 +90,7 @@ impl IntoIterator for StackInputs {
 
 impl Serializable for StackInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let num_stack_values = get_num_stack_values(self);
+        let num_stack_values = super::get_num_stack_values(&self.elements);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
     }

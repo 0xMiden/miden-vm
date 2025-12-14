@@ -1,5 +1,5 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{Felt, ONE, ZERO, Field};
 
 use crate::{
     ErrorContext, ExecutionError,
@@ -47,7 +47,7 @@ pub(super) fn op_inv<P: Processor>(
     if (*top) == ZERO {
         return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
     }
-    *top = top.inv();
+    *top = top.inverse();
     Ok(())
 }
 

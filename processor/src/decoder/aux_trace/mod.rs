@@ -1,8 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_air::{Felt, trace::main_trace::MainTrace};
-use miden_core::FieldElement;
+use miden_air::trace::main_trace::MainTrace;
+use miden_core::ExtensionField;
 
+use super::{Felt, ONE, ZERO};
 use crate::trace::AuxColumnBuilder;
 
 mod block_hash_table;
@@ -27,7 +28,7 @@ pub struct AuxTraceBuilder {}
 impl AuxTraceBuilder {
     /// Builds and returns decoder auxiliary trace columns p1, p2, and p3 describing states of block
     /// stack, block hash, and op group tables respectively.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],

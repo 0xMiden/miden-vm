@@ -19,14 +19,44 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-core/std", "thiserror/std", "winter-verifier/std"]
+std = [
+  "miden-air/std",
+  "miden-core/std",
+  "thiserror/std",
+]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-prover.workspace = true
 
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
-winter-verifier.workspace = true
+itertools = "0.12"
+
+# Plonky3 dependencies
+p3-air.workspace = true
+p3-blake3.workspace = true
+p3-challenger.workspace = true
+p3-commit.workspace = true
+p3-dft.workspace = true
+p3-field.workspace = true
+p3-fri.workspace = true
+p3-goldilocks.workspace = true
+p3-keccak.workspace = true
+p3-matrix.workspace = true
+p3-merkle-tree.workspace = true
+p3-poseidon2.workspace = true
+p3-symmetric.workspace = true
+p3-uni-stark.workspace = true
+p3-util.workspace = true
+
+# Miden-specific Plonky3 crates
+miden-air-trait.workspace = true
+miden-prover-p3.workspace = true
+
+# Serialization
+serde.workspace = true
+bincode = "1.3"

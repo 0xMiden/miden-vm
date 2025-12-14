@@ -53,6 +53,7 @@ miden-debug-types = { path = "./crates/debug-types", version = "0.21", default-f
 miden-mast-package = { path = "./crates/mast-package", version = "0.21", default-features = false }
 miden-processor = { path = "./processor", version = "0.21", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
+miden-serde-test-macros = { package = "miden-test-serde-macros", path = "./crates/test-serde-macros", default-features = false }
 miden-prover = { path = "./prover", version = "0.21", default-features = false }
 miden-core-lib = { path = "./crates/lib/core", version = "0.21", default-features = false }
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.21", default-features = false }
@@ -63,7 +64,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.19", default-features = false }
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "al-e2e-plonky3", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -86,11 +87,12 @@ proptest-derive = { version = "0.7", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged = {version = "0.1" }
-sha2 = { version = "0.10", default-features = false }
 smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.48", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
+rand = { version = "0.9", default-features = false }
+sha2 = { version = "0.10", default-features = false }
 winter-air = { version = "0.13", default-features = false }
 winter-fri = "0.13"
 winter-math = { version = "0.13", default-features = false }
@@ -98,3 +100,29 @@ winter-prover = { version = "0.13", default-features = false }
 winter-rand-utils = "0.13"
 winter-utils = { version = "0.13", default-features = false }
 winter-verifier = { version = "0.13", default-features = false }
+
+# Plonky3 dependencies
+p3-air        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-blake3     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-challenger = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-commit     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-dft        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-field      = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-fri        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-goldilocks = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-interpolation = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-keccak     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-matrix     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-maybe-rayon= { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-merkle-tree= { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-poseidon2  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-symmetric  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-uni-stark  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-util       = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+
+# Plonky3 miden-specific crates
+miden-air-trait = { package = "miden-air", branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+miden-prover-p3 = { package = "miden-prover", branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+
+# WASM support
+getrandom = { version = "0.2", default-features = false, features = ["js"] }

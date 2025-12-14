@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{StackOutputs, stack::MIN_STACK_DEPTH};
 
 use super::super::{
-    Assertion, CLK_COL_IDX, DECODER_TRACE_OFFSET, EvaluationFrame, Felt, FieldElement, ONE,
+    Assertion, CLK_COL_IDX, DECODER_TRACE_OFFSET, EvaluationFrame, Felt, ONE,
     STACK_AUX_TRACE_OFFSET, STACK_TRACE_OFFSET, TransitionConstraintDegree, ZERO,
 };
 use crate::{
@@ -95,7 +95,7 @@ pub fn get_transition_constraint_count() -> usize {
 }
 
 /// Enforces constraints for the stack module and all stack operations.
-pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
 ) -> usize {
@@ -113,7 +113,7 @@ pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Enforces unique constraints of all the stack ops.
-pub fn enforce_unique_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_unique_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &op_flags::OpFlags<E>,
@@ -147,7 +147,7 @@ pub fn enforce_unique_constraints<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Enforces general constraints of all the stack ops.
-pub fn enforce_general_constraints<E: FieldElement>(
+pub fn enforce_general_constraints<E: >(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     op_flag: &op_flags::OpFlags<E>,
@@ -235,7 +235,7 @@ pub fn get_assertions_last_step(
 /// Returns the stack's boundary assertions for auxiliary columns at the first step.
 pub fn get_aux_assertions_first_step<E>(result: &mut Vec<Assertion<E>>)
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     result.push(Assertion::single(STACK_AUX_TRACE_OFFSET, 0, E::ONE));
 }
@@ -243,7 +243,7 @@ where
 /// Returns the stack's boundary assertions for auxiliary columns at the last step.
 pub fn get_aux_assertions_last_step<E>(result: &mut Vec<Assertion<E>>, step: usize)
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     result.push(Assertion::single(STACK_AUX_TRACE_OFFSET, step, E::ONE));
 }
@@ -251,7 +251,7 @@ where
 // STACK OPERATION EXTENSION TRAIT
 // ================================================================================================
 
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Column accessors -----------------------------------------------------------------------
 
     /// Returns the current value at the specified index in the stack.
@@ -293,7 +293,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn is_syscall_end(&self) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Column accessors -----------------------------------------------------------------------
 
     #[inline(always)]

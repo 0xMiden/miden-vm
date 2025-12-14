@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{EvaluationFrame, Felt, FieldElement, TransitionConstraintDegree};
+use super::{EvaluationFrame, Felt, TransitionConstraintDegree};
 use crate::{
     ONE, ZERO,
     trace::chiplets::{
@@ -105,7 +105,7 @@ pub fn get_transition_constraint_count() -> usize {
 ///   by the caller and set to `Felt::ONE`
 /// - The `transition_flag` indicates whether this is the last row this chiplet's execution trace,
 ///   and therefore the constraints should not be enforced.
-pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
+pub fn enforce_constraints<E: ExtensionField<Felt>>(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -129,7 +129,7 @@ pub fn enforce_constraints<E: FieldElement<BaseField = Felt>>(
 /// - When a cycle ends by absorbing more elements or a Merkle path node, ensure the next value of
 ///   s0 is always zero. Otherwise, s0 should be unconstrained.
 /// - Prevent an invalid combination of flags where s_0 = 0 and s_1 = 1.
-fn enforce_hasher_selectors<E: FieldElement>(
+fn enforce_hasher_selectors<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -176,7 +176,7 @@ fn enforce_hasher_selectors<E: FieldElement>(
 /// - Ensure `i` is zero at the end of the computation.
 /// - Ensure `i` is shifted one bit to the right when a new node is absorbed into the hasher state.
 /// - Otherwise, ensure the value of `i` is copied to the next row.
-fn enforce_node_index<E: FieldElement>(
+fn enforce_node_index<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -212,7 +212,7 @@ fn enforce_node_index<E: FieldElement>(
 /// - When absorbing a new node during Merkle path computation, the result of the previous hash (the
 ///   digest) is copied to the next row in the position specified by the bit shifted out of the node
 ///   index.
-fn enforce_hasher_state<E: FieldElement + From<Felt>>(
+fn enforce_hasher_state<E:  + From<Felt>>(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -256,7 +256,7 @@ fn enforce_hasher_state<E: FieldElement + From<Felt>>(
 
 /// Enforces constraints for a single round of the Rescue Prime Optimized hash functions when
 /// flag = 1 using the provided round constants.
-pub fn enforce_rpo_round<E: FieldElement + From<Felt>>(
+pub fn enforce_rpo_round<E:  + From<Felt>>(
     frame: &EvaluationFrame<E>,
     result: &mut [E],
     ark: &[E],
@@ -294,7 +294,7 @@ pub fn enforce_rpo_round<E: FieldElement + From<Felt>>(
 // ================================================================================================
 
 #[inline(always)]
-fn apply_sbox<E: FieldElement + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
+fn apply_sbox<E:  + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
     state.iter_mut().for_each(|v| {
         let t2 = v.square();
         let t4 = t2.square();
@@ -303,7 +303,7 @@ fn apply_sbox<E: FieldElement + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
 }
 
 #[inline(always)]
-fn apply_mds<E: FieldElement + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
+fn apply_mds<E:  + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
     let mut result = [E::ZERO; STATE_WIDTH];
     result.iter_mut().zip(Hasher::MDS).for_each(|(r, mds_row)| {
         state.iter().zip(mds_row).for_each(|(&s, m)| {
@@ -318,7 +318,7 @@ fn apply_mds<E: FieldElement + From<Felt>>(state: &mut [E; STATE_WIDTH]) {
 
 /// Trait to allow easy access to column values and intermediate variables used in constraint
 /// calculations for the hash chiplet.
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Column accessors -----------------------------------------------------------------------
 
     /// Gets the value of the selector column at the specified index in the current row.
@@ -397,7 +397,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn f_an(&self, k: &[E]) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Column accessors -----------------------------------------------------------------------
 
     #[inline(always)]

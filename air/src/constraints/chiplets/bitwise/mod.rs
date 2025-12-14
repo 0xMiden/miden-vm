@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use winter_air::TransitionConstraintDegree;
 
-use super::{EvaluationFrame, Felt, FieldElement};
+use super::{EvaluationFrame, Felt};
 use crate::{
     ONE, ZERO,
     trace::chiplets::{
@@ -79,7 +79,7 @@ pub fn get_transition_constraint_count() -> usize {
 
 /// Enforces constraints for the bitwise chiplet, which includes the constraints for the
 /// internal selector & bitwise operations.
-pub fn enforce_constraints<E: FieldElement>(
+pub fn enforce_constraints<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -97,7 +97,7 @@ pub fn enforce_constraints<E: FieldElement>(
 
 /// Constraint evaluation function to enforce that the Bitwise internal selector column
 /// must be binary and remain the same throughout the cycle.
-fn enforce_selectors<E: FieldElement>(
+fn enforce_selectors<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -128,7 +128,7 @@ fn enforce_selectors<E: FieldElement>(
 ///   columns.
 /// - For every row except the last, the aggregated input value in the next row must be 16 times the
 ///   the value in the current row plus the aggregation of the bit decomposition in the next row.
-fn enforce_input_decomposition<E: FieldElement>(
+fn enforce_input_decomposition<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -186,7 +186,7 @@ fn enforce_input_decomposition<E: FieldElement>(
 ///
 /// Because the selectors for the AND and XOR operations are mutually exclusive, the
 /// constraints for different operations can be aggregated into the same result indices.
-fn enforce_output_aggregation<E: FieldElement>(
+fn enforce_output_aggregation<E: >(
     frame: &EvaluationFrame<E>,
     periodic_values: &[E],
     result: &mut [E],
@@ -229,7 +229,7 @@ fn enforce_output_aggregation<E: FieldElement>(
 
 /// Calculates the result of bitwise AND applied to the decomposed values provided as a bit array.
 /// The result will be the AND of the first 4 bits in the provided array with the latter 4 bits.
-pub fn bitwise_and<E: FieldElement>(decomposed_values: &[E]) -> E {
+pub fn bitwise_and<E: >(decomposed_values: &[E]) -> E {
     let mut result = E::ZERO;
     // Aggregate the result of the bitwise AND over the decomposed bits in the row.
     for idx in 0..NUM_DECOMP_BITS {
@@ -242,7 +242,7 @@ pub fn bitwise_and<E: FieldElement>(decomposed_values: &[E]) -> E {
 
 /// Calculates the result of bitwise XOR applied to the decomposed values provided as a bit array.
 /// The result will be the XOR of the first 4 bits in the provided array with the latter 4 bits.
-pub fn bitwise_xor<E: FieldElement>(decomposed_values: &[E]) -> E {
+pub fn bitwise_xor<E: >(decomposed_values: &[E]) -> E {
     let mut result = E::ZERO;
     // Aggregate the result of the bitwise XOR over the decomposed bits in the row.
     for idx in 0..NUM_DECOMP_BITS {
@@ -255,7 +255,7 @@ pub fn bitwise_xor<E: FieldElement>(decomposed_values: &[E]) -> E {
 
 // BITWISE FRAME EXTENSION TRAIT
 // ================================================================================================
-trait EvaluationFrameExt<E: FieldElement> {
+trait EvaluationFrameExt<E: > {
     // --- Column accessors -----------------------------------------------------------------------
 
     /// Gets the current value of the specified selector column.
@@ -302,7 +302,7 @@ trait EvaluationFrameExt<E: FieldElement> {
     fn bitwise_xor_flag(&self) -> E;
 }
 
-impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
+impl<E: > EvaluationFrameExt<E> for &EvaluationFrame<E> {
     // --- Column accessors -----------------------------------------------------------------------
 
     #[inline(always)]
@@ -403,7 +403,7 @@ impl<E: FieldElement> EvaluationFrameExt<E> for &EvaluationFrame<E> {
 // ================================================================================================
 /// Aggregate 4 decomposed bits representing a 4-bit binary value into a decimal value, starting
 /// from `start_idx` in the provided row.
-pub fn agg_bits<E: FieldElement>(row: &[E], start_idx: usize) -> E {
+pub fn agg_bits<E: >(row: &[E], start_idx: usize) -> E {
     let mut result = E::ZERO;
     // TODO: this can be optimized.
     // From Bobbin: "we are multiplying by a small power of two and then summing up the results -
