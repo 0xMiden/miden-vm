@@ -4,12 +4,12 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{
-    Felt, Path,
+    Felt, Path, Word,
     ast::{SymbolResolutionError, constants::ConstEvalError},
     debuginfo::{SourceFile, SourceSpan},
     diagnostics::{Diagnostic, RelatedError, RelatedLabel, miette},
 };
-use miden_core::{, utils::to_hex};
+use miden_core::utils::to_hex;
 
 // LINKER ERROR
 // ================================================================================================
@@ -83,7 +83,10 @@ pub enum LinkerError {
         source_file: Option<Arc<SourceFile>>,
         path: Arc<Path>,
     },
-    #[error("value for key {} already present in the advice map", to_hex(Felt::elements_as_bytes(.key)))]
+    #[error(
+        "value for key {} already present in the advice map",
+        to_hex(Word::from(.key).as_bytes())
+    )]
     #[diagnostic(help(
         "previous values at key were '{prev_values:?}'. Operation would have replaced them with '{new_values:?}'",
     ))]

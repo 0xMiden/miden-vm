@@ -26,6 +26,8 @@ use crate::fast::ExecutionOutput;
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
 
+mod aux_builder_impl;
+
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
@@ -35,7 +37,7 @@ use super::EMPTY_WORD;
 // ================================================================================================
 
 /// Number of rows at the end of an execution trace which are injected with random values.
-pub const NUM_RAND_ROWS: usize = 0;
+pub const NUM_RAND_ROWS: usize = 1;
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -215,6 +217,16 @@ impl ExecutionTrace {
     /// Returns hash of the program execution of which resulted in this execution trace.
     pub fn program_hash(&self) -> &Word {
         self.program_info.program_hash()
+    }
+
+    /// Returns a reference to the main trace segment.
+    pub fn main_segment(&self) -> &MainTrace {
+        &self.main_trace
+    }
+
+    /// Returns a mutable reference to the main trace segment.
+    pub fn main_segment_mut(&mut self) -> &mut MainTrace {
+        &mut self.main_trace
     }
 
     /// Returns outputs of the program execution which resulted in this execution trace.

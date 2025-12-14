@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-stark-tests")]
+
 use miden_core::Word;
 use miden_utils_testing::{
     Felt, MerkleTreeVC,

@@ -6,7 +6,7 @@ mod channel;
 
 pub(crate) mod verifier_fri_e2f4;
 use miden_core::Word;
-pub use verifier_fri_e2f4::*;
+//pub use verifier_fri_e2f4::*;
 
 #[test]
 fn fri_fold4_ext2_remainder64() {

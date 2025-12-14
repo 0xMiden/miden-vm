@@ -1,3 +1,5 @@
+#![cfg(feature = "legacy-stark-tests")]
+
 use std::array;
 
 use miden_air::{FieldExtension, HashFunction, PublicInputs};

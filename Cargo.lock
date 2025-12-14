@@ -1273,6 +1273,7 @@ dependencies = [
  "criterion",
  "miden-air 0.3.0",
  "miden-core",
+ "miden-test-utils",
  "miden-utils-indexing",
  "p3-air",
  "p3-commit",
@@ -1344,6 +1345,7 @@ dependencies = [
  "miden-debug-types",
  "miden-formatting",
  "miden-test-serde-macros",
+ "miden-test-utils",
  "miden-utils-core-derive",
  "miden-utils-indexing",
  "miden-utils-sync",
@@ -1355,7 +1357,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "winter-math",
- "winter-rand-utils",
  "winter-utils",
 ]
 
@@ -3799,16 +3800,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7aecfb48ee6a8b4746392c8ff31e33e62df8528a3b5628c5af27b92b14aef1ea"
 dependencies = [
  "serde",
- "winter-utils",
-]
-
-[[package]]
-name = "winter-rand-utils"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a4ff3b651754a7bd216f959764d0a5ab6f4b551c9a3a08fb9ccecbed594b614a"
-dependencies = [
- "rand",
  "winter-utils",
 ]
 

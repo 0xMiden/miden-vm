@@ -1,4 +1,4 @@
-use miden_core::{, QuadFelt};
+use miden_core::QuadFelt;
 use miden_utils_testing::{build_op_test, rand::rand_value};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS

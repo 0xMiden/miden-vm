@@ -1,4 +1,4 @@
-use miden_core::Felt;
+use miden_core::{Felt, Field, ZERO};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::utils::*;
@@ -39,4 +39,26 @@ pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
     let hi = (value >> 16) as u16;
 
     (hi, lo)
+}
+
+/// Inverts all non-zero values in the provided column in place, leaving zeros unchanged.
+/// A warning is logged for every zero entry encountered so we can track which lookups
+/// still need padding fixes.
+pub(crate) fn invert_column_allow_zeros(
+    column: &mut [Felt],
+    column_name: &'static str,
+    row_offset: usize,
+) {
+    for (offset, value) in column.iter_mut().enumerate() {
+        if *value == ZERO {
+            tracing::warn!(
+                column = column_name,
+                row = row_offset + offset,
+                "zero encountered before inversion; value left unchanged"
+            );
+            continue;
+        }
+
+        *value = value.inverse();
+    }
 }

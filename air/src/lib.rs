@@ -231,9 +231,7 @@ where
 pub struct MainTraceCols<T> {
     // System
     pub clk: T,
-    pub fmp: T,
     pub ctx: T,
-    pub in_syscall: T,
     pub fn_hash: [T; 4],
 
     // Decoder

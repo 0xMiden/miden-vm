@@ -50,10 +50,7 @@ impl StackOutputs {
         I: IntoIterator<Item = u64>,
     {
         // Validate stack elements
-        let stack = iter
-            .into_iter()
-            .map(Felt::from_u64)
-            .collect::<Vec<Felt>>();
+        let stack = iter.into_iter().map(Felt::from_u64).collect::<Vec<Felt>>();
 
         Self::new(stack)
     }

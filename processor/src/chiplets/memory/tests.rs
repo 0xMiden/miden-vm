@@ -13,9 +13,9 @@ use miden_core::{WORD_SIZE, Word, assert_matches};
 
 use super::{
     super::ZERO,
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    , Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
+    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
+    ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
 };
 use crate::{ContextId, MemoryAddress, MemoryError};
 

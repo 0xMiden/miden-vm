@@ -1,35 +1,100 @@
-pub use winter_rand_utils::*;
+use alloc::vec::Vec;
+use core::{
+    array,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use super::{Felt, WORD_SIZE, Word};
+use super::{Felt, QuadFelt, WORD_SIZE, Word};
 
-// SEEDED GENERATORS
-// ================================================================================================
+pub trait Randomizable {
+    fn random() -> Self;
+}
 
-/// Mutates a seed and generates a word deterministically
+pub fn rand_value<T: Randomizable>() -> T {
+    T::random()
+}
+
+pub fn rand_array<T: Randomizable, const N: usize>() -> [T; N] {
+    array::from_fn(|_| T::random())
+}
+
+pub fn rand_vector<T: Randomizable>(len: usize) -> Vec<T> {
+    (0..len).map(|_| T::random()).collect()
+}
+
 pub fn seeded_word(seed: &mut u64) -> Word {
-    let seed = generate_bytes_seed(seed);
-    prng_array::<Felt, WORD_SIZE>(seed).into()
+    let elements = [
+        seeded_element(seed),
+        seeded_element(seed),
+        seeded_element(seed),
+        seeded_element(seed),
+    ];
+    elements.into()
 }
 
-/// Mutates a seed and generates an element deterministically
 pub fn seeded_element(seed: &mut u64) -> Felt {
-    let seed = generate_bytes_seed(seed);
-    let num = prng_array::<u64, 1>(seed)[0];
-    Felt::new(num)
+    *seed = (*seed).wrapping_add(0x9E37_79B9_7F4A_7C15);
+    Felt::new(splitmix64(*seed))
 }
 
-// HELPERS
-// ================================================================================================
+impl Randomizable for u64 {
+    fn random() -> Self {
+        next_u64()
+    }
+}
 
-/// Generate a bytes seed that can be used as input for rand_utils.
-///
-/// Increments the argument.
-fn generate_bytes_seed(seed: &mut u64) -> [u8; 32] {
-    // increment the seed
-    *seed = seed.wrapping_add(1);
+impl Randomizable for u32 {
+    fn random() -> Self {
+        next_u64() as u32
+    }
+}
 
-    // generate a bytes seed
-    let mut bytes = [0u8; 32];
-    bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    bytes
+impl Randomizable for u16 {
+    fn random() -> Self {
+        next_u64() as u16
+    }
+}
+
+impl Randomizable for u8 {
+    fn random() -> Self {
+        next_u64() as u8
+    }
+}
+
+impl Randomizable for Felt {
+    fn random() -> Self {
+        Felt::new(next_u64())
+    }
+}
+
+impl Randomizable for QuadFelt {
+    fn random() -> Self {
+        QuadFelt::new([Felt::random(), Felt::random()])
+    }
+}
+
+impl Randomizable for Word {
+    fn random() -> Self {
+        let elements = rand_array::<Felt, WORD_SIZE>();
+        Word::new(elements)
+    }
+}
+
+fn next_u64() -> u64 {
+    static STATE: AtomicU64 = AtomicU64::new(0x4d595df4d0f33173);
+
+    let mut current = STATE.load(Ordering::Relaxed);
+    loop {
+        let next = current.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        match STATE.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return splitmix64(next),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn splitmix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

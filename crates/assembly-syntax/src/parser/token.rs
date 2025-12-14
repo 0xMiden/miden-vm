@@ -2,7 +2,8 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, PrimeCharacteristicRing, utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable}
+    Felt, PrimeCharacteristicRing,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

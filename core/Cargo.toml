@@ -72,4 +72,4 @@ insta.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
 serde_json = { workspace = true }
-winter-rand-utils.workspace = true
+miden-utils-testing.workspace = true

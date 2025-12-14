@@ -3,7 +3,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{, Operation::*, sys_events::SystemEvent};
+use miden_core::{Field, Operation::*, sys_events::SystemEvent};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
