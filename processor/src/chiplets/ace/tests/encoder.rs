@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, QuadFelt, crypto::hash::Rpo256};
-
+use miden_core::{Felt, QuadFelt, ZERO, crypto::hash::Rpo256, AlgebraicSponge, PrimeCharacteristicRing};
 use super::*;
 use crate::{
+
     chiplets::ace::instruction::{ID_BITS, MAX_ID},
 };
 
@@ -90,7 +90,7 @@ impl EncodedCircuit {
             circuit
                 .constants
                 .iter()
-                .flat_map(|c| QuadFelt::from(*c).as_basis_coefficients_slice()),
+                .flat_map(|c|  [c , &ZERO]),
         );
         // Pad with zero constants.
         let encoded_constants_size = 2 * layout.num_constants;

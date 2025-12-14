@@ -64,10 +64,14 @@ impl StackOutputs {
         self.elements.get(idx).cloned()
     }
 
-    /// Returns the word located starting at the specified Felt position on the stack or `None` if
-    /// out of bounds. For example, passing in `0` returns the word at the top of the stack, and
-    /// passing in `4` returns the word starting at element index `4`.
-    pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
+    /// Returns the word located starting at the specified Felt position on the stack in big-endian
+    /// order, or `None` if out of bounds. For example, passing in `0` returns the word at the top
+    /// of the stack, and passing in `4` returns the word starting at element index `4`.
+    ///
+    /// The elements are returned in big-endian order (most significant element first). Since words
+    /// are stored on the stack in reverse order `[d, c, b, a]` for word `[a, b, c, d]`, this
+    /// method reverses them back to the original order.
+    pub fn get_stack_word_be(&self, idx: usize) -> Option<Word> {
         let word_elements: [Felt; WORD_SIZE] = {
             let word_elements: Vec<Felt> = range(idx, 4)
                 .map(|idx| self.get_stack_item(idx))
@@ -80,6 +84,34 @@ impl StackOutputs {
         };
 
         Some(word_elements.into())
+    }
+
+    /// Returns the word located starting at the specified Felt position on the stack in
+    /// little-endian order, or `None` if out of bounds.
+    ///
+    /// The elements are returned in little-endian order (least significant element first), which
+    /// is the same order they appear on the stack.
+    pub fn get_stack_word_le(&self, idx: usize) -> Option<Word> {
+        self.get_stack_word_be(idx).map(|mut word| {
+            word.reverse();
+            word
+        })
+    }
+
+    /// Returns the word located starting at the specified Felt position on the stack or `None` if
+    /// out of bounds.
+    ///
+    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
+    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
+    /// ordering expectations clear.
+    ///
+    /// See [`Self::get_stack_word_be`] for detailed documentation.
+    #[deprecated(
+        since = "0.19.0",
+        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
+    )]
+    pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
+        self.get_stack_word_be(idx)
     }
 
     /// Returns the number of requested stack outputs or returns the full stack if fewer than the

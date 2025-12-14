@@ -40,7 +40,7 @@ fn fri_ext2fold4() {
     let stack_state = test.get_last_stack_state();
     assert_eq!(stack_state[8], Felt::new(poe).square());
     assert_eq!(stack_state[10], Felt::new(layer_ptr + 8));
-    assert_eq!(stack_state[11], Felt::new(poe).exp(4));
+    assert_eq!(stack_state[11], Felt::new(poe).exp_u64(4));
     assert_eq!(stack_state[12], Felt::new(f_pos));
     assert_eq!(stack_state[15], Felt::new(end_ptr));
 

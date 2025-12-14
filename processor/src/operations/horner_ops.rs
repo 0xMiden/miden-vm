@@ -1,4 +1,4 @@
-use miden_core::{BasedVectorSpace, Felt, ONE, Operation, QuadFelt};
+use miden_core::{BasedVectorSpace, Felt, ONE, Operation, QuadFelt, PrimeCharacteristicRing, ZERO};
 
 use crate::{ExecutionError, Process, errors::ErrorContext};
 
@@ -292,11 +292,13 @@ impl Process {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Operation, QuadFelt, StackInputs, ZERO, mast::MastForest};
+    use miden_core::{Felt, Operation, QuadFelt, StackInputs,BasedVectorSpace, ZERO, mast::MastForest};
     use miden_utils_testing::{build_test, rand::rand_array};
 
     use super::{ACC_HIGH_INDEX, ACC_LOW_INDEX, ALPHA_ADDR_INDEX, *};
     use crate::{ContextId, DefaultHost, Process};
+
+
 
     #[test]
     fn horner_eval_base() {
@@ -376,8 +378,9 @@ mod tests {
         // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
         let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
-        assert_eq!(acc_new.as_basis_coefficients_slice()[1], stack_state[ACC_HIGH_INDEX]);
-        assert_eq!(acc_new.as_basis_coefficients_slice()[0], stack_state[ACC_LOW_INDEX]);
+        let acc_new_elements: &[Felt] = acc_new.as_basis_coefficients_slice();
+        assert_eq!(acc_new_elements[1], stack_state[ACC_HIGH_INDEX]);
+        assert_eq!(acc_new_elements[0], stack_state[ACC_LOW_INDEX]);
 
         // --- check that memory pointers were untouched ------------------------------------------
         assert_eq!(inputs[12], stack_state[12]);
@@ -387,10 +390,10 @@ mod tests {
         let helper_reg_expected = [
             alpha_mem_word[0],
             alpha_mem_word[1],
-            tmp1.base_element(0),
-            tmp1.base_element(1),
-            tmp0.base_element(0),
-            tmp0.base_element(1),
+            tmp1.as_basis_coefficients_slice()[0],
+            tmp1.as_basis_coefficients_slice()[1],
+            tmp0.as_basis_coefficients_slice()[0],
+            tmp0.as_basis_coefficients_slice()[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }
@@ -466,8 +469,9 @@ mod tests {
         let acc_new =
             coefficients.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
 
-        assert_eq!(acc_new.as_basis_coefficients_slice()[1], stack_state[ACC_HIGH_INDEX]);
-        assert_eq!(acc_new.as_basis_coefficients_slice()[0], stack_state[ACC_LOW_INDEX]);
+        let acc_new_elements: &[Felt] = acc_new.as_basis_coefficients_slice();
+        assert_eq!(acc_new_elements[1], stack_state[ACC_HIGH_INDEX]);
+        assert_eq!(acc_new_elements[0], stack_state[ACC_LOW_INDEX]);
 
         // --- check that memory pointers were untouched ------------------------------------------
         assert_eq!(inputs[12], stack_state[12]);
@@ -479,8 +483,8 @@ mod tests {
             alpha_mem_word[1],
             alpha_mem_word[2],
             alpha_mem_word[3],
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp.as_basis_coefficients_slice()[0],
+            acc_tmp.as_basis_coefficients_slice()[1],
         ];
         assert_eq!(helper_reg_expected, process.decoder.get_user_op_helpers());
     }

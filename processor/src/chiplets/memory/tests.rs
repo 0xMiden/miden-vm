@@ -9,15 +9,15 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{WORD_SIZE, Word, assert_matches};
+use miden_core::{WORD_SIZE, Word, assert_matches, Field, ZERO, ONE};
 
 use super::{
-    super::ZERO,
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory, ONE,
+    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
     TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
 use crate::{ContextId, MemoryAddress, MemoryError};
+
 
 #[test]
 fn mem_init() {
@@ -500,7 +500,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.try_into().unwrap();
+            let addr: u32 = addr.as_int().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -547,7 +547,7 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.try_into().unwrap();
+        let addr: u32 = addr.as_int().try_into().unwrap();
         let remainder = addr % WORD_SIZE as u32;
         let word = Felt::from(addr - remainder);
 
