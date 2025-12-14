@@ -40,7 +40,7 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
@@ -257,6 +257,27 @@ impl DebugInfo {
     /// This is used when error code information needs to be reset.
     pub fn clear_error_codes(&mut self) {
         self.error_codes.clear();
+    }
+
+    // VALIDATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Validate the integrity of the DebugInfo structure.
+    ///
+    /// This validates:
+    /// - All CSR structures in op_decorator_storage
+    /// - All CSR structures in node_decorator_storage
+    /// - All decorator IDs reference valid decorators
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let decorator_count = self.decorators.len();
+
+        // Validate OpToDecoratorIds CSR
+        self.op_decorator_storage.validate_csr(decorator_count)?;
+
+        // Validate NodeToDecoratorIds CSR
+        self.node_decorator_storage.validate_csr(decorator_count)?;
+
+        Ok(())
     }
 
     // TEST HELPERS
