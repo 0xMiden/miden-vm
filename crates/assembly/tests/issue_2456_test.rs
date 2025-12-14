@@ -1,11 +1,14 @@
-/// Test case for issue #2456: DecoratorId out of bounds
-/// This test attempts to reproduce the decorator issue by compiling
-/// and EXECUTING a simple program with a call instruction.
+/// Test case for issue #2456: DecoratorId out of bounds when calling procedures
+/// from statically linked libraries.
+///
+/// The issue occurs because decorators aren't remapped when copying nodes from
+/// statically linked libraries, causing decorator IDs from the source forest to
+/// be used in the target forest where they don't exist.
 use miden_assembly::Assembler;
 use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
 
 #[test]
-fn test_issue_2456_call_with_push_before() {
+fn test_issue_2456_statically_linked_library_call() {
     use std::sync::Arc;
 
     use miden_assembly::{DefaultSourceManager, diagnostics::NamedSource};
