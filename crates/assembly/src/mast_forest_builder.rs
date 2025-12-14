@@ -578,73 +578,21 @@ impl MastForestBuilder {
     /// Builds a node builder with remapped children and decorators for copying from statically
     /// linked libraries.
     ///
-    /// This is similar to the `build_with_remapped_children` method in MastForestMerger,
-    /// but works with the MastForestBuilder's remappings.
+    /// Delegates to the generic `build_node_with_remapped_ids` helper to avoid code duplication
+    /// with `MastForestMerger`.
     fn build_with_remapped_ids(
         &self,
         node_id: MastNodeId,
-        node: &MastNode,
+        node: MastNode,
     ) -> Result<MastNodeBuilder, Report> {
-        // Map decorator IDs using the remapping
-        let map_decorator = |decorator_id: DecoratorId| -> Result<DecoratorId, Report> {
-            self.statically_linked_decorator_remapping
-                .get(&decorator_id)
-                .copied()
-                .ok_or_else(|| {
-                    report!(
-                        "Decorator ID {:?} not found in remapping for node {:?}",
-                        decorator_id,
-                        node_id
-                    )
-                })
-        };
-
-        let map_decorators = |decorators: &[DecoratorId]| -> Result<Vec<DecoratorId>, Report> {
-            decorators.iter().map(|&id| map_decorator(id)).collect()
-        };
-
-        // Get decorators from the source forest and remap them
-        let before_enter_decorators =
-            map_decorators(self.statically_linked_mast.before_enter_decorators(node_id))?;
-        let after_exit_decorators =
-            map_decorators(self.statically_linked_mast.after_exit_decorators(node_id))?;
-
-        // Build node-specific builder with remapped children and decorators
-        let builder = match node {
-            MastNode::Block(basic_block_node) => {
-                // For BasicBlockNode, we need to remap op-indexed decorators as well
-                let remapped_decorators: Result<Vec<(usize, DecoratorId)>, Report> =
-                    basic_block_node
-                        .indexed_decorator_iter(&self.statically_linked_mast)
-                        .map(|(idx, decorator_id)| {
-                            let mapped_decorator = map_decorator(decorator_id)?;
-                            Ok((idx, mapped_decorator))
-                        })
-                        .collect();
-                let builder = BasicBlockNodeBuilder::new(
-                    basic_block_node.operations().copied().collect(),
-                    remapped_decorators?,
-                )
-                .with_before_enter(before_enter_decorators)
-                .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::BasicBlock(builder)
-            },
-            other_node => {
-                // For other node types, use to_builder and remap children
-                let mut builder = other_node
-                    .clone()
-                    .to_builder(&self.statically_linked_mast)
-                    .remap_children(&self.statically_linked_mast_remapping);
-
-                // Apply remapped decorators
-                builder = builder.with_before_enter(before_enter_decorators);
-                builder = builder.with_after_exit(after_exit_decorators);
-
-                builder
-            },
-        };
-
-        Ok(builder)
+        miden_core::mast::build_node_with_remapped_ids(
+            node_id,
+            node,
+            &self.statically_linked_mast,
+            &self.statically_linked_mast_remapping,
+            &self.statically_linked_decorator_remapping,
+        )
+        .into_diagnostic()
     }
 
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
@@ -659,7 +607,7 @@ impl MastForestBuilder {
 
             // Then copy all nodes with remapped children and decorators
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-                let node = &self.statically_linked_mast[old_id];
+                let node = self.statically_linked_mast[old_id].clone();
                 let builder = self.build_with_remapped_ids(old_id, node)?;
                 let new_id = self.ensure_node(builder)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);

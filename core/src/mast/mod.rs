@@ -47,6 +47,9 @@ pub(crate) use multi_forest_node_iterator::*;
 mod node_fingerprint;
 pub use node_fingerprint::{DecoratorFingerprint, MastNodeFingerprint};
 
+mod node_builder_utils;
+pub use node_builder_utils::build_node_with_remapped_ids;
+
 #[cfg(test)]
 mod tests;
 

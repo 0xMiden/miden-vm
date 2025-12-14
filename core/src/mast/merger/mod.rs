@@ -5,9 +5,8 @@ use miden_crypto::hash::blake::Blake3Digest;
 use crate::{
     DenseIdMap, IndexVec,
     mast::{
-        BasicBlockNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, MastForest,
-        MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeFingerprint,
-        MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter, node::MastNodeExt,
+        DecoratorId, MastForest, MastForestContributor, MastForestError, MastNode, MastNodeBuilder,
+        MastNodeFingerprint, MastNodeId, MultiMastForestIteratorItem, MultiMastForestNodeIter,
     },
 };
 
@@ -302,84 +301,7 @@ impl MastForestMerger {
         nmap: &DenseIdMap<MastNodeId, MastNodeId>,
         dmap: &DenseIdMap<DecoratorId, DecoratorId>,
     ) -> Result<MastNodeBuilder, MastForestError> {
-        let map_decorator_id = |decorator_id: DecoratorId| {
-            dmap.get(decorator_id)
-                .ok_or_else(|| MastForestError::DecoratorIdOverflow(decorator_id, dmap.len()))
-        };
-
-        let map_decorators = |decorators: &[DecoratorId]| -> Result<Vec<_>, MastForestError> {
-            decorators.iter().copied().map(map_decorator_id).collect()
-        };
-
-        // Get decorators from centralized storage instead of from the node itself
-        let before_enter_decorators =
-            map_decorators(original_forest.before_enter_decorators(merging_id))?;
-        let after_exit_decorators =
-            map_decorators(original_forest.after_exit_decorators(merging_id))?;
-
-        let mapped_builder = match src {
-            MastNode::Join(join_node) => {
-                let builder = join_node
-                    .to_builder(&self.mast_forest)
-                    .remap_children(nmap)
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::Join(builder)
-            },
-            MastNode::Split(split_node) => {
-                let builder = split_node
-                    .to_builder(&self.mast_forest)
-                    .remap_children(nmap)
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::Split(builder)
-            },
-            MastNode::Loop(loop_node) => {
-                let builder = loop_node
-                    .to_builder(&self.mast_forest)
-                    .remap_children(nmap)
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::Loop(builder)
-            },
-            MastNode::Call(call_node) => {
-                let builder = call_node
-                    .to_builder(&self.mast_forest)
-                    .remap_children(nmap)
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::Call(builder)
-            },
-            MastNode::Block(basic_block_node) => {
-                let builder = BasicBlockNodeBuilder::new(
-                    basic_block_node.operations().copied().collect(),
-                    basic_block_node
-                        .indexed_decorator_iter(original_forest)
-                        .map(|(idx, decorator_id)| {
-                            let mapped_decorator = map_decorator_id(decorator_id)?;
-                            Ok((idx, mapped_decorator))
-                        })
-                        .collect::<Result<Vec<_>, _>>()?,
-                )
-                .with_before_enter(before_enter_decorators)
-                .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::BasicBlock(builder)
-            },
-            MastNode::Dyn(_) => {
-                let builder = DynNodeBuilder::new_dyn()
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::Dyn(builder)
-            },
-            MastNode::External(external_node) => {
-                let builder = ExternalNodeBuilder::new(external_node.digest())
-                    .with_before_enter(before_enter_decorators)
-                    .with_after_exit(after_exit_decorators);
-                MastNodeBuilder::External(builder)
-            },
-        };
-
-        Ok(mapped_builder)
+        super::build_node_with_remapped_ids(merging_id, src, original_forest, nmap, dmap)
     }
 }
 
