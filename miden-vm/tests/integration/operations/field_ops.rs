@@ -337,7 +337,7 @@ fn exp_bits_length() {
 
     let base = 9;
     let pow = 1021;
-    let expected = Felt::new(base).exp(pow);
+    let expected = Felt::new(base).exp_u64(pow);
 
     let test = build_op_test!(build_asm_op(10), &[base, pow]);
     test.expect_stack(&[expected.as_int()]);
@@ -385,7 +385,7 @@ fn exp_small_pow() {
 
     let base = rand_value::<u64>();
     let pow = 7;
-    let expected = Felt::new(base).exp(pow);
+    let expected = Felt::new(base).exp_u64(pow);
 
     let test = build_op_test!(build_asm_op(pow), &[base]);
     test.expect_stack(&[expected.as_int()]);
@@ -768,7 +768,7 @@ proptest! {
         let asm_op = "exp";
         let base = a;
         let pow = b;
-        let expected = Felt::new(base).exp(pow);
+        let expected = Felt::new(base).exp_u64(pow);
 
         let test = build_op_test!(asm_op, &[base, pow]);
         test.prop_expect_stack(&[expected.as_int()])?;
@@ -777,7 +777,7 @@ proptest! {
         let build_asm_op = |param: u64| format!("exp.{param}");
         let base = a;
         let pow = b;
-        let expected = Felt::new(base).exp(pow);
+        let expected = Felt::new(base).exp_u64(pow);
 
         let test = build_op_test!(build_asm_op(pow), &[base]);
         test.prop_expect_stack(&[expected.as_int()])?;

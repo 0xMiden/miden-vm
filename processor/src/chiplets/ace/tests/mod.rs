@@ -10,9 +10,11 @@ use miden_air::{
         V_2_0_IDX, V_2_1_IDX,
     },
 };
-use miden_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
+use miden_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO, PrimeCharacteristicRing, BasedVectorSpace, ONE};
 
 use crate::{
+
+
     ContextId,
     chiplets::ace::{
         instruction::{Op, decode_instruction},
@@ -73,7 +75,7 @@ fn test_bool_check() {
     let circuit = Circuit::new(2, constants, instructions).unwrap();
     let inputs: Vec<_> = (0u8..20)
         .map(|x_int| {
-            let x = QuadFelt::from(x_int);
+            let x = QuadFelt::new([Felt::from_u8(x_int), ZERO]);
             let result = x * (x - QuadFelt::ONE);
             [x, result]
         })

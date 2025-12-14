@@ -105,7 +105,7 @@ impl Deserializable for AdviceInputs {
 
 #[cfg(test)]
 mod tests {
-    use winter_utils::{Deserializable, Serializable};
+    use miden_core::utils::{Deserializable, Serializable};
 
     use crate::AdviceInputs;
 

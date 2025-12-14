@@ -1,4 +1,4 @@
-use miden_core::QuadFelt;
+use miden_core::{BasedVectorSpace, Felt, Field, QuadFelt};
 use miden_utils_testing::{build_op_test, rand::rand_value};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
@@ -117,6 +117,6 @@ fn ext2inverse() {
 /// Helper function to convert a quadratic extension field element into a tuple of elements in the
 /// underlying base field and convert them into integers.
 fn ext_element_to_ints(ext_elem: QuadFelt) -> (u64, u64) {
-    let base_elements = ext_elem.as_basis_coefficients_slice();
+    let base_elements: &[Felt] = ext_elem.as_basis_coefficients_slice();
     (base_elements[0].as_int(), base_elements[1].as_int())
 }

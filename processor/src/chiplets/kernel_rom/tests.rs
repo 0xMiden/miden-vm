@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::WORD_SIZE;
+use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{Felt, Kernel, KernelRom, TRACE_WIDTH, TraceFragment};
 use crate::{ONE, ZERO};
+
 
 // CONSTANTS
 // ================================================================================================
@@ -79,7 +80,7 @@ fn kernel_rom_with_access() {
     for row in 0..4 {
         let s_first = row == 0;
 
-        assert_eq!(trace[0][row], Felt::from(s_first)); // s_first
+        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
         assert_eq!(trace[1][row], PROC1_HASH[0]);
         assert_eq!(trace[2][row], PROC1_HASH[1]);
         assert_eq!(trace[3][row], PROC1_HASH[2]);
@@ -90,7 +91,7 @@ fn kernel_rom_with_access() {
     for row in 4..7 {
         let s_first = row == 4;
 
-        assert_eq!(trace[0][row], Felt::from(s_first)); // s_first
+        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
         assert_eq!(trace[1][row], PROC2_HASH[0]);
         assert_eq!(trace[2][row], PROC2_HASH[1]);
         assert_eq!(trace[3][row], PROC2_HASH[2]);
@@ -118,7 +119,7 @@ fn kernel_rom_with_single_access() {
     for row in 0..3 {
         let s_first = row == 0;
 
-        assert_eq!(trace[0][row], Felt::from(s_first)); // s_first
+        assert_eq!(trace[0][row], Felt::from_bool(s_first)); // s_first
         assert_eq!(trace[1][row], PROC1_HASH[0]);
         assert_eq!(trace[2][row], PROC1_HASH[1]);
         assert_eq!(trace[3][row], PROC1_HASH[2]);
@@ -127,7 +128,7 @@ fn kernel_rom_with_single_access() {
 
     // the last row of the trace should correspond to the second procedure
     let row = 3;
-    assert_eq!(trace[0][row], Felt::from(true)); // s_first
+    assert_eq!(trace[0][row], Felt::from_bool(true)); // s_first
     assert_eq!(trace[1][row], PROC2_HASH[0]);
     assert_eq!(trace[2][row], PROC2_HASH[1]);
     assert_eq!(trace[3][row], PROC2_HASH[2]);
