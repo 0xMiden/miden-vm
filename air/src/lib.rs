@@ -18,11 +18,8 @@ mod constraints;
 mod aux_builder;
 pub use aux_builder::AuxTraceBuilder;
 
-// Row-major to column-major adapter
-mod row_major_adapter;
-
-// Optimized matrix transposition
-pub mod transpose;
+// STARK configuration factories
+pub mod config;
 
 pub mod trace;
 use trace::*;
@@ -174,31 +171,11 @@ where
         main: &p3_matrix::dense::RowMajorMatrix<Felt>,
         challenges: &[EF],
     ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
-        use p3_matrix::Matrix;
-
         let _span = tracing::info_span!("build_aux_trace").entered();
 
         let builders = self.aux_builder.as_ref()?;
 
-        // Convert row-major base field matrix to column-major MainTrace format
-        let main_trace = {
-            let _span = tracing::info_span!("row_major_to_main_trace").entered();
-            row_major_adapter::row_major_to_main_trace(main)
-        };
-
-        // Build auxiliary columns in extension field (column-major EF)
-        let aux_columns = {
-            let _span = tracing::info_span!("build_aux_columns").entered();
-            builders.build_aux_columns(&main_trace, challenges)
-        };
-
-        // Convert column-major EF to row-major base field
-        let aux_trace = {
-            let _span = tracing::info_span!("aux_columns_to_row_major").entered();
-            row_major_adapter::aux_columns_to_row_major(aux_columns, main.height())
-        };
-
-        Some(aux_trace)
+        Some(builders.build_aux_columns(main, challenges))
     }
 
     fn eval<AB: miden_air_trait::MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {

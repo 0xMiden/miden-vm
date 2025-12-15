@@ -3,7 +3,7 @@
 //! This module provides a STARK configuration using the Rescue Prime eXtension (RPX)
 //! hash function, which is Miden's native algebraic hash function with extension field rounds.
 
-use miden_air::Felt;
+use crate::Felt;
 use miden_crypto::hash::algebraic_sponge::rescue::rpx::{
     RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256,
 };

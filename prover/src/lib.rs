@@ -9,16 +9,13 @@ use miden_air::ProcessorAir;
 use miden_processor::Program;
 use tracing::instrument;
 
-// Config module for STARK configurations
-pub mod config;
-
 // Trace and public input conversion utilities
 mod public_inputs;
 mod trace_adapter;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions};
+pub use miden_air::{config, DeserializationError, ExecutionProof, HashFunction, ProvingOptions};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
@@ -86,32 +83,32 @@ where
             // 24-byte). Proper 192-bit support requires Plonky3 to implement
             // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
             // 0xMiden/Plonky3 to add this support.
-            let config = config::create_blake3_256_config();
+            let config = miden_air::config::create_blake3_256_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Blake3_256 => {
-            let config = config::create_blake3_256_config();
+            let config = miden_air::config::create_blake3_256_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Keccak => {
-            let config = config::create_keccak_config();
+            let config = miden_air::config::create_keccak_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpo256 => {
-            let config = config::create_rpo_config();
+            let config = miden_air::config::create_rpo_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
-            let config = config::create_poseidon2_config();
+            let config = miden_air::config::create_poseidon2_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpx256 => {
-            let config = config::create_rpx_config();
+            let config = miden_air::config::create_rpx_config();
             let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
