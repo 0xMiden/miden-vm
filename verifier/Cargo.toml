@@ -29,12 +29,13 @@ std = [
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
-miden-prover.workspace = true
+miden-prover-p3.workspace = true
 
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
 itertools = "0.12"
+bincode = "1.3"
 
 # Plonky3 dependencies
 p3-air.workspace = true
@@ -55,8 +56,6 @@ p3-util.workspace = true
 
 # Miden-specific Plonky3 crates
 miden-air-trait.workspace = true
-miden-prover-p3.workspace = true
 
 # Serialization
 serde.workspace = true
-bincode = "1.3"

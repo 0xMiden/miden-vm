@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::vec::Vec;
 
-use miden_air::{HashFunction, ProcessorAir, PublicInputs};
+use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
 // EXPORTS
 // ================================================================================================
 pub use miden_core::{
@@ -20,9 +20,6 @@ pub mod math {
     pub use miden_core::Felt;
 }
 pub use miden_air::ExecutionProof;
-// Re-export config factories from prover
-// (The verifier uses the same STARK configs as the prover)
-use miden_prover::config;
 
 // VERIFIER
 // ================================================================================================

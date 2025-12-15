@@ -48,6 +48,11 @@ rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
+
+p3-field.workspace = true
+p3-matrix.workspace = true
+p3-maybe-rayon.workspace = true
+p3-util.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]

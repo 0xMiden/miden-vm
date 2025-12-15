@@ -5,12 +5,8 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
-    Felt,
-    trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, main_trace::ColMatrix},
-    transpose,
-};
-use miden_processor::ExecutionTrace;
+use miden_air::{Felt, trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, main_trace::ColMatrix}};
+use miden_processor::{ExecutionTrace, transpose};
 use p3_field::ExtensionField;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;

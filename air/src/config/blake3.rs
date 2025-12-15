@@ -8,7 +8,7 @@
 
 use alloc::vec;
 
-use miden_air::Felt;
+use crate::Felt;
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;

@@ -3,7 +3,7 @@
 //! This module provides a STARK configuration using the Poseidon2 hash function,
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
-use miden_air::Felt;
+use crate::Felt;
 use miden_crypto::hash::algebraic_sponge::poseidon2::{
     Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
 };
