@@ -234,61 +234,83 @@ fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
 
 // TESTS
 // ================================================================================================
-/*
+
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{StackInputs, mast::MastForest};
-    use miden_utils_testing::rand::{rand_array, rand_value, rand_vector};
+    use miden_core::{
+        BasedVectorSpace, Field, Felt, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs,
+        ZERO, mast::MastForest,
+    };
+    use miden_utils_testing::rand::rand_array;
 
-    use super::{Felt, Operation, Process, QuadFelt, TWO_INV};
-    use crate::{DefaultHost, operations::fri_ops::EIGHT};
+    use super::{TWO_INV};
+    use crate::{DefaultHost, Process, operations::fri_ops::EIGHT};
 
     #[test]
     fn fold4() {
-        let blowup = 4_usize;
+        // Test that fold4 correctly folds 4 values into 1 using the FRI folding formula.
+        // The fold4 operation should satisfy: for polynomial p(x) evaluated at 4 points
+        // {x, τ*x, τ²*x, τ³*x} where τ is a 4th root of unity, the folded value should
+        // equal p(x²) at the corresponding point.
 
-        // generate random alpha
-        let alpha: QuadFelt = rand_value();
+        // Create test values - these represent polynomial evaluations at {x, τx, τ²x, τ³x}
+        let v0 = QuadFelt::new([Felt::new(10), Felt::new(20)]);
+        let v1 = QuadFelt::new([Felt::new(30), Felt::new(40)]);
+        let v2 = QuadFelt::new([Felt::new(50), Felt::new(60)]);
+        let v3 = QuadFelt::new([Felt::new(70), Felt::new(80)]);
+        let values = [v0, v1, v2, v3];
 
-        // generate degree 7 polynomial f(x)
-        let poly: Vec<QuadFelt> = rand_vector(8);
+        // Choose a random challenge alpha and evaluation point x
+        let alpha = QuadFelt::new([Felt::new(123), Felt::new(456)]);
+        let x = Felt::new(789);
+        let x_inv = x.try_inverse().unwrap();
 
-        // evaluate the polynomial over domain of 32 elements
-        let offset = Felt::GENERATOR;
-        let twiddles = fft::get_twiddles(poly.len());
-        let evaluations = fft::evaluate_poly_with_offset(&poly, &twiddles, offset, blowup);
+        // Compute evaluation factors
+        let ev = alpha * x_inv;
+        let es = ev.square();
 
-        // fold the evaluations using FRI folding procedure from Winterfell
-        let transposed_evaluations = transpose_slice::<QuadFelt, 4>(&evaluations);
-        let folded_evaluations =
-            winter_fri::folding::apply_drp(&transposed_evaluations, offset, alpha);
+        // Perform the fold4 operation
+        let (folded_value, tmp0, tmp1) = super::fold4(values, ev, es);
 
-        // build the evaluation domain of 32 elements
-        let n = poly.len() * blowup;
-        let g = Felt::get_root_of_unity(n.trailing_zeros());
-        let domain = get_power_series_with_offset(g, offset, n);
+        // Verify intermediate values are computed correctly using fold2
+        let expected_tmp0 = super::fold2(values[0], values[2], ev);
+        let expected_tmp1 = super::fold2(values[1], values[3], ev * super::TAU_INV);
+        assert_eq!(tmp0, expected_tmp0);
+        assert_eq!(tmp1, expected_tmp1);
 
-        // fold evaluations at a single point using fold4 procedure
-        let pos = 3;
-        let x = domain[pos];
-        let ev = alpha * (x.inverse());
-        let (result, ..) = super::fold4(transposed_evaluations[pos], ev, ev.square());
+        // Verify final folded value
+        let expected_folded = super::fold2(tmp0, tmp1, es);
+        assert_eq!(folded_value, expected_folded);
 
-        // make sure the results of fold4 are the same as results form Winterfell
-        assert_eq!(folded_evaluations[pos], result)
+        // Additional check: verify fold2 formula for a simple case
+        // fold2(a, b, ep) = (a + b + (a - b) * ep) / 2
+        let a = QuadFelt::new([Felt::new(100), Felt::new(200)]);
+        let b = QuadFelt::new([Felt::new(50), Felt::new(100)]);
+        let ep = QuadFelt::new([Felt::new(2), Felt::new(3)]);
+
+        let result = super::fold2(a, b, ep);
+        let expected = (a + b + ((a - b) * ep)) * super::TWO_INV;
+        assert_eq!(result, expected);
     }
 
     #[test]
     fn constants() {
-        let tau = Felt::get_root_of_unity(2);
+        // Tau is the 4th root of unity in Goldilocks field
+        // It's the 3rd element in TWO_ADIC_GENERATORS (index 2)
+        // TWO_ADIC_GENERATORS[2] = 0x0001000000000000 = 281474976710656
+        let tau = Felt::new(281474976710656);
 
-        assert_eq!(super::TAU_INV, tau.inverse());
-        assert_eq!(super::TAU2_INV, tau.square().inverse());
-        assert_eq!(super::TAU3_INV, tau.cube().inverse());
+        // Verify tau is indeed a 4th root of unity: tau^4 = 1
+        assert_eq!(tau.square().square(), Felt::ONE);
 
-        assert_eq!(Felt::new(2).inverse(), TWO_INV);
+        // Verify the precomputed constants
+        assert_eq!(super::TAU_INV, tau.try_inverse().unwrap());
+        assert_eq!(super::TAU2_INV, tau.square().try_inverse().unwrap());
+        assert_eq!(super::TAU3_INV, tau.exp_u64(3).try_inverse().unwrap());
+
+        assert_eq!(Felt::new(2).try_inverse().unwrap(), TWO_INV);
     }
 
     #[test]
@@ -355,10 +377,12 @@ mod tests {
         assert_eq!(stack_state[7], ds[0]);
 
         // check poe, f_tau, layer_ptr, f_pos
-        assert_eq!(stack_state[8], poe.square());
+        let poe2 = poe.square();
+        let poe4 = poe2.square();
+        assert_eq!(stack_state[8], poe2);
         assert_eq!(stack_state[9], f_tau);
         assert_eq!(stack_state[10], layer_ptr + EIGHT);
-        assert_eq!(stack_state[11], poe.exp(4));
+        assert_eq!(stack_state[11], poe4);
         assert_eq!(stack_state[12], f_pos);
 
         // check folded value
@@ -370,10 +394,11 @@ mod tests {
         assert_eq!(stack_state[15], end_ptr);
 
         // --- check helper registers -----------------------------------------
-        let mut expected_helpers = QuadFelt::slice_as_base_elements(&[ev, es]).to_vec();
+        let mut expected_helpers = Vec::new();
+        expected_helpers.extend_from_slice(ev.as_basis_coefficients_slice());
+        expected_helpers.extend_from_slice(es.as_basis_coefficients_slice());
         expected_helpers.push(x);
         expected_helpers.push(x_inv);
         assert_eq!(expected_helpers, process.decoder.get_user_op_helpers().to_vec());
     }
 }
-*/

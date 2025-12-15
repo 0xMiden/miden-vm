@@ -1,11 +1,12 @@
 use miden_core::WORD_SIZE;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, StarkField, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
-    felt_slice_to_ints, hash_elements,
+    felt_slice_to_ints,
 };
+use miden_core::chiplets::hasher::hash_elements;
 
 // TESTS
 // ================================================================================================
@@ -67,7 +68,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let advice_stack: Vec<u64> = merkle_root.iter().map(StarkField::as_int).collect();
+    let advice_stack: Vec<u64> = merkle_root.iter().map(|f| f.as_int()).collect();
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -90,7 +91,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
         let leaf = merkle_store.get_node(merkle_root, NodeIndex::new(2, pos)?)?;
 
         // the stack should be first the leaf followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(StarkField::as_int).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(|f| f.as_int()).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -114,8 +115,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(StarkField::as_int)
-        .chain(merkle_root2.iter().map(StarkField::as_int))
+        .map(|f| f.as_int())
+        .chain(merkle_root2.iter().map(|f| f.as_int()))
         .collect();
 
     let examples = [
@@ -148,7 +149,7 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
         let test = build_test!(source, &[], advice_stack, merkle_store.clone());
 
         // the stack should be first the leaf element followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(StarkField::as_int).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(|f| f.as_int()).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -176,10 +177,10 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     // In the case of a single leaf, the leaf is itself also the root
-    let stack: Vec<u64> = merkle_root3.iter().map(StarkField::as_int).rev().collect();
+    let stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_int()).rev().collect();
 
     // Test case for single element MMR
-    let advice_stack: Vec<u64> = merkle_root3.iter().map(StarkField::as_int).collect();
+    let advice_stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_int()).collect();
     let source = format!(
         "
         use miden::core::collections::mmr
@@ -201,9 +202,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     // Test case for the single element tree in a MMR with multiple trees
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(StarkField::as_int)
-        .chain(merkle_root2.iter().map(StarkField::as_int))
-        .chain(merkle_root3.iter().map(StarkField::as_int))
+        .map(|f| f.as_int())
+        .chain(merkle_root2.iter().map(|f| f.as_int()))
+        .chain(merkle_root3.iter().map(|f| f.as_int()))
         .collect();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(

@@ -9,7 +9,7 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    EventName, Felt, ONE, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable},
 };
@@ -22,7 +22,7 @@ use miden_core_lib::{
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
-    hash::rpo::Rpo256,
+    hash::{algebraic_sponge::AlgebraicSponge, rpo::Rpo256},
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use rand::{SeedableRng, rngs::StdRng};
@@ -66,7 +66,7 @@ fn test_eddsa_verify_prehash_cases() {
     let output = test.execute().unwrap();
 
     let result = output.stack_outputs().get_stack_item(0).unwrap();
-    assert_eq!(result, Felt::ONE, "verification result mismatch");
+    assert_eq!(result, ONE, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
@@ -94,7 +94,7 @@ fn test_eddsa_verify_prehash_cases() {
     let output = test.execute().unwrap();
 
     let result = output.stack_outputs().get_stack_item(0).unwrap();
-    assert_eq!(result, Felt::ZERO, "verification result mismatch");
+    assert_eq!(result, ZERO, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
@@ -142,7 +142,8 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         assert_eq!(precompile_commitment, verifier_commitment);
 
         let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid));
+        let expected = if expected_valid { ONE } else { ZERO };
+        assert_eq!(result, expected);
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
