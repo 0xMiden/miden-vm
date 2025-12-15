@@ -36,19 +36,19 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeToDecoratorIds {
     /// All `before_enter` decorators, concatenated across all nodes.
-    pub before_enter_decorators: Vec<DecoratorId>,
+    pub(super) before_enter_decorators: Vec<DecoratorId>,
     /// All `after_exit` decorators, concatenated across all nodes.
-    pub after_exit_decorators: Vec<DecoratorId>,
+    pub(super) after_exit_decorators: Vec<DecoratorId>,
     /// Index pointers for before_enter decorators: the range for node `i` is
     /// ```text
     /// node_indptr_for_before[i]..node_indptr_for_before[i+1]
     /// ```
-    pub node_indptr_for_before: IndexVec<MastNodeId, usize>,
+    pub(super) node_indptr_for_before: IndexVec<MastNodeId, usize>,
     /// Index pointers for after_exit decorators: the range for node `i` is
     /// ```text
     /// node_indptr_for_after[i]..node_indptr_for_after[i+1]
     /// ```
-    pub node_indptr_for_after: IndexVec<MastNodeId, usize>,
+    pub(super) node_indptr_for_after: IndexVec<MastNodeId, usize>,
 }
 
 impl NodeToDecoratorIds {
@@ -98,7 +98,7 @@ impl NodeToDecoratorIds {
     /// Checks:
     /// - All decorator IDs are valid (< decorator_count)
     /// - Both indptr arrays are monotonic, start at 0, end at respective decorator vector lengths
-    pub(crate) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+    pub(super) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
         // Completely empty structures are valid (no nodes, no decorators)
         if self.before_enter_decorators.is_empty()
             && self.after_exit_decorators.is_empty()
@@ -312,6 +312,86 @@ impl NodeToDecoratorIds {
     /// Returns true if this storage is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    // SERIALIZATION HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Write this CSR structure to a target using dense representation.
+    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
+        use crate::utils::Serializable;
+
+        // before_enter_decorators as Vec<u32>
+        let before_decorators_u32: Vec<u32> =
+            self.before_enter_decorators.iter().map(|id| u32::from(*id)).collect();
+        before_decorators_u32.write_into(target);
+
+        // after_exit_decorators as Vec<u32>
+        let after_decorators_u32: Vec<u32> =
+            self.after_exit_decorators.iter().map(|id| u32::from(*id)).collect();
+        after_decorators_u32.write_into(target);
+
+        // node_indptr_for_before as Vec<usize>
+        let before_indptr_vec: Vec<usize> = self.node_indptr_for_before.as_slice().to_vec();
+        before_indptr_vec.write_into(target);
+
+        // node_indptr_for_after as Vec<usize>
+        let after_indptr_vec: Vec<usize> = self.node_indptr_for_after.as_slice().to_vec();
+        after_indptr_vec.write_into(target);
+    }
+
+    /// Read this CSR structure from a source, validating decorator IDs against decorator_count.
+    pub(super) fn read_from<R: crate::utils::ByteReader>(
+        source: &mut R,
+        decorator_count: usize,
+    ) -> Result<Self, crate::utils::DeserializationError> {
+        use crate::utils::Deserializable;
+
+        // before_enter_decorators from Vec<u32>
+        let before_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
+        let before_enter_decorators: Vec<DecoratorId> = before_decorators_u32
+            .into_iter()
+            .map(|id| {
+                if id as usize >= decorator_count {
+                    return Err(crate::utils::DeserializationError::InvalidValue(format!(
+                        "DecoratorId {} exceeds decorator count {}",
+                        id, decorator_count
+                    )));
+                }
+                Ok(DecoratorId(id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // after_exit_decorators from Vec<u32>
+        let after_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
+        let after_exit_decorators: Vec<DecoratorId> = after_decorators_u32
+            .into_iter()
+            .map(|id| {
+                if id as usize >= decorator_count {
+                    return Err(crate::utils::DeserializationError::InvalidValue(format!(
+                        "DecoratorId {} exceeds decorator count {}",
+                        id, decorator_count
+                    )));
+                }
+                Ok(DecoratorId(id))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // node_indptr_for_before from Vec<usize>
+        let before_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_before = IndexVec::from_raw(before_indptr_vec);
+
+        // node_indptr_for_after from Vec<usize>
+        let after_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_after = IndexVec::from_raw(after_indptr_vec);
+
+        Self::from_components(
+            before_enter_decorators,
+            after_exit_decorators,
+            node_indptr_for_before,
+            node_indptr_for_after,
+        )
+        .map_err(|e| crate::utils::DeserializationError::InvalidValue(e.to_string()))
     }
 }
 
