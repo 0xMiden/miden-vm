@@ -145,7 +145,6 @@ In the benchmarks below we execute the same Fibonacci calculator program for 2<s
 
 In the above, proof generation on some platforms can be hardware-accelerated. Specifically:
 
-- On Apple M1/M2 platforms the built-in GPU is used for a part of proof generation process.
 - On the Graviton platform, SVE vector extension is used to accelerate RPO computations.
 
 ### STARK Proving System
