@@ -39,8 +39,8 @@ pub(crate) mod processor;
 
 mod operations;
 
-pub mod transpose;
 pub(crate) mod row_major_adapter;
+pub mod transpose;
 
 mod system;
 pub use system::ContextId;

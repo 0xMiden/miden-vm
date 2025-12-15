@@ -240,12 +240,12 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
-        BasedVectorSpace, Field, Felt, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs,
+        BasedVectorSpace, Felt, Field, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs,
         ZERO, mast::MastForest,
     };
     use miden_utils_testing::rand::rand_array;
 
-    use super::{TWO_INV};
+    use super::TWO_INV;
     use crate::{DefaultHost, Process, operations::fri_ops::EIGHT};
 
     #[test]

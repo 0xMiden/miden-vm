@@ -50,12 +50,10 @@ impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
             .chain(chiplets_cols)
             .collect();
 
-        // 3. Convert column-major aux columns to row-major (ONCE at the end)
-        let aux_trace = {
+        // 3. Convert column-major aux columns to row-major
+        {
             let _span = tracing::info_span!("aux_columns_to_row_major").entered();
             row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
-        };
-
-        aux_trace
+        }
     }
 }
