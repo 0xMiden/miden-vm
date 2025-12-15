@@ -14,7 +14,7 @@ fn cycles_num_exceeded() {
         Kernel::default(),
         stack,
         AdviceInputs::default(),
-        ExecutionOptions::new(Some(max_cycles), max_cycles as u32, false, false).unwrap(),
+        ExecutionOptions::new(Some(max_cycles), max_cycles, false, false).unwrap(),
     );
     for _ in 0..max_cycles {
         process.execute_op(Operation::Noop, program, &mut host).unwrap();
