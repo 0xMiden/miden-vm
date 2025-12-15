@@ -2,7 +2,6 @@
 
 use alloc::vec;
 
-use crate::Felt;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
@@ -12,6 +11,8 @@ use p3_keccak::{Keccak256Hash, KeccakF};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
 use p3_uni_stark::StarkConfig;
+
+use crate::Felt;
 
 /// Challenge field type for Keccak config (degree-2 extension of Felt)
 pub type Challenge = BinomialExtensionField<Felt, 2>;

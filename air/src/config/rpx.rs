@@ -3,7 +3,6 @@
 //! This module provides a STARK configuration using the Rescue Prime eXtension (RPX)
 //! hash function, which is Miden's native algebraic hash function with extension field rounds.
 
-use crate::Felt;
 use miden_crypto::hash::algebraic_sponge::rescue::rpx::{
     RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256,
 };
@@ -13,6 +12,8 @@ use p3_field::extension::BinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_uni_stark::StarkConfig;
+
+use crate::Felt;
 
 /// Challenge field type for RPX config (degree-2 extension of Felt)
 pub type Challenge = BinomialExtensionField<Felt, 2>;

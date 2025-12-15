@@ -15,7 +15,7 @@ mod trace_adapter;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{config, DeserializationError, ExecutionProof, HashFunction, ProvingOptions};
+pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions, config};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,

@@ -3,7 +3,6 @@
 //! This module provides a STARK configuration using the Rescue Prime Optimized (RPO)
 //! hash function, which is Miden's native algebraic hash function.
 
-use crate::Felt;
 use miden_crypto::hash::algebraic_sponge::rescue::rpo::{
     RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256,
 };
@@ -13,6 +12,8 @@ use p3_field::extension::BinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_uni_stark::StarkConfig;
+
+use crate::Felt;
 
 /// Challenge field type for RPO config (degree-2 extension of Felt)
 pub type Challenge = BinomialExtensionField<Felt, 2>;

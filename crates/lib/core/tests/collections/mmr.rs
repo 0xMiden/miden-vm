@@ -1,4 +1,4 @@
-use miden_core::WORD_SIZE;
+use miden_core::{WORD_SIZE, chiplets::hasher::hash_elements};
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
@@ -6,7 +6,6 @@ use miden_utils_testing::{
     },
     felt_slice_to_ints,
 };
-use miden_core::chiplets::hasher::hash_elements;
 
 // TESTS
 // ================================================================================================

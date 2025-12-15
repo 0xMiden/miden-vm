@@ -42,11 +42,9 @@ p3-field.workspace = true
 p3-fri.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
-p3-maybe-rayon.workspace = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace = true
 p3-uni-stark.workspace = true
-p3-util.workspace = true
 
 # Miden-specific Plonky3 crates
 miden-air-trait.workspace = true

@@ -3,7 +3,6 @@
 //! This module provides a STARK configuration using the Poseidon2 hash function,
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
-use crate::Felt;
 use miden_crypto::hash::algebraic_sponge::poseidon2::{
     Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
 };
@@ -13,6 +12,8 @@ use p3_field::extension::BinomialExtensionField;
 use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_uni_stark::StarkConfig;
+
+use crate::Felt;
 
 /// Challenge field type for Poseidon2 config (degree-2 extension of Felt)
 pub type Challenge = BinomialExtensionField<Felt, 2>;

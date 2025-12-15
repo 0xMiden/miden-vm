@@ -8,7 +8,6 @@
 
 use alloc::vec;
 
-use crate::Felt;
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
@@ -18,6 +17,8 @@ use p3_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
 use p3_uni_stark::StarkConfig;
+
+use crate::Felt;
 
 /// Challenge field type for Blake3 config (degree-2 extension of Felt)
 pub type Challenge = BinomialExtensionField<Felt, 2>;
