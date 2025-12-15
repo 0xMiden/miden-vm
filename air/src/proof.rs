@@ -74,16 +74,6 @@ impl ExecutionProof {
     /// The previous Winterfell implementation (commented out above) should serve as a
     /// reference for the calculation logic.
     pub fn security_level(&self) -> u32 {
-        /*
-        let conjectured_security = match self.hash_fn {
-            HashFunction::Blake3_192 => self.proof.conjectured_security::<Blake3_192>(),
-            HashFunction::Blake3_256 => self.proof.conjectured_security::<Blake3_256>(),
-            HashFunction::Rpo256 => self.proof.conjectured_security::<Rpo256>(),
-            HashFunction::Rpx256 => self.proof.conjectured_security::<Rpx256>(),
-            HashFunction::Poseidon2 => self.proof.conjectured_security::<Poseidon2>(),
-        };
-        conjectured_security.bits()
-         */
         96
     }
 
