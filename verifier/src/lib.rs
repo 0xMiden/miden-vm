@@ -39,7 +39,7 @@ pub use miden_air::ExecutionProof;
 /// `stack_outputs` slice, and the order of the rest of the output elements will also match the
 /// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
 ///
-/// The verifier accepts proofs generated using a parameter set defined in [ProvingOptions].
+/// The verifier accepts proofs generated using various parameter sets.
 /// Specifically, parameter sets targeting the following are accepted:
 /// - 96-bit security level, non-recursive context (BLAKE3 hash function).
 /// - 96-bit security level, recursive context (BLAKE3 hash function).
