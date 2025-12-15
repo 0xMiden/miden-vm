@@ -110,7 +110,7 @@ impl crate::prettier::PrettyPrint for PushValue {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -207,7 +207,7 @@ impl Deserializable for WordValue {
 #[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub enum IntValue {
     /// A tiny value

@@ -10,8 +10,6 @@ use miden_core::{
 use p3_uni_stark::StarkGenericConfig;
 use serde::{Deserialize, Serialize};
 
-//use winter_air::proof::Proof;
-
 // EXECUTION PROOF
 // ================================================================================================
 
@@ -168,6 +166,7 @@ impl TryFrom<u8> for HashFunction {
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
             0x04 => Ok(Self::Keccak),
+            0x05 => Ok(Self::Poseidon2),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
