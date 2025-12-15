@@ -43,7 +43,7 @@ pub struct ColMatrix<E> {
 impl<E: Clone + Copy> ColMatrix<E> {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Returns a new [Matrix] instantiated with the data from the specified columns.
+    /// Returns a new [ColMatrix] instantiated with the data from the specified columns.
     ///
     /// # Panics
     /// Panics if:
