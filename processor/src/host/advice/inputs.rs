@@ -40,7 +40,7 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::Not(v, e)))
+            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
             .collect::<Result<Vec<_>, _>>()?;
 
         self.stack.extend(stack.iter());

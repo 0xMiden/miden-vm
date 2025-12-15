@@ -24,7 +24,7 @@ pub mod math {
     pub use miden_crypto::batch_multiplicative_inverse as batch_inversion;
 }
 
-// UTILITY FUNCTIONS (from winter-utils v0.13.1)
+// UTILITY FUNCTIONS
 // ================================================================================================
 
 /// Transmutes a slice of `n` elements into a slice of `n` / `N` elements,

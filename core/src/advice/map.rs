@@ -28,7 +28,7 @@ use crate::{
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 

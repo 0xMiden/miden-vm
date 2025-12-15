@@ -12,7 +12,7 @@ pub enum InputError {
     #[error("number of input values can not exceed {0}, but {1} was provided")]
     InputLengthExceeded(usize, usize),
     #[error("{0} is not a valid field element: {1}")]
-    Not(u64, String),
+    NotFieldElement(u64, String),
 }
 
 // OUTPUT ERROR

@@ -156,13 +156,16 @@ fn verify_stark(
 // ERRORS
 // ================================================================================================
 
-/// TODO: add docs
+/// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
+    /// The STARK proof failed to verify for the given program.
     #[error("failed to verify proof for program with hash {0}")]
     ProgramVerificationError(Word),
+    /// A precompile verification check failed.
     #[error("precompile verification failed: {0}")]
     PrecompileVerification(#[from] PrecompileVerificationError),
+    /// The recomputed precompile transcript digest does not match the one committed in the proof.
     #[error(
         "precompile transcript mismatch (proof digest: {expected:?}, recomputed digest: {actual:?})"
     )]
@@ -170,10 +173,13 @@ pub enum VerificationError {
         expected: PrecompileTranscriptDigest,
         actual: PrecompileTranscriptDigest,
     },
+    /// A public input value is not a valid field element.
     #[error("the input {0} is not a valid field element")]
     InputNot(u64),
+    /// A public output value is not a valid field element.
     #[error("the output {0} is not a valid field element")]
     OutputNot(u64),
+    /// A detailed verification error with additional context.
     #[error("verification error: {0}")]
     DetailedError(alloc::string::String),
 }

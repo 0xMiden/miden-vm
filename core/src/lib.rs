@@ -106,7 +106,7 @@ pub mod mast;
 pub fn felt_from_u64_checked(value: u64) -> Result<Felt, errors::InputError> {
     // Check against field modulus before conversion to avoid expensive as_int() call
     if value >= Felt::ORDER_U64 {
-        return Err(errors::InputError::Not(
+        return Err(errors::InputError::NotFieldElement(
             value,
             format!("value {} exceeds field modulus {}", value, Felt::ORDER_U64),
         ));

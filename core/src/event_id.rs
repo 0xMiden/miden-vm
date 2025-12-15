@@ -27,7 +27,7 @@ use crate::{Felt, utils::hash_string_to_word};
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct EventId(Felt);
 
@@ -115,7 +115,7 @@ impl Display for EventId {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct EventName(Cow<'static, str>);
 

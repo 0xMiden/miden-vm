@@ -1,6 +1,7 @@
 //! Proc macros for serde roundtrip testing in Miden VM
 //!
-//! This crate provides the `serde_test` macro for generating round-trip serialization tests.
+//! This crate provides the `serde_test` macro for generating round-trip serialization tests
+//! for both JSON (via serde) and binary (via miden-crypto's Serializable/Deserializable traits).
 extern crate proc_macro;
 
 use proc_macro::TokenStream;
@@ -22,8 +23,9 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 /// * Implementation of `Arbitrary` trait
 /// * Implementations of `Serialize` and `DeserializeOwned` traits
 ///
-/// When using the winter_serde annotation, the type furthermore must implement the
-/// Winterfell `Serializable` and `Deserializable` traits.
+/// When using the `binary_serde` annotation, the type must also implement the
+/// `Serializable` and `Deserializable` traits from `miden-crypto` (which provide
+/// `to_bytes()` and `read_from_bytes()` methods).
 ///
 /// # Configuration Attributes
 ///
@@ -31,8 +33,8 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// | Attribute   | Type | Default | Purpose | Features Required |
 /// |-------------|------|---------|---------|-------------------|
-/// | `serde_test` | `bool` | `true` | Generate standard Serde round-trip tests | `arbitrary`, `serde`, `test` |
-/// | `winter_serde` | `bool` | `false` | Generate Winterfell-style round-trip tests | `arbitrary`, `test` |
+/// | `serde_test` | `bool` | `true` | Generate standard Serde (JSON) round-trip tests | `arbitrary`, `serde`, `test` |
+/// | `binary_serde` | `bool` | `false` | Generate binary serialization round-trip tests | `arbitrary`, `test` |
 /// | `types(...)` | - | none | Specify type parameters for generics | - |
 ///
 /// ## Usage Examples
@@ -49,13 +51,13 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 /// }
 /// ```
 ///
-/// Winterfell tests only:
+/// Binary serialization tests only:
 /// ```rust
 /// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
-/// #[serde_test(winter_serde(true), serde_test(false))]
+/// #[serde_test(binary_serde(true), serde_test(false))]
 /// #[derive(Debug, PartialEq, Arbitrary)]
-/// struct WinterTest {
+/// struct BinaryTest {
 ///     data: [u8; 32],
 /// }
 /// ```
@@ -65,7 +67,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 /// # use miden_test_serde_macros::serde_test;
 /// # use proptest_derive::Arbitrary;
 /// # use serde::{Deserialize, Serialize};
-/// #[serde_test(winter_serde(true))]
+/// #[serde_test(binary_serde(true))]
 /// #[derive(Debug, PartialEq, Arbitrary, Serialize, Deserialize)]
 /// struct DualTest {
 ///     name: u32,
@@ -88,7 +90,7 @@ use syn::{AttributeArgs, Ident, Item, Lit, Meta, MetaList, NestedMeta, Type, par
 ///
 /// # Generated Test Names
 /// - Serde tests: `test_serde_roundtrip_{struct_name}_{index}`
-/// - Winter tests: `test_winter_serde_roundtrip_{struct_name}_{index}`
+/// - Binary tests: `test_binary_serde_roundtrip_{struct_name}_{index}`
 #[proc_macro_attribute]
 pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
     let args = parse_macro_input!(args as AttributeArgs);
@@ -102,7 +104,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Parse arguments.
     let mut types = Vec::new();
-    let mut winter_serde = false;
+    let mut binary_serde = false;
     let mut serde_test = true;
     for arg in args {
         match arg {
@@ -113,13 +115,13 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
                     types.push(quote!(<#name<#(#params),*>>));
                 },
 
-                Some(id) if *id == "winter_serde" => {
-                    assert!(nested.len() == 1, "winter_serde attribute takes 1 argument");
+                Some(id) if *id == "binary_serde" => {
+                    assert!(nested.len() == 1, "binary_serde attribute takes 1 argument");
                     match &nested[0] {
                         NestedMeta::Lit(Lit::Bool(b)) => {
-                            winter_serde = b.value;
+                            binary_serde = b.value;
                         },
-                        _ => panic!("winter_serde argument must be a boolean"),
+                        _ => panic!("binary_serde argument must be a boolean"),
                     }
                 },
 
@@ -174,9 +176,9 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
             quote! {}
         };
 
-        let winter_test = if winter_serde {
+        let binary_test = if binary_serde {
             let test_name =
-                Ident::new(&format!("test_winter_serde_roundtrip_{name}_{i}"), Span::mixed_site());
+                Ident::new(&format!("test_binary_serde_roundtrip_{name}_{i}"), Span::mixed_site());
             quote! {
                 #[cfg(all(feature = "arbitrary", test))]
                 proptest::proptest!{
@@ -195,7 +197,7 @@ pub fn serde_test(args: TokenStream, input: TokenStream) -> TokenStream {
         output = quote! {
             #output
             #serde_test
-            #winter_test
+            #binary_test
         };
     }
 
