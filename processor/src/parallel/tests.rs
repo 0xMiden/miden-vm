@@ -352,7 +352,9 @@ fn test_trace_generation_at_fragment_boundaries(
             }
         }
 
-        // random rows should be zero after padding; check they’re equal as well
+        // TODO(Al)
+        // random rows should be zero after padding; check they're equal as well
+        #[allow(clippy::absurd_extreme_comparisons)]
         if crate::trace::NUM_RAND_ROWS > 0 {
             let tail_start = effective_len_fragments;
             for row_idx in tail_start..col_from_fragments.len() {
