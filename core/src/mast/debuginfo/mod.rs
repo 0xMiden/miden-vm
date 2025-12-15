@@ -376,12 +376,7 @@ impl Serializable for DebugInfo {
 
         decorator_data.write_into(target);
         string_table.write_into(target);
-
-        // Write decorator count and infos
-        target.write_usize(decorator_infos.len());
-        for decorator_info in decorator_infos {
-            decorator_info.write_into(target);
-        }
+        decorator_infos.write_into(target);
 
         // 2. Serialize error codes
         let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> =
@@ -412,12 +407,7 @@ impl Deserializable for DebugInfo {
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
         let string_table: crate::mast::serialization::StringTable =
             Deserializable::read_from(source)?;
-
-        let decorator_count: usize = source.read_usize()?;
-        let mut decorator_infos = Vec::with_capacity(decorator_count);
-        for _ in 0..decorator_count {
-            decorator_infos.push(DecoratorInfo::read_from(source)?);
-        }
+        let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
 
         // 2. Reconstruct decorators
         let mut decorators = IndexVec::new();

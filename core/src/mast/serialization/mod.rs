@@ -21,32 +21,16 @@
 //! (advice map section)
 //! - Advice map (AdviceMap)
 //!
-//! (error_codes map section)
-//! - Error codes map (BTreeMap<u64, String>)
-//!
-//! (procedure_names map section)
-//! - Procedure names map (BTreeMap<Word, String>)
-//!
-//! (decorator data section)
+//! (DebugInfo section)
 //! - Decorator data
 //! - String table
-//!
-//! (decorator info section)
-//! - decorator infos (`Vec<DecoratorInfo>`)
-//!
-//! (basic block decorator lists section)
-//! - basic block decorator lists (`Vec<(MastNodeId, Vec<(usize, DecoratorId)>)>`)
-//!
-//! (before enter and after exit decorators section)
-//! - before enter decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
-//! - after exit decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
+//! - Decorator infos (`Vec<DecoratorInfo>`)
+//! - Error codes map (BTreeMap<u64, String>)
+//! - OpToDecoratorIds CSR (operation-indexed decorators)
+//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators)
+//! - Procedure names map (BTreeMap<Word, String>)
 
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::vec::Vec;
 
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
@@ -215,8 +199,8 @@ impl Deserializable for MastForest {
         };
 
         // Validate that all procedure name digests correspond to procedure roots in the forest
-        for digest in procedure_names.keys() {
-            if mast_forest.find_procedure_root(*digest).is_none() {
+        for (digest, _) in mast_forest.debug_info.procedure_names() {
+            if mast_forest.find_procedure_root(digest).is_none() {
                 return Err(DeserializationError::InvalidValue(format!(
                     "procedure name references digest that is not a procedure root: {:?}",
                     digest

@@ -127,22 +127,16 @@ impl OpToDecoratorIds {
     ///   must be monotonically increasing and within bounds of `op_indptr_for_dec_ids`. The slice
     ///   must not be empty, and the first element must be 0.
     ///
-    /// # Returns
-    /// An error if the internal structure is inconsistent. Common issues that cause errors:
-    /// - Empty `op_indptr_for_dec_ids` or `node_indptr_for_op_idx` vectors
-    /// - Non-zero first element in either pointer array
-    /// - Decreasing pointer values (pointers must be monotonically non-decreasing)
-    /// - Pointer values that exceed the bounds of the arrays they index into
-    /// - Invalid ranges (start > end) in any pointer window
+    /// # Valid Edge Cases
+    /// - All three vectors empty (no nodes, no decorators)
+    /// - Empty decorator vectors with node pointers all zero (nodes exist but have no decorators)
     ///
-    /// # Validation Restrictions
-    /// The following constraints are enforced between components:
-    /// - `op_indptr_for_dec_ids` length must be >= 1 (for the sentinel)
-    /// - `node_indptr_for_op_idx` length must be >= 1 (for the sentinel)
+    /// # Validation Rules
+    /// For non-empty structures:
+    /// - Pointer arrays must start at zero
+    /// - Pointers must be monotonically non-decreasing
     /// - Last value in `op_indptr_for_dec_ids` must be <= `decorator_ids.len()`
-    /// - Last value in `node_indptr_for_op_idx` must be <= `op_indptr_for_dec_ids.len() - 1`
-    /// - Both `op_indptr_for_dec_ids` and `node_indptr_for_op_idx` must be strictly monotonic (each
-    ///   successive value must be >= the previous one)
+    /// - Last value in `node_indptr_for_op_idx` must be < `op_indptr_for_dec_ids.len()`
     pub(super) fn from_components(
         decorator_ids: Vec<DecoratorId>,
         op_indptr_for_dec_ids: Vec<usize>,

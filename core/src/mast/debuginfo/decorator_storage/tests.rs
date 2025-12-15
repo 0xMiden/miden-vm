@@ -771,6 +771,7 @@ fn test_sparse_debuginfo_round_trip() {
         op_decorator_storage: op_storage,
         node_decorator_storage: node_storage,
         error_codes,
+        procedure_names: BTreeMap::new(),
     };
 
     // Serialize and deserialize
