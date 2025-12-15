@@ -3,11 +3,12 @@ use std::{sync::Arc, vec};
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{
-    EventName, StarkField, ZERO,
+    EventName, PrimeField64, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
     utils::Deserializable,
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
+use miden_crypto::hash::algebraic_sponge::AlgebraicSponge;
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -125,7 +126,7 @@ fn test_falcon512_diff_mod_m() {
         exec.falcon512rpo::diff_mod_M
     end
     ";
-    let v = Felt::MODULUS - 1;
+    let v = miden_core::Felt::ORDER_U64 - 1;
     let (v_lo, v_hi) = (v as u32, v >> 32);
 
     // test largest possible value given v
@@ -161,7 +162,7 @@ fn test_falcon512_diff_mod_m() {
 
 proptest! {
     #[test]
-    fn diff_mod_m_proptest(v in 0..Felt::MODULUS, w in 0..J, u in 0..J) {
+    fn diff_mod_m_proptest(v in 0..miden_core::Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
     use miden::core::crypto::dsa::falcon512rpo
@@ -299,7 +300,7 @@ fn falcon_prove_verify() {
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
     let (stack_outputs, proof) =
-        miden_utils_testing::prove(&program, self.stack_inputs, advice_inputs, &mut host, options)
+        miden_utils_testing::prove(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);

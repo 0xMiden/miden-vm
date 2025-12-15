@@ -6,7 +6,7 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    EventName, Felt, ONE, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
@@ -14,7 +14,10 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
+use miden_crypto::{
+    dsa::ecdsa_k256_keccak::SecretKey,
+    hash::{algebraic_sponge::AlgebraicSponge, rpo::Rpo256},
+};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use rand::{SeedableRng, rngs::StdRng};
 
@@ -65,7 +68,7 @@ fn test_ecdsa_verify_cases() {
 
         // Assert result
         let result = output.stack_outputs().get_stack_item(0).unwrap();
-        let expected = if expected_valid { Felt::ONE } else { Felt::ZERO };
+        let expected = if expected_valid { ONE } else { ZERO };
         assert_eq!(result, expected);
 
         // Verify the precompile request was logged with the right event ID
@@ -123,7 +126,8 @@ fn test_ecdsa_verify_impl_commitment() {
 
         // Verify result
         let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid), "result does not match expected validity");
+        let expected = if expected_valid { ONE } else { ZERO };
+        assert_eq!(result, expected, "result does not match expected validity");
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");

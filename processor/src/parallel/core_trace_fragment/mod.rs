@@ -818,7 +818,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_int());
         let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inverse();
+        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
