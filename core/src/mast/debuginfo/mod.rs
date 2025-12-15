@@ -341,7 +341,7 @@ impl DebugInfo {
     /// - All CSR structures in op_decorator_storage
     /// - All CSR structures in node_decorator_storage
     /// - All decorator IDs reference valid decorators
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub(super) fn validate(&self) -> Result<(), String> {
         let decorator_count = self.decorators.len();
 
         // Validate OpToDecoratorIds CSR
@@ -392,55 +392,15 @@ impl Serializable for DebugInfo {
         // Dense representation: serialize indptr arrays as-is (no sparse encoding).
         // Analysis shows sparse saves <1KB even with 90% empty nodes, not worth complexity.
         // See measurement: https://gist.github.com/huitseeker/7379e2eecffd7020ae577e986057a400
-
-        // decorator_ids as Vec<u32>
-        let decorator_ids_u32: Vec<u32> = self
-            .op_decorator_storage
-            .decorator_ids
-            .iter()
-            .map(|id| u32::from(*id))
-            .collect();
-        decorator_ids_u32.write_into(target);
-
-        // op_indptr_for_dec_ids
-        self.op_decorator_storage.op_indptr_for_dec_ids.write_into(target);
-
-        // node_indptr_for_op_idx as Vec<usize>
-        self.op_decorator_storage
-            .node_indptr_for_op_idx
-            .as_slice()
-            .to_vec()
-            .write_into(target);
+        self.op_decorator_storage.write_into(target);
 
         // 4. Serialize NodeToDecoratorIds CSR (dense representation)
+        self.node_decorator_storage.write_into(target);
 
-        // before_enter_decorators as Vec<u32>
-        let before_decorators_u32: Vec<u32> = self
-            .node_decorator_storage
-            .before_enter_decorators
-            .iter()
-            .map(|id| u32::from(*id))
-            .collect();
-        before_decorators_u32.write_into(target);
-
-        // after_exit_decorators as Vec<u32>
-        let after_decorators_u32: Vec<u32> = self
-            .node_decorator_storage
-            .after_exit_decorators
-            .iter()
-            .map(|id| u32::from(*id))
-            .collect();
-        after_decorators_u32.write_into(target);
-
-        // node_indptr_for_before as Vec<usize>
-        let before_indptr_vec: Vec<usize> =
-            self.node_decorator_storage.node_indptr_for_before.as_slice().to_vec();
-        before_indptr_vec.write_into(target);
-
-        // node_indptr_for_after as Vec<usize>
-        let after_indptr_vec: Vec<usize> =
-            self.node_decorator_storage.node_indptr_for_after.as_slice().to_vec();
-        after_indptr_vec.write_into(target);
+        // 5. Serialize procedure names
+        let procedure_names: BTreeMap<Word, String> =
+            self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
+        procedure_names.write_into(target);
     }
 }
 
@@ -479,86 +439,10 @@ impl Deserializable for DebugInfo {
             .collect();
 
         // 4. Read OpToDecoratorIds CSR (dense representation)
-
-        // decorator_ids from Vec<u32>
-        let decorator_ids_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let decorator_ids: Vec<DecoratorId> = decorator_ids_u32
-            .into_iter()
-            .map(|id| {
-                if id as usize >= decorators.len() {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "DecoratorId {} exceeds decorator count {}",
-                        id,
-                        decorators.len()
-                    )));
-                }
-                Ok(DecoratorId(id))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // op_indptr_for_dec_ids
-        let op_indptr_for_dec_ids: Vec<usize> = Deserializable::read_from(source)?;
-
-        // node_indptr_for_op_idx from Vec<usize>
-        let node_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
-        let node_indptr_for_op_idx = IndexVec::from_raw(node_indptr_vec);
-
-        let op_decorator_storage = OpToDecoratorIds::from_components(
-            decorator_ids,
-            op_indptr_for_dec_ids,
-            node_indptr_for_op_idx,
-        )
-        .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+        let op_decorator_storage = OpToDecoratorIds::read_from(source, decorators.len())?;
 
         // 5. Read NodeToDecoratorIds CSR (dense representation)
-
-        // before_enter_decorators from Vec<u32>
-        let before_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let before_enter_decorators: Vec<DecoratorId> = before_decorators_u32
-            .into_iter()
-            .map(|id| {
-                if id as usize >= decorators.len() {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "DecoratorId {} exceeds decorator count {}",
-                        id,
-                        decorators.len()
-                    )));
-                }
-                Ok(DecoratorId(id))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // after_exit_decorators from Vec<u32>
-        let after_decorators_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let after_exit_decorators: Vec<DecoratorId> = after_decorators_u32
-            .into_iter()
-            .map(|id| {
-                if id as usize >= decorators.len() {
-                    return Err(DeserializationError::InvalidValue(format!(
-                        "DecoratorId {} exceeds decorator count {}",
-                        id,
-                        decorators.len()
-                    )));
-                }
-                Ok(DecoratorId(id))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // node_indptr_for_before from Vec<usize>
-        let before_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
-        let node_indptr_for_before = IndexVec::from_raw(before_indptr_vec);
-
-        // node_indptr_for_after from Vec<usize>
-        let after_indptr_vec: Vec<usize> = Deserializable::read_from(source)?;
-        let node_indptr_for_after = IndexVec::from_raw(after_indptr_vec);
-
-        let node_decorator_storage = NodeToDecoratorIds::from_components(
-            before_enter_decorators,
-            after_exit_decorators,
-            node_indptr_for_before,
-            node_indptr_for_after,
-        )
-        .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+        let node_decorator_storage = NodeToDecoratorIds::read_from(source, decorators.len())?;
 
         // 6. Read procedure names (marked serde(skip) but we deserialize manually)
         let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;

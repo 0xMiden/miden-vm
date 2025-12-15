@@ -161,7 +161,7 @@ impl Deserializable for MastForest {
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
-        let _decorator_count = source.read_usize()?;
+        let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
         let roots: Vec<u32> = Deserializable::read_from(source)?;
