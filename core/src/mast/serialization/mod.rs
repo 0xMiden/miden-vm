@@ -21,22 +21,13 @@
 //! (advice map section)
 //! - Advice map (AdviceMap)
 //!
-//! (error_codes map section)
-//! - Error codes map (BTreeMap<u64, String>)
-//!
-//! (decorator data section)
+//! (DebugInfo section)
 //! - Decorator data
 //! - String table
-//!
-//! (decorator info section)
-//! - decorator infos (`Vec<DecoratorInfo>`)
-//!
-//! (basic block decorator lists section)
-//! - basic block decorator lists (`Vec<(MastNodeId, Vec<(usize, DecoratorId)>)>`)
-//!
-//! (before enter and after exit decorators section)
-//! - before enter decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
-//! - after exit decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
+//! - Decorator infos (`Vec<DecoratorInfo>`)
+//! - Error codes map (BTreeMap<u64, String>)
+//! - OpToDecoratorIds CSR (operation-indexed decorators)
+//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators)
 
 use alloc::vec::Vec;
 
