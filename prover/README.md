@@ -55,7 +55,6 @@ Miden prover can be compiled with the following features:
 
 * `std` - enabled by default and relies on the Rust standard library.
 * `concurrent` - implies `std` and also enables multi-threaded proof generation.
-* `metal` - enables [Metal](https://en.wikipedia.org/wiki/Metal_(API))-based acceleration of proof generation (for recursive proofs) on supported platforms (e.g., Apple silicon).
 * `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
     * Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

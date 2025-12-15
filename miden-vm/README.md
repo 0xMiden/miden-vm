@@ -260,9 +260,6 @@ We also provide a number of `make` commands to simplify building Miden VM for va
 # build an executable for a generic target (concurrent)
 make exec
 
-# build an executable for Apple silicon (concurrent+metal)
-make exec-metal
-
 # build an executable for targets with AVX2 instructions (concurrent)
 make exec-avx2
 
