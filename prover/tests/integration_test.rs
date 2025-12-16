@@ -225,3 +225,89 @@ fn test_rpx_prove_verify() {
 
     println!("Verification successful! Security level: {}", security_level);
 }
+
+// ================================================================================================
+// FAST PROCESSOR + PARALLEL TRACE GENERATION TESTS
+// ================================================================================================
+
+mod fast_parallel {
+    use alloc::sync::Arc;
+
+    use miden_air::ProcessorAir;
+    use miden_assembly::{Assembler, DefaultSourceManager};
+    use miden_core::Felt;
+    use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
+    use miden_prover::{
+        HashFunction, execution_trace_to_row_major, extract_public_values_from_trace,
+    };
+    use miden_verifier::verify;
+    use miden_vm::DefaultHost;
+
+    /// Default fragment size for parallel trace generation
+    const FRAGMENT_SIZE: usize = 1024;
+
+    /// Test that proves and verifies using the fast processor + parallel trace generation path.
+    /// This verifies the complete code path works end-to-end.
+    ///
+    /// Note: We only test one hash function here since
+    /// `test_trace_equivalence_slow_vs_fast_parallel` verifies trace equivalence, and the slow
+    /// processor tests already cover all hash functions.
+    #[test]
+    fn test_fast_parallel_prove_verify() {
+        // Use a program with enough iterations to generate a meaningful trace
+        let source = "
+            begin
+                repeat.500
+                    swap dup.1 add
+                end
+            end
+        ";
+
+        let program = Assembler::default().assemble_program(source).unwrap();
+        let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+        let advice_inputs = AdviceInputs::default();
+        let mut host =
+            DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
+
+        // Convert stack inputs for fast processor (reversed order)
+        let stack_inputs_vec: Vec<Felt> = stack_inputs.into_iter().rev().collect();
+
+        let fast_processor =
+            FastProcessor::new_with_advice_inputs(&stack_inputs_vec, advice_inputs.clone());
+        let (execution_output, trace_context) = fast_processor
+            .execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE)
+            .expect("Fast processor execution failed");
+
+        let fast_stack_outputs = execution_output.stack;
+
+        // Build trace using parallel trace generation
+        let trace =
+            build_trace(execution_output, trace_context, program.hash(), program.kernel().clone());
+
+        // Convert trace to row-major format for proving
+        let trace_matrix = execution_trace_to_row_major(&trace);
+        let public_values = extract_public_values_from_trace(&trace);
+
+        // Create AIR with aux trace builders
+        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+
+        // Generate proof using Blake3_256
+        let config = miden_air::config::create_blake3_256_config();
+        let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+        let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
+
+        let precompile_requests = trace.precompile_requests().to_vec();
+        let precompile_transcript_digest = trace.final_precompile_transcript().finalize();
+
+        let proof = miden_air::ExecutionProof::new(
+            proof_bytes,
+            HashFunction::Blake3_256,
+            precompile_requests,
+            precompile_transcript_digest,
+        );
+
+        // Verify the proof
+        verify(program.into(), stack_inputs, fast_stack_outputs, proof)
+            .expect("Verification failed");
+    }
+}
