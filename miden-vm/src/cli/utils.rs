@@ -4,6 +4,7 @@ use miden_assembly::{
     Assembler, DefaultSourceManager, KernelLibrary,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
+use miden_core_lib::CoreLibrary;
 use miden_mast_package::{MastArtifact, Package};
 use miden_prover::utils::Deserializable;
 
@@ -29,7 +30,7 @@ pub fn get_masp_program(path: &Path) -> Result<miden_core::Program, Report> {
 pub fn get_masm_program(
     path: &Path,
     libraries: &Libraries,
-    debug_on: bool,
+    _debug_on: bool,
     kernel_file: Option<&Path>,
 ) -> Result<(miden_core::Program, Arc<DefaultSourceManager>), Report> {
     // Assembler debug mode is always enabled (issue #1821)
@@ -73,12 +74,10 @@ pub fn get_masm_program(
             },
             "masm" => {
                 // Compile kernel from assembly source
-                Assembler::default()
-                    .with_debug_mode(matches!(debug_mode, Debug::On))
-                    .assemble_kernel(kernel_path)
-                    .wrap_err_with(|| {
-                        format!("Failed to compile kernel from `{}`", kernel_path.display())
-                    })?
+                // Assembler debug mode is always enabled (issue #1821)
+                Assembler::default().assemble_kernel(kernel_path).wrap_err_with(|| {
+                    format!("Failed to compile kernel from `{}`", kernel_path.display())
+                })?
             },
             _ => {
                 return Err(Report::msg(format!(
@@ -89,12 +88,12 @@ pub fn get_masm_program(
         };
 
         // Create assembler with kernel
-        let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib)
-            .with_debug_mode(matches!(debug_mode, Debug::On));
+        // Assembler debug mode is always enabled (issue #1821)
+        let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib);
 
         // Link standard library
         assembler
-            .link_dynamic_library(miden_stdlib::StdLibrary::default())
+            .link_dynamic_library(CoreLibrary::default())
             .wrap_err("Failed to load stdlib")?;
 
         // Link user libraries
@@ -108,7 +107,7 @@ pub fn get_masm_program(
             .wrap_err("Failed to compile program")?
     } else {
         // No kernel, use the standard compilation path
-        program_file.compile(debug_mode, &libraries.libraries)?
+        program_file.compile(&libraries.libraries)?
     };
 
     Ok((program, source_manager))
