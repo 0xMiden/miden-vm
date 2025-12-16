@@ -337,14 +337,6 @@ impl Deserializable for MastForest {
 
         mast_forest.debug_info.extend_procedure_names(procedure_names);
 
-        // Validate the deserialized forest
-        mast_forest.validate().map_err(|e| {
-            DeserializationError::InvalidValue(format!(
-                "validation failed after deserialization: {}",
-                e
-            ))
-        })?;
-
         Ok(mast_forest)
     }
 }
