@@ -9,11 +9,8 @@ use miden_core::{
 };
 use rstest::rstest;
 
-use super::{
-    super::NUM_RAND_ROWS, AdviceInputs, Felt, ONE, Operation, Word, ZERO,
-    build_trace_from_ops_with_inputs, rand_array,
-};
-use crate::StackInputs;
+use super::{Felt, ONE, Operation, Word, ZERO, build_trace_from_ops_with_inputs, rand_array};
+use crate::{AdviceInputs, StackInputs};
 
 // SIBLING TABLE TESTS
 // ================================================================================================
@@ -45,7 +42,7 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
 
     // executing MPVERIFY does not affect the sibling table - so, all values in the column must be
     // ONE
-    for value in p1.iter().take(p1.len() - NUM_RAND_ROWS) {
+    for value in p1.iter().take(p1.len()) {
         assert_eq!(ONE, *value);
     }
 }
@@ -147,7 +144,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
 
     // at this point the table should be empty again, and it should stay empty until the end
     assert_eq!(expected_value, ONE);
-    for value in p1.iter().skip(50).take(p1.len() - NUM_RAND_ROWS - 50) {
+    for value in p1.iter().skip(50).take(p1.len() - 50) {
         assert_eq!(ONE, *value);
     }
 }

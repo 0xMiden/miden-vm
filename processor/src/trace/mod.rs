@@ -15,7 +15,7 @@ use miden_core::{
 
 use super::{
     AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
-    crypto::RpoRandomCoin, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
@@ -28,14 +28,6 @@ mod aux_builder_impl;
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-use super::EMPTY_WORD;
-
-// CONSTANTS
-// ================================================================================================
-
-/// Number of rows at the end of an execution trace which are injected with random values.
-pub const NUM_RAND_ROWS: usize = 0;
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -132,29 +124,18 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
-    // CONSTANTS
-    // --------------------------------------------------------------------------------------------
-
-    /// Number of rows at the end of an execution trace which are injected with random values.
-    pub const NUM_RAND_ROWS: usize = NUM_RAND_ROWS;
-
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
     /// Builds an execution trace for the provided process.
     pub fn new(mut process: Process, stack_outputs: StackOutputs) -> Self {
-        // use program hash to initialize random element generator; this generator will be used
-        // to inject random values at the end of the trace; using program hash here is OK because
-        // we are using random values only to stabilize constraint degrees, and not to achieve
-        // perfect zero knowledge.
         let program_hash = process.decoder.program_hash().into();
-        let rng = RpoRandomCoin::new(program_hash);
 
         // create a new program info instance with the underlying kernel
         let kernel = process.kernel().clone();
         let program_info = ProgramInfo::new(program_hash, kernel);
         let advice = mem::take(&mut process.advice);
         let (main_trace, aux_trace_builders, trace_len_summary, final_pc_transcript) =
-            finalize_trace(process, rng);
+            finalize_trace(process);
         let trace_metadata = TraceMetadata::new(
             PADDED_TRACE_WIDTH,
             AUX_TRACE_WIDTH,
@@ -324,7 +305,7 @@ impl ExecutionTrace {
 
     /// Returns the index of the last row in the trace.
     fn last_step(&self) -> usize {
-        self.main_trace.num_rows() - NUM_RAND_ROWS - 1
+        self.main_trace.num_rows() - 1
     }
 
     // TEST HELPERS
@@ -343,9 +324,8 @@ impl ExecutionTrace {
 
     #[cfg(test)]
     pub fn test_finalize_trace(process: Process) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-        let rng = RpoRandomCoin::new(EMPTY_WORD);
         let (main_trace, aux_trace_builders, trace_len_summary, _final_pc_transcript) =
-            finalize_trace(process, rng);
+            finalize_trace(process);
         (main_trace, aux_trace_builders, trace_len_summary)
     }
 
@@ -371,12 +351,8 @@ impl ExecutionTrace {
 /// The process includes:
 /// - Determining the length of the trace required to accommodate the longest trace column.
 /// - Padding the columns to make sure all columns are of the same length.
-/// - Inserting random values in the last row of all columns. This helps ensure that there are no
-///   repeating patterns in each column and each column contains a least two distinct values. This,
-///   in turn, ensures that polynomial degrees of all columns are stable.
 fn finalize_trace(
     process: Process,
-    _rng: RpoRandomCoin,
 ) -> (MainTrace, AuxTraceBuilders, TraceLenSummary, PrecompileTranscript) {
     let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
     let final_pc_transcript = PrecompileTranscript::from_state(final_capacity);
@@ -406,13 +382,13 @@ fn finalize_trace(
         TraceLenSummary::new(clk.into(), range_table_len, ChipletsLengths::new(&chiplets));
 
     // Combine all trace segments into the main trace
-    let system_trace = system.into_trace(trace_len, 0);
-    let decoder_trace = decoder.into_trace(trace_len, 0);
-    let stack_trace = stack.into_trace(trace_len, 0);
-    let chiplets_trace = chiplets.into_trace(trace_len, 0, final_capacity);
+    let system_trace = system.into_trace(trace_len);
+    let decoder_trace = decoder.into_trace(trace_len);
+    let stack_trace = stack.into_trace(trace_len);
+    let chiplets_trace = chiplets.into_trace(trace_len, final_capacity);
 
     // Combine the range trace segment using the support lookup table
-    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, 0);
+    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len);
 
     // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
     let padding = vec![vec![ZERO; trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];

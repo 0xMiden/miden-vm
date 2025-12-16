@@ -875,10 +875,10 @@ impl Decoder {
     /// Returns an array of columns containing an execution trace of this decoder.
     ///
     /// Trace columns are extended to match the specified trace length.
-    pub fn into_trace(self, trace_len: usize, num_rand_rows: usize) -> super::DecoderTrace {
+    pub fn into_trace(self, trace_len: usize) -> super::DecoderTrace {
         let trace = self
             .trace
-            .into_vec(trace_len, num_rand_rows)
+            .into_vec(trace_len)
             .try_into()
             .expect("failed to convert vector to array");
         let aux_builder = AuxTraceBuilder::default();

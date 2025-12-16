@@ -385,10 +385,9 @@ impl DecoderTrace {
     /// - The first 4 columns of the hasher state, where the unfilled rows are filled with the
     ///   values from the last filled row. This is done so that the hash of the program is
     ///   propagated to the last row.
-    pub fn into_vec(mut self, trace_len: usize, num_rand_rows: usize) -> Vec<Vec<Felt>> {
+    pub fn into_vec(mut self, trace_len: usize) -> Vec<Vec<Felt>> {
         let own_len = self.trace_len();
-        // make sure that only the duplicate rows will be overwritten with random values
-        assert!(own_len + num_rand_rows <= trace_len, "target trace length too small");
+        assert!(own_len <= trace_len, "target trace length too small");
 
         let mut trace = Vec::new();
 

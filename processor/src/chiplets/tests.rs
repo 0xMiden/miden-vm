@@ -136,7 +136,7 @@ fn build_trace(
     process.execute(&program, &mut host).unwrap();
 
     let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let trace_len = trace.num_rows();
 
     (
         trace

@@ -14,8 +14,8 @@ use miden_air::{
 use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, NUM_RAND_ROWS,
-    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, ONE, Operation,
+    Word, ZERO, build_trace_from_ops, rand_array,
 };
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
@@ -172,7 +172,7 @@ fn b_chip_trace_mem() {
     assert_eq!(expected, b_chip[15]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 15..trace.length() - NUM_RAND_ROWS {
+    for row in 15..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }

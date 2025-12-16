@@ -442,7 +442,7 @@ fn generate_trace() {
     stack.shift_left(1);
     stack.advance_clock();
 
-    let trace = stack.into_trace(16, 1);
+    let trace = stack.into_trace(16);
     let trace = trace.trace;
 
     assert_eq!(read_stack_top(&trace, 0), build_stack(&[4, 3, 2, 1]));

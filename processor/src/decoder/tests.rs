@@ -1594,7 +1594,7 @@ fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize)
     process.execute(program, &mut host).unwrap();
 
     let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let trace_len = trace.num_rows();
 
     (
         trace
@@ -1618,7 +1618,7 @@ fn build_dyn_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, us
     process.execute(program, &mut host).unwrap();
 
     let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let trace_len = trace.num_rows();
 
     (
         trace
@@ -1638,7 +1638,7 @@ fn build_call_trace(program: &Program, kernel: Kernel) -> (SystemTrace, DecoderT
     process.execute(program, &mut host).unwrap();
 
     let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let trace_len = trace.num_rows();
 
     let sys_trace = trace
         .get_column_range(SYS_TRACE_RANGE)
