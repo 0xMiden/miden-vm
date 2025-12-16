@@ -259,33 +259,32 @@ impl BasicBlockDataDecoder<'_> {
 mod tests {
     use alloc::string::ToString;
 
+    use rstest::rstest;
+
     use super::*;
 
-    #[test]
-    fn test_pack_unpack_indptr_roundtrip() {
-        // Test various valid indptr patterns
-        let test_cases = vec![
-            [0, 0, 0, 0, 0, 0, 0, 0, 0],        // All empty groups
-            [0, 9, 18, 27, 36, 45, 54, 63, 72], // Max deltas (9 each)
-            [0, 1, 2, 3, 4, 5, 6, 7, 8],        // Min non-zero deltas (1 each)
-            [0, 3, 6, 9, 12, 15, 18, 21, 24],   // Mixed deltas (3 each)
-            [0, 0, 5, 5, 10, 10, 15, 15, 20],   // Some zero deltas
-        ];
-
-        for indptr in test_cases {
-            let packed = pack_indptr_deltas(&indptr);
-            let unpacked = unpack_indptr_deltas(&packed).unwrap();
-            assert_eq!(indptr, unpacked);
-        }
+    #[rstest]
+    #[case::all_empty([0, 0, 0, 0, 0, 0, 0, 0, 0])]
+    #[case::max_deltas([0, 9, 18, 27, 36, 45, 54, 63, 72])]
+    #[case::min_non_zero_deltas([0, 1, 2, 3, 4, 5, 6, 7, 8])]
+    #[case::mixed_deltas([0, 3, 6, 9, 12, 15, 18, 21, 24])]
+    #[case::some_zero_deltas([0, 0, 5, 5, 10, 10, 15, 15, 20])]
+    fn test_pack_unpack_indptr_roundtrip(#[case] indptr: [usize; 9]) {
+        let packed = pack_indptr_deltas(&indptr);
+        let unpacked = unpack_indptr_deltas(&packed).unwrap();
+        assert_eq!(indptr, unpacked);
     }
 
-    #[test]
-    fn test_unpack_invalid_delta() {
-        // Delta of 10 at position 0 (exceeds GROUP_SIZE = 9)
-        let packed = [0x0a, 0x00, 0x00, 0x00];
+    #[rstest]
+    #[case::delta_10_position_0([0x0a, 0x00, 0x00, 0x00], "delta 10 exceeds maximum of 9")]
+    #[case::delta_15_position_0([0x0f, 0x00, 0x00, 0x00], "delta 15 exceeds maximum of 9")]
+    #[case::delta_10_position_1([0x0a, 0x00, 0x00, 0x00], "delta 10 exceeds maximum of 9")]
+    #[case::delta_11_position_3([0x00, 0xb0, 0x00, 0x00], "delta 11 exceeds maximum of 9")]
+    #[case::delta_14_position_7([0x00, 0x00, 0x00, 0x0e], "delta 14 exceeds maximum of 9")]
+    fn test_unpack_invalid_delta(#[case] packed: [u8; 4], #[case] expected_msg: &str) {
         let result = unpack_indptr_deltas(&packed);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("delta 10 exceeds maximum of 9"));
+        assert!(err_msg.contains(expected_msg));
     }
 }

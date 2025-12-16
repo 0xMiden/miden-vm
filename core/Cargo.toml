@@ -66,5 +66,6 @@ criterion = { workspace = true }
 insta.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
+rstest = { version = "0.26" }
 serde_json = { workspace = true }
 miden-utils-testing.workspace = true
