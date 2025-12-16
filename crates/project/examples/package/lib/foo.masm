@@ -1,0 +1,3 @@
+pub proc explode
+    push.0 assert
+end
