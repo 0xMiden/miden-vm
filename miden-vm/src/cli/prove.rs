@@ -94,13 +94,13 @@ impl ProveCmd {
         let libraries = Libraries::new(&self.library_paths)?;
 
         // validate kernel file if provided
-        if let Some(ref kernel_path) = self.kernel_file {
-            if !kernel_path.is_file() {
-                return Err(Report::msg(format!(
-                    "Kernel file `{}` must be a file.",
-                    kernel_path.display()
-                )));
-            }
+        if let Some(ref kernel_path) = self.kernel_file
+            && !kernel_path.is_file()
+        {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
         }
 
         // determine file type based on extension
