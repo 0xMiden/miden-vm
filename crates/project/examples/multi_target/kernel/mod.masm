@@ -1,0 +1,34 @@
+const SYSCALL_TABLE_ADDR = 0
+const NUM_SYSCALLS = 2
+const PRINTLN = event("sys.println")
+const PRINTLN_ADDR = SYSCALL_TABLE_ADDR + 4
+
+#! Causes execution to trap
+pub proc panic
+    push.0 assert
+end
+
+#! Prints the given null-terminated byte string to stdout, if debug tracing is enabled
+pub proc println(message: ptr<u8, addrspace(byte)>)
+    trace.PRINTLN
+    drop
+end
+
+#! Execute one of this kernel's syscalls
+#!
+#! This allows downstream packages to link against the kernel, without requiring them to be
+#! recompiled every time the kernel changes.
+pub proc system_call
+    # validate syscall id
+    dup.0 lt.NUM_SYSCALLS assert
+    # invoke the syscall
+    mul.4 add.SYSCALL_TABLE_ADDR mem_loadw dynexec
+end
+
+begin
+    # At program start, initialize the syscall table
+    procref.panic
+    mem_storew.SYSCALL_TABLE_ADDR
+    procref.println
+    mem_storew.PRINTLN_ADDR
+end

@@ -1,0 +1,12 @@
+[package]
+name = "my-kernel"
+version = "1.0.0"
+
+[[target]]
+kind = "kernel"
+path = "kernel/mod.masm"
+
+[[target]]
+kind = "library"
+path = "lib/mod.masm"
+namespace = "userspace"
