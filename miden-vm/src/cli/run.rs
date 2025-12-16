@@ -174,13 +174,13 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let libraries = Libraries::new(&params.library_paths)?;
 
     // validate kernel file if provided
-    if let Some(ref kernel_path) = params.kernel_file {
-        if !kernel_path.is_file() {
-            return Err(Report::msg(format!(
-                "Kernel file `{}` must be a file.",
-                kernel_path.display()
-            )));
-        }
+    if let Some(ref kernel_path) = params.kernel_file
+        && !kernel_path.is_file()
+    {
+        return Err(Report::msg(format!(
+            "Kernel file `{}` must be a file.",
+            kernel_path.display()
+        )));
     }
 
     // load program from file and compile
