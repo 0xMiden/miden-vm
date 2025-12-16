@@ -1,0 +1,11 @@
+
+[package]
+name = "my-account-note"
+version = "0.1.0"
+
+[[target]]
+kind = "note"
+namespace = "my_account::note"
+
+[dependencies]
+my-account.workspace = true
