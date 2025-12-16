@@ -57,13 +57,13 @@ impl DebugCmd {
             .to_lowercase();
 
         // Validate kernel file if provided
-        if let Some(ref kernel_path) = self.kernel_file {
-            if !kernel_path.is_file() {
-                return Err(Report::msg(format!(
-                    "Kernel file `{}` must be a file.",
-                    kernel_path.display()
-                )));
-            }
+        if let Some(ref kernel_path) = self.kernel_file
+            && !kernel_path.is_file()
+        {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
         }
 
         // Use a single match expression to load the program.
