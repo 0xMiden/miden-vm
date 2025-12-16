@@ -31,7 +31,6 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 pub(super) fn execute_sync_op(
     processor: &mut impl Processor,
     op: &Operation,
-    op_idx_in_block: usize,
     current_forest: &MastForest,
     host: &mut impl BaseHost,
     err_ctx: &impl ErrorContext,
@@ -108,7 +107,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32add3_helpers);
         },
         Operation::U32sub => {
-            let u32sub_helpers = u32_ops::op_u32sub(processor, op_idx_in_block, err_ctx, tracer)?;
+            let u32sub_helpers = u32_ops::op_u32sub(processor, err_ctx, tracer)?;
             user_op_helpers = Some(u32sub_helpers);
         },
         Operation::U32mul => {

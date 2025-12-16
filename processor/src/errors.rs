@@ -1,9 +1,12 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
     EventId, EventName, Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
+    mast::{DecoratorId, MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
@@ -219,14 +222,13 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         value: Felt,
     },
-    #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
+    #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         values: Vec<Felt>,
-        err_code: Felt,
     },
     #[error(
         "Operand stack input is {input} but it is expected to fit in a u32 at clock cycle {clk}"
@@ -424,19 +426,14 @@ impl ExecutionError {
         Self::NotBinaryValueLoop { label, source_file, value }
     }
 
-    pub fn not_u32_value(value: Felt, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_value(value: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values {
-            label,
-            source_file,
-            values: vec![value],
-            err_code,
-        }
+        Self::NotU32Values { label, source_file, values: vec![value] }
     }
 
-    pub fn not_u32_values(values: Vec<Felt>, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_values(values: Vec<Felt>, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values { label, source_file, values, err_code }
+        Self::NotU32Values { label, source_file, values }
     }
 
     pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {
@@ -560,35 +557,32 @@ pub struct ErrorContextImpl {
 }
 
 impl ErrorContextImpl {
-    pub fn new(
-        mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
-        host: &impl BaseHost,
-    ) -> Self {
+    pub fn new(mast_forest: &MastForest, node_id: MastNodeId, host: &impl BaseHost) -> Self {
         let (label, source_file) =
-            Self::precalc_label_and_source_file(None, mast_forest, node, host);
+            Self::precalc_label_and_source_file(None, mast_forest, node_id, host);
         Self { label, source_file }
     }
 
     pub fn new_with_op_idx(
         mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
+        node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
     ) -> Self {
         let op_idx = op_idx.into();
         let (label, source_file) =
-            Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
+            Self::precalc_label_and_source_file(op_idx, mast_forest, node_id, host);
         Self { label, source_file }
     }
 
     fn precalc_label_and_source_file(
         op_idx: Option<usize>,
         mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
+        node_id: MastNodeId,
         host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        node.get_assembly_op(mast_forest, op_idx)
+        mast_forest
+            .get_assembly_op(node_id, op_idx)
             .and_then(|assembly_op| assembly_op.location())
             .map_or_else(
                 || (SourceSpan::UNKNOWN, None),

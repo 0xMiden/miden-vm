@@ -11,10 +11,7 @@ use crate::{ErrorContext, ZERO};
 const U32_MAX: u64 = u32::MAX as u64;
 
 macro_rules! require_u32_operands {
-    ($stack:expr, [$($idx:expr),*], $err_ctx:expr) => {
-        require_u32_operands!($stack, [$($idx),*], ZERO, $err_ctx)
-    };
-    ($stack:expr, [$($idx:expr),*], $errno:expr, $err_ctx:expr) => {{
+    ($stack:expr, [$($idx:expr),*], $err_ctx:expr) => {{
         paste!{
             let mut invalid_values = Vec::new();
 
@@ -26,7 +23,7 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
+                return Err(ExecutionError::not_u32_values(invalid_values, $err_ctx));
             }
             // Return tuple of operands based on indices
             ($([<_operand_ $idx>].as_int()),*)
@@ -60,7 +57,7 @@ impl Process {
         err_code: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<(), ExecutionError> {
-        let (b, a) = require_u32_operands!(self.stack, [0, 1], err_code, err_ctx);
+        let (b, a) = require_u32_operands!(self.stack, [0, 1], err_ctx);
 
         self.add_range_checks(Operation::U32assert2(err_code), Felt::new(a), Felt::new(b), false);
 
@@ -319,8 +316,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(123u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
-            assert_eq!(err_code, Felt::from(123u32));
+        if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 2);
             // Values are collected in stack order: stack[0] (top) first, then stack[1]
             assert_eq!(values[0].as_int(), 4294967296u64); // stack[0] = top value
@@ -343,8 +339,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(456u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
-            assert_eq!(err_code, Felt::from(456u32));
+        if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967297u64);
         } else {
@@ -365,8 +360,7 @@ mod tests {
             process.execute_op(Operation::U32assert2(Felt::from(789u32)), program, &mut host);
         assert!(result.is_err());
 
-        if let Err(ExecutionError::NotU32Values { values, err_code, .. }) = result {
-            assert_eq!(err_code, Felt::from(789u32));
+        if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 1);
             assert_eq!(values[0].as_int(), 4294967296u64);
         } else {

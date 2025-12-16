@@ -14,10 +14,7 @@ use crate::{
 const U32_MAX: u64 = u32::MAX as u64;
 
 macro_rules! require_u32_operands {
-    ($processor:expr, [$($idx:expr),*], $err_ctx:expr) => {
-        require_u32_operands!($processor, [$($idx),*], miden_core::ZERO, $err_ctx)
-    };
-    ($processor:expr, [$($idx:expr),*], $errno:expr, $err_ctx:expr) => {{
+    ($processor:expr, [$($idx:expr),*], $err_ctx:expr) => {{
         let mut invalid_values = Vec::new();
 
         paste!{
@@ -29,7 +26,7 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(ExecutionError::not_u32_values(invalid_values, $errno, $err_ctx));
+                return Err(ExecutionError::not_u32_values(invalid_values, $err_ctx));
             }
             // Return tuple of operands based on indices
             ($([<operand_ $idx>]),*)
@@ -110,12 +107,10 @@ pub(super) fn op_u32add3<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32sub<P: Processor>(
     processor: &mut P,
-    op_idx: usize,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (first_old, second_old) =
-        require_u32_operands!(processor, [0, 1], Felt::from(op_idx as u32), err_ctx);
+    let (first_old, second_old) = require_u32_operands!(processor, [0, 1], err_ctx);
 
     let result = second_old.as_int().wrapping_sub(first_old.as_int());
     let first_new = Felt::new(result >> 63);
@@ -254,11 +249,11 @@ pub(super) fn op_u32xor<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32assert2<P: Processor>(
     processor: &mut P,
-    err_code: Felt,
+    _err_code: Felt,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (first, second) = require_u32_operands!(processor, [0, 1], err_code, err_ctx);
+    let (first, second) = require_u32_operands!(processor, [0, 1], err_ctx);
 
     tracer.record_u32_range_checks(processor.system().clk(), first, second);
 

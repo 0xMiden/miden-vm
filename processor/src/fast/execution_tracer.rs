@@ -426,7 +426,7 @@ impl Tracer for ExecutionTracer {
         &mut self,
         processor: &FastProcessor,
         execution_state: NodeExecutionState,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state

@@ -1,0 +1,33 @@
+name: Verify workspace packaging
+
+on:
+  push:
+    branches:
+      - main
+      - next
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC token exchange
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  verify-packaging:
+    if: ${{ github.repository_owner == '0xMiden' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify workspace can be packaged
+        uses: ./.github/actions/workspace-release
+        with:
+          mode: "dry-run"
+          verify-main-head: "false"
+          # ref left blank: uses the pushed ref

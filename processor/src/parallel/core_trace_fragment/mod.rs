@@ -79,9 +79,10 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let execution_state = self.context.initial_execution_state.clone();
         // Execute fragment generation and always finalize at the end
         let _ = self.fill_fragment_impl(execution_state);
+
+        let num_rows_built = self.num_rows_built();
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
         let final_system_rows = self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]);
-        let num_rows_built = self.num_rows_built();
         (final_stack_rows, final_system_rows, num_rows_built)
     }
 
@@ -188,6 +189,9 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 Continuation::FinishLoop(node_id) => {
                     self.finish_loop_node(node_id, &current_forest, None)?;
                 },
+                Continuation::FinishLoopUnentered(_node_id) => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                },
                 Continuation::FinishCall(node_id) => {
                     let call_node = current_forest
                         .get_node_by_id(node_id)
@@ -209,9 +213,28 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                     // External nodes don't generate END trace rows in the parallel processor
                     // as they only execute after_exit decorators
                 },
+                Continuation::ResumeBasicBlock {
+                    node_id: _,
+                    batch_index: _,
+                    op_idx_in_batch: _,
+                } => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                },
+                Continuation::Respan { node_id: _, batch_index: _ } => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                },
+                Continuation::FinishBasicBlock(_node_id) => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
+                },
+                Continuation::AfterExitDecorators(_node_id) => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                },
+                Continuation::AfterExitDecoratorsBasicBlock(_node_id) => {
+                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
                 },
             }
         }
@@ -422,11 +445,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
-                    // Note that the `op_idx_in_block` is only used in case of error, so we set it
-                    // to 0.
                     self.execute_sync_op(
                         op,
-                        0,
                         current_forest,
                         &mut NoopHost,
                         &(),
@@ -875,7 +895,6 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
-#[expect(clippy::too_many_arguments)]
 fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,

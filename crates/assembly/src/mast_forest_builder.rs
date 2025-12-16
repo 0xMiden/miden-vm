@@ -12,7 +12,8 @@ use miden_core::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
         ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
+        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
+        SubtreeIterator,
     },
 };
 
@@ -73,6 +74,9 @@ pub struct MastForestBuilder {
     /// Keeps track of the new ids assigned to nodes that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_mast_remapping: Remapping,
+    /// Keeps track of the new ids assigned to decorators that are copied from the MAST of
+    /// statically-linked libraries.
+    statically_linked_decorator_remapping: BTreeMap<DecoratorId, DecoratorId>,
 }
 
 impl MastForestBuilder {
@@ -524,6 +528,73 @@ impl MastForestBuilder {
         )
     }
 
+    /// Collects all decorators from a subtree in the statically linked forest and copies them
+    /// to the target forest, populating the decorator remapping.
+    ///
+    /// This must be called before copying nodes from the subtree to ensure all decorator IDs
+    /// can be properly remapped.
+    fn collect_decorators_from_subtree(&mut self, root_id: &MastNodeId) -> Result<(), Report> {
+        // Clear the decorator remapping for this subtree
+        self.statically_linked_decorator_remapping.clear();
+
+        // Iterate through all nodes in the subtree
+        for node_id in SubtreeIterator::new(root_id, &self.statically_linked_mast.clone()) {
+            // Get all decorator IDs used by this node
+            let decorator_ids: Vec<DecoratorId> = {
+                let mut ids = Vec::new();
+
+                // Collect before_enter decorators
+                ids.extend(self.statically_linked_mast.before_enter_decorators(node_id));
+
+                // Collect after_exit decorators
+                ids.extend(self.statically_linked_mast.after_exit_decorators(node_id));
+
+                // For BasicBlockNode, also collect op-indexed decorators
+                if let MastNode::Block(block_node) = &self.statically_linked_mast[node_id] {
+                    for (_idx, decorator_id) in
+                        block_node.indexed_decorator_iter(&self.statically_linked_mast)
+                    {
+                        ids.push(decorator_id);
+                    }
+                }
+
+                ids
+            };
+
+            // Copy each decorator to the target forest if not already copied
+            for old_decorator_id in decorator_ids {
+                if !self.statically_linked_decorator_remapping.contains_key(&old_decorator_id) {
+                    let decorator = self.statically_linked_mast[old_decorator_id].clone();
+                    let new_decorator_id = self.ensure_decorator(decorator)?;
+                    self.statically_linked_decorator_remapping
+                        .insert(old_decorator_id, new_decorator_id);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Builds a node builder with remapped children and decorators for copying from statically
+    /// linked libraries.
+    ///
+    /// Delegates to the generic `build_node_with_remapped_ids` helper to avoid code duplication
+    /// with `MastForestMerger`.
+    fn build_with_remapped_ids(
+        &self,
+        node_id: MastNodeId,
+        node: MastNode,
+    ) -> Result<MastNodeBuilder, Report> {
+        miden_core::mast::build_node_with_remapped_ids(
+            node_id,
+            node,
+            &self.statically_linked_mast,
+            &self.statically_linked_mast_remapping,
+            &self.statically_linked_decorator_remapping,
+        )
+        .into_diagnostic()
+    }
+
     /// Adds a node corresponding to the given MAST root, according to how it is linked.
     ///
     /// * If statically-linked, then the entire subtree is copied, and the MastNodeId of the root of
@@ -531,11 +602,13 @@ impl MastForestBuilder {
     /// * If dynamically-linked, then an external node is inserted, and its MastNodeId is returned
     pub fn ensure_external_link(&mut self, mast_root: Word) -> Result<MastNodeId, Report> {
         if let Some(root_id) = self.statically_linked_mast.find_procedure_root(mast_root) {
+            // First, collect and copy all decorators from the subtree
+            self.collect_decorators_from_subtree(&root_id)?;
+
+            // Then copy all nodes with remapped children and decorators
             for old_id in SubtreeIterator::new(&root_id, &self.statically_linked_mast.clone()) {
-                let builder = self.statically_linked_mast[old_id]
-                    .clone()
-                    .to_builder(&self.statically_linked_mast)
-                    .remap_children(&self.statically_linked_mast_remapping);
+                let node = self.statically_linked_mast[old_id].clone();
+                let builder = self.build_with_remapped_ids(old_id, node)?;
                 let new_id = self.ensure_node(builder)?;
                 self.statically_linked_mast_remapping.insert(old_id, new_id);
             }

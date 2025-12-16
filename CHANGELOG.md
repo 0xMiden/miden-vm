@@ -2,6 +2,22 @@
 
 ## 0.21.0 (TBD)
 
+#### Enhancements
+
+#### Changes
+
+- [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).
+- Run batch inversion concurrently per fragment in parallel trace generation ([#2405](https://github.com/0xMiden/miden-vm/issues/2405)).
+- Adds a cached commitment to the `MastForest` ([#2447](https://github.com/0xMiden/miden-vm/pull/2447))
+- Add MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).
+- Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
+- Removed undocumented `err_code` field from `ExecutionError::NotU32Values` ([#2419](https://github.com/0xMiden/miden-vm/pull/2419)).
+- Moved `bytes_to_packed_u32_elements` to `miden-core::utils` and added `packed_u32_elements_to_bytes` inverse function ([#2458](https://github.com/0xMiden/miden-vm/pull/2458)).
+
+## 0.20.1 (2025-12-14)
+
+- Fix issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
+
 ## 0.20.0 (2025-12-05)
 
 #### Enhancements
@@ -15,6 +31,7 @@
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
 - Added new `pad_and_hash_elements` procedure to the `std::crypto::hashes::rpo` module ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
 - Added padding option for the `adv.push_mapvaln` instruction ([#2398](https://github.com/0xMiden/miden-vm/pull/2398)).
+- Added new `FastProcessor::step()` method that executes a single clock cycle ([#2440](https://github.com/0xMiden/miden-vm/pull/2440))
 
 #### Changes
 

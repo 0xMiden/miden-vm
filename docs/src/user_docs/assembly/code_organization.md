@@ -13,7 +13,7 @@ Miden assembly programs are organized into procedures. Procedures, in turn, can 
 ### Procedures
 A *procedure* can be used to encapsulate a frequently-used sequence of instructions which can later be invoked via a label. A procedure is introduced using the `proc` keyword. Procedure definitions consist of the following parts, in the order they appear:
 
-* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes that modify the procedure itself. Currently, the only built-in attribute is `@locals(N)`, which specifies the number of procedure locals allocated for the procedure. See the [Attributes](#attributes) section for more on their syntax and semantics.
+* Zero or more attributes which modify the procedure definition, or annotate it in some way. These can be user-defined, but there are also built-in attributes that modify the procedure itself. Currently, the only built-in attribute is `@locals(N)`, which specifies the number of procedure locals allocated for the procedure. See the [Procedure Attributes](#procedure-attributes) section for more on their syntax and semantics.
 * An optional visibility modifier, i.e. `pub` if the procedure is to be exported from the containing module.
 * The `proc` keyword
 * The procedure name/label
@@ -84,6 +84,33 @@ During execution of the `dynexec` instruction, the VM does the following:
 4. Execute the loaded code block.
 
 The `dyncall` instruction is used the same way, with the difference that it involves a context switch to a new context when executing the referenced block, and switching back to the calling context once execution of the callee completes.
+
+### Procedure attributes
+
+Procedure attributes (also called annotations) provide a mechanism to attach arbitrary metadata to a procedure definition in Miden Assembly. Some attributes are built-in, in that they are recognized by the parser/assembler, and in some cases modify the procedure definition itself, e.g. `@locals(N)`. In general though, attributes are not significant to the parser/assembler, and are instead simply passed along during assembly and emitted in the artifact produced by the assembler.
+
+The set of built-in attributes is listed below:
+
+- `@locals(N)`, specifies that the assembler should allocate `N` elements of procedure local storage, which can then be accessed using procedure-local memory operations, e.g. `loc_load`
+
+#### Attribute syntax
+
+You may define your own attributes, and attach them to procedures as you see fit. The syntax for user-defined attributes depends on the type of attribute you wish to define:
+
+- **Marker attributes**, which consist solely of the attribute name, e.g. `@foo`. The presence (or lack thereof) of a specific marker is significant in and of itself.
+- **List attributes**, which consist of one or more comma-separated attribute values (described below) listed in parentheses, e.g. `@foo(1, "string")`.
+- **Key/value attributes**, which consist of one or more comma-separated key-value pairs listed in parentheses, where the key is an identifier, and the value is an attribute value. For example, `@foo(key1 = "value", key2 = 42)`
+
+#### Attribute values
+
+List and key/value attributes use attribute values to allow you to attach arbitrary information to a procedure. The only constraint is that these values must be expressed in the form of a supported value type. These types and their syntax are as follows:
+
+- **Identifiers**, i.e. unquoted strings which adhere to the Miden Assembly syntax for valid identifiers.
+- **Strings**, i.e. quoted strings
+- **Integer literals**, i.e. an integer value adhering to the same syntax rules as integers used in constant expressions. These can be in either decimal or hexadecimal format, but the value range is the same as Miden's field element type. Integers which overflow the field are treated as errors.
+- **Word literals**, i.e. a value representing a Miden _word_, which is an array of four field elements. These may be expressed as either an array of integer literals, or a hexadecimal encoding of the same.
+
+Note that attributes may _not_ reference constants, attribute values are not evaluated, only parsed.
 
 ### Modules
 A *module* consists of one or more items (procedures, constants, types). There are two types of modules: *library modules* and *executable modules* (also called *programs*).
@@ -362,7 +389,12 @@ proc foo(t: T, u: U) -> i1
 # values on the operand stack upon return, with the value of type i1 on top,
 # followed by the value of type T
 proc foo() -> (i1, T)
+
+# The same signature as above, but with named results
+proc foo() -> (flag: i1, value: T)
 ```
+
+Parameters must be named, while results may be either named or anonymous, however named results are only permitted when there is more than one result. Names of parameters and results are only used for documentation purposes.
 
 Values are expected to be laid out on the operand stack in the order they
 appear, with the first to appear being on top of the operand stack. Additionally, a value is expected to be laid out on the operand stack by mapping its byte representation to 1 or more elements by treating each element as 4 bytes (with the exception of `felt`, which is converted 1:1), with the lowest-addressable bytes appearing closest to the top of the operand stack. The size of a value type is rounded up to the nearest element boundary, so a value of type `u8` would require a full element on the operand stack to represent; as would a value of type `struct { a: u8, b: u8, b: u16 }`, as the total size of the struct is 4 bytes. A value of type `[u32; 4]` on the other hand, would require 4 elements on the operand stack, with the element on top of the stack corresponding to the `u32` value at index 0 of the array.

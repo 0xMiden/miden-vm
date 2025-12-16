@@ -1,5 +1,7 @@
 use alloc::{
+    boxed::Box,
     collections::{BTreeMap, BTreeSet},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -9,6 +11,7 @@ use core::{
 };
 
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
+use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,12 +22,12 @@ pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
     ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
-    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
-    AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
+    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
     crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
@@ -47,6 +50,9 @@ pub(crate) use multi_forest_node_iterator::*;
 mod node_fingerprint;
 pub use node_fingerprint::{DecoratorFingerprint, MastNodeFingerprint};
 
+mod node_builder_utils;
+pub use node_builder_utils::build_node_with_remapped_ids;
+
 #[cfg(test)]
 mod tests;
 
@@ -57,7 +63,7 @@ mod tests;
 ///
 /// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
 /// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -71,6 +77,10 @@ pub struct MastForest {
     /// Debug information including decorators and error codes.
     /// Always present (as per issue #1821), but can be empty for stripped builds.
     debug_info: DebugInfo,
+
+    /// Cached commitment to this MAST forest (commitment to all roots).
+    /// This is computed lazily on first access and invalidated on any mutation.
+    commitment_cache: OnceLockCompat<Word>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -83,9 +93,24 @@ impl MastForest {
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
             debug_info: DebugInfo::new(),
+            commitment_cache: OnceLockCompat::new(),
         }
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+/// Equality implementations
+impl PartialEq for MastForest {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare all fields except commitment_cache, which is derived data
+        self.nodes == other.nodes
+            && self.roots == other.roots
+            && self.advice_map == other.advice_map
+            && self.debug_info == other.debug_info
+    }
+}
+
+impl Eq for MastForest {}
 
 // ------------------------------------------------------------------------------------------------
 /// State mutators
@@ -105,6 +130,8 @@ impl MastForest {
 
         if !self.roots.contains(&new_root_id) {
             self.roots.push(new_root_id);
+            // Invalidate the cached commitment since we modified the roots
+            self.commitment_cache.take();
         }
     }
 
@@ -129,6 +156,10 @@ impl MastForest {
 
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
+
+        // Invalidate the cached commitment since we modified the forest structure
+        self.commitment_cache.take();
+
         id_remappings
     }
 
@@ -156,12 +187,12 @@ impl MastForest {
     ///
     /// This operation performs node deduplication by merging the forest with itself.
     /// The method assumes that decorators have already been stripped if that is desired.
-    /// The operation modifies the forest in-place, updating all node references as needed.
+    /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
     /// 1. Merging the forest with itself to deduplicate identical nodes
     /// 2. Updating internal node references and remappings
-    /// 3. Modifying the forest in-place with the compacted result
+    /// 3. Returning the compacted forest and root map
     ///
     /// # Examples
     ///
@@ -174,23 +205,18 @@ impl MastForest {
     /// // First strip decorators if needed
     /// forest.strip_decorators();
     ///
-    /// // Then compact the forest
-    /// let root_map = forest.compact();
+    /// // Then compact the forest (consumes the original)
+    /// let (compacted_forest, root_map) = forest.compact();
     ///
-    /// // Forest is now compacted with duplicate nodes merged
+    /// // compacted_forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(&mut self) -> MastForestRootMap {
+    pub fn compact(self) -> (MastForest, MastForestRootMap) {
         // Merge with itself to deduplicate nodes
         // Note: This cannot fail for a self-merge under normal conditions.
         // The only possible failures (TooManyNodes, TooManyDecorators) would require the
         // original forest to be at capacity limits, at which point compaction wouldn't help.
-        let (compacted_forest, root_map) = MastForest::merge([&*self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge");
-
-        // Replace current forest with compacted version
-        *self = compacted_forest;
-
-        root_map
+        MastForest::merge([&self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge")
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -385,6 +411,19 @@ impl MastForest {
         miden_crypto::hash::rpo::Rpo256::merge_many(&digests)
     }
 
+    /// Returns the commitment to this MAST forest.
+    ///
+    /// The commitment is computed as the sequential hash of all procedure roots in the forest.
+    /// This value is cached after the first computation and reused for subsequent calls,
+    /// unless the forest is mutated (in which case the cache is invalidated).
+    ///
+    /// The commitment uniquely identifies the forest's structure, as each root's digest
+    /// transitively includes all of its descendants. Therefore, a commitment to all roots
+    /// is a commitment to the entire forest.
+    pub fn commitment(&self) -> Word {
+        *self.commitment_cache.get_or_init(|| self.compute_nodes_commitment(&self.roots))
+    }
+
     /// Returns the number of nodes in this MAST forest.
     pub fn num_nodes(&self) -> u32 {
         self.nodes.len() as u32
@@ -493,6 +532,103 @@ impl MastForest {
     ) {
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
+
+    /// Returns the [`AssemblyOp`] associated with this node and operation (if provided), if any.
+    ///
+    /// If the `target_op_idx` is provided, the method treats the node as having operations and will
+    /// return the assembly op associated with the operation at the corresponding index. If no
+    /// `target_op_idx` is provided, the method will return the first assembly op found
+    /// (effectively assuming that the node has at most one associated [`AssemblyOp`]).
+    pub fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        let node = &self[node_id];
+
+        // Replicate the behavior of the original MastNodeErrorContext::decorators method
+        // by collecting all decorators in the correct order for each node type
+        let decorator_links: Box<dyn Iterator<Item = (usize, DecoratorId)>> = match node {
+            MastNode::Block(block_node) => {
+                let num_ops: usize = block_node.num_operations() as usize;
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
+                let op_iter = self
+                    .decorator_links_for_node(node_id)
+                    .expect("Block node must have some valid set of decorator links");
+                let after_iter =
+                    self.after_exit_decorators(node_id).iter().map(move |&id| (num_ops, id));
+
+                Box::new(before_iter.chain(op_iter).chain(after_iter))
+            },
+            _ => {
+                // For all other node types: before_enter at index 0, after_exit at index 1
+                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
+
+                let after_iter = self.after_exit_decorators(node_id).iter().map(|&id| (1, id));
+
+                Box::new(before_iter.chain(after_iter))
+            },
+        };
+
+        match target_op_idx {
+            // If a target operation index is provided, return the assembly op associated with that
+            // operation.
+            Some(target_op_idx) => {
+                for (op_idx, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
+                        // when an instruction compiles down to multiple operations, only the first
+                        // operation is associated with the assembly op. We need to check if the
+                        // target operation index falls within the range of operations associated
+                        // with the assembly op.
+                        if target_op_idx >= op_idx
+                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
+                        {
+                            return Some(assembly_op);
+                        }
+                    }
+                }
+            },
+            // If no target operation index is provided, return the first assembly op found.
+            None => {
+                for (_, decorator_id) in decorator_links {
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    {
+                        return Some(assembly_op);
+                    }
+                }
+            },
+        }
+
+        None
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Validation methods
+impl MastForest {
+    /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
+    /// 1. Power-of-two number of groups in each batch
+    /// 2. No operation group ends with an operation requiring an immediate value
+    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
+    ///    indptr integrity, bounds checking)
+    ///
+    /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
+    /// at assembly time rather than dynamically during execution, and adds comprehensive
+    /// structural validation to prevent deserialization-time panics.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        for (node_id_idx, node) in self.nodes.iter().enumerate() {
+            let node_id =
+                MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
+            if let MastNode::Block(basic_block) = node {
+                basic_block.validate_batch_invariants().map_err(|error_msg| {
+                    MastForestError::InvalidBatchPadding(node_id, error_msg)
+                })?;
+            }
+        }
+        Ok(())
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -511,6 +647,64 @@ impl MastForest {
         // we use u64 as keys for the map
         self.debug_info.insert_error_code(code.as_int(), msg);
         code
+    }
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+#[cfg(test)]
+impl MastForest {
+    /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
+    ///
+    /// This helper method combines before_enter, operation-indexed, and after_exit decorators
+    /// into a single collection, which is useful for testing decorator positions and ordering.
+    ///
+    /// **Performance Warning**: This method performs multiple allocations through collect() calls
+    /// and should not be relied upon for performance-critical code. It is intended for testing
+    /// only.
+    pub fn all_decorators(&self, node_id: MastNodeId) -> Vec<(usize, DecoratorId)> {
+        let node = &self[node_id];
+
+        // For non-basic blocks, just get before_enter and after_exit decorators at position 0
+        if !node.is_basic_block() {
+            let before_enter_decorators: Vec<_> = self
+                .before_enter_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (0, deco_id))
+                .collect();
+
+            let after_exit_decorators: Vec<_> = self
+                .after_exit_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (1, deco_id))
+                .collect();
+
+            return [before_enter_decorators, after_exit_decorators].concat();
+        }
+
+        // For basic blocks, we need to handle operation-indexed decorators with proper positioning
+        let block = node.unwrap_basic_block();
+
+        // Before-enter decorators are at position 0
+        let before_enter_decorators: Vec<_> = self
+            .before_enter_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (0, deco_id))
+            .collect();
+
+        // Operation-indexed decorators with their actual positions
+        let op_indexed_decorators: Vec<_> =
+            self.decorator_links_for_node(node_id).unwrap().into_iter().collect();
+
+        // After-exit decorators are positioned after all operations
+        let after_exit_decorators: Vec<_> = self
+            .after_exit_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (block.num_operations() as usize, deco_id))
+            .collect();
+
+        [before_enter_decorators, op_indexed_decorators, after_exit_decorators].concat()
     }
 }
 
@@ -595,7 +789,7 @@ impl MastNodeId {
     }
 
     /// Returns a new [`MastNodeId`] from the given `value` without checking its validity.
-    pub(crate) fn new_unchecked(value: u32) -> Self {
+    pub fn new_unchecked(value: u32) -> Self {
         Self(value)
     }
 
@@ -797,6 +991,8 @@ pub enum MastForestError {
     DecoratorError(DecoratorIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
+    #[error("invalid batch in basic block node {0:?}: {1}")]
+    InvalidBatchPadding(MastNodeId, String),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly

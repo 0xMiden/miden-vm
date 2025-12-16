@@ -259,6 +259,12 @@ fn test_masm_consistency(
     let processor = FastProcessor::new(&stack_inputs);
     let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
 
+    // fast processor by step
+    let stepped_stack_outputs = {
+        let processor = FastProcessor::new(&stack_inputs);
+        processor.execute_by_step_sync(&program, &mut host).unwrap()
+    };
+
     // slow processor
     let mut slow_processor = Process::new(
         kernel_lib.map(|k| k.kernel().clone()).unwrap_or_default(),
@@ -268,6 +274,7 @@ fn test_masm_consistency(
     );
     let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap();
 
+    assert_eq!(fast_stack_outputs, stepped_stack_outputs);
     assert_eq!(fast_stack_outputs, slow_stack_outputs);
 }
 
@@ -337,7 +344,13 @@ fn test_masm_errors_consistency(
 
     // fast processor
     let processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap_err();
+    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
+
+    // fast processor by step
+    let fast_stepped_err = {
+        let processor = FastProcessor::new(&stack_inputs);
+        processor.execute_by_step_sync(&program, &mut host).unwrap_err()
+    };
 
     // slow processor
     let mut slow_processor = Process::new(
@@ -346,9 +359,10 @@ fn test_masm_errors_consistency(
         AdviceInputs::default(),
         ExecutionOptions::default(),
     );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap_err();
+    let slow_err = slow_processor.execute(&program, &mut host).unwrap_err();
 
-    assert_eq!(fast_stack_outputs.to_string(), slow_stack_outputs.to_string());
+    assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
+    assert_eq!(fast_err.to_string(), slow_err.to_string());
 }
 
 /// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.

@@ -588,43 +588,73 @@ impl Test {
         &self,
         slow_result: &Result<StackOutputs, ExecutionError>,
     ) {
+        fn compare_results(
+            left_result: &Result<StackOutputs, ExecutionError>,
+            right_result: &Result<StackOutputs, ExecutionError>,
+            left_name: &str,
+            right_name: &str,
+        ) {
+            match (left_result, right_result) {
+                (Ok(left_stack_outputs), Ok(right_stack_outputs)) => {
+                    assert_eq!(
+                        left_stack_outputs, right_stack_outputs,
+                        "stack outputs do not match between {left_name} and {right_name}"
+                    );
+                },
+                (Err(left_err), Err(right_err)) => {
+                    // assert that diagnostics match
+                    let right_diagnostic =
+                        format!("{}", PrintDiagnostic::new_without_color(right_err));
+                    let left_diagnostic =
+                        format!("{}", PrintDiagnostic::new_without_color(left_err));
+
+                    // Note: This assumes that the tests are run WITHOUT the `no_err_ctx` feature
+                    assert_eq!(
+                        left_diagnostic, right_diagnostic,
+                        "diagnostics do not match between {left_name} and {right_name}:\n{left_name}: {}\n{right_name}: {}",
+                        left_diagnostic, right_diagnostic
+                    );
+                },
+                (Ok(_), Err(right_err)) => {
+                    let right_diagnostic =
+                        format!("{}", PrintDiagnostic::new_without_color(right_err));
+                    panic!(
+                        "expected error, but {left_name} succeeded. {right_name} error:\n{right_diagnostic}"
+                    );
+                },
+                (Err(left_err), Ok(_)) => {
+                    panic!(
+                        "expected success, but {left_name} failed. {left_name} error:\n{left_err}"
+                    );
+                },
+            }
+        }
+
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
-        let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-        let fast_result = fast_process.execute_sync(&program, &mut host);
+        let fast_result = {
+            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
+            let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+            fast_process.execute_sync(&program, &mut host)
+        };
 
-        match (fast_result, slow_result) {
-            (Ok(fast_stack_outputs), Ok(slow_stack_outputs)) => {
-                assert_eq!(
-                    slow_stack_outputs, &fast_stack_outputs,
-                    "stack outputs do not match between slow and fast processors"
-                );
-            },
-            (Err(fast_err), Err(slow_err)) => {
-                // assert that diagnostics match
-                let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
-                let fast_diagnostic = format!("{}", PrintDiagnostic::new_without_color(fast_err));
+        let fast_result_by_step = {
+            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
+            let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+            fast_process.execute_by_step_sync(&program, &mut host)
+        };
 
-                // Note: This assumes that the tests are run WITHOUT the `no_err_ctx` feature
-                assert_eq!(
-                    slow_diagnostic, fast_diagnostic,
-                    "diagnostics do not match between slow and fast processors:\nSlow: {}\nFast: {}",
-                    slow_diagnostic, fast_diagnostic
-                );
-            },
-            (Ok(_), Err(slow_err)) => {
-                let slow_diagnostic = format!("{}", PrintDiagnostic::new_without_color(slow_err));
-                panic!(
-                    "expected error, but fast processor succeeded. slow error:\n{slow_diagnostic}"
-                );
-            },
-            (Err(fast_err), Ok(_)) => {
-                panic!("expected success, but fast processor failed. fast error:\n{fast_err}");
-            },
-        }
+        compare_results(
+            &fast_result,
+            &fast_result_by_step,
+            "fast processor",
+            "fast processor by step",
+        );
+
+        compare_results(slow_result, &fast_result, "slow processor", "fast processor");
     }
 
     fn assert_trace_with_parallel_trace_generator(

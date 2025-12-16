@@ -1,7 +1,5 @@
 use miden_processor::ExecutionError;
-use miden_utils_testing::{
-    Felt, U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, prop_randw,
-};
+use miden_utils_testing::{Felt, U32_BOUND, build_op_test, expect_exec_error_matches, prop_randw};
 
 mod arithmetic_ops;
 mod bitwise_ops;
@@ -18,10 +16,9 @@ pub fn test_input_out_of_bounds(asm_op: &str) {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 1 &&
-            values[0] == Felt::new(U32_BOUND) &&
-            err_code == ZERO
+            values[0] == Felt::new(U32_BOUND)
     );
 }
 
@@ -39,10 +36,9 @@ pub fn test_inputs_out_of_bounds(asm_op: &str, input_count: usize) {
 
         expect_exec_error_matches!(
             test,
-            ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+            ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
                 values.len() == 1 &&
-                values[0] == Felt::new(U32_BOUND) &&
-                err_code == ZERO
+                values[0] == Felt::new(U32_BOUND)
         );
     }
 }

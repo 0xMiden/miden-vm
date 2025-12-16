@@ -9,7 +9,7 @@ use crate::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        SplitNodeBuilder, node::MastNodeErrorContext,
+        SplitNodeBuilder,
     },
     operations::Operation,
 };
@@ -550,12 +550,42 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
         "after_exit decorator should not be duplicated in indexed decorators"
     );
 
-    // Verify that all decorators() method returns all decorators (this is the full iterator)
-    let all_decorators: Vec<_> = deserialized_block.decorators(&forest).collect();
-    assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
+    // Note: The decorators() method test was removed as MastNodeErrorContext trait has been removed
+    // The decorator functionality is now accessed through MastForest.get_assembly_op() directly
+}
 
-    // Verify the order: before_enter, op-indexed, after_exit
-    assert_eq!(all_decorators[0].1, before_enter_deco, "First decorator should be before_enter");
-    assert_eq!(all_decorators[1].1, op_deco, "Second decorator should be op-indexed");
-    assert_eq!(all_decorators[2].1, after_exit_deco, "Third decorator should be after_exit");
+/// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
+#[test]
+fn mast_forest_deserialize_invalid_ops_offset_fails() {
+    use crate::utils::Serializable;
+
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let serialized = forest.to_bytes();
+
+    use crate::utils::SliceReader;
+    let mut reader = SliceReader::new(&serialized);
+
+    let _: [u8; 8] = reader.read_array().unwrap(); // magic + version
+    let _node_count: usize = reader.read().unwrap();
+    let _decorator_count: usize = reader.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+
+    // Calculate offset to MastNodeInfo
+    let node_info_offset = 5 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+
+    // Corrupt the ops_offset field with an out-of-bounds value
+    let block_discriminant: u64 = 3;
+    let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
+
+    let mut corrupted = serialized;
+    corrupted_value.write_into(&mut &mut corrupted[node_info_offset..node_info_offset + 8]);
+
+    let result = MastForest::read_from_bytes(&corrupted);
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
 }

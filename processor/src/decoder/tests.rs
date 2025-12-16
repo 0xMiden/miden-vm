@@ -1705,7 +1705,6 @@ fn check_op_decoding(
     );
 }
 
-#[expect(clippy::too_many_arguments)]
 #[track_caller]
 fn check_op_decoding_with_imm(
     trace: &DecoderTrace,

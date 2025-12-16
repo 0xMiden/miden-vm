@@ -1,3 +1,6 @@
+// Allow unused assignments - required by miette::Diagnostic derive macro
+#![allow(unused_assignments)]
+
 use alloc::vec::Vec;
 
 use miden_utils_diagnostics::{Diagnostic, miette};

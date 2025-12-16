@@ -234,6 +234,17 @@ fn generate_core_trace_columns(
         &first_stack_top,
     );
 
+    // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
+    // This must be done after fixup_stack_and_system_rows since that function overwrites the first
+    // row of each fragment with non-inverted values.
+    {
+        let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
+        h0_column.par_chunks_mut(fragment_size).for_each(|chunk| {
+            let inverted = batch_inversion(chunk);
+            chunk.copy_from_slice(&inverted);
+        });
+    }
+
     // Truncate the core trace columns. After this point, there is no more uninitialized memory.
     for col in core_trace_columns.iter_mut() {
         col.truncate(total_core_trace_rows);
@@ -248,10 +259,6 @@ fn generate_core_trace_columns(
             "stack_rows should not be empty, which indicates that there are no trace fragments",
         ),
     );
-
-    // Run batch inversion on stack's H0 helper column
-    core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX] =
-        batch_inversion(&core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX]);
 
     core_trace_columns
 }
