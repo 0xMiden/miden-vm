@@ -1,0 +1,11 @@
+[workspace]
+members = [
+    "account",
+    "note"
+]
+
+[workspace.dependencies]
+my-account = { path = "account" }
+
+[profile.test]
+inherits = "dev"

@@ -1,0 +1,36 @@
+[package]
+name = "miden-project"
+version.workspace = true
+description = "Interface for working with Miden projects"
+documentation = "https://docs.rs/miden-project"
+readme = "README.md"
+categories = ["compilers", "no-std"]
+keywords = ["project", "miden"]
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+
+[features]
+default = ["std", "serde"]
+arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std"]
+serde = ["dep:serde", "dep:serde-untagged", "dep:toml", "miden-assembly-syntax/serde"]
+
+[dependencies]
+miden-assembly-syntax.workspace = true
+
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+serde-untagged = { workspace = true, optional = true }
+thiserror.workspace = true
+toml = { version = "0.9", optional = true, default-features = false, features = ["serde", "parse"] }
+
+[dev-dependencies]
+miden-core.workspace = true
+miden-test-serde-macros.workspace = true
+serde_json.workspace = true
+toml = { version = "0.9", default-features = false, features = ["std", "serde", "parse"] }
