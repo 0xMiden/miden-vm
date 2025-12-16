@@ -1406,6 +1406,7 @@ dependencies = [
  "num-traits",
  "proptest",
  "proptest-derive",
+ "rstest",
  "serde",
  "serde_json",
  "thiserror",
