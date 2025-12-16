@@ -162,14 +162,9 @@ impl System {
     ///   in the column.
     /// - the remainder of the `fn_hash` columns are filled with ZERO, which should be the last
     ///   values in these columns.
-    ///
-    /// `num_rand_rows` indicates the number of rows at the end of the trace which will be
-    /// overwritten with random values. This parameter is unused because last rows are just
-    /// duplicates of the prior rows and thus can be safely overwritten.
-    pub fn into_trace(mut self, trace_len: usize, num_rand_rows: usize) -> SysTrace {
+    pub fn into_trace(mut self, trace_len: usize) -> SysTrace {
         let clk: usize = self.clk().into();
-        // make sure that only the duplicate rows will be overwritten with random values
-        assert!(clk + num_rand_rows <= trace_len, "target trace length too small");
+        assert!(clk <= trace_len, "target trace length too small");
 
         // complete the clk column by filling in all values after the last clock cycle. The values
         // in the clk column are equal to the index of the row in the trace table.

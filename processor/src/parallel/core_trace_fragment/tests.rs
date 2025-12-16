@@ -1,7 +1,9 @@
-use alloc::{sync::Arc, vec::Vec};
+use alloc::vec::Vec;
+use std::sync::Arc;
 
 use miden_air::trace::{
-    CTX_COL_IDX,
+    CTX_COL_IDX, DECODER_TRACE_RANGE, DECODER_TRACE_WIDTH, FN_HASH_RANGE, SYS_TRACE_RANGE,
+    SYS_TRACE_WIDTH,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
@@ -10,18 +12,21 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    EMPTY_WORD, EventName, ONE, Program, WORD_SIZE, ZERO,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
 };
 use miden_utils_testing::rand::rand_value;
-use winter_prover::Trace;
 
-use crate::{
-    DefaultHost, ExecutionTrace, NoopEventHandler, fast::FastProcessor, parallel::build_trace,
+use super::{
+    super::{
+        ExecutionOptions, ExecutionTrace, Felt, Kernel, Operation, Process, StackInputs, Word,
+    },
+    build_op_group,
 };
+use crate::{AdviceInputs, DefaultHost, NoopEventHandler};
 
 // CONSTANTS
 // ================================================================================================
@@ -37,14 +42,14 @@ const EMIT_EVENT: EventName = EventName::new("test::emit::event");
 // TYPE ALIASES
 // ================================================================================================
 
-type SystemTrace = Vec<Vec<Felt>>;
-type DecoderTrace = Vec<Vec<Felt>>;
+type SystemTrace = [Vec<Felt>; SYS_TRACE_WIDTH];
+type DecoderTrace = [Vec<Felt>; DECODER_TRACE_WIDTH];
 
-// BASIC BLOCK TESTS
+// SPAN BLOCK TESTS
 // ================================================================================================
 
 #[test]
-fn test_basic_block_one_group_decoding() {
+fn basic_block_one_group() {
     let ops = vec![Operation::Pad, Operation::Add, Operation::Mul];
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
@@ -58,7 +63,7 @@ fn test_basic_block_one_group_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 1, 0, 0);
@@ -91,7 +96,7 @@ fn test_basic_block_one_group_decoding() {
 }
 
 #[test]
-fn test_basic_block_small_decoding() {
+fn basic_block_small() {
     let iv = [ONE, TWO];
     let ops = vec![
         Operation::Push(iv[0]),
@@ -112,7 +117,7 @@ fn test_basic_block_small_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
@@ -155,7 +160,7 @@ fn test_basic_block_small_decoding() {
 }
 
 #[test]
-fn test_basic_block_small_with_emit_decoding() {
+fn basic_block_small_with_emit() {
     let emit_event_felt = EMIT_EVENT.to_event_id().as_felt();
     let ops = vec![
         Operation::Push(ONE),
@@ -176,7 +181,7 @@ fn test_basic_block_small_with_emit_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
@@ -217,7 +222,7 @@ fn test_basic_block_small_with_emit_decoding() {
 }
 
 #[test]
-fn test_basic_block_decoding() {
+fn basic_block() {
     let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
     let ops = vec![
         Operation::Push(iv[0]),
@@ -246,7 +251,7 @@ fn test_basic_block_decoding() {
 
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 8, 0, 0);
@@ -309,7 +314,7 @@ fn test_basic_block_decoding() {
 }
 
 #[test]
-fn test_basic_block_with_respan_decoding() {
+fn span_block_with_respan() {
     let iv = [
         ONE,
         TWO,
@@ -354,7 +359,7 @@ fn test_basic_block_with_respan_decoding() {
 
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 12, 0, 0);
@@ -428,11 +433,11 @@ fn test_basic_block_with_respan_decoding() {
     }
 }
 
-// JOIN NODE TESTS
+// JOIN BLOCK TESTS
 // ================================================================================================
 
 #[test]
-fn test_join_node_decoding() {
+fn join_node() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -453,7 +458,7 @@ fn test_join_node_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), join_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace(&[], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
@@ -500,11 +505,11 @@ fn test_join_node_decoding() {
     }
 }
 
-// SPLIT NODE TESTS
+// SPLIT BLOCK TESTS
 // ================================================================================================
 
 #[test]
-fn test_split_node_true_decoding() {
+fn split_node_true() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -525,7 +530,7 @@ fn test_split_node_true_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), split_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[1], &program);
+    let (trace, trace_len) = build_trace(&[1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + EIGHT;
@@ -563,7 +568,7 @@ fn test_split_node_true_decoding() {
 }
 
 #[test]
-fn test_split_node_false_decoding() {
+fn split_node_false() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -584,7 +589,7 @@ fn test_split_node_false_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), split_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0], &program);
+    let (trace, trace_len) = build_trace(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + EIGHT;
@@ -625,9 +630,7 @@ fn test_split_node_false_decoding() {
 // ================================================================================================
 
 #[test]
-fn test_loop_node_decoding() {
-    use miden_core::{Operation, Word};
-
+fn loop_node() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -643,7 +646,7 @@ fn test_loop_node_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0, 1], &program);
+    let (trace, trace_len) = build_trace(&[0, 1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let body_addr = INIT_ADDR + EIGHT;
@@ -683,7 +686,7 @@ fn test_loop_node_decoding() {
 }
 
 #[test]
-fn test_loop_node_skip_decoding() {
+fn loop_node_skip() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -699,7 +702,7 @@ fn test_loop_node_skip_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0], &program);
+    let (trace, trace_len) = build_trace(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
@@ -729,9 +732,7 @@ fn test_loop_node_skip_decoding() {
 }
 
 #[test]
-fn test_loop_node_repeat_decoding() {
-    use miden_core::{Operation, Word};
-
+fn loop_node_repeat() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -747,7 +748,7 @@ fn test_loop_node_repeat_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0, 1, 1], &program);
+    let (trace, trace_len) = build_trace(&[0, 1, 1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let iter1_addr = INIT_ADDR + EIGHT;
@@ -810,8 +811,6 @@ fn test_loop_node_repeat_decoding() {
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
-    use miden_core::{Operation, Word};
-
     // build a program which looks like this:
     //
     // pub proc foo
@@ -881,8 +880,8 @@ fn test_call_decoding() {
 
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
-    let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program, kernel);
+    let (sys_trace, dec_trace,   trace_len) =
+        build_call_trace(&program, kernel);
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -969,18 +968,18 @@ fn test_call_decoding() {
     // --- check hasher state columns -------------------------------------------------------------
     // in the first row, the hasher state is set to hashes of (inner_join, last_span)
     let inner_join_hash = inner_join_node.digest();
-    let last_basic_block_hash = last_basic_block.digest();
+    let last_span_hash = last_basic_block.digest();
     assert_eq!(inner_join_hash, get_hasher_state1(&dec_trace, 0));
-    assert_eq!(last_basic_block_hash, get_hasher_state2(&dec_trace, 0));
+    assert_eq!(last_span_hash, get_hasher_state2(&dec_trace, 0));
 
     // in the second row, the hasher state is set to hashes of (first_span, bar_call)
-    let first_basic_block_hash = first_basic_block.digest();
+    let first_span_hash = first_basic_block.digest();
     let bar_call_hash = bar_call_node.digest();
-    assert_eq!(first_basic_block_hash, get_hasher_state1(&dec_trace, 1));
+    assert_eq!(first_span_hash, get_hasher_state1(&dec_trace, 1));
     assert_eq!(bar_call_hash, get_hasher_state2(&dec_trace, 1));
 
     // at the end of the first SPAN, the hasher state is set to the hash of the first child
-    assert_eq!(first_basic_block_hash, get_hasher_state1(&dec_trace, 7));
+    assert_eq!(first_span_hash, get_hasher_state1(&dec_trace, 7));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 7));
 
     // in the 8th row, we start the CALL block which has bar_join as its only child
@@ -989,13 +988,13 @@ fn test_call_decoding() {
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 8));
 
     // in the 9th row, the hasher state for JOIN is set to hashes of (bar_span, foo_call)
-    let bar_basic_block_hash = bar_basic_block.digest();
+    let bar_span_hash = bar_basic_block.digest();
     let foo_call_hash = foo_call_node.digest();
-    assert_eq!(bar_basic_block_hash, get_hasher_state1(&dec_trace, 9));
+    assert_eq!(bar_span_hash, get_hasher_state1(&dec_trace, 9));
     assert_eq!(foo_call_hash, get_hasher_state2(&dec_trace, 9));
 
     // at the end of the bar_span, the hasher state is set to the hash of the first child
-    assert_eq!(bar_basic_block_hash, get_hasher_state1(&dec_trace, 12));
+    assert_eq!(bar_span_hash, get_hasher_state1(&dec_trace, 12));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 12));
 
     // in the 13th row, we start the CALL block which has foo_span as its only child
@@ -1026,7 +1025,7 @@ fn test_call_decoding() {
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 20));
 
     // last span ends in the 24th row
-    assert_eq!(last_basic_block_hash, get_hasher_state1(&dec_trace, 24));
+    assert_eq!(last_span_hash, get_hasher_state1(&dec_trace, 24));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 24));
 
     // the program ends in the 25th row
@@ -1105,8 +1104,6 @@ fn test_call_decoding() {
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
-    use miden_core::{Operation, Word};
-
     // build a program which looks like this:
     //
     // --- kernel ---
@@ -1184,8 +1181,8 @@ fn test_syscall_decoding() {
 
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
-    let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program, kernel);
+    let (sys_trace, dec_trace,   trace_len) =
+        build_call_trace(&program, kernel);
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -1272,18 +1269,18 @@ fn test_syscall_decoding() {
     // --- check hasher state columns -------------------------------------------------------------
     // in the first row, the hasher state is set to hashes of (inner_join, last_span)
     let inner_join_hash = inner_join_node.digest();
-    let last_basic_block_hash = last_basic_block.digest();
+    let last_span_hash = last_basic_block.digest();
     assert_eq!(inner_join_hash, get_hasher_state1(&dec_trace, 0));
-    assert_eq!(last_basic_block_hash, get_hasher_state2(&dec_trace, 0));
+    assert_eq!(last_span_hash, get_hasher_state2(&dec_trace, 0));
 
     // in the second row, the hasher state is set to hashes of (first_span, bar_call)
-    let first_basic_block_hash = first_basic_block.digest();
+    let first_span_hash = first_basic_block.digest();
     let bar_call_hash = bar_call_node.digest();
-    assert_eq!(first_basic_block_hash, get_hasher_state1(&dec_trace, 1));
+    assert_eq!(first_span_hash, get_hasher_state1(&dec_trace, 1));
     assert_eq!(bar_call_hash, get_hasher_state2(&dec_trace, 1));
 
     // at the end of the first SPAN, the hasher state is set to the hash of the first child
-    assert_eq!(first_basic_block_hash, get_hasher_state1(&dec_trace, 7));
+    assert_eq!(first_span_hash, get_hasher_state1(&dec_trace, 7));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 7));
 
     // in the 8th row, we start the CALL block which has bar_join as its only child
@@ -1292,13 +1289,13 @@ fn test_syscall_decoding() {
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 8));
 
     // in the 9th row, the hasher state for JOIN is set to hashes of (bar_span, foo_call)
-    let bar_basic_block_hash = bar_basic_block.digest();
+    let bar_span_hash = bar_basic_block.digest();
     let foo_call_hash = foo_call_node.digest();
-    assert_eq!(bar_basic_block_hash, get_hasher_state1(&dec_trace, 9));
+    assert_eq!(bar_span_hash, get_hasher_state1(&dec_trace, 9));
     assert_eq!(foo_call_hash, get_hasher_state2(&dec_trace, 9));
 
     // at the end of the bar_span, the hasher state is set to the hash of the first child
-    assert_eq!(bar_basic_block_hash, get_hasher_state1(&dec_trace, 12));
+    assert_eq!(bar_span_hash, get_hasher_state1(&dec_trace, 12));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 12));
 
     // in the 13th row, we start the SYSCALL block which has foo_span as its only child
@@ -1329,7 +1326,7 @@ fn test_syscall_decoding() {
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 20));
 
     // last span ends in the 24th row
-    assert_eq!(last_basic_block_hash, get_hasher_state1(&dec_trace, 24));
+    assert_eq!(last_span_hash, get_hasher_state1(&dec_trace, 24));
     assert_eq!(EMPTY_WORD, get_hasher_state2(&dec_trace, 24));
 
     // the program ends in the 25th row
@@ -1392,13 +1389,10 @@ fn test_syscall_decoding() {
     }
 }
 
-// DYN NODE TESTS
+// DYN BLOCK TESTS
 // ================================================================================================
-
 #[test]
-fn test_dyn_node_decoding() {
-    use miden_core::{Operation, Word};
-
+fn dyn_block() {
     // Equivalent masm:
     //
     // proc foo
@@ -1451,7 +1445,7 @@ fn test_dyn_node_decoding() {
 
     let program = Program::new(mast_forest.into(), program_root_node_id);
 
-    let (trace, trace_len) = build_dyn_trace_helper(
+    let (trace, trace_len) = build_dyn_trace(
         &[
             foo_root_node.digest()[0].as_int(),
             foo_root_node.digest()[1].as_int(),
@@ -1547,7 +1541,6 @@ fn test_dyn_node_decoding() {
 
 // HELPER REGISTERS TESTS
 // ================================================================================================
-
 #[test]
 fn set_user_op_helpers_many() {
     // --- user operation with 4 helper values ----------------------------------------------------
@@ -1564,7 +1557,7 @@ fn set_user_op_helpers_many() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
-    let (trace, ..) = build_trace_helper(&[dividend as u64, divisor as u64], &program);
+    let (trace, ..) = build_trace(&[dividend as u64, divisor as u64], &program);
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.
@@ -1588,79 +1581,76 @@ fn set_user_op_helpers_many() {
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// We make the fragment size large enough here to avoid fragmenting the trace in multiple
-/// fragments, but still not too large so as to not cause memory allocation issues.
-const MAX_FRAGMENT_SIZE: usize = 1 << 20;
-
-/// Builds the trace using FastProcessor and parallel::build_trace, returning the decoder trace
-/// portion.
-fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
-    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
-    let processor = FastProcessor::new(&stack_inputs);
+fn build_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
+    let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
+    let mut process = Process::new(
+        Kernel::default(),
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
+    );
+    process.execute(program, &mut host).unwrap();
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host, MAX_FRAGMENT_SIZE).unwrap();
+    let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
+    let trace_len = trace.num_rows();
 
-    let trace = build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
+    (
+        trace
+            .get_column_range(DECODER_TRACE_RANGE)
+            .try_into()
+            .expect("failed to convert vector to array"),
+        trace_len,
+    )
+}
+
+fn build_dyn_trace(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
+    let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
+    let mut host = DefaultHost::default();
+    let mut process = Process::new(
+        Kernel::default(),
+        stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default(),
     );
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    process.execute(program, &mut host).unwrap();
 
-    // Extract decoder trace columns
-    let decoder_trace = extract_decoder_trace(&trace);
+    let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
+    let trace_len = trace.num_rows();
 
-    (decoder_trace, trace_len)
+    (
+        trace
+            .get_column_range(DECODER_TRACE_RANGE)
+            .try_into()
+            .expect("failed to convert vector to array"),
+        trace_len,
+    )
 }
 
-/// Builds the trace for DYN operations using FastProcessor and parallel::build_trace.
-fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
-    // DYN trace uses the same infrastructure
-    build_trace_helper(stack_inputs, program)
-}
-
-/// Builds both system and decoder traces for CALL/SYSCALL operations.
-fn build_call_trace_helper(
-    program: &Program,
-    kernel: Kernel,
-) -> (SystemTrace, DecoderTrace, usize) {
-    let processor = FastProcessor::new(&[]);
+fn build_call_trace(program: &Program, kernel: Kernel) -> (SystemTrace, DecoderTrace, usize) {
     let mut host = DefaultHost::default();
+    let stack_inputs = crate::StackInputs::default();
+    let mut process =
+        Process::new(kernel, stack_inputs, AdviceInputs::default(), ExecutionOptions::default());
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host, MAX_FRAGMENT_SIZE).unwrap();
+    process.execute(program, &mut host).unwrap();
 
-    let trace = build_trace(execution_output, trace_generation_context, program.hash(), kernel);
+    let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
+    let trace_len = trace.num_rows();
 
-    // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
-    let trace_len = trace.trace_len_summary().main_trace_len();
+    let sys_trace = trace
+        .get_column_range(SYS_TRACE_RANGE)
+        .try_into()
+        .expect("failed to convert vector to array");
 
-    let sys_trace = extract_system_trace(&trace);
-    let decoder_trace = extract_decoder_trace(&trace);
+    let decoder_trace = trace
+        .get_column_range(DECODER_TRACE_RANGE)
+        .try_into()
+        .expect("failed to convert vector to array");
 
     (sys_trace, decoder_trace, trace_len)
-}
-
-/// Extracts the decoder trace columns from the execution trace.
-fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
-    use miden_air::trace::DECODER_TRACE_RANGE;
-
-    let main_segment = trace.main_segment();
-    DECODER_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
-}
-
-/// Extracts the system trace columns from the execution trace.
-fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
-    use miden_air::trace::SYS_TRACE_RANGE;
-
-    let main_segment = trace.main_segment();
-    SYS_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
 // OPCODES
@@ -1671,7 +1661,7 @@ fn check_op_decoding(
     trace: &DecoderTrace,
     row_idx: usize,
     addr: Felt,
-    op: miden_core::Operation,
+    op: Operation,
     group_count: u64,
     op_idx: u64,
     in_span: u64,
@@ -1688,13 +1678,12 @@ fn check_op_decoding(
     );
     assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx), "op index mismatch");
 
-    let expected_batch_flags =
-        if op == miden_core::Operation::Span || op == miden_core::Operation::Respan {
-            let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
-            build_op_batch_flags(num_groups)
-        } else {
-            [ZERO, ZERO, ZERO]
-        };
+    let expected_batch_flags = if op == Operation::Span || op == Operation::Respan {
+        let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
+        build_op_batch_flags(num_groups)
+    } else {
+        [ZERO, ZERO, ZERO]
+    };
 
     for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
         assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {}", i);
@@ -1732,23 +1721,23 @@ fn check_op_decoding_with_imm(
 
     // then, ensure the immediate value is present in the hasher state of the most recent
     // SPAN/RESPAN row (immediates are absorbed into hasher state as separate groups)
-    let mut basic_block_row = None;
+    let mut span_row = None;
     for r in (0..=row_idx).rev() {
         if contains_op(trace, r, Operation::Span) || contains_op(trace, r, Operation::Respan) {
-            basic_block_row = Some(r);
+            span_row = Some(r);
             break;
         }
     }
-    let basic_block_row = basic_block_row.expect("no preceding SPAN/RESPAN row found for PUSH");
+    let span_row = span_row.expect("no preceding SPAN/RESPAN row found for PUSH");
 
     assert_eq!(
-        trace[HASHER_STATE_RANGE.start + imm_idx][basic_block_row],
+        trace[HASHER_STATE_RANGE.start + imm_idx][span_row],
         imm,
         "immediate value in hasher state mismatch"
     );
 }
 
-fn contains_op(trace: &DecoderTrace, row_idx: usize, op: miden_core::Operation) -> bool {
+fn contains_op(trace: &DecoderTrace, row_idx: usize, op: Operation) -> bool {
     op.op_code() == read_opcode(trace, row_idx)
 }
 
@@ -1775,14 +1764,11 @@ fn build_op_batch_flags(num_groups: usize) -> [Felt; NUM_OP_BATCH_FLAGS] {
 // SYSTEM REGISTERS
 // ------------------------------------------------------------------------------------------------
 
-use miden_air::trace::FN_HASH_RANGE;
-
-fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> miden_core::Word {
+fn get_fn_hash(trace: &SystemTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
-    // FN_HASH_RANGE is relative to the full trace, but SystemTrace only has system columns
-    // System trace columns are indexed 0..SYS_TRACE_WIDTH, and FN_HASH is columns 2-5
-    for (element, col_idx) in result.iter_mut().zip(FN_HASH_RANGE) {
-        *element = trace[col_idx][row_idx];
+    let trace = &trace[FN_HASH_RANGE];
+    for (element, column) in result.iter_mut().zip(trace) {
+        *element = column[row_idx];
     }
     result.into()
 }
@@ -1805,7 +1791,7 @@ fn get_hasher_state(trace: &DecoderTrace, row_idx: usize) -> [Felt; NUM_HASHER_C
     result
 }
 
-fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter()) {
         *result = column[row_idx];
@@ -1813,7 +1799,7 @@ fn get_hasher_state1(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
     result.into()
 }
 
-fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> miden_core::Word {
+fn get_hasher_state2(trace: &DecoderTrace, row_idx: usize) -> Word {
     let mut result = [ZERO; WORD_SIZE];
     for (result, column) in result.iter_mut().zip(trace[HASHER_STATE_RANGE].iter().skip(4)) {
         *result = column[row_idx];
@@ -1827,22 +1813,4 @@ fn build_expected_hasher_state(values: &[Felt]) -> [Felt; NUM_HASHER_COLUMNS] {
         result[i] = *value;
     }
     result
-}
-
-// TEST HELPERS
-// ================================================================================================
-
-/// Build an operation group from the specified list of operations.
-#[cfg(test)]
-pub fn build_op_group(ops: &[Operation]) -> Felt {
-    use miden_core::mast::OP_GROUP_SIZE;
-
-    let mut group = 0u64;
-    let mut i = 0;
-    for op in ops.iter() {
-        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
-        i += 1;
-    }
-    assert!(i <= OP_GROUP_SIZE, "too many ops");
-    Felt::new(group)
 }

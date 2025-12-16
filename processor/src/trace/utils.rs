@@ -6,7 +6,7 @@ use miden_core::ExtensionField;
 #[cfg(test)]
 use miden_core::{Operation, utils::ToElements};
 
-use super::{Felt, NUM_RAND_ROWS};
+use super::Felt;
 use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 
 // TRACE FRAGMENT
@@ -125,7 +125,7 @@ impl TraceLenSummary {
 
     /// Returns `trace_len` rounded up to the next power of two.
     pub fn padded_trace_len(&self) -> usize {
-        (self.trace_len() + NUM_RAND_ROWS).next_power_of_two()
+        self.trace_len().next_power_of_two()
     }
 
     /// Returns the percent (0 - 100) of the steps that were added to the trace to pad it to the

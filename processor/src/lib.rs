@@ -78,7 +78,7 @@ pub use chiplets::MemoryError;
 
 mod trace;
 use trace::TraceFragment;
-pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
+pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
 
 mod errors;
 pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};

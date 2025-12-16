@@ -4,7 +4,7 @@ use miden_air::trace::{
 use miden_core::{Field, Operation};
 use miden_utils_testing::rand::rand_array;
 
-use super::{Felt, NUM_RAND_ROWS, ONE, ZERO, build_trace_from_ops};
+use super::{Felt, ONE, ZERO, build_trace_from_ops};
 
 /// This test checks that range check lookups from stack operations are balanced by the range checks
 /// processed in the Range Checker.
@@ -44,7 +44,7 @@ fn b_range_trace_stack() {
     // values.) An extra row is added to pad the u16::MAX value.
     let len_16bit = 44 + 1;
     // The start of the values in the range checker table.
-    let values_start = trace.length() - len_16bit - NUM_RAND_ROWS;
+    let values_start = trace.length() - len_16bit;
 
     // After the padded rows, the first value will be unchanged.
     assert_eq!(expected, b_range[values_start]);
@@ -61,7 +61,7 @@ fn b_range_trace_stack() {
 
     // --- Check the last value of the b_range column is zero --------------------------------------
 
-    let last_row = b_range.len() - NUM_RAND_ROWS - 1;
+    let last_row = b_range.len() - 1;
     assert_eq!(ZERO, b_range[last_row]);
 }
 
@@ -98,7 +98,7 @@ fn b_range_trace_mem() {
     // 3  ..., 65535. (0 and 4 are both range-checked. 65535 is the max, and the rest are "bridge"
     // values.) An extra row is added to pad the u16::MAX value.
     let len_16bit = 40 + 1;
-    let values_start = trace.length() - len_16bit - NUM_RAND_ROWS;
+    let values_start = trace.length() - len_16bit;
 
     // The value should start at ZERO and be unchanged until the memory processor section begins.
     let mut expected = ZERO;
@@ -146,7 +146,7 @@ fn b_range_trace_mem() {
 
     // --- The value should now be ZERO for the rest of the trace. ---------------------------------
     assert_eq!(expected, ZERO);
-    for i in (values_start + 4)..(b_range.len() - NUM_RAND_ROWS) {
+    for i in (values_start + 4)..(b_range.len()) {
         assert_eq!(ZERO, b_range[i]);
     }
 }

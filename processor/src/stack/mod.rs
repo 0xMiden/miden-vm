@@ -329,14 +329,9 @@ impl Stack {
     ///
     /// If the stack trace is smaller than the specified `trace_len`, last value in each column is
     /// duplicated until the length of the columns reaches `trace_len`.
-    ///
-    /// `num_rand_rows` indicates the number of rows at the end of the trace which will be
-    /// overwritten with random values. This parameter is unused because last rows are just
-    /// duplicates of the prior rows and thus can be safely overwritten.
-    pub fn into_trace(self, trace_len: usize, num_rand_rows: usize) -> super::StackTrace {
+    pub fn into_trace(self, trace_len: usize) -> super::StackTrace {
         let clk = self.current_clk().as_usize();
-        // make sure that only the duplicate rows will be overwritten with random values
-        assert!(clk + num_rand_rows <= trace_len, "target trace length too small");
+        assert!(clk <= trace_len, "target trace length too small");
 
         // at the end of program execution we must be in the root context, and thus active and
         // full stack depth must be the same.

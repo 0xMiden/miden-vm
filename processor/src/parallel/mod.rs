@@ -36,7 +36,7 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
+    trace::AuxTraceBuilders,
     utils::invert_column_allow_zeros,
 };
 
@@ -101,7 +101,7 @@ pub fn build_trace(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Compute the final main trace length, after accounting for random rows
+    // Compute the final main trace length
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
 
@@ -109,8 +109,8 @@ pub fn build_trace(
         || pad_trace_columns(&mut core_trace_columns, main_trace_len),
         || {
             rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len, 0),
-                || chiplets.into_trace(main_trace_len, 0, final_pc_transcript.state()),
+                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || chiplets.into_trace(main_trace_len, final_pc_transcript.state()),
             )
         },
     );
@@ -119,19 +119,12 @@ pub fn build_trace(
     let padding_columns = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
     // Chain all trace columns together
-    let mut trace_columns: Vec<Vec<Felt>> = core_trace_columns
+    let trace_columns: Vec<Vec<Felt>> = core_trace_columns
         .into_iter()
         .chain(range_checker_trace.trace)
         .chain(chiplets_trace.trace)
         .chain(padding_columns)
         .collect();
-
-    // Fill the random rows with zeros (Plonky3 doesn’t require random padding yet).
-    for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
-        for column in trace_columns.iter_mut() {
-            column[i] = ZERO;
-        }
-    }
 
     // Create the MainTrace
     let main_trace = {
@@ -169,9 +162,8 @@ fn compute_main_trace_length(
     // Get the trace length required to hold all execution trace steps
     let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
 
-    // Pad the trace length to the next power of two and ensure that there is space for random
-    // rows
-    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
+    // Pad the trace length to the next power of two
+    let trace_len = max_len.next_power_of_two();
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
@@ -588,7 +580,7 @@ fn initialize_chiplets(
 
 fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     let total_program_rows = trace_columns[0].len();
-    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= main_trace_len);
+    assert!(total_program_rows <= main_trace_len);
 
     let num_padding_rows = main_trace_len - total_program_rows;
 

@@ -9,7 +9,7 @@ use miden_air::{
 };
 use miden_core::{ExtensionField, ZERO};
 
-use super::{Felt, NUM_RAND_ROWS, uninit_vector};
+use super::{Felt, uninit_vector};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
@@ -116,7 +116,7 @@ impl AuxTraceBuilder {
             .iter()
             .zip(main_trace.get_column(V_COL_IDX).iter())
             .enumerate()
-            .take(main_trace.num_rows() - NUM_RAND_ROWS - 1)
+            .take(main_trace.num_rows() - 1)
             .skip(self.values_start)
         {
             b_range_idx = row_idx + 1;

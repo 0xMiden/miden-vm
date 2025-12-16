@@ -27,8 +27,8 @@ use miden_core::{
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    NUM_RAND_ROWS, ONE, Operation, ZERO, build_span_with_respan_ops,
-    build_trace_from_ops_with_inputs, build_trace_from_program, init_state_from_words, rand_array,
+    ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
+    build_trace_from_program, init_state_from_words, rand_array,
 };
 use crate::StackInputs;
 
@@ -117,7 +117,7 @@ pub fn b_chip_span() {
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in HASH_CYCLE_LEN..trace.length() - NUM_RAND_ROWS {
+    for row in HASH_CYCLE_LEN..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -212,7 +212,7 @@ pub fn b_chip_span_with_respan() {
     assert_eq!(expected, b_chip[22]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 22..trace.length() - NUM_RAND_ROWS {
+    for row in 22..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -333,7 +333,7 @@ pub fn b_chip_merge() {
     assert_eq!(expected, b_chip[16]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 16..trace.length() - NUM_RAND_ROWS {
+    for row in 16..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -445,7 +445,7 @@ pub fn b_chip_permutation() {
     assert_eq!(expected, b_chip[16]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 16..trace.length() - NUM_RAND_ROWS {
+    for row in 16..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -573,7 +573,7 @@ pub fn b_chip_log_precompile() {
     assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (2 * HASH_CYCLE_LEN)..trace.length() - NUM_RAND_ROWS {
+    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -713,7 +713,7 @@ fn b_chip_mpverify() {
     assert_eq!(expected, b_chip[mp_verify_complete]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in mp_verify_complete..trace.length() - NUM_RAND_ROWS {
+    for row in mp_verify_complete..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -926,7 +926,7 @@ fn b_chip_mrupdate() {
     assert_eq!(expected, b_chip[mp_new_verify_complete]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in (mp_new_verify_complete)..trace.length() - NUM_RAND_ROWS {
+    for row in (mp_new_verify_complete)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
