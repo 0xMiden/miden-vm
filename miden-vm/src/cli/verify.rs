@@ -138,7 +138,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
         },
         "masm" => {
             // Compile kernel from assembly source
-            Assembler::default().assemble_kernel(kernel_path).wrap_err_with(|| {
+            Assembler::default().assemble_kernel(kernel_path.clone()).wrap_err_with(|| {
                 format!("Failed to compile kernel from `{}`", kernel_path.display())
             })?
         },
@@ -177,6 +177,7 @@ mod tests {
             output_file: None,
             proof_file: proof_path.clone(),
             program_hash: "00".to_string(),
+            kernel_file: None,
         };
 
         // exercise
