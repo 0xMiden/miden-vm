@@ -5,13 +5,12 @@ use miden_crypto::{Felt, WORD_SIZE, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use winter_math::FieldElement;
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::Kernel;
 use crate::{
     AdviceMap,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    utils::ToElements,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements},
 };
 
 // PROGRAM

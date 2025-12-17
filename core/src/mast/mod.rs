@@ -1016,9 +1016,9 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     where
         D: serde::Deserializer<'de>,
     {
-        // Deserialize bytes, then use winter-utils Deserializable
+        // Deserialize bytes, then use Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
+        let mut slice_reader = crate::utils::SliceReader::new(&bytes);
         crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
     }
 }

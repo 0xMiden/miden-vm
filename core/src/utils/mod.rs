@@ -14,7 +14,7 @@ pub use miden_crypto::{
     },
 };
 #[cfg(feature = "std")]
-pub use winter_utils::ReadAdapter;
+pub use miden_crypto::utils::ReadAdapter;
 pub use winter_utils::group_slice_elements;
 
 use crate::{Felt, Word};

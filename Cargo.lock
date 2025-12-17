@@ -1340,6 +1340,7 @@ dependencies = [
  "winter-air",
  "winter-prover",
  "winter-rand-utils",
+ "winter-utils",
 ]
 
 [[package]]
@@ -1446,9 +1447,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc7981c1d907bb9864e24f2bd6304c4fca03a41fc4606c09edd6a7f5a8fc80fc"
+version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto#b71367810ef986289672f42b00ed623d00d89bc7"
 dependencies = [
  "blake3",
  "cc",
@@ -1460,6 +1460,7 @@ dependencies = [
  "hkdf",
  "k256",
  "miden-crypto-derive",
+ "miden-serde-utils",
  "num",
  "num-complex",
  "rand",
@@ -1479,9 +1480,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83479e7af490784c6f2d2e02cec5210fd6e5bc6ce3d4427734e36a773bca72d2"
+version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto#b71367810ef986289672f42b00ed623d00d89bc7"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1620,6 +1620,15 @@ dependencies = [
  "tracing",
  "winter-maybe-async",
  "winter-prover",
+]
+
+[[package]]
+name = "miden-serde-utils"
+version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto#b71367810ef986289672f42b00ed623d00d89bc7"
+dependencies = [
+ "winter-math",
+ "winter-utils",
 ]
 
 [[package]]
