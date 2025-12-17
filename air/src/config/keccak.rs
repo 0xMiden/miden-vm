@@ -59,7 +59,7 @@ pub type StarkConfigKeccak = StarkConfig<FriPcs, Challenge, Challenger>;
 /// - Keccak256 for the Fiat-Shamir challenger
 /// - KeccakF permutation for field element hashing in Merkle trees
 /// - FRI with 8x blowup (log_blowup = 3)
-/// - 27 query repetitions for ~100 bits of security
+/// - 27 query repetitions
 /// - 16 bits of proof-of-work
 /// - Binary folding (log_folding_factor = 1)
 ///
@@ -80,9 +80,9 @@ pub fn create_keccak_config() -> StarkConfigKeccak {
         log_blowup: 3,          // 8x blowup factor
         log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
         num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
-        proof_of_work_bits: 16, // Grinding parameter for extra security
+        proof_of_work_bits: 16, // Grinding parameter
         mmcs: challenge_mmcs,
-        log_folding_factor: 1, // Binary folding (fold by 2 each round)
+        log_folding_factor: 1, // Binary folding
     };
 
     let pcs = FriPcs::new(dft, val_mmcs, fri_config);

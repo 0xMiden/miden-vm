@@ -25,14 +25,7 @@ where
     builder.when_first_row().assert_zero(local.range[1].clone());
 
     // Last row: V[last] = 65535 (2^16 - 1)
-    let one_f = AB::F::ONE;
-    let two_f = one_f + one_f;
-    let mut val = two_f;
-    for _ in 0..15 {
-        // 2^16 = 2 * 2 * ... (16 times)
-        val *= two_f;
-    }
-    let sixty_five_k = val - one_f; // 2^16 - 1 = 65535
+    let sixty_five_k = AB::Expr::from_u32(65535);
     builder.when_last_row().assert_eq(local.range[1].clone(), sixty_five_k);
 }
 
@@ -52,25 +45,15 @@ pub fn enforce_range_transition_constraint<AB>(
 {
     let change_v = next.range[1].clone() - local.range[1].clone();
 
-    // Build constant expressions using ONE and arithmetic
-    let one_f = AB::F::ONE;
-    let three_f = one_f + one_f + one_f;
-    let nine_f = three_f * three_f;
-    let twenty_seven_f = nine_f * three_f;
-    let eighty_one_f = nine_f * nine_f;
-    let two_forty_three_f = eighty_one_f * three_f;
-    let seven_twenty_nine_f = two_forty_three_f * three_f;
-    let two_one_eight_seven_f = seven_twenty_nine_f * three_f;
-
-    // Convert to expressions
-    let one_expr: AB::Expr = AB::F::ONE.into();
-    let three: AB::Expr = three_f.into();
-    let nine: AB::Expr = nine_f.into();
-    let twenty_seven: AB::Expr = twenty_seven_f.into();
-    let eighty_one: AB::Expr = eighty_one_f.into();
-    let two_forty_three: AB::Expr = two_forty_three_f.into();
-    let seven_twenty_nine: AB::Expr = seven_twenty_nine_f.into();
-    let two_one_eight_seven: AB::Expr = two_one_eight_seven_f.into();
+    // Powers of 3: {1, 3, 9, 27, 81, 243, 729, 2187}
+    let one_expr = AB::Expr::ONE;
+    let three = AB::Expr::from_u16(3);
+    let nine = AB::Expr::from_u16(9);
+    let twenty_seven = AB::Expr::from_u16(27);
+    let eighty_one = AB::Expr::from_u16(81);
+    let two_forty_three = AB::Expr::from_u16(243);
+    let seven_twenty_nine = AB::Expr::from_u16(729);
+    let two_one_eight_seven = AB::Expr::from_u16(2187);
 
     // Note: Extra factor of change_v allows V to stay constant (change_v = 0) during padding
     builder.when_transition().assert_zero(
@@ -129,7 +112,7 @@ where
     let b_local = b_local_val;
     let b_next = b_next_val;
 
-    let one_expr: AB::Expr = AB::F::ONE.into();
+    let one_expr = AB::Expr::ONE;
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[14], mv1 = alpha + chiplets[15]
