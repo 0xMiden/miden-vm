@@ -120,6 +120,28 @@ impl Deserializable for PrecompileRequest {
     }
 }
 
+// winter_utils compatibility implementations
+// These allow PrecompileRequest to work with winterfell types in ExecutionProof
+impl winter_utils::Serializable for PrecompileRequest {
+    fn write_into<W: winter_utils::ByteWriter>(&self, target: &mut W) {
+        // Use the same serialization format as miden-serde-utils
+        target.write_u64(self.event_id.as_u64());
+        target.write_usize(self.calldata.len());
+        target.write_bytes(&self.calldata);
+    }
+}
+
+impl winter_utils::Deserializable for PrecompileRequest {
+    fn read_from<R: winter_utils::ByteReader>(
+        source: &mut R,
+    ) -> Result<Self, winter_utils::DeserializationError> {
+        let event_id = EventId::from_u64(source.read_u64()?);
+        let len = source.read_usize()?;
+        let calldata = source.read_vec(len)?;
+        Ok(Self::new(event_id, calldata))
+    }
+}
+
 // PRECOMPILE TRANSCRIPT TYPES
 // ================================================================================================
 

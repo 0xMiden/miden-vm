@@ -3,12 +3,11 @@ use alloc::{string::ToString, vec::Vec};
 use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    },
 };
 use winter_air::proof::Proof;
-use winter_utils::{Deserializable as WinterDeserializable, Serializable as WinterSerializable};
+use winter_utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
+};
 
 // EXECUTION PROOF
 // ================================================================================================
@@ -176,14 +175,7 @@ impl Deserializable for HashFunction {
 
 impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Serialize the Proof using winter_utils serialization into a byte vector
-        let mut proof_bytes = Vec::new();
-        WinterSerializable::write_into(&self.proof, &mut proof_bytes);
-        // Write the length and then the bytes
-        target.write_usize(proof_bytes.len());
-        target.write_bytes(&proof_bytes);
-
-        // Serialize the rest using miden_serde_utils serialization
+        self.proof.write_into(target);
         self.hash_fn.write_into(target);
         self.pc_requests.write_into(target);
     }
@@ -191,17 +183,7 @@ impl Serializable for ExecutionProof {
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // Read the proof bytes
-        let proof_len = source.read_usize()?;
-        let proof_bytes = source.read_vec(proof_len)?;
-
-        // Deserialize the Proof using winter_utils deserialization
-        let mut proof_reader = winter_utils::SliceReader::new(&proof_bytes);
-        let proof = WinterDeserializable::read_from(&mut proof_reader).map_err(|e| {
-            DeserializationError::InvalidValue(format!("Failed to deserialize proof: {}", e))
-        })?;
-
-        // Deserialize the rest using miden_serde_utils deserialization
+        let proof = Proof::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
