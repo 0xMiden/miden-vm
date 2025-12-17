@@ -40,36 +40,24 @@ pub use miden_air::ExecutionProof;
 /// `stack_outputs` slice, and the order of the rest of the output elements will also match the
 /// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
 ///
-/// The verifier accepts proofs generated using various parameter sets.
-/// Specifically, parameter sets targeting the following are accepted:
-/// - 96-bit security level, non-recursive context (BLAKE3 hash function).
-/// - 96-bit security level, recursive context (BLAKE3 hash function).
-/// - 128-bit security level, non-recursive context (RPO hash function).
-/// - 128-bit security level, recursive context (RPO hash function).
-///
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The protocol parameters used to generate the proof are not in the set of acceptable
-///   parameters.
-//#[tracing::instrument("verify_program", skip_all)]
+/// - The proof contains precompile requests. When precompile requests are present, use
+///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`].
+#[tracing::instrument("verify_program", skip_all)]
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let security_level = proof.security_level();
-    let (hash_fn, proof_bytes, ..) = proof.into_parts();
-    // Use default transcript state (all zeros) when no precompiles are used
-    let pc_transcript_state = PrecompileTranscriptState::default();
-    verify_stark(
+    let (security_level, _) = verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
-        pc_transcript_state,
-        hash_fn,
-        proof_bytes,
+        proof,
+        &PrecompileVerifierRegistry::new(),
     )?;
     Ok(security_level)
 }
