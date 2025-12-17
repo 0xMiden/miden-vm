@@ -93,6 +93,7 @@ fn next_u64() -> u64 {
     }
 }
 
+/// SplitMix64 hash function for mixing RNG state into high-quality random output.
 fn splitmix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
     z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);

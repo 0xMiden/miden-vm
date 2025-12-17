@@ -297,13 +297,11 @@ mod fast_parallel {
         let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
 
         let precompile_requests = trace.precompile_requests().to_vec();
-        let precompile_transcript_digest = trace.final_precompile_transcript().finalize();
 
         let proof = miden_air::ExecutionProof::new(
             proof_bytes,
             HashFunction::Blake3_256,
             precompile_requests,
-            precompile_transcript_digest,
         );
 
         // Verify the proof

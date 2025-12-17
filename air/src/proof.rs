@@ -2,12 +2,11 @@ use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
     crypto::hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    precompile::{PrecompileRequest, PrecompileTranscriptDigest},
+    precompile::PrecompileRequest,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
-use p3_uni_stark::StarkGenericConfig;
 use serde::{Deserialize, Serialize};
 
 // EXECUTION PROOF
@@ -23,27 +22,20 @@ pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
     pub precompile_requests: Vec<PrecompileRequest>,
-    pub precompile_transcript_digest: PrecompileTranscriptDigest,
 }
 
 impl ExecutionProof {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
-    /// function.
+    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash
+    /// function, and list of precompile requests.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
         precompile_requests: Vec<PrecompileRequest>,
-        precompile_transcript_digest: PrecompileTranscriptDigest,
     ) -> Self {
-        Self {
-            proof,
-            hash_fn,
-            precompile_requests,
-            precompile_transcript_digest,
-        }
+        Self { proof, hash_fn, precompile_requests }
     }
 
     // PUBLIC ACCESSORS
@@ -77,11 +69,6 @@ impl ExecutionProof {
         &self.precompile_requests
     }
 
-    /// Returns the finalized precompile transcript digest committed inside the proof.
-    pub fn precompile_transcript_digest(&self) -> PrecompileTranscriptDigest {
-        self.precompile_transcript_digest
-    }
-
     // SERIALIZATION / DESERIALIZATION
     // --------------------------------------------------------------------------------------------
 
@@ -104,15 +91,8 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(
-        self,
-    ) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>, PrecompileTranscriptDigest) {
-        (
-            self.hash_fn,
-            self.proof,
-            self.precompile_requests,
-            self.precompile_transcript_digest,
-        )
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
+        (self.hash_fn, self.proof, self.precompile_requests)
     }
 }
 
@@ -208,7 +188,6 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.precompile_transcript_digest.write_into(target);
         self.precompile_requests.write_into(target);
     }
 }
@@ -217,50 +196,8 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let precompile_transcript_digest = PrecompileTranscriptDigest::read_from(source)?;
         let precompile_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof {
-            proof,
-            hash_fn,
-            precompile_requests,
-            precompile_transcript_digest,
-        })
+        Ok(ExecutionProof { proof, hash_fn, precompile_requests })
     }
-}
-
-use p3_commit::Pcs;
-
-type Com<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Commitment;
-type PcsProof<SC> = <<SC as StarkGenericConfig>::Pcs as Pcs<
-    <SC as StarkGenericConfig>::Challenge,
-    <SC as StarkGenericConfig>::Challenger,
->>::Proof;
-
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
-pub struct Proof<SC: StarkGenericConfig> {
-    pub commitments: Commitments<Com<SC>>,
-    pub opened_values: OpenedValues<SC::Challenge>,
-    pub opening_proof: PcsProof<SC>,
-    pub degree_bits: usize,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Commitments<Com> {
-    pub trace: Com,
-    pub aux_trace: Com,
-    pub quotient_chunks: Com,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct OpenedValues<Challenge> {
-    pub trace_local: Vec<Challenge>,
-    pub trace_next: Vec<Challenge>,
-    pub aux_trace_local: Vec<Challenge>,
-    pub aux_trace_next: Vec<Challenge>,
-    pub quotient_chunks: Vec<Vec<Challenge>>,
 }

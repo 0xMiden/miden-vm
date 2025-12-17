@@ -205,7 +205,7 @@ impl StackTrace {
 
         // compute inverses in the h0 helper column using batch inversion; any ZERO in the vector
         // will remain unchanged
-        invert_column_allow_zeros(&mut trace[H0_COL_IDX], "stack.h0", 0);
+        invert_column_allow_zeros(&mut trace[H0_COL_IDX]);
 
         trace.try_into().expect("Failed to convert vector to an array")
     }

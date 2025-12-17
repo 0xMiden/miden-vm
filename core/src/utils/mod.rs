@@ -5,9 +5,9 @@ use core::{
     slice,
 };
 
+use miden_crypto::PrimeCharacteristicRing;
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
-use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -17,6 +17,7 @@ pub use miden_crypto::{
         uninit_vector,
     },
 };
+pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
 use crate::{Felt, Word};
 
@@ -229,31 +230,8 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
         .collect()
 }
 
-// FORMATTING
+// TESTS
 // ================================================================================================
-
-pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
-
-pub fn serial_batch_inversion<E: ExtensionField<Felt>>(values: &[E], result: &mut [E]) {
-    let mut last = E::ONE;
-    for (result, &value) in result.iter_mut().zip(values.iter()) {
-        *result = last;
-        if value != E::ZERO {
-            last *= value;
-        }
-    }
-
-    last = last.inverse();
-
-    for i in (0..values.len()).rev() {
-        if values[i] == E::ZERO {
-            result[i] = E::ZERO;
-        } else {
-            result[i] *= last;
-            last *= values[i];
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

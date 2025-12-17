@@ -13,7 +13,8 @@ use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
 pub use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
     precompile::{
-        PrecompileTranscriptDigest, PrecompileVerificationError, PrecompileVerifierRegistry,
+        PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
+        PrecompileVerifierRegistry,
     },
 };
 pub mod math {
@@ -60,15 +61,24 @@ pub fn verify(
 ) -> Result<u32, VerificationError> {
     let security_level = proof.security_level();
     let (hash_fn, proof_bytes, ..) = proof.into_parts();
-    verify_stark(program_info, stack_inputs, stack_outputs, hash_fn, proof_bytes)?;
+    // Use default transcript state (all zeros) when no precompiles are used
+    let pc_transcript_state = PrecompileTranscriptState::default();
+    verify_stark(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        pc_transcript_state,
+        hash_fn,
+        proof_bytes,
+    )?;
     Ok(security_level)
 }
 
 /// Verifies the proof together with all deferred precompile requests.
 ///
 /// This helper recomputes the precompile commitments using the supplied
-/// [`PrecompileVerifierRegistry`], rebuilds the transcript, compares it against the digest
-/// committed inside the proof, and then verifies the STARK proof.
+/// [`PrecompileVerifierRegistry`], rebuilds the transcript, and verifies the STARK proof
+/// with the recomputed transcript state as part of the public inputs.
 pub fn verify_with_precompiles(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -77,19 +87,22 @@ pub fn verify_with_precompiles(
     registry: &PrecompileVerifierRegistry,
 ) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     let security_level = proof.security_level();
-    let (hash_fn, proof_bytes, precompile_requests, expected_digest) = proof.into_parts();
+    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
 
+    // Recompute the precompile transcript by verifying all precompile requests
     let transcript = registry.requests_transcript(&precompile_requests)?;
+    let pc_transcript_state = transcript.state();
     let recomputed_digest = transcript.finalize();
 
-    if recomputed_digest != expected_digest {
-        return Err(VerificationError::PrecompileTranscriptMismatch {
-            expected: expected_digest,
-            actual: recomputed_digest,
-        });
-    }
-
-    verify_stark(program_info, stack_inputs, stack_outputs, hash_fn, proof_bytes)?;
+    // Verify the STARK proof with the recomputed transcript state in public inputs
+    verify_stark(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        pc_transcript_state,
+        hash_fn,
+        proof_bytes,
+    )?;
     Ok((security_level, recomputed_digest))
 }
 
@@ -97,11 +110,13 @@ fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    pc_transcript_state: PrecompileTranscriptState,
     hash_fn: HashFunction,
     proof_bytes: Vec<u8>,
 ) -> Result<(), VerificationError> {
     let program_hash = *program_info.program_hash();
-    let pub_inputs = PublicInputs::new(program_info, stack_inputs, stack_outputs);
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
     let public_values = pub_inputs.to_elements();
     let air = ProcessorAir::new();
 
@@ -165,14 +180,6 @@ pub enum VerificationError {
     /// A precompile verification check failed.
     #[error("precompile verification failed: {0}")]
     PrecompileVerification(#[from] PrecompileVerificationError),
-    /// The recomputed precompile transcript digest does not match the one committed in the proof.
-    #[error(
-        "precompile transcript mismatch (proof digest: {expected:?}, recomputed digest: {actual:?})"
-    )]
-    PrecompileTranscriptMismatch {
-        expected: PrecompileTranscriptDigest,
-        actual: PrecompileTranscriptDigest,
-    },
     /// A public input value is not a valid field element.
     #[error("the input {0} is not a valid field element")]
     InputNot(u64),
