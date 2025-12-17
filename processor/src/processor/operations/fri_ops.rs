@@ -26,13 +26,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let prev_value = {
         let pe1 = processor.stack().get(11);
         let pe0 = processor.stack().get(12);
-        QuadFelt::new([pe0, pe1])
+        QuadFelt::from_basis_coefficients_slice(&[pe0, pe1]).expect("slice has correct length")
     };
     // the verifier challenge for the current layer
     let alpha = {
         let a1 = processor.stack().get(13);
         let a0 = processor.stack().get(14);
-        QuadFelt::new([a0, a1])
+        QuadFelt::from_basis_coefficients_slice(&[a0, a1]).expect("slice has correct length")
     };
     // the memory address of the current layer
     let layer_ptr = processor.stack().get(15);
@@ -89,14 +89,14 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// value in the folded domain.
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v4, v5, v6, v7] = processor.stack().get_word(0).into();
-    let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
+    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
-        QuadFelt::new([v0, v1]),
-        QuadFelt::new([v2, v3]),
-        QuadFelt::new([v4, v5]),
-        QuadFelt::new([v6, v7]),
+        QuadFelt::from_basis_coefficients_slice(&[v0, v1]).expect("slice has correct length"),
+        QuadFelt::from_basis_coefficients_slice(&[v2, v3]).expect("slice has correct length"),
+        QuadFelt::from_basis_coefficients_slice(&[v4, v5]).expect("slice has correct length"),
+        QuadFelt::from_basis_coefficients_slice(&[v6, v7]).expect("slice has correct length"),
     ]
 }
 
