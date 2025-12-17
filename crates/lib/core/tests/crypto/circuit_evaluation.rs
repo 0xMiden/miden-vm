@@ -37,7 +37,10 @@ fn circuit_evaluation_prove_verify() {
 
     // the circuit
     let input_0: QuadFelt = rand_value();
-    let input_1 = input_0 * (input_0 - QuadFelt::from_basis_coefficients_slice(&[ONE, ZERO]).expect("slice has correct length"));
+    let input_1 = input_0
+        * (input_0
+            - QuadFelt::from_basis_coefficients_slice(&[ONE, ZERO])
+                .expect("slice has correct length"));
     // inputs
     let input_0_coeffs = input_0.as_basis_coefficients_slice();
     let input_1_coeffs = input_1.as_basis_coefficients_slice();

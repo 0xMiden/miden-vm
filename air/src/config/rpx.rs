@@ -9,8 +9,8 @@ use miden_crypto::hash::algebraic_sponge::rescue::rpx::{
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_field::extension::BinomialExtensionField;
-use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 use p3_merkle_tree::MerkleTreeMmcs;
+use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 use p3_uni_stark::StarkConfig;
 
 use crate::Felt;

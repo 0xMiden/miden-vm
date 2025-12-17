@@ -247,10 +247,26 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
     let coef = [
-        QuadFelt::from_basis_coefficients_slice(&[processor.stack().get(1), processor.stack().get(0)]).expect("slice has correct length"), // c0: (c0_0, c0_1)
-        QuadFelt::from_basis_coefficients_slice(&[processor.stack().get(3), processor.stack().get(2)]).expect("slice has correct length"), // c1: (c1_0, c1_1)
-        QuadFelt::from_basis_coefficients_slice(&[processor.stack().get(5), processor.stack().get(4)]).expect("slice has correct length"), // c2: (c2_0, c2_1)
-        QuadFelt::from_basis_coefficients_slice(&[processor.stack().get(7), processor.stack().get(6)]).expect("slice has correct length"), // c3: (c3_0, c3_1)
+        QuadFelt::from_basis_coefficients_slice(&[
+            processor.stack().get(1),
+            processor.stack().get(0),
+        ])
+        .expect("slice has correct length"), // c0: (c0_0, c0_1)
+        QuadFelt::from_basis_coefficients_slice(&[
+            processor.stack().get(3),
+            processor.stack().get(2),
+        ])
+        .expect("slice has correct length"), // c1: (c1_0, c1_1)
+        QuadFelt::from_basis_coefficients_slice(&[
+            processor.stack().get(5),
+            processor.stack().get(4),
+        ])
+        .expect("slice has correct length"), // c2: (c2_0, c2_1)
+        QuadFelt::from_basis_coefficients_slice(&[
+            processor.stack().get(7),
+            processor.stack().get(6),
+        ])
+        .expect("slice has correct length"), // c3: (c3_0, c3_1)
     ];
 
     // Read the evaluation point alpha from memory
@@ -267,7 +283,12 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             processor.system().clk(),
         );
 
-        (QuadFelt::from_basis_coefficients_slice(&[word[0], word[1]]).expect("slice has correct length"), word[2], word[3])
+        (
+            QuadFelt::from_basis_coefficients_slice(&[word[0], word[1]])
+                .expect("slice has correct length"),
+            word[2],
+            word[3],
+        )
     };
 
     // Read the current accumulator

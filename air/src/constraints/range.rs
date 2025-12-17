@@ -7,9 +7,9 @@
 
 use core::borrow::Borrow;
 
-use p3_miden_air::MidenAirBuilder;
 use miden_core::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
+use p3_miden_air::MidenAirBuilder;
 
 use crate::MainTraceCols;
 

@@ -6,8 +6,8 @@
 //! - Range checker constraints
 //! - (Future: decoder, stack, chiplets)
 
-use p3_miden_air::MidenAirBuilder;
 use miden_core::PrimeCharacteristicRing;
+use p3_miden_air::MidenAirBuilder;
 
 use crate::MainTraceCols;
 
