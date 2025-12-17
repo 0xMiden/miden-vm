@@ -20,8 +20,7 @@ use crate::Felt;
 /// - `processor` implements the interface (concrete aux builders)
 /// - `prover` injects the implementation: `ProcessorAir::with_aux_builder(impl)`
 ///
-/// The trait works with row-major matrices (Plonky3 format). Implementations can convert
-/// to column-major internally if needed for their algorithms.
+/// The trait works with row-major matrices (i.e., Plonky3 format).
 pub trait AuxTraceBuilder<EF>: Send + Sync {
     /// Builds auxiliary trace in row-major format from the main trace.
     ///

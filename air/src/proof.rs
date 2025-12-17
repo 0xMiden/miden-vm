@@ -50,8 +50,8 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the underlying STARK proof.
-    pub fn stark_proof(&self) -> Vec<u8> {
-        self.proof.clone()
+    pub fn stark_proof(&self) -> &[u8] {
+        &self.proof
     }
 
     /// Returns the hash function used during proof generation process.
@@ -68,9 +68,6 @@ impl ExecutionProof {
     /// - Proof parameters (FRI folding factor, number of queries, etc.)
     /// - Hash function collision resistance
     /// - Field size and extension degree
-    ///
-    /// The previous Winterfell implementation (commented out above) should serve as a
-    /// reference for the calculation logic.
     pub fn security_level(&self) -> u32 {
         96
     }
