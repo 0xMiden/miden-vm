@@ -18,6 +18,7 @@ pub mod sha512;
 pub mod smt_peek;
 pub mod sorted_array;
 pub mod u64_div;
+pub mod u128_div;
 
 // HELPER FUNCTIONS
 // ================================================================================================
@@ -27,6 +28,15 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
     let hi = Felt::from((value >> 32) as u32);
     let lo = Felt::from(value as u32);
     (hi, lo)
+}
+
+/// Converts a u128 value into four u32 elements (high to low parts).
+fn u128_to_u32_elements(value: u128) -> (Felt, Felt, Felt, Felt) {
+    let hh = Felt::from((value >> 96) as u32);
+    let hm = Felt::from((value >> 64) as u32);
+    let lm = Felt::from((value >> 32) as u32);
+    let ll = Felt::from(value as u32);
+    (hh, hm, lm, ll)
 }
 
 /// Reads a contiguous region of memory elements.

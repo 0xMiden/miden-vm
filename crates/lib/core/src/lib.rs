@@ -25,6 +25,7 @@ use crate::handlers::{
         handle_lowerbound_key_value,
     },
     u64_div::{U64_DIV_EVENT_NAME, handle_u64_div},
+    u128_div::{U128_DIV_EVENT_NAME, handle_u128_div},
 };
 
 // STANDARD LIBRARY
@@ -79,6 +80,7 @@ impl CoreLibrary {
             (EDDSA25519_VERIFY_EVENT_NAME, Arc::new(EddsaPrecompile)),
             (SMT_PEEK_EVENT_NAME, Arc::new(handle_smt_peek)),
             (U64_DIV_EVENT_NAME, Arc::new(handle_u64_div)),
+            (U128_DIV_EVENT_NAME, Arc::new(handle_u128_div)),
             (FALCON_DIV_EVENT_NAME, Arc::new(handle_falcon_div)),
             (LOWERBOUND_ARRAY_EVENT_NAME, Arc::new(handle_lowerbound_array)),
             (LOWERBOUND_KEY_VALUE_EVENT_NAME, Arc::new(handle_lowerbound_key_value)),
