@@ -40,9 +40,14 @@ where
         domain_size: usize,
         folding_factor: usize,
     ) -> Result<Self, DeserializationError> {
-        let remainder = proof.parse_remainder()?;
-        let (layer_queries, layer_proofs) =
-            proof.parse_layers::<E, H, MerkleTreeVC<H>>(domain_size, folding_factor)?;
+        let remainder = proof.parse_remainder().map_err(|e| {
+            DeserializationError::InvalidValue(format!("Failed to parse FRI remainder: {}", e))
+        })?;
+        let (layer_queries, layer_proofs) = proof
+            .parse_layers::<E, H, MerkleTreeVC<H>>(domain_size, folding_factor)
+            .map_err(|e| {
+                DeserializationError::InvalidValue(format!("Failed to parse FRI layers: {}", e))
+            })?;
 
         Ok(MidenFriVerifierChannel {
             layer_commitments,

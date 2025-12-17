@@ -4,6 +4,8 @@ use core::{
     ops::{Bound, Range},
 };
 
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -13,8 +15,6 @@ pub use miden_crypto::{
         uninit_vector,
     },
 };
-#[cfg(feature = "std")]
-pub use miden_crypto::utils::ReadAdapter;
 pub use winter_utils::group_slice_elements;
 
 use crate::{Felt, Word};

@@ -10,7 +10,9 @@ use super::Kernel;
 use crate::{
     AdviceMap,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
+    },
 };
 
 // PROGRAM

@@ -197,8 +197,9 @@ impl Deserializable for ExecutionProof {
 
         // Deserialize the Proof using winter_utils deserialization
         let mut proof_reader = winter_utils::SliceReader::new(&proof_bytes);
-        let proof = WinterDeserializable::read_from(&mut proof_reader)
-            .map_err(|e| DeserializationError::InvalidValue(format!("Failed to deserialize proof: {}", e)))?;
+        let proof = WinterDeserializable::read_from(&mut proof_reader).map_err(|e| {
+            DeserializationError::InvalidValue(format!("Failed to deserialize proof: {}", e))
+        })?;
 
         // Deserialize the rest using miden_serde_utils deserialization
         let hash_fn = HashFunction::read_from(source)?;
