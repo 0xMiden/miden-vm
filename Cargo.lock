@@ -2059,7 +2059,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2069,7 +2069,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-fri"
 version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2106,7 +2106,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-goldilocks"
 version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "num-bigint",
  "p3-challenger",
@@ -2145,7 +2145,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
@@ -2186,7 +2186,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
+source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
