@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, LexicographicWord, Word};
+use miden_core::{EventName, Felt, LexicographicWord, PrimeCharacteristicRing, Word};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Event name for the lowerbound_array operation.
@@ -115,7 +115,7 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            felt_from_bool(false),
+            Felt::from_bool(false),
             Felt::from(addr_range.end),
         ])]);
     }
@@ -158,7 +158,7 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        felt_from_bool(was_key_found),
+        Felt::from_bool(was_key_found),
         Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }
@@ -201,8 +201,4 @@ pub enum SortedArrayError {
     /// Last key or value is an incomplete word.
     #[error("key-value array must have size divisible by 4 or 8, but was {size}")]
     InvalidKeyValueRange { size: u32 },
-}
-
-fn felt_from_bool(value: bool) -> Felt {
-    if value { Felt::new(1) } else { Felt::new(0) }
 }

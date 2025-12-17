@@ -9,8 +9,6 @@ pub use miden_core::crypto::{
     },
 };
 
-// RE-EXPORTS
-// ================================================================================================
 use super::{Felt, Word, ZERO};
 
 // CRYPTO HELPER FUNCTIONS

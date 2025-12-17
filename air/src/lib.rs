@@ -9,7 +9,7 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{ProgramInfo, StackInputs, StackOutputs};
+use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
 pub use p3_air::{Air, AirBuilder, BaseAir};
 
 mod constraints;
@@ -28,7 +28,6 @@ pub use trace::{TRACE_WIDTH, rows::RowIndex};
 mod errors;
 mod options;
 mod proof;
-pub use proof::{Commitments, OpenedValues, Proof};
 
 mod utils;
 
@@ -51,11 +50,12 @@ pub use proof::{ExecutionProof, HashFunction};
 // PUBLIC INPUTS
 // ================================================================================================
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct PublicInputs {
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
+    pc_transcript_state: PrecompileTranscriptState,
 }
 
 impl PublicInputs {
@@ -63,11 +63,13 @@ impl PublicInputs {
         program_info: ProgramInfo,
         stack_inputs: StackInputs,
         stack_outputs: StackOutputs,
+        pc_transcript_state: PrecompileTranscriptState,
     ) -> Self {
         Self {
             program_info,
             stack_inputs,
             stack_outputs,
+            pc_transcript_state,
         }
     }
 
@@ -83,16 +85,24 @@ impl PublicInputs {
         self.program_info.clone()
     }
 
+    /// Returns the precompile transcript state.
+    pub fn pc_transcript_state(&self) -> PrecompileTranscriptState {
+        self.pc_transcript_state
+    }
+
     /// Converts public inputs into a vector of field elements (Felt) in the canonical order:
     /// - program info elements
     /// - stack inputs
     /// - stack outputs
+    /// - precompile transcript state
     pub fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.program_info.to_elements();
         let mut ins = self.stack_inputs.to_vec();
         result.append(&mut ins);
         let mut outs = self.stack_outputs.to_vec();
         result.append(&mut outs);
+        let pc_state: [Felt; 4] = self.pc_transcript_state.into();
+        result.extend_from_slice(&pc_state);
         result
     }
 }
@@ -102,6 +112,7 @@ impl Serializable for PublicInputs {
         self.program_info.write_into(target);
         self.stack_inputs.write_into(target);
         self.stack_outputs.write_into(target);
+        self.pc_transcript_state.write_into(target);
     }
 }
 
@@ -110,10 +121,12 @@ impl Deserializable for PublicInputs {
         let program_info = ProgramInfo::read_from(source)?;
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
+        let pc_transcript_state = PrecompileTranscriptState::read_from(source)?;
         Ok(PublicInputs {
             program_info,
             stack_inputs,
             stack_outputs,
+            pc_transcript_state,
         })
     }
 }

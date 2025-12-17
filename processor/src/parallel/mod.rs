@@ -221,12 +221,7 @@ fn generate_core_trace_columns(
     // row of each fragment with non-inverted values.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
-        h0_column
-            .par_chunks_mut(fragment_size)
-            .enumerate()
-            .for_each(|(chunk_idx, chunk)| {
-                invert_column_allow_zeros(chunk, "stack.h0", chunk_idx * fragment_size);
-            });
+        h0_column.par_chunks_mut(fragment_size).for_each(invert_column_allow_zeros);
     }
 
     // Truncate the core trace columns. After this point, there is no more uninitialized memory.
