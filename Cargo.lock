@@ -1257,21 +1257,10 @@ checksum = "f52b00d39961fc5b2736ea853c9cc86238e165017a493d1d5c8eac6bdc4cc273"
 
 [[package]]
 name = "miden-air"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "p3-air",
- "p3-field",
- "p3-matrix",
-]
-
-[[package]]
-name = "miden-air"
 version = "0.21.0"
 dependencies = [
  "bincode",
  "criterion",
- "miden-air 0.3.0",
  "miden-core",
  "miden-crypto",
  "miden-test-utils",
@@ -1282,11 +1271,12 @@ dependencies = [
  "p3-commit",
  "p3-dft",
  "p3-field",
- "p3-fri",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
+ "p3-miden-air",
+ "p3-miden-fri",
  "p3-symmetric",
  "p3-uni-stark",
  "proptest",
@@ -1373,7 +1363,7 @@ dependencies = [
  "criterion",
  "env_logger",
  "fs-err",
- "miden-air 0.21.0",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-crypto",
@@ -1396,7 +1386,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#aefa201537579c6a573ebe119f85530c4ab22a90"
+source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#192708b02cebb8233192285c84bde0d067d8367d"
 dependencies = [
  "blake3",
  "cc",
@@ -1407,15 +1397,15 @@ dependencies = [
  "glob",
  "hkdf",
  "k256",
- "miden-air 0.3.0",
  "miden-crypto-derive",
- "miden-prover 0.3.0",
  "num",
  "num-complex",
  "p3-air",
  "p3-challenger",
  "p3-field",
- "p3-goldilocks",
+ "p3-miden-air",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-symmetric",
  "rand",
  "rand_chacha",
@@ -1432,7 +1422,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#aefa201537579c6a573ebe119f85530c4ab22a90"
+source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#192708b02cebb8233192285c84bde0d067d8367d"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1527,7 +1517,7 @@ version = "0.21.0"
 dependencies = [
  "insta",
  "itertools 0.14.0",
- "miden-air 0.21.0",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-debug-types",
@@ -1550,40 +1540,17 @@ dependencies = [
 
 [[package]]
 name = "miden-prover"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "itertools 0.14.0",
- "miden-air 0.3.0",
- "p3-air",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-interpolation",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-uni-stark",
- "p3-util",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "miden-prover"
 version = "0.21.0"
 dependencies = [
  "bincode",
  "getrandom 0.2.16",
  "getrandom 0.3.4",
- "miden-air 0.21.0",
- "miden-air 0.3.0",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
  "miden-processor",
- "miden-prover 0.3.0",
  "miden-verifier",
  "miden-vm",
  "p3-air",
@@ -1592,13 +1559,15 @@ dependencies = [
  "p3-commit",
  "p3-dft",
  "p3-field",
- "p3-fri",
- "p3-goldilocks",
  "p3-interpolation",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
+ "p3-miden-air",
+ "p3-miden-fri",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1625,12 +1594,12 @@ name = "miden-test-utils"
 version = "0.1.0"
 dependencies = [
  "env_logger",
- "miden-air 0.21.0",
+ "miden-air",
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
  "miden-processor",
- "miden-prover 0.21.0",
+ "miden-prover",
  "miden-verifier",
  "pretty_assertions",
  "proptest",
@@ -1682,21 +1651,21 @@ version = "0.21.0"
 dependencies = [
  "bincode",
  "itertools 0.12.1",
- "miden-air 0.21.0",
- "miden-air 0.3.0",
+ "miden-air",
  "miden-core",
- "miden-prover 0.3.0",
  "p3-air",
  "p3-blake3",
  "p3-challenger",
  "p3-commit",
  "p3-dft",
  "p3-field",
- "p3-fri",
- "p3-goldilocks",
  "p3-keccak",
  "p3-matrix",
  "p3-merkle-tree",
+ "p3-miden-air",
+ "p3-miden-fri",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1722,7 +1691,7 @@ dependencies = [
  "miden-debug-types",
  "miden-mast-package",
  "miden-processor",
- "miden-prover 0.21.0",
+ "miden-prover",
  "miden-test-utils",
  "miden-verifier",
  "num-bigint",
@@ -1929,8 +1898,8 @@ checksum = "9c6901729fa79e91a0913333229e9ca5dc725089d1c363b2f4b4760709dc4a52"
 
 [[package]]
 name = "p3-air"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "p3-field",
  "p3-matrix",
@@ -1938,8 +1907,8 @@ dependencies = [
 
 [[package]]
 name = "p3-blake3"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "blake3",
  "p3-symmetric",
@@ -1948,11 +1917,12 @@ dependencies = [
 
 [[package]]
 name = "p3-challenger"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "p3-field",
  "p3-maybe-rayon",
+ "p3-monty-31",
  "p3-symmetric",
  "p3-util",
  "tracing",
@@ -1960,8 +1930,8 @@ dependencies = [
 
 [[package]]
 name = "p3-commit"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -1974,8 +1944,8 @@ dependencies = [
 
 [[package]]
 name = "p3-dft"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -1988,8 +1958,8 @@ dependencies = [
 
 [[package]]
 name = "p3-field"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "num-bigint",
@@ -2002,9 +1972,94 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-fri"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+name = "p3-interpolation"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-util",
+]
+
+[[package]]
+name = "p3-keccak"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "p3-field",
+ "p3-symmetric",
+ "p3-util",
+ "tiny-keccak",
+]
+
+[[package]]
+name = "p3-matrix"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-field",
+ "p3-maybe-rayon",
+ "p3-util",
+ "rand",
+ "serde",
+ "tracing",
+ "transpose",
+]
+
+[[package]]
+name = "p3-maybe-rayon"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
+name = "p3-mds"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "p3-dft",
+ "p3-field",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+]
+
+[[package]]
+name = "p3-merkle-tree"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-commit",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-symmetric",
+ "p3-util",
+ "rand",
+ "serde",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-air"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+]
+
+[[package]]
+name = "p3-miden-fri"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2021,11 +2076,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-goldilocks"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+name = "p3-miden-goldilocks"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "num-bigint",
+ "p3-challenger",
  "p3-dft",
  "p3-field",
  "p3-mds",
@@ -2035,87 +2091,56 @@ dependencies = [
  "paste",
  "rand",
  "serde",
- "winter-utils",
 ]
 
 [[package]]
-name = "p3-interpolation"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+name = "p3-miden-prover"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
+ "itertools 0.14.0",
+ "p3-air",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-interpolation",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-miden-air",
+ "p3-uni-stark",
+ "p3-util",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-monty-31"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
+dependencies = [
+ "itertools 0.14.0",
+ "num-bigint",
+ "p3-dft",
  "p3-field",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-util",
-]
-
-[[package]]
-name = "p3-keccak"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "p3-field",
+ "p3-mds",
+ "p3-poseidon2",
  "p3-symmetric",
  "p3-util",
- "tiny-keccak",
-]
-
-[[package]]
-name = "p3-matrix"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "itertools 0.14.0",
- "p3-field",
- "p3-maybe-rayon",
- "p3-util",
+ "paste",
  "rand",
  "serde",
+ "spin 0.10.0",
  "tracing",
  "transpose",
 ]
 
 [[package]]
-name = "p3-maybe-rayon"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "rayon",
-]
-
-[[package]]
-name = "p3-mds"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "p3-dft",
- "p3-field",
- "p3-symmetric",
- "p3-util",
- "rand",
-]
-
-[[package]]
-name = "p3-merkle-tree"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
-dependencies = [
- "itertools 0.14.0",
- "p3-commit",
- "p3-field",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-symmetric",
- "p3-util",
- "rand",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "p3-poseidon2"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "p3-field",
  "p3-mds",
@@ -2126,8 +2151,8 @@ dependencies = [
 
 [[package]]
 name = "p3-symmetric"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "p3-field",
@@ -2136,8 +2161,8 @@ dependencies = [
 
 [[package]]
 name = "p3-uni-stark"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
@@ -2149,13 +2174,14 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-util",
  "serde",
+ "thiserror",
  "tracing",
 ]
 
 [[package]]
 name = "p3-util"
-version = "0.3.0"
-source = "git+https://github.com/0xMiden/Plonky3/?branch=zz%2Fmigrate-plonky3#6190a25b7b23472369e642459bda23b4716a7584"
+version = "0.4.0"
+source = "git+https://github.com/0xMiden/Plonky3/?branch=al-p3-cleanup-and-update#d7dcc2766927aca19aedb82e3250f8080c8c0555"
 dependencies = [
  "rayon",
  "serde",
@@ -3800,12 +3826,6 @@ checksum = "5a5364e9d77fcdeeaa6062ced926ee3381faa2ee02d3eb83a5c27a8825540829"
 dependencies = [
  "memchr",
 ]
-
-[[package]]
-name = "winter-utils"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9951263ef5317740cd0f49e618db00c72fabb70b75756ea26c4d5efe462c04dd"
 
 [[package]]
 name = "wit-bindgen"

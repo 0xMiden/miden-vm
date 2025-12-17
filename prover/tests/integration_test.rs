@@ -254,7 +254,7 @@ mod fast_parallel {
 
         // Generate proof using Blake3_256
         let config = miden_air::config::create_blake3_256_config();
-        let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+        let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
         let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
 
         let precompile_requests = trace.precompile_requests().to_vec();

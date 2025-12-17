@@ -7,7 +7,7 @@
 
 use core::borrow::Borrow;
 
-use miden_air_trait::MidenAirBuilder;
+use p3_miden_air::MidenAirBuilder;
 use miden_core::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
 

@@ -63,7 +63,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "al-e2e-plonky3", default-features = false }
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "al-p3-cleanup-and-update", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -94,27 +94,27 @@ rand = { version = "0.9", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 
 # Plonky3 dependencies
-p3-air        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-blake3     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-challenger = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-commit     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-dft        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-field      = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-fri        = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-goldilocks = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-interpolation = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-keccak     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-matrix     = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-maybe-rayon= { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-merkle-tree= { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-poseidon2  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-symmetric  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-uni-stark  = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-p3-util       = { branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-air        = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-blake3     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-challenger = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-commit     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-dft        = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-field      = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-interpolation = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-keccak     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-matrix     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-maybe-rayon= { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-merkle-tree= { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-poseidon2  = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-symmetric  = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-uni-stark  = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-util       = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
 
 # Plonky3 miden-specific crates
-miden-air-trait = { package = "miden-air", branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
-miden-prover-p3 = { package = "miden-prover", branch = "zz/migrate-plonky3", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-miden-air     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-miden-fri     = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-miden-goldilocks = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
+p3-miden-prover  = { branch = "al-p3-cleanup-and-update", default-features = false, git = "https://github.com/0xMiden/Plonky3/" }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }

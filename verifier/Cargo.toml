@@ -29,7 +29,7 @@ std = [
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
-miden-prover-p3.workspace = true
+p3-miden-prover.workspace = true
 
 # External dependencies
 tracing.workspace = true
@@ -44,8 +44,8 @@ p3-challenger.workspace = true
 p3-commit.workspace = true
 p3-dft.workspace = true
 p3-field.workspace = true
-p3-fri.workspace = true
-p3-goldilocks.workspace = true
+p3-miden-fri.workspace = true
+p3-miden-goldilocks.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
 p3-merkle-tree.workspace = true
@@ -55,7 +55,7 @@ p3-uni-stark.workspace = true
 p3-util.workspace = true
 
 # Miden-specific Plonky3 crates
-miden-air-trait.workspace = true
+p3-miden-air.workspace = true
 
 # Serialization
 serde.workspace = true
