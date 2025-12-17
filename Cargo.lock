@@ -1275,7 +1275,7 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-air",
  "p3-miden-fri",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1386,7 +1386,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#cdebb8f6062c1c3257f87471ab0239297a4d6fc1"
+source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#3ad17f0b49de4025f7eecdab9b896d78d671ed7d"
 dependencies = [
  "blake3",
  "cc",
@@ -1403,9 +1403,9 @@ dependencies = [
  "p3-air",
  "p3-challenger",
  "p3-field",
- "p3-miden-air 0.4.0 (git+ssh://git@github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-goldilocks 0.4.0 (git+ssh://git@github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-prover 0.4.0 (git+ssh://git@github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-air",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-symmetric",
  "rand",
  "rand_chacha",
@@ -1422,7 +1422,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#cdebb8f6062c1c3257f87471ab0239297a4d6fc1"
+source = "git+https://github.com/0xMiden/crypto?branch=al-p3-cleanup-and-update#3ad17f0b49de4025f7eecdab9b896d78d671ed7d"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1564,10 +1564,10 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-air",
  "p3-miden-fri",
- "p3-miden-goldilocks 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-prover 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1662,10 +1662,10 @@ dependencies = [
  "p3-keccak",
  "p3-matrix",
  "p3-merkle-tree",
- "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-air",
  "p3-miden-fri",
- "p3-miden-goldilocks 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-prover 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-goldilocks",
+ "p3-miden-prover",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -2049,16 +2049,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.0"
-source = "git+ssh://git@github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
-dependencies = [
- "p3-air",
- "p3-field",
- "p3-matrix",
-]
-
-[[package]]
-name = "p3-miden-air"
-version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "p3-air",
@@ -2088,24 +2078,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-goldilocks"
 version = "0.4.0"
-source = "git+ssh://git@github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
-dependencies = [
- "num-bigint",
- "p3-challenger",
- "p3-dft",
- "p3-field",
- "p3-mds",
- "p3-poseidon2",
- "p3-symmetric",
- "p3-util",
- "paste",
- "rand",
- "serde",
-]
-
-[[package]]
-name = "p3-miden-goldilocks"
-version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "num-bigint",
@@ -2124,27 +2096,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.0"
-source = "git+ssh://git@github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
-dependencies = [
- "itertools 0.14.0",
- "p3-air",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-interpolation",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-miden-air 0.4.0 (git+ssh://git@github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-uni-stark 0.4.0 (git+ssh://git@github.com/0xMiden/p3-miden?branch=main)",
- "p3-util",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "p3-miden-prover"
-version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#e9b6208f102c20756e88bd132e325d1f61301e70"
 dependencies = [
  "itertools 0.14.0",
@@ -2156,30 +2107,10 @@ dependencies = [
  "p3-interpolation",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
- "p3-miden-uni-stark 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-air",
+ "p3-miden-uni-stark",
  "p3-util",
  "serde",
- "tracing",
-]
-
-[[package]]
-name = "p3-miden-uni-stark"
-version = "0.4.0"
-source = "git+ssh://git@github.com/0xMiden/p3-miden?branch=main#8048e8c049e068ee83221d287ab313acf96eee60"
-dependencies = [
- "itertools 0.14.0",
- "p3-air",
- "p3-challenger",
- "p3-commit",
- "p3-dft",
- "p3-field",
- "p3-matrix",
- "p3-maybe-rayon",
- "p3-uni-stark",
- "p3-util",
- "serde",
- "thiserror",
  "tracing",
 ]
 
