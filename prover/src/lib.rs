@@ -15,19 +15,18 @@ mod trace_adapter;
 
 // EXPORTS
 // ================================================================================================
+
 pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions, config};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
 };
+pub use miden_prover_p3::{Commitments, OpenedValues, Proof};
 pub use public_inputs::{build_public_values, extract_public_values_from_trace};
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
 // ================================================================================================
-
-// Note: The old ExecutionProver<SC> struct has been removed in favor of
-// the unified prove() function below that uses miden_prover_p3::prove() directly.
 
 #[instrument("program proving", skip_all)]
 pub fn prove(
@@ -117,9 +116,3 @@ where
 
     Ok((stack_outputs, proof))
 }
-
-// HELPERS
-// ================================================================================================
-
-// Re-export proof types from miden-prover-p3
-pub use miden_prover_p3::{Commitments, OpenedValues, Proof};
