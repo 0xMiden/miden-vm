@@ -196,8 +196,7 @@ impl Stack {
             self.clk.into(),
             start_pos,
             // TODO: change type of `active_depth` to `u32`
-            Felt::try_from(self.active_depth as u64)
-                .expect("value is greater than or equal to the field modulus"),
+            Felt::from(self.active_depth as u64),
             self.overflow.last_update_clk_in_current_ctx(),
         );
     }

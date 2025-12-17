@@ -351,7 +351,7 @@ fn copy_map_value_length_to_adv_stack(
         ))?
         .len();
 
-    advice_provider.push_stack(Felt::try_from(values_len as u64).expect("value length too big"));
+    advice_provider.push_stack(Felt::from(values_len as u64));
 
     Ok(())
 }

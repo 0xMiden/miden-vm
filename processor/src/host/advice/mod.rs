@@ -180,7 +180,7 @@ impl AdviceProvider {
         self.stack.extend(map_value.iter().rev());
         if include_len {
             self.stack
-                .push(Felt::try_from(map_value.len() as u64).expect("value length too big"));
+                .push(Felt::from(map_value.len() as u64));
         }
 
         Ok(())
