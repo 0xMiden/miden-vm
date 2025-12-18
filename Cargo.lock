@@ -1540,6 +1540,7 @@ dependencies = [
  "p3-util",
  "paste",
  "pretty_assertions",
+ "proptest",
  "rayon",
  "rstest",
  "thiserror",

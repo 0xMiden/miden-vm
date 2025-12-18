@@ -113,7 +113,8 @@ fn test_basic_block(
 
     let mut host = DefaultHost::default();
     let fast_processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host);
+    let fast_stack_outputs =
+        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
 
     let mut host = DefaultHost::default();
     let mut slow_processor = Process::new(

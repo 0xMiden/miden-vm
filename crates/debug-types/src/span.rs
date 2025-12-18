@@ -382,6 +382,17 @@ impl SourceSpan {
         end: ByteIndex::new(0),
     };
 
+    /// A sentinel [SourceSpan] that indicates compiler-generated/synthetic code
+    ///
+    /// This is used to distinguish between:
+    /// - UNKNOWN: debug info missing or failed to parse from DWARF
+    /// - SYNTHETIC: compiler-generated code that doesn't correspond to any user source
+    pub const SYNTHETIC: Self = Self {
+        source_id: SourceId::UNKNOWN,
+        start: ByteIndex::new(u32::MAX),
+        end: ByteIndex::new(u32::MAX),
+    };
+
     /// Creates a new [SourceSpan] from the given range.
     pub fn new<B>(source_id: SourceId, range: Range<B>) -> Self
     where
@@ -419,7 +430,14 @@ impl SourceSpan {
 
     /// Returns `true` if this [SourceSpan] represents the unknown span
     pub const fn is_unknown(&self) -> bool {
+        self.source_id.is_unknown() && self.start.to_u32() == 0 && self.end.to_u32() == 0
+    }
+
+    /// Returns `true` if this [SourceSpan] represents synthetic/compiler-generated code
+    pub const fn is_synthetic(&self) -> bool {
         self.source_id.is_unknown()
+            && self.start.to_u32() == u32::MAX
+            && self.end.to_u32() == u32::MAX
     }
 
     /// Get the [SourceId] associated with this source span

@@ -51,7 +51,8 @@ impl Analyze {
         let (program, host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
-                let (program, source_manager) = get_masm_program(&self.program_file, &libraries)?;
+                let (program, source_manager) =
+                    get_masm_program(&self.program_file, &libraries, true, None)?;
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),

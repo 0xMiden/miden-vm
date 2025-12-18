@@ -1,7 +1,12 @@
-use std::{path::PathBuf, time::Instant};
+use std::{fs, path::PathBuf, sync::Arc, time::Instant};
 
 use clap::Parser;
-use miden_assembly::diagnostics::{IntoDiagnostic, Report, Result, WrapErr};
+use miden_assembly::{
+    Assembler, KernelLibrary,
+    diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
+};
+use miden_mast_package::{MastArtifact, Package};
+use miden_prover::utils::Deserializable;
 use miden_vm::{Kernel, ProgramInfo, internal::InputFile};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};
@@ -21,6 +26,10 @@ pub struct VerifyCmd {
     /// Program hash (hex)
     #[arg(short = 'x', long = "program-hash")]
     program_hash: String,
+
+    /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl VerifyCmd {
@@ -50,8 +59,18 @@ impl VerifyCmd {
 
         let now = Instant::now();
 
-        // TODO accept kernel as CLI argument
-        let kernel = Kernel::default();
+        // Load kernel if provided, otherwise use default
+        let kernel = if let Some(ref kernel_path) = self.kernel_file {
+            if !kernel_path.is_file() {
+                return Err(Report::msg(format!(
+                    "Kernel file `{}` must be a file.",
+                    kernel_path.display()
+                )));
+            }
+            load_kernel(kernel_path)?
+        } else {
+            Kernel::default()
+        };
         let program_info = ProgramInfo::new(program_hash, kernel);
 
         // verify proof
@@ -82,6 +101,59 @@ impl VerifyCmd {
     }
 }
 
+/// Loads a kernel from a file (.masm or .masp) and returns the Kernel.
+fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
+    // Determine file type based on extension
+    let ext = kernel_path.extension().and_then(|s| s.to_str()).unwrap_or("").to_lowercase();
+
+    // Load kernel from .masp package or compile from .masm source
+    let kernel_lib = match ext.as_str() {
+        "masp" => {
+            // Load kernel from package file
+            let bytes = fs::read(kernel_path).into_diagnostic().wrap_err_with(|| {
+                format!("Failed to read kernel package `{}`", kernel_path.display())
+            })?;
+            let package =
+                Package::read_from_bytes(&bytes).into_diagnostic().wrap_err_with(|| {
+                    format!("Failed to deserialize kernel package `{}`", kernel_path.display())
+                })?;
+
+            match package.into_mast_artifact() {
+                MastArtifact::Library(lib) => {
+                    let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
+                    KernelLibrary::try_from(library).wrap_err_with(|| {
+                        format!(
+                            "The package `{}` is not a valid kernel package",
+                            kernel_path.display()
+                        )
+                    })?
+                },
+                MastArtifact::Executable(_) => {
+                    return Err(Report::msg(format!(
+                        "Kernel package `{}` contains a program, not a kernel library",
+                        kernel_path.display()
+                    )));
+                },
+            }
+        },
+        "masm" => {
+            // Compile kernel from assembly source
+            Assembler::default().assemble_kernel(kernel_path.clone()).wrap_err_with(|| {
+                format!("Failed to compile kernel from `{}`", kernel_path.display())
+            })?
+        },
+        _ => {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must have a .masm or .masp extension",
+                kernel_path.display()
+            )));
+        },
+    };
+
+    // Extract kernel from kernel library
+    Ok(kernel_lib.kernel().clone())
+}
+
 #[cfg(test)]
 mod tests {
     use std::{fs, fs::File};
@@ -105,6 +177,7 @@ mod tests {
             output_file: None,
             proof_file: proof_path.clone(),
             program_hash: "00".to_string(),
+            kernel_file: None,
         };
 
         // exercise

@@ -39,9 +39,6 @@ use block_stack::{BlockStack, BlockType, ExecutionContextInfo};
 #[cfg(test)]
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 
-#[cfg(test)]
-mod tests;
-
 // DECODER PROCESS EXTENSION
 // ================================================================================================
 

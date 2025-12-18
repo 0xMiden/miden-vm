@@ -257,7 +257,7 @@ fn test_masm_consistency(
 
     // fast processor
     let processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     // fast processor by step
     let stepped_stack_outputs = {
@@ -401,12 +401,12 @@ fn test_log_precompile_correctness() {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
     // Verify stack outputs: [R1, R0, CAP_NEXT, ...]
-    let r1 = stack_outputs.get_stack_word_be(0).unwrap();
-    let r0 = stack_outputs.get_stack_word_be(4).unwrap();
-    let cap_next = stack_outputs.get_stack_word_be(8).unwrap();
+    let r1 = execution_output.stack.get_stack_word_be(0).unwrap();
+    let r0 = execution_output.stack.get_stack_word_be(4).unwrap();
+    let cap_next = execution_output.stack.get_stack_word_be(8).unwrap();
 
     assert_eq!(&hasher_state[0..4], cap_next.as_slice(), "CAP_NEXT on stack mismatch");
     assert_eq!(&hasher_state[4..8], r0.as_slice(), "R0 on stack mismatch");

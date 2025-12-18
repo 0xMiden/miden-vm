@@ -9,6 +9,9 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+mod tests;
+
 #[inline(always)]
 pub(super) fn op_advpop<P: Processor>(
     processor: &mut P,

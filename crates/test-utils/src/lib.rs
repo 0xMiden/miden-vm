@@ -569,10 +569,10 @@ impl Test {
         let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
         let advice_inputs = self.advice_inputs.clone();
         let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-        let fast_stack_outputs = fast_process.execute_sync(&program, &mut host).unwrap();
+        let fast_execution_output = fast_process.execute_sync(&program, &mut host).unwrap();
 
         assert_eq!(
-            slow_stack_outputs, fast_stack_outputs,
+            slow_stack_outputs, fast_execution_output.stack,
             "stack outputs do not match between slow and fast processors"
         );
     }
@@ -630,7 +630,9 @@ impl Test {
             let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().rev().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-            fast_process.execute_sync(&program, &mut host)
+            fast_process
+                .execute_sync(&program, &mut host)
+                .map(|execution_output| execution_output.stack)
         };
 
         let fast_result_by_step = {

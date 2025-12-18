@@ -37,6 +37,9 @@ use crate::{
 mod execution;
 mod trace_row;
 
+#[cfg(test)]
+mod tests;
+
 // CORE TRACE FRAGMENT
 // ================================================================================================
 

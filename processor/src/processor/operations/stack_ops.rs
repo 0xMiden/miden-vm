@@ -6,6 +6,9 @@ use crate::{
     processor::{Processor, StackInterface},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Pushes a new element onto the stack.
 #[inline(always)]
 pub(super) fn op_push<P: Processor>(

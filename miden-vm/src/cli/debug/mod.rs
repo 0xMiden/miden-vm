@@ -33,6 +33,10 @@ pub struct DebugCmd {
     /// Paths to .masl library files
     #[arg(short = 'l', long = "libraries", value_parser)]
     library_paths: Vec<PathBuf>,
+
+    /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl DebugCmd {
@@ -52,12 +56,24 @@ impl DebugCmd {
             .unwrap_or("")
             .to_lowercase();
 
+        // Validate kernel file if provided
+        if let Some(ref kernel_path) = self.kernel_file
+            && !kernel_path.is_file()
+        {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
+        }
+
         // Use a single match expression to load the program.
         let (program, source_manager) = match ext.as_str() {
             "masp" => {
                 (get_masp_program(&self.program_file)?, Arc::new(DefaultSourceManager::default()))
             },
-            "masm" => get_masm_program(&self.program_file, &libraries)?,
+            "masm" => {
+                get_masm_program(&self.program_file, &libraries, true, self.kernel_file.as_deref())?
+            },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
         };
         let program_hash: [u8; 32] = program.hash().into();
