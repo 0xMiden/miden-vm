@@ -155,19 +155,19 @@ where
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[12] * (sibling[0])
-                + alphas[13] * (sibling[1])
-                + alphas[14] * (sibling[2])
-                + alphas[15] * (sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[8] * (sibling[0])
-                + alphas[9] * (sibling[1])
-                + alphas[10] * (sibling[2])
-                + alphas[11] * (sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
@@ -175,19 +175,19 @@ where
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[12] * (sibling[0])
-                + alphas[13] * (sibling[1])
-                + alphas[14] * (sibling[2])
-                + alphas[15] * (sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[8] * (sibling[0])
-                + alphas[9] * (sibling[1])
-                + alphas[10] * (sibling[2])
-                + alphas[11] * (sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE
@@ -212,19 +212,19 @@ where
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[12] * (sibling[0])
-                + alphas[13] * (sibling[1])
-                + alphas[14] * (sibling[2])
-                + alphas[15] * (sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[8] * (sibling[0])
-                + alphas[9] * (sibling[1])
-                + alphas[10] * (sibling[2])
-                + alphas[11] * (sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
@@ -232,19 +232,19 @@ where
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[12] * (sibling[0])
-                + alphas[13] * (sibling[1])
-                + alphas[14] * (sibling[2])
-                + alphas[15] * (sibling[3])
+                + alphas[3] * index
+                + alphas[12] * sibling[0]
+                + alphas[13] * sibling[1]
+                + alphas[14] * sibling[2]
+                + alphas[15] * sibling[3]
         } else {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
-                + alphas[3] * (index)
-                + alphas[8] * (sibling[0])
-                + alphas[9] * (sibling[1])
-                + alphas[10] * (sibling[2])
-                + alphas[11] * (sibling[3])
+                + alphas[3] * index
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         }
     } else {
         E::ONE
@@ -266,7 +266,7 @@ where
     fn value(&self, alphas: &[E]) -> E {
         let state_elements: [Felt; 4] = self.state.into();
         alphas[0]
-            + alphas[1] * (Felt::from(LOG_PRECOMPILE_LABEL))
+            + alphas[1] * Felt::from(LOG_PRECOMPILE_LABEL)
             + build_value(&alphas[2..6], state_elements)
     }
 

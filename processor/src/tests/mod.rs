@@ -1070,7 +1070,7 @@ fn test_debug_mode_flag_propagation() {
 
     let process_disabled = Process::initialize(
         kernel.clone(),
-        stack_inputs,
+        stack_inputs.clone(),
         advice_inputs.clone(),
         exec_options_disabled,
     );
@@ -1079,7 +1079,7 @@ fn test_debug_mode_flag_propagation() {
     let exec_options_tracing = ExecutionOptions::default().with_tracing();
     let process_tracing = Process::initialize(
         kernel.clone(),
-        stack_inputs,
+        stack_inputs.clone(),
         advice_inputs.clone(),
         exec_options_tracing,
     );
@@ -1088,15 +1088,19 @@ fn test_debug_mode_flag_propagation() {
     let exec_options_debugging = ExecutionOptions::default().with_debugging(true);
     let process_debugging = Process::initialize(
         kernel.clone(),
-        stack_inputs,
+        stack_inputs.clone(),
         advice_inputs.clone(),
         exec_options_debugging,
     );
 
     // Test case 4: Both tracing and debugging enabled
     let exec_options_both = ExecutionOptions::default().with_tracing().with_debugging(true);
-    let process_both =
-        Process::initialize(kernel.clone(), stack_inputs, advice_inputs.clone(), exec_options_both);
+    let process_both = Process::initialize(
+        kernel.clone(),
+        stack_inputs.clone(),
+        advice_inputs.clone(),
+        exec_options_both,
+    );
 
     // Test case 5: Process::new_debug() method
     let process_new_debug = Process::new_debug(kernel, stack_inputs, advice_inputs);

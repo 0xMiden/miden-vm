@@ -252,13 +252,13 @@ impl BlockHashTableRow {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
         alphas[0]
-            + alphas[1] * (self.parent_block_id)
-            + alphas[2] * (self.child_block_hash[0])
-            + alphas[3] * (self.child_block_hash[1])
-            + alphas[4] * (self.child_block_hash[2])
-            + alphas[5] * (self.child_block_hash[3])
-            + alphas[6] * (is_first_child)
-            + alphas[7] * (is_loop_body)
+            + alphas[1] * self.parent_block_id
+            + alphas[2] * self.child_block_hash[0]
+            + alphas[3] * self.child_block_hash[1]
+            + alphas[4] * self.child_block_hash[2]
+            + alphas[5] * self.child_block_hash[3]
+            + alphas[6] * is_first_child
+            + alphas[7] * is_loop_body
     }
 
     // TEST

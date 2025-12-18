@@ -8,8 +8,6 @@ use miden_core::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::FIELD_MODULUS;
-
 // DOCUMENTATION TYPE
 // ================================================================================================
 
@@ -387,7 +385,7 @@ impl Serializable for IntValue {
 impl Deserializable for IntValue {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let raw = source.read_u64()?;
-        if raw >= FIELD_MODULUS {
+        if raw >= Felt::ORDER_U64 {
             Err(DeserializationError::InvalidValue(
                 "int value is greater than field modulus".into(),
             ))

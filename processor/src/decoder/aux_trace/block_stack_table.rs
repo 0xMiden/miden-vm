@@ -74,7 +74,7 @@ fn get_block_stack_table_respan_multiplicand<E: ExtensionField<Felt>>(
 
     let mut table_row = E::ZERO;
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        table_row += alpha * (element);
+        table_row += alpha * element;
     }
     table_row
 }
@@ -120,7 +120,7 @@ fn get_block_stack_table_end_multiplicand<E: ExtensionField<Felt>>(
 
     let mut table_row = E::ZERO;
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        table_row += alpha * (element);
+        table_row += alpha * element;
     }
     table_row
 }
@@ -196,7 +196,7 @@ fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     let mut value = E::ZERO;
 
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        value += alpha * (element);
+        value += alpha * element;
     }
     value
 }

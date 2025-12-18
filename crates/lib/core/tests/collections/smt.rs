@@ -713,7 +713,7 @@ fn test_smt_randomized_round_trip() {
 /// This ensures keys are distributed across a limited number of buckets, which exercises
 /// multi-leaf functionality in the SMT.
 fn random_word(seed: &mut u64, buckets: usize) -> Word {
-    let mut word = [ZERO; 4];
+    let mut word = [Felt::new(0); 4];
     for element in word.iter_mut() {
         *element = Felt::new(random_u64(seed));
     }

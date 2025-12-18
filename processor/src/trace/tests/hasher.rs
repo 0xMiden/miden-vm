@@ -42,7 +42,7 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
 
     // executing MPVERIFY does not affect the sibling table - so, all values in the column must be
     // ONE
-    for value in p1.iter().take(p1.len()) {
+    for value in p1.iter() {
         assert_eq!(ONE, *value);
     }
 }
@@ -144,7 +144,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
 
     // at this point the table should be empty again, and it should stay empty until the end
     assert_eq!(expected_value, ONE);
-    for value in p1.iter().skip(50).take(p1.len() - 50) {
+    for value in p1.iter().skip(50) {
         assert_eq!(ONE, *value);
     }
 }
@@ -195,18 +195,18 @@ impl SiblingTableRow {
         let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
             alphas[0]
-                + alphas[3] * (self.index)
-                + alphas[12] * (self.sibling[0])
-                + alphas[13] * (self.sibling[1])
-                + alphas[14] * (self.sibling[2])
-                + alphas[15] * (self.sibling[3])
+                + alphas[3] * self.index
+                + alphas[12] * self.sibling[0]
+                + alphas[13] * self.sibling[1]
+                + alphas[14] * self.sibling[2]
+                + alphas[15] * self.sibling[3]
         } else {
             alphas[0]
-                + alphas[3] * (self.index)
-                + alphas[8] * (self.sibling[0])
-                + alphas[9] * (self.sibling[1])
-                + alphas[10] * (self.sibling[2])
-                + alphas[11] * (self.sibling[3])
+                + alphas[3] * self.index
+                + alphas[8] * self.sibling[0]
+                + alphas[9] * self.sibling[1]
+                + alphas[10] * self.sibling[2]
+                + alphas[11] * self.sibling[3]
         }
     }
 }

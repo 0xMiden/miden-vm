@@ -90,13 +90,16 @@ pub fn verify_with_precompiles(
     precompile_verifiers: &PrecompileVerifierRegistry,
 ) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     let security_level = proof.security_level();
+
     let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
 
     // Recompute the precompile transcript by verifying all precompile requests and recording the
     // commitments.
     // If no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
-    let recomputed_transcript = precompile_verifiers.requests_transcript(&precompile_requests)?;
+    let recomputed_transcript = precompile_verifiers
+        .requests_transcript(&precompile_requests)
+        .map_err(VerificationError::PrecompileVerificationError)?;
     let pc_transcript_state = recomputed_transcript.state();
 
     // Verify the STARK proof with the recomputed transcript state in public inputs
@@ -130,6 +133,7 @@ fn verify_stark(
 
     match hash_fn {
         HashFunction::Blake3_192 => {
+            // TODO: Change to Blake3_192
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
@@ -189,5 +193,5 @@ pub enum VerificationError {
     #[error("the output {0} is not a valid field element")]
     OutputNotFieldElement(u64),
     #[error("failed to verify precompile calls")]
-    PrecompileVerificationError(#[from] PrecompileVerificationError),
+    PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

@@ -22,11 +22,11 @@ fn test_constants() {
     // tau is the primitive 4th root of unity (i.e., generator of multiplicative subgroup of size 4)
     let tau = Felt::two_adic_generator(2);
 
-    assert_eq!(TAU_INV, tau.try_inverse().unwrap());
-    assert_eq!(TAU2_INV, tau.square().try_inverse().unwrap());
-    assert_eq!(TAU3_INV, tau.cube().try_inverse().unwrap());
+    assert_eq!(TAU_INV, tau.inverse());
+    assert_eq!(TAU2_INV, tau.square().inverse());
+    assert_eq!(TAU3_INV, tau.cube().inverse());
 
-    assert_eq!(Felt::new(2).try_inverse().unwrap(), TWO_INV);
+    assert_eq!(Felt::new(2).inverse(), TWO_INV);
 }
 
 // FRI OPERATION TESTS
@@ -64,17 +64,17 @@ proptest! {
     ) {
         // Query values
         let query_values = [
-            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v0_0), Felt::new(v0_1)]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v1_0), Felt::new(v1_1)]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v2_0), Felt::new(v2_1)]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v3_0), Felt::new(v3_1)]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v0_0), Felt::new(v0_1)]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v1_0), Felt::new(v1_1)]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v2_0), Felt::new(v2_1)]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v3_0), Felt::new(v3_1)]).unwrap(),
         ];
 
         // The previous value must match query_values[d_seg] for the operation to succeed
         let prev_value = query_values[d_seg as usize];
         let prev_value_base = prev_value.as_basis_coefficients_slice();
 
-        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).expect("failed to create QuadFelt");
+        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).unwrap();
         let poe = Felt::new(poe);
         let f_pos = Felt::new(f_pos);
         let d_seg_felt = Felt::new(d_seg);
@@ -124,7 +124,7 @@ proptest! {
         // Compute expected values
         let f_tau = get_tau_factor(d_seg as usize);
         let x = poe * f_tau * DOMAIN_OFFSET;
-        let x_inv = x.try_inverse().unwrap();
+        let x_inv = x.inverse();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fri_fold4(query_values, ev, es);
@@ -133,8 +133,8 @@ proptest! {
         let tmp1_base = tmp1.as_basis_coefficients_slice();
         let ds = get_domain_segment_flags(d_seg as usize);
         let folded_value_base = folded_value.as_basis_coefficients_slice();
-        let poe2 = poe * poe;
-        let poe4 = poe2 * poe2;
+        let poe2 = poe.square();
+        let poe4 = poe2.square();
 
         // Check the stack state
         let stack = processor.stack_top();

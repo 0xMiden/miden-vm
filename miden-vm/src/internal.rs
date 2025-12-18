@@ -160,7 +160,14 @@ impl InputFile {
                     .map_err(|e| format!("failed to decode advice map key '{k}': {e}"))?;
 
                 // convert values to Felt
-                let values = v.iter().map(|v| Felt::from(*v)).collect::<Vec<_>>();
+                let values = v
+                    .iter()
+                    .map(|v| {
+                        Felt::from_canonical_checked(*v).ok_or_else(|| {
+                            format!("failed to convert advice map value '{v}' to Felt")
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
                 Ok((key, values))
             })
             .collect::<Result<BTreeMap<Word, Vec<Felt>>, String>>()?;

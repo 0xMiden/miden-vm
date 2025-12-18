@@ -128,7 +128,10 @@ pub fn build_prover_channel(
 pub fn build_evaluations(trace_length: usize, lde_blowup: usize) -> Vec<QuadFelt> {
     let mut p = (0..trace_length as u32)
         .map(|i| (i, i))
-        .map(|(i, j)| QuadFelt::from_basis_coefficients_slice(&[i.into(), j.into(]).expect("failed to create QuadFelt")))
+        .map(|(i, j)| {
+            QuadFelt::from_basis_coefficients_slice(&[i.into(), j.into()])
+                .expect("failed to create QuadFelt")
+        })
         .collect::<Vec<_>>();
     let domain_size = trace_length * lde_blowup;
     p.resize(domain_size, QuadFelt::ZERO);
@@ -342,10 +345,14 @@ fn iterate_query_fold_4_quad_ext(
             .1;
 
         let query_values = [
-            QuadFelt::from_basis_coefficients_slice(&[query_values[0], query_values[1]]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[query_values[2], query_values[3]]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[query_values[4], query_values[5]]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[query_values[6], query_values[7]]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[query_values[0], query_values[1]])
+                .expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[query_values[2], query_values[3]])
+                .expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[query_values[4], query_values[5]])
+                .expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[query_values[6], query_values[7]])
+                .expect("failed to create QuadFelt"),
         ];
 
         let query_value = query_values[cur_pos / target_domain_size];

@@ -29,8 +29,6 @@ mod errors;
 mod options;
 mod proof;
 
-mod utils;
-
 // RE-EXPORTS
 // ================================================================================================
 
@@ -76,11 +74,11 @@ impl PublicInputs {
     }
 
     pub fn stack_inputs(&self) -> StackInputs {
-        self.stack_inputs
+        self.stack_inputs.clone()
     }
 
     pub fn stack_outputs(&self) -> StackOutputs {
-        self.stack_outputs
+        self.stack_outputs.clone()
     }
 
     pub fn program_info(&self) -> ProgramInfo {
@@ -109,6 +107,9 @@ impl PublicInputs {
     }
 }
 
+// SERIALIZATION
+// ================================================================================================
+
 impl Serializable for PublicInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.program_info.write_into(target);
@@ -124,6 +125,7 @@ impl Deserializable for PublicInputs {
         let stack_inputs = StackInputs::read_from(source)?;
         let stack_outputs = StackOutputs::read_from(source)?;
         let pc_transcript_state = PrecompileTranscriptState::read_from(source)?;
+
         Ok(PublicInputs {
             program_info,
             stack_inputs,

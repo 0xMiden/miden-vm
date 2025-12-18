@@ -433,7 +433,7 @@ where
         let idx0 = main_trace.chiplet_memory_idx0(row);
         let idx1 = main_trace.chiplet_memory_idx1(row);
 
-        word + idx1 * Felt::from_u16(2) + idx0
+        word + idx1.double() + idx0
     };
 
     if access_type == MEMORY_ACCESS_ELEMENT {

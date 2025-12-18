@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO};
+use miden_crypto::{PrimeField64, QuotientMap, WORD_SIZE, Word, ZERO};
 
-use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable};
+use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 
 // STACK OUTPUTS
@@ -16,7 +16,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
 /// `stack` is expected to be ordered as if the elements were popped off the stack one by one.
 /// Thus, the value at the top of the stack is expected to be in the first position, and the order
 /// of the rest of the output elements will also match the order on the stack.
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StackOutputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -50,7 +50,14 @@ impl StackOutputs {
         I: IntoIterator<Item = u64>,
     {
         // Validate stack elements
-        let stack = iter.into_iter().map(Felt::from_u64).collect::<Vec<Felt>>();
+        let stack = iter
+            .into_iter()
+            .map(|v| {
+                Felt::from_canonical_checked(v)
+                    .ok_or_else(|| format!("value {} exceeds field modulus {}", v, Felt::ORDER_U64))
+            })
+            .collect::<Result<Vec<Felt>, _>>()
+            .map_err(OutputError::InvalidStackElement)?;
 
         Self::new(stack)
     }
@@ -89,10 +96,14 @@ impl StackOutputs {
     }
 
     /// Returns the word located starting at the specified Felt position on the stack in
-    /// little-endian order, or `None` if out of bounds.
+    /// little-endian (memory) order, or `None` if out of bounds.
     ///
-    /// The elements are returned in little-endian order (least significant element first), which
-    /// is the same order they appear on the stack.
+    /// For example, passing in `0` returns the word at the top of the stack, and passing in `4`
+    /// returns the word starting at element index `4`.
+    ///
+    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
+    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
+    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
     pub fn get_stack_word_le(&self, idx: usize) -> Option<Word> {
         self.get_stack_word_be(idx).map(|mut word| {
             word.reverse();
@@ -156,7 +167,7 @@ impl From<[Felt; MIN_STACK_DEPTH]> for StackOutputs {
 
 impl Serializable for StackOutputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let num_stack_values = super::get_num_stack_values(&self.elements);
+        let num_stack_values = get_num_stack_values(self);
         target.write_u8(num_stack_values);
         target.write_many(&self.elements[..num_stack_values as usize]);
     }

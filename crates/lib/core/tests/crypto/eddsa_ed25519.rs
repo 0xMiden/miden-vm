@@ -9,7 +9,7 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, ONE, PrimeField64, Word, ZERO,
+    EventName, Felt, PrimeCharacteristicRing, PrimeField64, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
@@ -63,7 +63,7 @@ fn test_eddsa_verify_prehash_cases() {
     let output = test.execute().unwrap();
 
     let result = output.stack_outputs().get_stack_item(0).unwrap();
-    assert_eq!(result, ONE, "verification result mismatch");
+    assert_eq!(result, Felt::ONE, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
@@ -91,7 +91,7 @@ fn test_eddsa_verify_prehash_cases() {
     let output = test.execute().unwrap();
 
     let result = output.stack_outputs().get_stack_item(0).unwrap();
-    assert_eq!(result, ZERO, "verification result mismatch");
+    assert_eq!(result, Felt::ZERO, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
     assert_eq!(deferred.len(), 1, "expected one deferred request");
@@ -139,8 +139,7 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         assert_eq!(precompile_commitment, verifier_commitment);
 
         let result = stack.get_stack_item(6).unwrap();
-        let expected = if expected_valid { ONE } else { ZERO };
-        assert_eq!(result, expected);
+        assert_eq!(result, Felt::from_bool(expected_valid));
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");

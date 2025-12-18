@@ -390,7 +390,7 @@ impl MainTrace {
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
         let b0 = self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i];
         let h0 = self.columns.get_column(STACK_TRACE_OFFSET + H0_COL_IDX)[i];
-        ONE == (b0 - Felt::from_u64(16)) * h0
+        (b0 - Felt::from_u64(16)) * h0 == ONE
     }
 
     // CHIPLETS COLUMNS
