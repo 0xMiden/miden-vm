@@ -77,7 +77,7 @@ impl Process {
         // compute x corresponding to the query position
         let f_tau = get_tau_factor(d_seg);
         let x = poe * f_tau * DOMAIN_OFFSET;
-        let x_inv = x.try_inverse().unwrap_or(ZERO);
+        let x_inv = x.try_inverse().expect("FRI domain point must be non-zero");
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
