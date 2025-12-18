@@ -308,6 +308,7 @@ fn init_helper_columns(
     // if the overflow table is not empty, set h0 to (init_depth - 16)
     let mut h0 = IndexVec::with_capacity(init_trace_capacity);
     // TODO: change type of `init_depth` to `u32`
+    // TODO check if we should error
     let h0_value = Felt::from((init_depth - MIN_STACK_DEPTH) as u64);
     h0.push(h0_value).expect("trace capacity within u32 limits");
     for _ in 1..init_trace_capacity {

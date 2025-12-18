@@ -38,7 +38,7 @@ impl<'a> WiringBusBuilder<'a> {
 
                 let m_0 = main_trace.chiplet_ace_m_0(trace_row.into());
                 let m_1 = main_trace.chiplet_ace_m_1(trace_row.into());
-                let value = divisor_tuple[0] * (m_0) + divisor_tuple[1] * (m_1);
+                let value = divisor_tuple[0] * m_0 + divisor_tuple[1] * m_1;
 
                 wiring_bus[trace_row + 1] = wiring_bus[trace_row] + value;
             }
@@ -53,7 +53,7 @@ impl<'a> WiringBusBuilder<'a> {
                 let trace_row = i + trace_offset;
 
                 let m_0 = main_trace.chiplet_ace_m_0(trace_row.into());
-                let value = divisor_tuple[0] * (m_0) - (divisor_tuple[1] + divisor_tuple[2]);
+                let value = divisor_tuple[0] * m_0 - (divisor_tuple[1] + divisor_tuple[2]);
 
                 wiring_bus[trace_row + 1] = wiring_bus[trace_row] + value;
             }

@@ -6,7 +6,7 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    EventName, Felt, ONE, Word, ZERO,
+    EventName, Felt, PrimeCharacteristicRing, Word,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
@@ -68,8 +68,7 @@ fn test_ecdsa_verify_cases() {
 
         // Assert result
         let result = output.stack_outputs().get_stack_item(0).unwrap();
-        let expected = if expected_valid { ONE } else { ZERO };
-        assert_eq!(result, expected);
+        assert_eq!(result, Felt::from_bool(expected_valid));
 
         // Verify the precompile request was logged with the right event ID
         let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -126,8 +125,11 @@ fn test_ecdsa_verify_impl_commitment() {
 
         // Verify result
         let result = stack.get_stack_item(6).unwrap();
-        let expected = if expected_valid { ONE } else { ZERO };
-        assert_eq!(result, expected, "result does not match expected validity");
+        assert_eq!(
+            result,
+            Felt::from_bool(expected_valid),
+            "result does not match expected validity"
+        );
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");

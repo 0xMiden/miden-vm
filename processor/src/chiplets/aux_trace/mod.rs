@@ -87,9 +87,9 @@ where
     E: ExtensionField<Felt>,
 {
     debug_assert_eq!(alphas.len(), elements.len());
-    let mut value = alphas[0] * (elements[0]);
+    let mut value = alphas[0] * elements[0];
     for i in 1..N {
-        value += alphas[i] * (elements[i]);
+        value += alphas[i] * elements[i];
     }
     value
 }

@@ -337,8 +337,8 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).expect("failed to create QuadFelt");
-        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).expect("failed to create QuadFelt");
+        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).unwrap();
+        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).unwrap();
 
         let c0_q = QuadFelt::from(Felt::new(c0));
         let c1_q = QuadFelt::from(Felt::new(c1));
@@ -458,13 +458,13 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).expect("failed to create QuadFelt");
-        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).expect("failed to create QuadFelt");
+        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).unwrap();
+        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).unwrap();
 
-        let c0 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c0_0), Felt::new(c0_1)]).expect("failed to create QuadFelt");
-        let c1 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c1_0), Felt::new(c1_1)]).expect("failed to create QuadFelt");
-        let c2 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c2_0), Felt::new(c2_1)]).expect("failed to create QuadFelt");
-        let c3 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c3_0), Felt::new(c3_1)]).expect("failed to create QuadFelt");
+        let c0 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c0_0), Felt::new(c0_1)]).unwrap();
+        let c1 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c1_0), Felt::new(c1_1)]).unwrap();
+        let c2 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c2_0), Felt::new(c2_1)]).unwrap();
+        let c3 = QuadFelt::from_basis_coefficients_slice(&[Felt::new(c3_0), Felt::new(c3_1)]).unwrap();
 
         let coefficients = [c0, c1, c2, c3];
 

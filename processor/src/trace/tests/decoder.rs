@@ -877,17 +877,17 @@ impl BlockStackTableRow {
     pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
         alphas[0]
-            + alphas[1] * (self.block_id)
-            + alphas[2] * (self.parent_id)
-            + alphas[3] * (is_loop)
-            + alphas[4] * (Felt::from(self.parent_ctx))
-            + alphas[5] * (self.parent_fmp)
-            + alphas[6] * (Felt::from(self.parent_stack_depth))
-            + alphas[7] * (self.parent_next_overflow_addr)
-            + alphas[8] * (self.parent_fn_hash[0])
-            + alphas[9] * (self.parent_fn_hash[1])
-            + alphas[10] * (self.parent_fn_hash[2])
-            + alphas[11] * (self.parent_fn_hash[3])
+            + alphas[1] * self.block_id
+            + alphas[2] * self.parent_id
+            + alphas[3] * is_loop
+            + alphas[4] * Felt::from(self.parent_ctx)
+            + alphas[5] * self.parent_fmp
+            + alphas[6] * Felt::from(self.parent_stack_depth)
+            + alphas[7] * self.parent_next_overflow_addr
+            + alphas[8] * self.parent_fn_hash[0]
+            + alphas[9] * self.parent_fn_hash[1]
+            + alphas[10] * self.parent_fn_hash[2]
+            + alphas[11] * self.parent_fn_hash[3]
     }
 }
 
@@ -912,8 +912,8 @@ impl OpGroupTableRow {
     /// at least 4 alpha values.
     pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         alphas[0]
-            + alphas[1] * (self.batch_id)
-            + alphas[2] * (self.group_pos)
-            + alphas[3] * (self.group_value)
+            + alphas[1] * self.batch_id
+            + alphas[2] * self.group_pos
+            + alphas[3] * self.group_value
     }
 }

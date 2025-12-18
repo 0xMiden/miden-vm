@@ -6,8 +6,9 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use miden_core::PrimeField64;
-pub use miden_core::{Felt, Word, prettier, utils::DisplayHex};
+pub use miden_core::{
+    Felt, PrimeCharacteristicRing, PrimeField64, Word, prettier, utils::DisplayHex,
+};
 pub use miden_debug_types as debuginfo;
 pub use miden_utils_diagnostics::{self as diagnostics, Report};
 

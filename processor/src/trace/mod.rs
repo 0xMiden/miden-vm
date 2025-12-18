@@ -246,7 +246,7 @@ impl ExecutionTrace {
         let public_inputs = PublicInputs::new(
             self.program_info.clone(),
             self.init_stack_state(),
-            self.stack_outputs,
+            self.stack_outputs.clone(),
             self.final_pc_transcript.state(),
         );
         public_inputs.to_elements()
@@ -356,9 +356,6 @@ impl ExecutionTrace {
     {
         let aux_columns =
             self.aux_trace_builders.build_aux_columns(&self.main_trace, rand_elements);
-
-        // NOTE: We no longer inject randomizers into auxiliary columns; Plonky3’s symbolic
-        // degree tracking does not require them (they were only needed for Winterfell).
 
         Some(ColMatrix::new(aux_columns))
     }

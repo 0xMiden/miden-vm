@@ -72,7 +72,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         let h = main_trace.decoder_hasher_state(i);
         (1..8_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
-                + alphas[1] * (block_id)
+                + alphas[1] * block_id
                 + alphas[2] * (group_count - Felt::from(k))
                 + alphas[3] * (h[k as usize]))
         })
@@ -80,13 +80,13 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         let h = main_trace.decoder_hasher_state_first_half(i);
         (1..4_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
-                + alphas[1] * (block_id)
+                + alphas[1] * block_id
                 + alphas[2] * (group_count - Felt::from(k))
                 + alphas[3] * (h[k as usize]))
         })
     } else if op_batch_flag == OP_BATCH_2_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
-        alphas[0] + alphas[1] * (block_id) + alphas[2] * (group_count - ONE) + alphas[3] * (h[1])
+        alphas[0] + alphas[1] * block_id + alphas[2] * (group_count - ONE) + alphas[3] * h[1]
     } else {
         E::ONE
     }
@@ -113,5 +113,5 @@ fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
         }
     };
 
-    alphas[0] + alphas[1] * (block_id) + alphas[2] * (group_count) + alphas[3] * (group_value)
+    alphas[0] + alphas[1] * block_id + alphas[2] * group_count + alphas[3] * group_value
 }

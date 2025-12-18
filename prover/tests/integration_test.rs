@@ -31,7 +31,8 @@ fn test_blake3_256_prove_verify() {
 
     println!("Proving with Blake3_256...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Verifying proof...");
@@ -68,7 +69,8 @@ fn test_keccak_prove_verify() {
     // Prove the program
     println!("Proving with Keccak...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -107,7 +109,8 @@ fn test_rpo_prove_verify() {
     // Prove the program
     println!("Proving with RPO...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -142,7 +145,8 @@ fn test_poseidon2_prove_verify() {
 
     println!("Proving with Poseidon2...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -177,7 +181,8 @@ fn test_rpx_prove_verify() {
 
     println!("Proving with RPX...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -231,7 +236,7 @@ mod fast_parallel {
             DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
         // Convert stack inputs for fast processor (reversed order)
-        let stack_inputs_vec: Vec<Felt> = stack_inputs.into_iter().rev().collect();
+        let stack_inputs_vec: Vec<Felt> = stack_inputs.clone().into_iter().rev().collect();
 
         let fast_processor =
             FastProcessor::new_with_advice_inputs(&stack_inputs_vec, advice_inputs.clone());
@@ -239,7 +244,7 @@ mod fast_parallel {
             .execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE)
             .expect("Fast processor execution failed");
 
-        let fast_stack_outputs = execution_output.stack;
+        let fast_stack_outputs = execution_output.stack.clone();
 
         // Build trace using parallel trace generation
         let trace =

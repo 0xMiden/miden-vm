@@ -129,10 +129,10 @@ impl Process {
         let v0 = self.stack.get(7);
 
         [
-            QuadFelt::from_basis_coefficients_slice(&[v0, v1]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[v2, v3]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[v4, v5]).expect("failed to create QuadFelt"),
-            QuadFelt::from_basis_coefficients_slice(&[v6, v7]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[v0, v1]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[v2, v3]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[v4, v5]).unwrap(),
+            QuadFelt::from_basis_coefficients_slice(&[v6, v7]).unwrap(),
         ]
     }
 
@@ -159,14 +159,14 @@ impl Process {
     fn get_previous_value(&self) -> QuadFelt {
         let pe1 = self.stack.get(11);
         let pe0 = self.stack.get(12);
-        QuadFelt::from_basis_coefficients_slice(&[pe0, pe1]).expect("failed to create QuadFelt")
+        QuadFelt::from_basis_coefficients_slice(&[pe0, pe1]).unwrap()
     }
 
     /// Returns verifier challenge for the current layer.
     fn get_alpha(&self) -> QuadFelt {
         let a1 = self.stack.get(13);
         let a0 = self.stack.get(14);
-        QuadFelt::from_basis_coefficients_slice(&[a0, a1]).expect("failed to create QuadFelt")
+        QuadFelt::from_basis_coefficients_slice(&[a0, a1]).unwrap()
     }
 
     /// Returns memory address of the current layer.
@@ -211,7 +211,7 @@ fn get_domain_segment_flags(domain_segment: usize) -> [Felt; 4] {
 
 /// Computes 2 evaluation points needed for [fold4] function.
 fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFelt) {
-    let ev = alpha * (x_inv);
+    let ev = alpha * x_inv;
     let es = ev.square();
     (ev, es)
 }
@@ -222,7 +222,7 @@ fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFel
 /// - es = (alpha / x)^2
 fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFelt, QuadFelt) {
     let tmp0 = fold2(values[0], values[2], ev);
-    let tmp1 = fold2(values[1], values[3], ev * (TAU_INV));
+    let tmp1 = fold2(values[1], values[3], ev * TAU_INV);
     let folded_value = fold2(tmp0, tmp1, es);
     (folded_value, tmp0, tmp1)
 }
@@ -230,5 +230,5 @@ fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFe
 /// Performs folding by a factor of 2. ep is a value computed based on x and verifier challenge
 /// alpha.
 fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
-    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * (TWO_INV)
+    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * TWO_INV
 }

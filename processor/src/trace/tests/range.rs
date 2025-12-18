@@ -33,7 +33,7 @@ fn b_range_trace_stack() {
     // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
     // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
     // 1/(alpha + 256).
-    let lookups = alpha.inverse() * (Felt::new(3)) + (alpha + Felt::new(256)).inverse();
+    let lookups = alpha.inverse() * Felt::new(3) + (alpha + Felt::new(256)).inverse();
     let mut expected = b_range[1] - lookups;
     assert_eq!(expected, b_range[2]);
 
@@ -49,7 +49,7 @@ fn b_range_trace_stack() {
     // After the padded rows, the first value will be unchanged.
     assert_eq!(expected, b_range[values_start]);
     // We include 3 lookups of 0.
-    expected += alpha.inverse() * (Felt::new(3));
+    expected += alpha.inverse() * Felt::new(3);
     assert_eq!(expected, b_range[values_start + 1]);
     // Then we have 3 bridge rows between 0 and 255 where the value does not change
     assert_eq!(expected, b_range[values_start + 2]);
@@ -130,7 +130,7 @@ fn b_range_trace_mem() {
     // --- Check the range checker's lookups. -----------------------------------------------------
 
     // We include 2 lookups of ZERO in the next row.
-    expected += alpha.inverse() * (Felt::new(2));
+    expected += alpha.inverse() * Felt::new(2);
     assert_eq!(expected, b_range[values_start + 1]);
 
     // We include 1 lookup of ONE in the next row.

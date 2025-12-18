@@ -291,6 +291,6 @@ impl Process {
         let acc1 = self.stack.get(ACC_HIGH_INDEX);
         let acc0 = self.stack.get(ACC_LOW_INDEX);
 
-        QuadFelt::from_basis_coefficients_slice(&[acc0, acc1]).expect("failed to create QuadFelt")
+        QuadFelt::from_basis_coefficients_slice(&[acc0, acc1]).unwrap()
     }
 }

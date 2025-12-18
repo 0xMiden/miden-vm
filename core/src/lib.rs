@@ -92,9 +92,9 @@ pub mod crypto {
     }
 }
 
-pub type QuadFelt = BinomialExtensionField<Felt, 2>;
-
 pub mod mast;
+
+pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

@@ -88,7 +88,7 @@ pub fn generate_recursive_verifier_data(
         ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
     let (stack_outputs, proof) =
-        prove(&program, self.stack_inputs, advice_inputs, &mut host, options).unwrap();
+        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 
@@ -146,8 +146,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 
     // 2) Generate the variable length public inputs, i.e., the kernel procedures digests
 
-    let num_elements_kernel_proc_digests =
-        num_kernel_proc_digests * (WORD_SIZE.next_multiple_of(8));
+    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
     let kernel_procedures_digests =
         generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
 
