@@ -280,8 +280,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
         tracer.record_memory_read_element(eval_point_1, addr + ONE, ctx, clk);
 
-        QuadFelt::from_basis_coefficients_slice(&[eval_point_0, eval_point_1])
-            .expect("slice has correct length")
+        QuadFelt::new([eval_point_0, eval_point_1])
     };
 
     // Read the coefficients from the stack (top 8 elements)
@@ -299,11 +298,10 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     let c0 = QuadFelt::from(coef[7]);
 
     // Read the current accumulator
-    let acc = QuadFelt::from_basis_coefficients_slice(&[
+    let acc = QuadFelt::new([
         processor.stack().get(ACC_LOW_INDEX),
         processor.stack().get(ACC_HIGH_INDEX),
-    ])
-    .expect("slice has correct length");
+    ]);
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
     let tmp0 = (acc * alpha + c0) * alpha + c1;
@@ -389,26 +387,10 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
     let coef = [
-        QuadFelt::from_basis_coefficients_slice(&[
-            processor.stack().get(1),
-            processor.stack().get(0),
-        ])
-        .expect("slice has correct length"), // c0: (c0_0, c0_1)
-        QuadFelt::from_basis_coefficients_slice(&[
-            processor.stack().get(3),
-            processor.stack().get(2),
-        ])
-        .expect("slice has correct length"), // c1: (c1_0, c1_1)
-        QuadFelt::from_basis_coefficients_slice(&[
-            processor.stack().get(5),
-            processor.stack().get(4),
-        ])
-        .expect("slice has correct length"), // c2: (c2_0, c2_1)
-        QuadFelt::from_basis_coefficients_slice(&[
-            processor.stack().get(7),
-            processor.stack().get(6),
-        ])
-        .expect("slice has correct length"), // c3: (c3_0, c3_1)
+        QuadFelt::new([processor.stack().get(1), processor.stack().get(0)]), // c0: (c0_0, c0_1)
+        QuadFelt::new([processor.stack().get(3), processor.stack().get(2)]), // c1: (c1_0, c1_1)
+        QuadFelt::new([processor.stack().get(5), processor.stack().get(4)]), // c2: (c2_0, c2_1)
+        QuadFelt::new([processor.stack().get(7), processor.stack().get(6)]), // c3: (c3_0, c3_1)
     ];
 
     // Read the evaluation point alpha from memory
@@ -425,20 +407,14 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             processor.system().clk(),
         );
 
-        (
-            QuadFelt::from_basis_coefficients_slice(&[word[0], word[1]])
-                .expect("slice has correct length"),
-            word[2],
-            word[3],
-        )
+        (QuadFelt::new([word[0], word[1]]), word[2], word[3])
     };
 
     // Read the current accumulator
-    let acc_old = QuadFelt::from_basis_coefficients_slice(&[
+    let acc_old = QuadFelt::new([
         processor.stack().get(ACC_LOW_INDEX),  // acc0
         processor.stack().get(ACC_HIGH_INDEX), // acc1
-    ])
-    .expect("slice has correct length");
+    ]);
 
     // Compute the temporary accumulator (first 2 coefficients: c0, c1)
     let acc_tmp = coef.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
