@@ -98,12 +98,12 @@ impl CircuitEvaluation {
     /// adds wires with values `v_0 = QuadFelt(v_00, v_01)` and `v_1 = QuadFelt(v_10, v_11)`.
     pub fn do_read(&mut self, ptr: Felt, word: Word) -> Result<(), ExecutionError> {
         // Add first variable as QuadFelt to wire bus
-        let v_0 = QuadFelt::new([word[0], word[1]]);
+        let v_0 = QuadFelt::from([word[0], word[1]]);
         let id_0 = self.wire_bus.insert(v_0);
         self.col_wire_out.push(id_0, v_0);
 
         // Add second variable as QuadFelt to wire bus
-        let v_1 = QuadFelt::new([word[2], word[3]]);
+        let v_1 = QuadFelt::from([word[2], word[3]]);
         let id_1 = self.wire_bus.insert(v_1);
         self.col_wire_left.push(id_1, v_1);
 

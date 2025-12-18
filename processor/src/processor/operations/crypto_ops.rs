@@ -280,7 +280,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
         tracer.record_memory_read_element(eval_point_1, addr + ONE, ctx, clk);
 
-        QuadFelt::new([eval_point_0, eval_point_1])
+        QuadFelt::from([eval_point_0, eval_point_1])
     };
 
     // Read the coefficients from the stack (top 8 elements)
@@ -298,7 +298,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     let c0 = QuadFelt::from(coef[7]);
 
     // Read the current accumulator
-    let acc = QuadFelt::new([
+    let acc = QuadFelt::from([
         processor.stack().get(ACC_LOW_INDEX),
         processor.stack().get(ACC_HIGH_INDEX),
     ]);
@@ -387,10 +387,10 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
     let coef = [
-        QuadFelt::new([processor.stack().get(1), processor.stack().get(0)]), // c0: (c0_0, c0_1)
-        QuadFelt::new([processor.stack().get(3), processor.stack().get(2)]), // c1: (c1_0, c1_1)
-        QuadFelt::new([processor.stack().get(5), processor.stack().get(4)]), // c2: (c2_0, c2_1)
-        QuadFelt::new([processor.stack().get(7), processor.stack().get(6)]), // c3: (c3_0, c3_1)
+        QuadFelt::from([processor.stack().get(1), processor.stack().get(0)]), // c0: (c0_0, c0_1)
+        QuadFelt::from([processor.stack().get(3), processor.stack().get(2)]), // c1: (c1_0, c1_1)
+        QuadFelt::from([processor.stack().get(5), processor.stack().get(4)]), // c2: (c2_0, c2_1)
+        QuadFelt::from([processor.stack().get(7), processor.stack().get(6)]), // c3: (c3_0, c3_1)
     ];
 
     // Read the evaluation point alpha from memory
@@ -407,11 +407,11 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             processor.system().clk(),
         );
 
-        (QuadFelt::new([word[0], word[1]]), word[2], word[3])
+        (QuadFelt::from([word[0], word[1]]), word[2], word[3])
     };
 
     // Read the current accumulator
-    let acc_old = QuadFelt::new([
+    let acc_old = QuadFelt::from([
         processor.stack().get(ACC_LOW_INDEX),  // acc0
         processor.stack().get(ACC_HIGH_INDEX), // acc1
     ]);
