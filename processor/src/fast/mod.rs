@@ -903,7 +903,7 @@ impl FastProcessor {
     }
 
     /// Convenience sync wrapper to [Self::execute] for testing purposes.
-    #[cfg(any(test, feature = "testing"))]
+    // #[cfg(any(test, feature = "testing"))]
     pub fn execute_sync(
         self,
         program: &Program,

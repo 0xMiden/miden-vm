@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
-    pub precompile_requests: Vec<PrecompileRequest>,
+    pub pc_requests: Vec<PrecompileRequest>,
 }
 
 impl ExecutionProof {
@@ -32,9 +32,9 @@ impl ExecutionProof {
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
-        precompile_requests: Vec<PrecompileRequest>,
+        pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
-        Self { proof, hash_fn, precompile_requests }
+        Self { proof, hash_fn, pc_requests }
     }
 
     // PUBLIC ACCESSORS
@@ -50,6 +50,11 @@ impl ExecutionProof {
         self.hash_fn
     }
 
+    /// Returns the precompile requests queued during program execution.
+    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
+        &self.pc_requests
+    }
+
     /// Returns conjectured security level of this proof in bits.
     ///
     /// TODO(Al): Migrate security estimator from Winterfell to 0xMiden/Plonky3
@@ -61,11 +66,6 @@ impl ExecutionProof {
     /// - Field size and extension degree
     pub fn security_level(&self) -> u32 {
         96
-    }
-
-    /// Returns the precompile requests queued during program execution.
-    pub fn precompile_requests(&self) -> &[PrecompileRequest] {
-        &self.precompile_requests
     }
 
     // SERIALIZATION / DESERIALIZATION
@@ -91,7 +91,7 @@ impl ExecutionProof {
 
     /// Returns components of this execution proof.
     pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
-        (self.hash_fn, self.proof, self.precompile_requests)
+        (self.hash_fn, self.proof, self.pc_requests)
     }
 }
 
@@ -99,11 +99,10 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 192-bit output.
-    #[default]
     Blake3_192 = 0x00,
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
@@ -111,10 +110,10 @@ pub enum HashFunction {
     Rpo256 = 0x02,
     /// RPX hash function with 256-bit output.
     Rpx256 = 0x03,
+    /// Poseidon2 hash function with 256-bit output.
+    Poseidon2 = 0x04,
     /// Keccak hash function with 256-bit output.
-    Keccak = 0x04,
-    /// Poseidon hash function with 256-bit output.
-    Poseidon2 = 0x05,
+    Keccak = 0x05,
 }
 
 impl HashFunction {
@@ -125,8 +124,8 @@ impl HashFunction {
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
-            HashFunction::Keccak => 128,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
+            HashFunction::Keccak => 128,
         }
     }
 }
@@ -140,8 +139,8 @@ impl TryFrom<u8> for HashFunction {
             0x01 => Ok(Self::Blake3_256),
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
-            0x04 => Ok(Self::Keccak),
-            0x05 => Ok(Self::Poseidon2),
+            0x04 => Ok(Self::Poseidon2),
+            0x05 => Ok(Self::Keccak),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -158,8 +157,8 @@ impl TryFrom<&str> for HashFunction {
             "blake3-256" => Ok(Self::Blake3_256),
             "rpo" => Ok(Self::Rpo256),
             "rpx" => Ok(Self::Rpx256),
-            "keccak" => Ok(Self::Keccak),
             "poseidon2" => Ok(Self::Poseidon2),
+            "keccak" => Ok(Self::Keccak),
             _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
                 hash_function: hash_fn_str.to_string(),
             }),
@@ -186,7 +185,7 @@ impl Serializable for ExecutionProof {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.proof.write_into(target);
         self.hash_fn.write_into(target);
-        self.precompile_requests.write_into(target);
+        self.pc_requests.write_into(target);
     }
 }
 
@@ -194,8 +193,8 @@ impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
-        let precompile_requests = Vec::<PrecompileRequest>::read_from(source)?;
+        let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
-        Ok(ExecutionProof { proof, hash_fn, precompile_requests })
+        Ok(ExecutionProof { proof, hash_fn, pc_requests })
     }
 }

@@ -76,11 +76,11 @@ impl PublicInputs {
     }
 
     pub fn stack_inputs(&self) -> StackInputs {
-        self.stack_inputs
+        self.stack_inputs.clone()
     }
 
     pub fn stack_outputs(&self) -> StackOutputs {
-        self.stack_outputs
+        self.stack_outputs.clone()
     }
 
     pub fn program_info(&self) -> ProgramInfo {
@@ -108,6 +108,9 @@ impl PublicInputs {
         result
     }
 }
+
+// SERIALIZATION
+// ================================================================================================
 
 impl Serializable for PublicInputs {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {

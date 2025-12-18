@@ -187,7 +187,6 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]

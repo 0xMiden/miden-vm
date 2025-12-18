@@ -20,7 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
-concurrent = ["std", "p3-maybe-rayon/parallel", "p3-dft/parallel"]
+concurrent = ["std", "p3-maybe-rayon/parallel"]
 testing = []
 
 [dependencies]

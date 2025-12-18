@@ -246,7 +246,7 @@ impl ExecutionTrace {
         let public_inputs = PublicInputs::new(
             self.program_info.clone(),
             self.init_stack_state(),
-            self.stack_outputs,
+            self.stack_outputs.clone(),
             self.final_pc_transcript.state(),
         );
         public_inputs.to_elements()
