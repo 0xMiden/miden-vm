@@ -228,10 +228,10 @@ impl Process {
         let c3_0 = self.stack.get(7);
 
         [
-            QuadFelt::new([c0_0, c0_1]),
-            QuadFelt::new([c1_0, c1_1]),
-            QuadFelt::new([c2_0, c2_1]),
-            QuadFelt::new([c3_0, c3_1]),
+            QuadFelt::from([c0_0, c0_1]),
+            QuadFelt::from([c1_0, c1_1]),
+            QuadFelt::from([c2_0, c2_1]),
+            QuadFelt::from([c3_0, c3_1]),
         ]
     }
 
@@ -253,7 +253,7 @@ impl Process {
             .read(ctx, addr + ONE, self.system.clk(), err_ctx)
             .map_err(ExecutionError::MemoryError)?;
 
-        Ok(QuadFelt::new([alpha_0, alpha_1]))
+        Ok(QuadFelt::from([alpha_0, alpha_1]))
     }
 
     /// Returns the evaluation point.
@@ -273,7 +273,7 @@ impl Process {
         let alpha_0 = word[0];
         let alpha_1 = word[1];
 
-        Ok((QuadFelt::new([alpha_0, alpha_1]), word[2], word[3]))
+        Ok((QuadFelt::from([alpha_0, alpha_1]), word[2], word[3]))
     }
 
     /// Reads the accumulator values.
@@ -281,6 +281,6 @@ impl Process {
         let acc1 = self.stack.get(ACC_HIGH_INDEX);
         let acc0 = self.stack.get(ACC_LOW_INDEX);
 
-        QuadFelt::new([acc0, acc1])
+        QuadFelt::from([acc0, acc1])
     }
 }

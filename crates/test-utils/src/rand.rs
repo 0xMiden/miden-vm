@@ -69,7 +69,7 @@ impl Randomizable for Felt {
 
 impl Randomizable for QuadFelt {
     fn random() -> Self {
-        QuadFelt::new([Felt::random(), Felt::random()])
+        QuadFelt::from([Felt::random(), Felt::random()])
     }
 }
 
