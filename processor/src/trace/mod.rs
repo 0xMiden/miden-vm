@@ -23,7 +23,7 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::{PrimeField64, fast::ExecutionOutput, row_major_adapter};
+use crate::{fast::ExecutionOutput, row_major_adapter};
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -333,6 +333,7 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
+        use crate::PrimeField64;
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.main_trace.num_rows() {
             self.main_trace.read_row_into(i, &mut row);
