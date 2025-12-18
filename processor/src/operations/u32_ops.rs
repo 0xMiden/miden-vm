@@ -7,7 +7,7 @@ use super::{
     super::utils::{split_element, split_u32_into_u16},
     ExecutionError, Felt, Operation, Process,
 };
-use crate::{ErrorContext, ZERO};
+use crate::{ErrorContext, PrimeField64, ZERO};
 
 const U32_MAX: u64 = u32::MAX as u64;
 
@@ -18,7 +18,7 @@ macro_rules! require_u32_operands {
 
             $(
                 let [<_operand_ $idx>] = $stack.get($idx);
-                if [<_operand_ $idx>].as_int() > U32_MAX {
+                if [<_operand_ $idx>].as_canonical_u64() > U32_MAX {
                     invalid_values.push([<_operand_ $idx>]);
                 }
             )*
@@ -27,7 +27,7 @@ macro_rules! require_u32_operands {
                 return Err(ExecutionError::not_u32_values(invalid_values, $err_ctx));
             }
             // Return tuple of operands based on indices
-            ($([<_operand_ $idx>].as_int()),*)
+            ($([<_operand_ $idx>].as_canonical_u64()),*)
         }
     }};
 }
@@ -219,8 +219,8 @@ impl Process {
         hi: Felt,
         check_element_validity: bool,
     ) {
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         // add lookup values to the range checker.
         self.range.add_range_checks(self.system.clk(), &[t0, t1, t2, t3]);
@@ -244,7 +244,7 @@ impl Process {
 #[cfg(test)]
 mod tests {
     use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-    use miden_core::{mast::MastForest, stack::MIN_STACK_DEPTH};
+    use miden_core::{PrimeField64, mast::MastForest, stack::MIN_STACK_DEPTH};
     use miden_utils_testing::rand::rand_value;
 
     use super::{
@@ -320,8 +320,8 @@ mod tests {
         if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 2);
             // Values are collected in stack order: stack[0] (top) first, then stack[1]
-            assert_eq!(values[0].as_int(), 4294967296u64); // stack[0] = top value
-            assert_eq!(values[1].as_int(), 4294967297u64); // stack[1] = second value
+            assert_eq!(values[0].as_canonical_u64(), 4294967296u64); // stack[0] = top value
+            assert_eq!(values[1].as_canonical_u64(), 4294967297u64); // stack[1] = second value
         } else {
             panic!("Expected NotU32Values error");
         }
@@ -342,7 +342,7 @@ mod tests {
 
         if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 1);
-            assert_eq!(values[0].as_int(), 4294967297u64);
+            assert_eq!(values[0].as_canonical_u64(), 4294967297u64);
         } else {
             panic!("Expected NotU32Values error");
         }
@@ -363,7 +363,7 @@ mod tests {
 
         if let Err(ExecutionError::NotU32Values { values, .. }) = result {
             assert_eq!(values.len(), 1);
-            assert_eq!(values[0].as_int(), 4294967296u64);
+            assert_eq!(values[0].as_canonical_u64(), 4294967296u64);
         } else {
             panic!("Expected NotU32Values error");
         }

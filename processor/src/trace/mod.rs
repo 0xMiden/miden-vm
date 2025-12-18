@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use miden_air::{
-    AuxTraceBuilder as AirAuxTraceBuilder,
+    AuxTraceBuilder as AirAuxTraceBuilder, PublicInputs,
     trace::{
         AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
         PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
@@ -23,7 +23,7 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::{fast::ExecutionOutput, row_major_adapter};
+use crate::{PrimeField64, fast::ExecutionOutput, row_major_adapter};
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -233,6 +233,25 @@ impl ExecutionTrace {
         self.final_pc_transcript
     }
 
+    /// Returns the public values as a vector of field elements.
+    ///
+    /// The public values are encoded in a canonical order:
+    /// 1. Program info elements (program hash, kernel procedures, etc.)
+    /// 2. Stack inputs (up to 16 elements)
+    /// 3. Stack outputs (up to 16 elements)
+    /// 4. Precompile transcript state (4 elements)
+    ///
+    /// This encoding must match the order expected by the AIR constraints and the verifier.
+    pub fn to_public_values(&self) -> Vec<Felt> {
+        let public_inputs = PublicInputs::new(
+            self.program_info.clone(),
+            self.init_stack_state(),
+            self.stack_outputs,
+            self.final_pc_transcript.state(),
+        );
+        public_inputs.to_elements()
+    }
+
     /// Returns the initial state of the top 16 stack registers.
     pub fn init_stack_state(&self) -> StackInputs {
         let mut result = [ZERO; MIN_STACK_DEPTH];
@@ -319,7 +338,7 @@ impl ExecutionTrace {
             self.main_trace.read_row_into(i, &mut row);
             std::println!(
                 "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_int()).collect::<Vec<_>>()
+                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
             );
         }
     }
@@ -375,8 +394,7 @@ fn finalize_trace(
     // Get the trace length required to hold all execution trace steps.
     let max_len = range_table_len.max(clk.into()).max(chiplets.trace_len());
 
-    // Pad the trace length to the next power of two (min MIN_TRACE_LEN). Random-row padding is
-    // no longer required now that we rely on Plonky3’s static degree analysis.
+    // Pad the trace length to the next power of two (min MIN_TRACE_LEN).
     let trace_len = max_len.next_power_of_two().max(MIN_TRACE_LEN);
 
     // Get the lengths of the traces: main, range, and chiplets

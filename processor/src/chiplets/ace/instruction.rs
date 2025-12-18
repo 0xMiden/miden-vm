@@ -1,5 +1,7 @@
 use miden_core::Felt;
 
+use crate::PrimeField64;
+
 /// Number of bits used to represent the ID of a node in the evaluation graph.
 /// Define as 30 bits to ensure two indices and the operation can be encoded in a single `Felt`
 pub const ID_BITS: u64 = 30;
@@ -32,7 +34,7 @@ impl TryFrom<u64> for Op {
 
 /// Given a `Felt`, tries to recover the components `id_l, id_r, op`.
 pub fn decode_instruction(instruction: Felt) -> Option<(u32, u32, Op)> {
-    let mut remaining = instruction.as_int();
+    let mut remaining = instruction.as_canonical_u64();
     let id_l = (remaining & MAX_ID as u64) as u32;
     remaining >>= ID_BITS;
     let id_r = (remaining & MAX_ID as u64) as u32;

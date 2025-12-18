@@ -9,7 +9,7 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    AlgebraicSponge, EventName, Felt, Word, ZERO,
+    AlgebraicSponge, EventName, Felt, PrimeField64, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
@@ -36,8 +36,8 @@ impl EventHandler for Sha512Precompile {
     /// - **Memory**: bytes packed into u32 field elements starting at `ptr`
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
-        let ptr = process.get_stack_item(1).as_int();
-        let len_bytes = process.get_stack_item(2).as_int();
+        let ptr = process.get_stack_item(1).as_canonical_u64();
+        let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
         // Read input bytes (u32-packed) from memory.
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;

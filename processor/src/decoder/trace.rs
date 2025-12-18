@@ -5,6 +5,8 @@ use core::ops::Range;
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::utils::new_array_vec;
 
+use crate::PrimeField64;
+
 // TRACE LENGTH TRAIT EXTENSION
 // ================================================================================================
 
@@ -162,10 +164,10 @@ impl DecoderTrace {
         is_call: Felt,
         is_syscall: Felt,
     ) {
-        debug_assert!(is_loop_body.as_int() <= 1, "invalid is_loop_body");
-        debug_assert!(is_loop.as_int() <= 1, "invalid is_loop");
-        debug_assert!(is_call.as_int() <= 1, "invalid is_call");
-        debug_assert!(is_syscall.as_int() <= 1, "invalid is_syscall");
+        debug_assert!(is_loop_body.as_canonical_u64() <= 1, "invalid is_loop_body");
+        debug_assert!(is_loop.as_canonical_u64() <= 1, "invalid is_loop");
+        debug_assert!(is_call.as_canonical_u64() <= 1, "invalid is_call");
+        debug_assert!(is_syscall.as_canonical_u64() <= 1, "invalid is_syscall");
 
         self.addr_trace.push(block_addr);
         self.append_opcode(Operation::End);
@@ -343,7 +345,7 @@ impl DecoderTrace {
     /// - Set operation index register to ZERO.
     /// - Set op_batch_flags to ZEROs.
     pub fn append_span_end(&mut self, span_hash: Word, is_loop_body: Felt) {
-        debug_assert!(is_loop_body.as_int() <= 1, "invalid loop body");
+        debug_assert!(is_loop_body.as_canonical_u64() <= 1, "invalid loop body");
 
         self.addr_trace.push(self.last_addr());
         self.append_opcode(Operation::End);

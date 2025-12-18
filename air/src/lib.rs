@@ -59,6 +59,8 @@ pub struct PublicInputs {
 }
 
 impl PublicInputs {
+    /// Creates a new instance of `PublicInputs` from program information, stack inputs and outputs,
+    /// and the precompile transcript state (capacity of an internal sponge).
     pub fn new(
         program_info: ProgramInfo,
         stack_inputs: StackInputs,

@@ -35,6 +35,7 @@ const DECODER_HASHER_RANGE: Range<usize> =
 
 // HELPER STRUCT AND METHODS
 // ================================================================================================
+
 #[derive(Debug)]
 pub struct ColMatrix<E> {
     columns: Vec<Vec<E>>,

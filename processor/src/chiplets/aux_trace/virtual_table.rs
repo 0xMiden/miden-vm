@@ -13,6 +13,7 @@ use miden_core::{
 
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
+    PrimeField64,
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
@@ -68,7 +69,7 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
         let log_pc_request = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_remove(main_trace, row, alphas, _debugger)
         } else {
@@ -93,7 +94,7 @@ where
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
         let log_pc_response = if op_code == OPCODE_LOGPRECOMPILE {
             build_log_precompile_capacity_insert(main_trace, row, alphas, _debugger)
         } else {
@@ -150,7 +151,7 @@ where
 
     if f_mu {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
@@ -170,7 +171,7 @@ where
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]
@@ -207,7 +208,7 @@ where
 
     if f_mv {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
             alphas[0]
@@ -227,7 +228,7 @@ where
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
-        let lsb = index.as_int() & 1;
+        let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
             alphas[0]

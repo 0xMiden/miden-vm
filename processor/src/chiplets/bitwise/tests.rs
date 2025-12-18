@@ -8,6 +8,7 @@ use miden_core::ZERO;
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
+use crate::PrimeField64;
 
 #[test]
 fn bitwise_init() {
@@ -24,7 +25,7 @@ fn bitwise_and() {
     let b = rand_u32();
 
     let result = bitwise.u32and(a, b, &()).unwrap();
-    assert_eq!(a.as_int() & b.as_int(), result.as_int());
+    assert_eq!(a.as_canonical_u64() & b.as_canonical_u64(), result.as_canonical_u64());
 
     // --- check generated trace ----------------------------------------------
     let trace = build_trace(bitwise, OP_CYCLE_LEN);
@@ -38,7 +39,7 @@ fn bitwise_and() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_int(), b.as_int());
+    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -68,7 +69,7 @@ fn bitwise_xor() {
     let b = rand_u32();
 
     let result = bitwise.u32xor(a, b, &()).unwrap();
-    assert_eq!(a.as_int() ^ b.as_int(), result.as_int());
+    assert_eq!(a.as_canonical_u64() ^ b.as_canonical_u64(), result.as_canonical_u64());
 
     // --- check generated trace ----------------------------------------------
     let trace = build_trace(bitwise, OP_CYCLE_LEN);
@@ -82,7 +83,7 @@ fn bitwise_xor() {
     assert_eq!(result, trace[OUTPUT_COL_IDX][OP_CYCLE_LEN - 1]);
 
     // make sure values a and b were decomposed correctly
-    check_decomposition(&trace, 0, a.as_int(), b.as_int());
+    check_decomposition(&trace, 0, a.as_canonical_u64(), b.as_canonical_u64());
 
     // make sure the result was re-composed correctly
     let mut prev_result = ZERO;
@@ -113,15 +114,15 @@ fn bitwise_multiple() {
 
     // first operation: AND
     let result0 = bitwise.u32and(a[0], b[0], &()).unwrap();
-    assert_eq!(a[0].as_int() & b[0].as_int(), result0.as_int());
+    assert_eq!(a[0].as_canonical_u64() & b[0].as_canonical_u64(), result0.as_canonical_u64());
 
     // second operation: XOR
     let result1 = bitwise.u32xor(a[1], b[1], &()).unwrap();
-    assert_eq!(a[1].as_int() ^ b[1].as_int(), result1.as_int());
+    assert_eq!(a[1].as_canonical_u64() ^ b[1].as_canonical_u64(), result1.as_canonical_u64());
 
     // third operation: AND
     let result2 = bitwise.u32and(a[2], b[2], &()).unwrap();
-    assert_eq!(a[2].as_int() & b[2].as_int(), result2.as_int());
+    assert_eq!(a[2].as_canonical_u64() & b[2].as_canonical_u64(), result2.as_canonical_u64());
 
     // --- check generated trace ----------------------------------------------
     let trace = build_trace(bitwise, 3 * OP_CYCLE_LEN);
@@ -131,9 +132,9 @@ fn bitwise_multiple() {
     assert_eq!(result1, trace[OUTPUT_COL_IDX][2 * OP_CYCLE_LEN - 1]);
     assert_eq!(result2, trace[OUTPUT_COL_IDX][3 * OP_CYCLE_LEN - 1]);
     // make sure input values were decomposed correctly
-    check_decomposition(&trace, 0, a[0].as_int(), b[0].as_int());
-    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_int(), b[1].as_int());
-    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_int(), b[2].as_int());
+    check_decomposition(&trace, 0, a[0].as_canonical_u64(), b[0].as_canonical_u64());
+    check_decomposition(&trace, OP_CYCLE_LEN, a[1].as_canonical_u64(), b[1].as_canonical_u64());
+    check_decomposition(&trace, 2 * OP_CYCLE_LEN, a[2].as_canonical_u64(), b[2].as_canonical_u64());
 
     // make sure the results was re-composed correctly
 

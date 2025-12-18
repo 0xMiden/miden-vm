@@ -9,8 +9,8 @@ use miden_air::RowIndex;
 use miden_core::{AssemblyOp, ExtensionField, Operation, StackOutputs};
 
 use crate::{
-    Chiplets, ChipletsLengths, Decoder, ExecutionError, Felt, MemoryAddress, Process, Stack,
-    System, TraceLenSummary, range::RangeChecker, system::ContextId,
+    Chiplets, ChipletsLengths, Decoder, ExecutionError, Felt, MemoryAddress, PrimeField64, Process,
+    Stack, System, TraceLenSummary, range::RangeChecker, system::ContextId,
 };
 
 /// VmState holds a current process state information at a specific clock cycle.
@@ -26,7 +26,7 @@ pub struct VmState {
 
 impl fmt::Display for VmState {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let stack: Vec<u64> = self.stack.iter().map(|x| x.as_int()).collect();
+        let stack: Vec<u64> = self.stack.iter().map(|x| x.as_canonical_u64()).collect();
         write!(
             f,
             "clk={}{}{}, stack={stack:?}, memory={:?}",

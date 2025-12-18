@@ -9,7 +9,7 @@ use miden_air::{
     Felt,
     trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, main_trace::ColMatrix},
 };
-use miden_processor::{ExecutionTrace, transpose};
+use miden_processor::ExecutionTrace;
 use p3_field::ExtensionField;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
@@ -27,18 +27,15 @@ use tracing::instrument;
 pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Felt> {
     let trace_len = trace.get_trace_len();
 
-    // Extract column-major data into a flat buffer
+    // Extract column-major data into a flat buffer (columns are contiguous)
     let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
     for col_idx in 0..TRACE_WIDTH {
-        for row_idx in 0..trace_len {
-            col_major_data.push(trace.main_trace.get(col_idx, row_idx));
-        }
+        col_major_data.extend_from_slice(trace.main_trace.get_column(col_idx));
     }
 
-    // Use optimized cache-blocked transposition: column-major -> row-major
-    let row_major_data = transpose::col_major_to_row_major(&col_major_data, trace_len, TRACE_WIDTH);
-
-    RowMajorMatrix::new(row_major_data, TRACE_WIDTH)
+    // Build a column-major matrix and transpose to row-major using Plonky3's optimized transpose
+    let col_major_matrix = RowMajorMatrix::new(col_major_data, trace_len);
+    col_major_matrix.transpose()
 }
 
 /// Converts an auxiliary trace from column-major to row-major format.
@@ -60,17 +57,17 @@ pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Fe
 #[instrument(skip_all, fields(rows = trace.num_rows(), cols = AUX_TRACE_WIDTH))]
 pub fn aux_trace_to_row_major<E>(trace: &ColMatrix<E>) -> RowMajorMatrix<E>
 where
-    E: ExtensionField<Felt>,
+    E: ExtensionField<Felt> + Default,
 {
     let trace_len = trace.num_rows();
-    let mut result =
-        RowMajorMatrix::new(alloc::vec![E::ZERO; AUX_TRACE_WIDTH * trace_len], AUX_TRACE_WIDTH);
 
-    result.rows_mut().enumerate().for_each(|(row_idx, row)| {
-        for (col_idx, elem) in row.iter_mut().enumerate() {
-            *elem = trace.get(col_idx, row_idx);
-        }
-    });
+    // Extract column-major data into a flat buffer (columns are contiguous)
+    let mut col_major_data = Vec::with_capacity(AUX_TRACE_WIDTH * trace_len);
+    for col_idx in 0..AUX_TRACE_WIDTH {
+        col_major_data.extend_from_slice(trace.get_column(col_idx));
+    }
 
-    result
+    // Build a column-major matrix and transpose to row-major using Plonky3's optimized transpose
+    let col_major_matrix = RowMajorMatrix::new(col_major_data, trace_len);
+    col_major_matrix.transpose()
 }

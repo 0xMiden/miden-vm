@@ -107,6 +107,6 @@ impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
     pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
-        alphas[0] + alphas[1].mul(self.clk) + alphas[2].mul(self.val) + alphas[3].mul(self.prev)
+        alphas[0] + alphas[1] * self.clk + alphas[2] * self.val + alphas[3] * self.prev
     }
 }

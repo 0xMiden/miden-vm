@@ -1,6 +1,7 @@
 use miden_core::{BasedVectorSpace, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
 
 use super::{ExecutionError, Felt, Operation, Process};
+use crate::PrimeField64;
 
 // CONSTANTS
 // ================================================================================================
@@ -56,7 +57,7 @@ impl Process {
         // --- read all relevant variables from the stack ---------------------
         let query_values = self.get_query_values();
         let f_pos = self.get_folded_position();
-        let d_seg = self.get_domain_segment().as_int();
+        let d_seg = self.get_domain_segment().as_canonical_u64();
         let poe = self.get_poe();
         let prev_value = self.get_previous_value();
         let alpha = self.get_alpha();
@@ -240,8 +241,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
-        BasedVectorSpace, Felt, Field, Operation, PrimeCharacteristicRing, QuadFelt, StackInputs,
-        ZERO, mast::MastForest,
+        BasedVectorSpace, Felt, Field, Operation, PrimeCharacteristicRing, PrimeField64, QuadFelt,
+        StackInputs, ZERO, mast::MastForest,
     };
     use miden_utils_testing::rand::rand_array;
 
@@ -354,7 +355,7 @@ mod tests {
         let stack_state = process.stack.trace_state();
 
         // perform layer folding
-        let f_tau = super::get_tau_factor(d_seg.as_int() as usize);
+        let f_tau = super::get_tau_factor(d_seg.as_canonical_u64() as usize);
         let x = poe * f_tau * super::DOMAIN_OFFSET;
         let x_inv = x.try_inverse().unwrap_or(ZERO);
 
@@ -370,7 +371,7 @@ mod tests {
         assert_eq!(stack_state[3], tmp1[0]);
 
         // check domain segment flags
-        let ds = super::get_domain_segment_flags(d_seg.as_int() as usize);
+        let ds = super::get_domain_segment_flags(d_seg.as_canonical_u64() as usize);
         assert_eq!(stack_state[4], ds[3]);
         assert_eq!(stack_state[5], ds[2]);
         assert_eq!(stack_state[6], ds[1]);

@@ -10,43 +10,6 @@ use miden_vm::DefaultHost;
 extern crate alloc;
 
 #[test]
-fn test_blake3_192_prove_verify() {
-    // NOTE: Blake3_192 currently uses Blake3_256 config internally (32-byte output instead of
-    // 24-byte) until Plonky3 adds support for CryptographicHasher<u8, [u8; 24]>.
-    // TODO: Create an issue in 0xMiden/Plonky3 to add Blake3_192 support.
-
-    // Compute many Fibonacci iterations to generate a trace >= 2048 rows
-    let source = "
-        begin
-            repeat.1000
-                swap dup.1 add
-            end
-        end
-    ";
-
-    let program = Assembler::default().assemble_program(source).unwrap();
-    let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
-    let advice_inputs = AdviceInputs::default();
-    let mut host =
-        DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-
-    // Create proving options with Blake3_192 (96-bit security)
-    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_192);
-
-    println!("Proving with Blake3_192 (using Blake3_256 config)...");
-    let (stack_outputs, proof) =
-        prove(&program, stack_inputs, advice_inputs, &mut host, options).expect("Proving failed");
-
-    println!("Proof generated successfully!");
-    println!("Verifying proof...");
-
-    let security_level =
-        verify(program.into(), stack_inputs, stack_outputs, proof).expect("Verification failed");
-
-    println!("Verification successful! Security level: {}", security_level);
-}
-
-#[test]
 fn test_blake3_256_prove_verify() {
     // Compute many Fibonacci iterations to generate a trace >= 2048 rows
     let source = "
@@ -237,9 +200,7 @@ mod fast_parallel {
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::Felt;
     use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
-    use miden_prover::{
-        HashFunction, execution_trace_to_row_major, extract_public_values_from_trace,
-    };
+    use miden_prover::{HashFunction, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -286,7 +247,7 @@ mod fast_parallel {
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = extract_public_values_from_trace(&trace);
+        let public_values = trace.to_public_values();
 
         // Create AIR with aux trace builders
         let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());

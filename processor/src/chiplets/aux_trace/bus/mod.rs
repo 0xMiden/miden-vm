@@ -36,6 +36,7 @@ use miden_core::{
 
 use super::Felt;
 use crate::{
+    PrimeField64,
     chiplets::aux_trace::bus::memory::{
         build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
     },
@@ -80,7 +81,7 @@ where
         debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(row);
-        let op_code = op_code_felt.as_int() as u8;
+        let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_JOIN | OPCODE_SPLIT | OPCODE_LOOP => build_control_block_request(

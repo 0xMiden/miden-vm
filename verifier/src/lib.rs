@@ -8,22 +8,27 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
+
 // EXPORTS
 // ================================================================================================
-pub use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
-    precompile::{
-        PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
-        PrecompileVerifierRegistry,
-    },
-};
-pub mod math {
-    pub use miden_core::Felt;
+mod exports {
+    pub use miden_core::{
+        Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+        precompile::{
+            PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
+            PrecompileVerifierRegistry,
+        },
+    };
+    pub mod math {
+        pub use miden_core::Felt;
+    }
+    pub use miden_air::ExecutionProof;
 }
-pub use miden_air::ExecutionProof;
+pub use exports::*;
 
 // VERIFIER
 // ================================================================================================
+
 /// Returns the security level of the proof if the specified program was executed correctly against
 /// the specified inputs and outputs.
 ///
@@ -43,16 +48,16 @@ pub use miden_air::ExecutionProof;
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The proof contains precompile requests. When precompile requests are present, use
-///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`].
-#[tracing::instrument("verify_program", skip_all)]
+/// - The proof contains one or more precompile requests. When precompile requests are present, use
+///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
+///   verify the precompile computations.
 pub fn verify(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
 ) -> Result<u32, VerificationError> {
-    let (security_level, _) = verify_with_precompiles(
+    let (security_level, _commitment) = verify_with_precompiles(
         program_info,
         stack_inputs,
         stack_outputs,
@@ -62,25 +67,37 @@ pub fn verify(
     Ok(security_level)
 }
 
-/// Verifies the proof together with all deferred precompile requests.
+/// Identical to [`verify`], with additional verification of any precompile requests made during the
+/// VM execution. The resulting aggregated precompile commitment is returned, which can be compared
+/// against the commitment computed by the VM.
 ///
-/// This helper recomputes the precompile commitments using the supplied
-/// [`PrecompileVerifierRegistry`], rebuilds the transcript, and verifies the STARK proof
-/// with the recomputed transcript state as part of the public inputs.
+/// # Returns
+/// Returns a tuple `(security_level, aggregated_commitment)` where:
+/// - `security_level`: The security level (in bits) of the verified proof
+/// - `aggregated_commitment`: A [`Word`] containing the final aggregated commitment to all
+///   precompile requests, computed by recomputing and recording each precompile commitment in a
+///   transcript. This value is the finalized digest of the recomputed precompile transcript.
+///
+/// # Errors
+/// Returns any error produced by [`verify`], as well as any errors resulting from precompile
+/// verification.
+#[tracing::instrument("verify_program", skip_all)]
 pub fn verify_with_precompiles(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
     stack_outputs: StackOutputs,
     proof: ExecutionProof,
-    registry: &PrecompileVerifierRegistry,
+    precompile_verifiers: &PrecompileVerifierRegistry,
 ) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
     let security_level = proof.security_level();
     let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
 
-    // Recompute the precompile transcript by verifying all precompile requests
-    let transcript = registry.requests_transcript(&precompile_requests)?;
-    let pc_transcript_state = transcript.state();
-    let recomputed_digest = transcript.finalize();
+    // Recompute the precompile transcript by verifying all precompile requests and recording the
+    // commitments.
+    // If no verifiers were provided (e.g. when this function was called from `verify()`),
+    // but the proof contained requests anyway, returns a `NoVerifierFound` error.
+    let recomputed_transcript = precompile_verifiers.requests_transcript(&precompile_requests)?;
+    let pc_transcript_state = recomputed_transcript.state();
 
     // Verify the STARK proof with the recomputed transcript state in public inputs
     verify_stark(
@@ -91,7 +108,10 @@ pub fn verify_with_precompiles(
         hash_fn,
         proof_bytes,
     )?;
-    Ok((security_level, recomputed_digest))
+
+    // Finalize transcript to return the digest
+    let digest = recomputed_transcript.finalize();
+    Ok((security_level, digest))
 }
 
 fn verify_stark(
@@ -162,19 +182,12 @@ fn verify_stark(
 /// Errors that can occur during proof verification.
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
-    /// The STARK proof failed to verify for the given program.
     #[error("failed to verify proof for program with hash {0}")]
     ProgramVerificationError(Word),
-    /// A precompile verification check failed.
-    #[error("precompile verification failed: {0}")]
-    PrecompileVerification(#[from] PrecompileVerificationError),
-    /// A public input value is not a valid field element.
     #[error("the input {0} is not a valid field element")]
-    InputNot(u64),
-    /// A public output value is not a valid field element.
+    InputNotFieldElement(u64),
     #[error("the output {0} is not a valid field element")]
-    OutputNot(u64),
-    /// A detailed verification error with additional context.
-    #[error("verification error: {0}")]
-    DetailedError(alloc::string::String),
+    OutputNotFieldElement(u64),
+    #[error("failed to verify precompile calls")]
+    PrecompileVerificationError(#[from] PrecompileVerificationError),
 }

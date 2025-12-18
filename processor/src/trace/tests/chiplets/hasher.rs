@@ -30,7 +30,7 @@ use super::{
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
     build_trace_from_program, init_state_from_words, rand_array,
 };
-use crate::StackInputs;
+use crate::{PrimeField64, StackInputs};
 
 // CONSTANTS
 // ================================================================================================
@@ -588,16 +588,16 @@ fn b_chip_mpverify() {
     let tree = MerkleTree::new(&leaves).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         index as u64,
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
     ];
     let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
     let store = MerkleStore::from(&tree);
@@ -733,20 +733,20 @@ fn b_chip_mrupdate() {
     let new_leaf_value = leaves[0];
 
     let stack_inputs = [
-        new_leaf_value[0].as_int(),
-        new_leaf_value[1].as_int(),
-        new_leaf_value[2].as_int(),
-        new_leaf_value[3].as_int(),
-        old_root[0].as_int(),
-        old_root[1].as_int(),
-        old_root[2].as_int(),
-        old_root[3].as_int(),
+        new_leaf_value[0].as_canonical_u64(),
+        new_leaf_value[1].as_canonical_u64(),
+        new_leaf_value[2].as_canonical_u64(),
+        new_leaf_value[3].as_canonical_u64(),
+        old_root[0].as_canonical_u64(),
+        old_root[1].as_canonical_u64(),
+        old_root[2].as_canonical_u64(),
+        old_root[3].as_canonical_u64(),
         index as u64,
         tree.depth() as u64,
-        old_leaf_value[0].as_int(),
-        old_leaf_value[1].as_int(),
-        old_leaf_value[2].as_int(),
-        old_leaf_value[3].as_int(),
+        old_leaf_value[0].as_canonical_u64(),
+        old_leaf_value[1].as_canonical_u64(),
+        old_leaf_value[2].as_canonical_u64(),
+        old_leaf_value[3].as_canonical_u64(),
     ];
     let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
     let store = MerkleStore::from(&tree);
@@ -964,7 +964,7 @@ fn build_expected(
                 || label == MR_UPDATE_NEW_LABEL
                 || label == MR_UPDATE_OLD_LABEL
         );
-        let bit = index.as_int() & 1;
+        let bit = index.as_canonical_u64() & 1;
         let left_word = build_value(&alphas[8..12], &state[DIGEST_RANGE]);
         let right_word = build_value(&alphas[8..12], &state[DIGEST_RANGE.end..]);
 
@@ -1058,7 +1058,7 @@ fn fill_state_from_decoder(trace: &ExecutionTrace, state: &mut HasherState, row:
 fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex) -> Felt {
     // calculate the op code
     let opcode_value = DECODER_OP_BITS_RANGE.rev().fold(0u8, |result, bit_index| {
-        let op_bit = trace.main_trace.get_column(bit_index)[row].as_int() as u8;
+        let op_bit = trace.main_trace.get_column(bit_index)[row].as_canonical_u64() as u8;
         (result << 1) ^ op_bit
     });
 
@@ -1080,7 +1080,7 @@ fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex
 
 /// Returns the row of the hash cycle which corresponds to the provided Hasher address.
 fn addr_to_cycle_row(addr: Felt) -> usize {
-    let cycle = (addr.as_int() - 1) as usize;
+    let cycle = (addr.as_canonical_u64() - 1) as usize;
     let cycle_row = cycle % HASH_CYCLE_LEN;
     debug_assert!(
         cycle_row == 0 || cycle_row == HASH_CYCLE_LEN - 1,

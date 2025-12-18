@@ -1,7 +1,7 @@
 use miden_core::{Field, ONE, Operation, ZERO};
 
 use super::{ExecutionError, Felt, Process, utils::assert_binary};
-use crate::ErrorContext;
+use crate::{ErrorContext, PrimeField64};
 
 // FIELD OPERATIONS
 // ================================================================================================
@@ -198,11 +198,11 @@ impl Process {
         let old_exp = self.stack.get(3);
 
         // Compute new exponent.
-        let new_exp = Felt::new(old_exp.as_int() >> 1);
+        let new_exp = Felt::new(old_exp.as_canonical_u64() >> 1);
 
         // Compute new accumulator. We update the accumulator only when the least significant bit of
         // the exponent is 1.
-        let exp_lsb = old_exp.as_int() & 1;
+        let exp_lsb = old_exp.as_canonical_u64() & 1;
         let result_acc_update = if exp_lsb == 1 { old_base_acc } else { ONE };
         let new_result_acc = old_result_acc * result_acc_update;
 
@@ -228,7 +228,7 @@ impl Process {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::{Field, ONE, ZERO, mast::MastForest};
+    use miden_core::{Field, ONE, PrimeField64, ZERO, mast::MastForest};
     use miden_utils_testing::rand::rand_value;
 
     use super::{
@@ -244,7 +244,12 @@ mod tests {
     fn op_add() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -266,7 +271,12 @@ mod tests {
     fn op_neg() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -284,7 +294,12 @@ mod tests {
     fn op_mul() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -306,7 +321,12 @@ mod tests {
     fn op_inverse() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();
@@ -330,7 +350,12 @@ mod tests {
     fn op_incr() {
         // initialize the stack with a few values
         let (a, b, c) = get_rand_values();
-        let stack = StackInputs::try_from_ints([c.as_int(), b.as_int(), a.as_int()]).unwrap();
+        let stack = StackInputs::try_from_ints([
+            c.as_canonical_u64(),
+            b.as_canonical_u64(),
+            a.as_canonical_u64(),
+        ])
+        .unwrap();
         let mut process = Process::new_dummy(stack);
         let mut host = DefaultHost::default();
         let program = &MastForest::default();

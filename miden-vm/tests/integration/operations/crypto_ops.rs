@@ -1,6 +1,6 @@
 use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
-    Felt, build_expected_hash, build_expected_perm, build_op_test,
+    Felt, PrimeField64, build_expected_hash, build_expected_perm, build_op_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
@@ -110,23 +110,23 @@ fn mtree_get() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         index as u64,
         tree.depth() as u64,
     ];
 
     let final_stack = [
-        leaves[index][3].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][0].as_int(),
-        tree.root()[3].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[0].as_int(),
+        leaves[index][3].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][0].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[0].as_canonical_u64(),
     ];
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store);
@@ -142,29 +142,29 @@ fn mtree_verify() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         index as u64,
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
     ];
 
     let final_stack = [
-        leaves[index][3].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][0].as_int(),
+        leaves[index][3].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][0].as_canonical_u64(),
         tree.depth() as u64,
         index as u64,
-        tree.root()[3].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[0].as_int(),
+        tree.root()[3].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[0].as_canonical_u64(),
     ];
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store);
@@ -182,29 +182,29 @@ fn mtree_verify_negative() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         tampered_index as u64,
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
     ];
 
     let final_stack = [
-        leaves[index][3].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][0].as_int(),
+        leaves[index][3].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][0].as_canonical_u64(),
         tree.depth() as u64,
         index as u64,
-        tree.root()[3].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[0].as_int(),
+        tree.root()[3].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[0].as_canonical_u64(),
     ];
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store);
@@ -223,14 +223,14 @@ fn mtree_update() {
     let new_tree = MerkleTree::new(new_leaves).unwrap();
 
     let stack_inputs = [
-        new_node[0].as_int(),
-        new_node[1].as_int(),
-        new_node[2].as_int(),
-        new_node[3].as_int(),
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        new_node[0].as_canonical_u64(),
+        new_node[1].as_canonical_u64(),
+        new_node[2].as_canonical_u64(),
+        new_node[3].as_canonical_u64(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         index as u64,
         tree.depth() as u64,
     ];
@@ -245,14 +245,14 @@ fn mtree_update() {
 
     // expected state has the new leaf and the new root of the tree
     let final_stack = [
-        old_node[3].as_int(),
-        old_node[2].as_int(),
-        old_node[1].as_int(),
-        old_node[0].as_int(),
-        new_tree.root()[3].as_int(),
-        new_tree.root()[2].as_int(),
-        new_tree.root()[1].as_int(),
-        new_tree.root()[0].as_int(),
+        old_node[3].as_canonical_u64(),
+        old_node[2].as_canonical_u64(),
+        old_node[1].as_canonical_u64(),
+        old_node[0].as_canonical_u64(),
+        new_tree.root()[3].as_canonical_u64(),
+        new_tree.root()[2].as_canonical_u64(),
+        new_tree.root()[1].as_canonical_u64(),
+        new_tree.root()[0].as_canonical_u64(),
     ];
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store.clone());

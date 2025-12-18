@@ -9,7 +9,7 @@ use miden_core::{
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ErrorContext, ExecutionError, ONE,
+    ErrorContext, ExecutionError, ONE, PrimeField64,
     fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
     processor::{
@@ -108,7 +108,7 @@ pub(super) fn op_mrupdate<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     if let Some(path) = &path
-        && path.len() != depth.as_int() as usize
+        && path.len() != depth.as_canonical_u64() as usize
     {
         return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
     }

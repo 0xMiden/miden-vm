@@ -1,4 +1,4 @@
-use miden_core::{BasedVectorSpace, Felt, ONE, QuadFelt, ZERO};
+use miden_core::{BasedVectorSpace, Felt, ONE, PrimeField64, QuadFelt, ZERO};
 use miden_utils_testing::rand::rand_value;
 
 #[test]
@@ -72,7 +72,7 @@ fn circuit_evaluation_prove_verify() {
 
     // finalize the advice stack
     let adv_stack = data.repeat(num_repetitions);
-    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_int()).collect();
+    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_canonical_u64()).collect();
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);

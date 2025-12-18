@@ -1,5 +1,5 @@
 use super::{ExecutionError, MIN_STACK_DEPTH, Process};
-use crate::{ErrorContext, ZERO};
+use crate::{ErrorContext, PrimeField64, ZERO};
 
 impl Process {
     // STACK MANIPULATION
@@ -233,7 +233,7 @@ impl Process {
         let b = self.stack.get(1);
         let a = self.stack.get(2);
 
-        match c.as_int() {
+        match c.as_canonical_u64() {
             0 => {
                 self.stack.set(0, b);
                 self.stack.set(1, a);
@@ -265,7 +265,7 @@ impl Process {
         let a2 = self.stack.get(7);
         let a3 = self.stack.get(8);
 
-        match c.as_int() {
+        match c.as_canonical_u64() {
             0 => {
                 self.stack.set(0, b0);
                 self.stack.set(1, b1);

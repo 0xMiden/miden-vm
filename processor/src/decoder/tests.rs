@@ -26,7 +26,7 @@ use super::{
     },
     build_op_group,
 };
-use crate::{AdviceInputs, DefaultHost, NoopEventHandler};
+use crate::{AdviceInputs, DefaultHost, NoopEventHandler, PrimeField64};
 
 // CONSTANTS
 // ================================================================================================
@@ -1447,10 +1447,10 @@ fn dyn_block() {
 
     let (trace, trace_len) = build_dyn_trace(
         &[
-            foo_root_node.digest()[0].as_int(),
-            foo_root_node.digest()[1].as_int(),
-            foo_root_node.digest()[2].as_int(),
-            foo_root_node.digest()[3].as_int(),
+            foo_root_node.digest()[0].as_canonical_u64(),
+            foo_root_node.digest()[1].as_canonical_u64(),
+            foo_root_node.digest()[2].as_canonical_u64(),
+            foo_root_node.digest()[3].as_canonical_u64(),
             FOO_ROOT_NODE_ADDR,
         ],
         &program,
@@ -1744,7 +1744,7 @@ fn contains_op(trace: &DecoderTrace, row_idx: usize, op: Operation) -> bool {
 fn read_opcode(trace: &DecoderTrace, row_idx: usize) -> u8 {
     let mut result = 0;
     for (i, column) in trace.iter().skip(OP_BITS_OFFSET).take(NUM_OP_BITS).enumerate() {
-        let op_bit = column[row_idx].as_int();
+        let op_bit = column[row_idx].as_canonical_u64();
         assert!(op_bit <= 1, "invalid op bit");
         result += op_bit << i;
     }

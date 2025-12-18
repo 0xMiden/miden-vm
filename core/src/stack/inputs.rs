@@ -2,7 +2,10 @@ use alloc::vec::Vec;
 use core::{ops::Deref, slice};
 
 use super::{super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable};
-use crate::utils::{ByteReader, Deserializable, DeserializationError};
+use crate::{
+    PrimeField64, QuotientMap,
+    utils::{ByteReader, Deserializable, DeserializationError},
+};
 
 // STACK INPUTS
 // ================================================================================================
@@ -46,7 +49,14 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            .map(crate::felt_from_u64_checked)
+            .map(|v| {
+                Felt::from_canonical_checked(v).ok_or_else(|| {
+                    InputError::NotFieldElement(
+                        v,
+                        format!("value {} exceeds field modulus {}", v, Felt::ORDER_U64),
+                    )
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)

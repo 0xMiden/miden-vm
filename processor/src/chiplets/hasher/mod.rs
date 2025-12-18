@@ -9,6 +9,7 @@ use super::{
     Felt, HasherState, MerklePath, MerkleRootUpdate, ONE, OpBatch, TraceFragment, Word as Digest,
     ZERO,
 };
+use crate::PrimeField64;
 
 mod trace;
 use trace::HasherTrace;
@@ -211,8 +212,12 @@ impl Hasher {
     ) -> (Felt, Digest) {
         let addr = self.trace.next_row_addr();
 
-        let root =
-            self.verify_merkle_path(value, path, index.as_int(), MerklePathContext::MpVerify);
+        let root = self.verify_merkle_path(
+            value,
+            path,
+            index.as_canonical_u64(),
+            MerklePathContext::MpVerify,
+        );
 
         (addr, root)
     }
@@ -234,7 +239,7 @@ impl Hasher {
         index: Felt,
     ) -> MerkleRootUpdate {
         let address = self.trace.next_row_addr();
-        let index = index.as_int();
+        let index = index.as_canonical_u64();
 
         let old_root =
             self.verify_merkle_path(old_value, path, index, MerklePathContext::MrUpdateOld);
@@ -359,8 +364,8 @@ impl Hasher {
     /// Inserts start and end rows of trace for a program block to the memoized_trace_map.
     fn insert_to_memoized_trace_map(&mut self, addr: Felt, hash: Digest) {
         let key: [u8; 32] = hash.into();
-        let start_row = addr.as_int() as usize - 1;
-        let end_row = self.trace.next_row_addr().as_int() as usize - 1;
+        let start_row = addr.as_canonical_u64() as usize - 1;
+        let end_row = self.trace.next_row_addr().as_canonical_u64() as usize - 1;
         self.memoized_trace_map.insert(key, (start_row, end_row));
     }
 }

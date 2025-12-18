@@ -1,6 +1,6 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, LexicographicWord, PrimeCharacteristicRing, Word};
+use miden_core::{EventName, Felt, LexicographicWord, PrimeCharacteristicRing, PrimeField64, Word};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Event name for the lowerbound_array operation.
@@ -57,7 +57,7 @@ pub fn handle_lowerbound_key_value(
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let use_full_key = process.get_stack_item(7);
 
-    let key_size = match use_full_key.as_int() {
+    let key_size = match use_full_key.as_canonical_u64() {
         0 => KeySize::Half,
         1 => KeySize::Full,
         _ => {
@@ -172,8 +172,8 @@ fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
     match key_size {
         KeySize::Full => LexicographicWord::new(word),
         KeySize::Half => {
-            word[0] = Felt::new(0);
-            word[1] = Felt::new(0);
+            word[0] = Felt::ZERO;
+            word[1] = Felt::ZERO;
 
             LexicographicWord::new(word)
         },

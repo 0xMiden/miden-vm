@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{PrimeCharacteristicRing, WORD_SIZE, Word, ZERO};
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO};
 
 use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
@@ -65,12 +65,14 @@ impl StackOutputs {
     }
 
     /// Returns the word located starting at the specified Felt position on the stack in big-endian
-    /// order, or `None` if out of bounds. For example, passing in `0` returns the word at the top
-    /// of the stack, and passing in `4` returns the word starting at element index `4`.
+    /// (reversed) order, or `None` if out of bounds.
     ///
-    /// The elements are returned in big-endian order (most significant element first). Since words
-    /// are stored on the stack in reverse order `[d, c, b, a]` for word `[a, b, c, d]`, this
-    /// method reverses them back to the original order.
+    /// For example, passing in `0` returns the word at the top of the stack, and passing in `4`
+    /// returns the word starting at element index `4`.
+    ///
+    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
+    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
+    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
     pub fn get_stack_word_be(&self, idx: usize) -> Option<Word> {
         let word_elements: [Felt; WORD_SIZE] = {
             let word_elements: Vec<Felt> = range(idx, 4)
@@ -131,7 +133,7 @@ impl StackOutputs {
 
     /// Converts the [`StackOutputs`] into the vector of `u64` values.
     pub fn as_int_vec(&self) -> Vec<u64> {
-        self.elements.iter().map(|e| (*e).as_int()).collect()
+        self.elements.iter().map(|e| (*e).as_canonical_u64()).collect()
     }
 }
 

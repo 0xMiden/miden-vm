@@ -293,7 +293,8 @@ mod tests {
     use alloc::vec::Vec;
 
     use miden_core::{
-        BasedVectorSpace, Felt, Operation, QuadFelt, StackInputs, ZERO, mast::MastForest,
+        BasedVectorSpace, Felt, Operation, PrimeField64, QuadFelt, StackInputs, ZERO,
+        mast::MastForest,
     };
     use miden_utils_testing::{build_test, rand::rand_array};
 
@@ -330,7 +331,7 @@ mod tests {
             .memory
             .write_word(
                 ctx,
-                inputs[2].as_int().try_into().expect("Shouldn't fail by construction"),
+                inputs[2].as_canonical_u64().try_into().expect("Shouldn't fail by construction"),
                 process.system.clk(),
                 alpha_mem_word.into(),
                 &(),
@@ -428,7 +429,7 @@ mod tests {
             .memory
             .write_word(
                 ctx,
-                inputs[2].as_int().try_into().expect("Shouldn't fail by construction"),
+                inputs[2].as_canonical_u64().try_into().expect("Shouldn't fail by construction"),
                 process.system.clk(),
                 alpha_mem_word.into(),
                 &(),
@@ -528,7 +529,7 @@ mod tests {
 
         // prepare the advice stack with the generated data
         let adv_stack = [a[0], a[1], ZERO, ZERO];
-        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_int()).collect();
+        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_canonical_u64()).collect();
 
         // create the expected operand stack
         let mut expected = Vec::new();
@@ -539,10 +540,10 @@ mod tests {
         ]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
-        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
+        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_canonical_u64()).collect();
 
         // convert input stack
-        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_int()).collect();
+        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_canonical_u64()).collect();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);
@@ -590,7 +591,7 @@ mod tests {
 
         // prepare the advice stack with the generated data
         let adv_stack = [a[0], a[1], ZERO, ZERO];
-        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_int()).collect();
+        let adv_stack: Vec<u64> = adv_stack.iter().map(|e| e.as_canonical_u64()).collect();
 
         // create the expected operand stack
         let mut expected = Vec::new();
@@ -601,10 +602,10 @@ mod tests {
         ]);
         // the rest of the stack should remain unchanged
         expected.extend_from_slice(&inputs[2..]);
-        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_int()).collect();
+        let expected: Vec<u64> = expected.iter().rev().map(|e| e.as_canonical_u64()).collect();
 
         // convert input stack
-        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_int()).collect();
+        let inputs: Vec<u64> = inputs.iter().map(|e| e.as_canonical_u64()).collect();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);

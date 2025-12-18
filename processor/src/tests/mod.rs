@@ -339,17 +339,17 @@ fn test_diagnostic_merkle_path_verification_failed() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         // Intentionally choose the wrong index to trigger the error
         (index + 1) as u64,
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
     ];
 
     let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
@@ -377,17 +377,17 @@ fn test_diagnostic_merkle_path_verification_failed() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
         // Intentionally choose the wrong index to trigger the error
         (index + 1) as u64,
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
     ];
 
     let build_test = build_test_by_mode!(true, source, &stack_inputs, &[], store);
@@ -677,10 +677,10 @@ fn test_diagnostic_merkle_store_lookup_failed() {
 
         &[
             1,
-            merkle_root[0].as_int(),
-            merkle_root[1].as_int(),
-            merkle_root[2].as_int(),
-            merkle_root[3].as_int(),
+            merkle_root[0].as_canonical_u64(),
+            merkle_root[1].as_canonical_u64(),
+            merkle_root[2].as_canonical_u64(),
+            merkle_root[3].as_canonical_u64(),
             index,
             log_depth,
         ]

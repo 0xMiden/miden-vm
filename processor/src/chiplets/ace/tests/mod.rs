@@ -15,7 +15,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId,
+    ContextId, PrimeField64,
     chiplets::{
         ace::{
             eval_circuit,
@@ -311,7 +311,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         let v_0 = QuadFelt::new([v_00, v_01]);
 
         // Insert wire 0
-        let id_0 = columns[ID_0_IDX][row_idx].as_int();
+        let id_0 = columns[ID_0_IDX][row_idx].as_canonical_u64();
         let m_0 = columns[M_0_IDX][row_idx];
         assert_eq!(id_0, wire_idx_iter.next().unwrap());
         assert!(bus.insert(id_0, (v_0, m_0)).is_none());
@@ -322,7 +322,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         let v_1 = QuadFelt::new([v_10, v_11]);
 
         // Insert wire 1
-        let id_1 = columns[ID_1_IDX][row_idx].as_int();
+        let id_1 = columns[ID_1_IDX][row_idx].as_canonical_u64();
         let m_1 = columns[M_1_IDX][row_idx];
         assert_eq!(id_1, wire_idx_iter.next().unwrap());
         assert!(bus.insert(id_1, (v_1, m_1)).is_none());
@@ -341,13 +341,13 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         let v_0 = QuadFelt::new([v_00, v_01]);
 
         // Insert wire 0
-        let id_0 = columns[ID_0_IDX][row_idx].as_int();
+        let id_0 = columns[ID_0_IDX][row_idx].as_canonical_u64();
         let m_0 = columns[M_0_IDX][row_idx];
         assert_eq!(id_0, wire_idx_iter.next().unwrap());
         assert!(bus.insert(id_0, (v_0, m_0)).is_none());
 
         // Get wire 1
-        let id_1 = columns[ID_1_IDX][row_idx].as_int();
+        let id_1 = columns[ID_1_IDX][row_idx].as_canonical_u64();
         let (v_l, m_1) = bus.get_mut(&id_1).unwrap();
         *m_1 -= Felt::ONE;
 
@@ -358,7 +358,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         assert_eq!(*v_l, v_1);
 
         // Get wire 2
-        let id_2 = columns[ID_2_IDX][row_idx].as_int();
+        let id_2 = columns[ID_2_IDX][row_idx].as_canonical_u64();
         let (v_r, m_2) = bus.get_mut(&id_2).unwrap();
         *m_2 -= Felt::ONE;
 

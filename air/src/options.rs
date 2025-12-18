@@ -70,7 +70,7 @@ impl ProvingOptions {
 
 impl Default for ProvingOptions {
     fn default() -> Self {
-        Self::new(HashFunction::Blake3_192)
+        Self::new(HashFunction::Blake3_256)
     }
 }
 

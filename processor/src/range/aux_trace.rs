@@ -10,6 +10,7 @@ use miden_air::{
 use miden_core::{ExtensionField, ZERO};
 
 use super::{Felt, uninit_vector};
+use crate::PrimeField64;
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
@@ -123,8 +124,10 @@ impl AuxTraceBuilder {
 
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
-                let value = divisors.get(&(lookup.as_int() as u16)).expect("invalid lookup value");
-                b_range[b_range_idx] = b_range[row_idx] + value.mul(*multiplicity);
+                let value = divisors
+                    .get(&(lookup.as_canonical_u64() as u16))
+                    .expect("invalid lookup value");
+                b_range[b_range_idx] = b_range[row_idx] + *value * *multiplicity;
             } else {
                 b_range[b_range_idx] = b_range[row_idx];
             }
