@@ -13,7 +13,7 @@ use miden_air::trace::{
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET, STACK_TOP_RANGE},
 };
 use miden_core::{
-    Felt, ONE, Operation, Word, ZERO,
+    Felt, ONE, Operation, PrimeField64, Word, ZERO,
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },
@@ -591,7 +591,7 @@ fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
     };
     use miden_core::mast::OP_BATCH_SIZE;
 
-    let num_groups = core::cmp::min(num_groups_left.as_int() as usize, OP_BATCH_SIZE);
+    let num_groups = core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE);
     match num_groups {
         8 => OP_BATCH_8_GROUPS,
         4 => OP_BATCH_4_GROUPS,

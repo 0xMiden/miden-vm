@@ -5,7 +5,7 @@ use miden_core::{
     Word, ZERO, crypto::hash::Rpo256, sys_events::SystemEvent,
 };
 
-use crate::{AdviceError, ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{AdviceError, ExecutionError, PrimeField64, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -498,7 +498,7 @@ fn push_ilog2(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let n = process.get_stack_item(1).as_int();
+    let n = process.get_stack_item(1).as_canonical_u64();
     if n == 0 {
         return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
     }
@@ -520,7 +520,7 @@ fn push_transformed_stack_top(
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
     let stack_top: u32 = stack_top
-        .as_int()
+        .as_canonical_u64()
         .try_into()
         .map_err(|_| ExecutionError::not_u32_value(stack_top, err_ctx))?;
     let transformed_stack_top = f(stack_top);

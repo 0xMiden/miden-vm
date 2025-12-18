@@ -73,7 +73,7 @@ pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutatio
     // Create the corresponding secret key
     let mut sk_bytes = Vec::with_capacity(sk.len());
     for element in sk {
-        let value = element.as_int();
+        let value = element.as_canonical_u64();
         assert!(value <= u8::MAX as u64, "invalid secret key");
         sk_bytes.push(value as u8);
     }
@@ -250,9 +250,13 @@ fn test_move_sig_to_adv_stack() {
 
     let op_stack = {
         let mut op_stack = vec![];
-        let message = message.into_iter().map(|a| a.as_int()).collect::<Vec<u64>>();
+        let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
         op_stack.extend_from_slice(&message);
-        let pk_elements = public_key.as_elements().iter().map(|a| a.as_int()).collect::<Vec<u64>>();
+        let pk_elements = public_key
+            .as_elements()
+            .iter()
+            .map(|a| a.as_canonical_u64())
+            .collect::<Vec<u64>>();
         op_stack.extend_from_slice(&pk_elements);
 
         op_stack
@@ -298,7 +302,7 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
     let (stack_outputs, proof) =
         miden_utils_testing::prove(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("failed to generate proof");
@@ -333,9 +337,11 @@ fn generate_test(
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
     let mut op_stack = vec![];
-    let message = message.into_iter().map(|a| a.as_int()).collect::<Vec<u64>>();
+    let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
     op_stack.extend_from_slice(&message);
-    op_stack.extend_from_slice(&pk.as_elements().iter().map(|a| a.as_int()).collect::<Vec<u64>>());
+    op_stack.extend_from_slice(
+        &pk.as_elements().iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>(),
+    );
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
@@ -365,7 +371,7 @@ fn mul_modulo_p(a: Polynomial<Felt>, b: Polynomial<Felt>) -> [u64; 1024] {
     let mut c = [0; 2 * N];
     for i in 0..N {
         for j in 0..N {
-            c[i + j] += a.coefficients[i].as_int() * b.coefficients[j].as_int();
+            c[i + j] += a.coefficients[i].as_canonical_u64() * b.coefficients[j].as_canonical_u64();
         }
     }
     c
@@ -396,7 +402,7 @@ fn generate_data_probabilistic_product_test(
     // get the challenge point and push it to the advice stack
     let digest_polynomials = Rpo256::hash_elements(&polynomials);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);
-    let mut advice_stack = vec![challenge.0.as_int(), challenge.1.as_int()];
+    let mut advice_stack = vec![challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64()];
 
     // push the polynomials to the advice stack
     let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.into()).collect();

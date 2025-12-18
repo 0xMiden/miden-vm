@@ -59,7 +59,7 @@ mod kernel;
 pub use kernel::Kernel;
 pub use miden_crypto::{
     AlgebraicSponge, BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt,
-    Field, ONE, PrimeCharacteristicRing, PrimeField64, WORD_SIZE, Word, ZERO,
+    Field, ONE, PrimeCharacteristicRing, PrimeField64, QuotientMap, WORD_SIZE, Word, ZERO,
     batch_multiplicative_inverse, word::LexicographicWord,
 };
 
@@ -95,25 +95,6 @@ pub mod crypto {
 pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 pub mod mast;
-
-// FIELD ELEMENT CONVERSION
-// ================================================================================================
-
-/// Converts a u64 value to a field element with validation.
-///
-/// # Errors
-/// Returns an error if the value is not in the canonical range (i.e., >= field modulus).
-pub fn felt_from_u64_checked(value: u64) -> Result<Felt, errors::InputError> {
-    // Check against field modulus before conversion to avoid expensive as_int() call
-    if value >= Felt::ORDER_U64 {
-        return Err(errors::InputError::NotFieldElement(
-            value,
-            format!("value {} exceeds field modulus {}", value, Felt::ORDER_U64),
-        ));
-    }
-
-    Ok(Felt::from_u64(value))
-}
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

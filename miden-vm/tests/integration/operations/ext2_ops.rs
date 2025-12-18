@@ -1,5 +1,5 @@
 use miden_core::{BasedVectorSpace, Felt, Field, QuadFelt};
-use miden_utils_testing::{build_op_test, rand::rand_value};
+use miden_utils_testing::{PrimeField64, build_op_test, rand::rand_value};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================
@@ -118,5 +118,5 @@ fn ext2inverse() {
 /// underlying base field and convert them into integers.
 fn ext_element_to_ints(ext_elem: QuadFelt) -> (u64, u64) {
     let base_elements: &[Felt] = ext_elem.as_basis_coefficients_slice();
-    (base_elements[0].as_int(), base_elements[1].as_int())
+    (base_elements[0].as_canonical_u64(), base_elements[1].as_canonical_u64())
 }

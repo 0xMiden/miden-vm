@@ -1,3 +1,4 @@
+use miden_core::PrimeField64;
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 
@@ -628,14 +629,14 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
 
 fn build_expected_stack(word0: Word, word1: Word) -> Vec<u64> {
     vec![
-        word0[3].as_int(),
-        word0[2].as_int(),
-        word0[1].as_int(),
-        word0[0].as_int(),
-        word1[3].as_int(),
-        word1[2].as_int(),
-        word1[1].as_int(),
-        word1[0].as_int(),
+        word0[3].as_canonical_u64(),
+        word0[2].as_canonical_u64(),
+        word0[1].as_canonical_u64(),
+        word0[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
     ]
 }
 
@@ -712,7 +713,7 @@ fn test_smt_randomized_round_trip() {
 /// This ensures keys are distributed across a limited number of buckets, which exercises
 /// multi-leaf functionality in the SMT.
 fn random_word(seed: &mut u64, buckets: usize) -> Word {
-    let mut word = [Felt::new(0); 4];
+    let mut word = [ZERO; 4];
     for element in word.iter_mut() {
         *element = Felt::new(random_u64(seed));
     }

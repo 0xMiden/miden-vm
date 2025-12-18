@@ -5,6 +5,7 @@ use miden_air::RowIndex;
 use miden_core::PrimeCharacteristicRing;
 
 use super::{EMPTY_WORD, ExecutionError, Felt, SysTrace, Word, ZERO};
+use crate::PrimeField64;
 
 #[cfg(test)]
 mod tests;
@@ -85,7 +86,7 @@ impl System {
     /// Returns execution context ID at the specified clock cycle.
     #[inline(always)]
     pub fn get_ctx_at(&self, clk: RowIndex) -> ContextId {
-        (self.ctx_trace[clk.as_usize()].as_int() as u32).into()
+        (self.ctx_trace[clk.as_usize()].as_canonical_u64() as u32).into()
     }
 
     // STATE MUTATORS

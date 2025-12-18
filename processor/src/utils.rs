@@ -6,6 +6,8 @@ pub use miden_core::utils::*;
 use miden_core::{Felt, Field, ONE, ZERO};
 use rayon::prelude::*;
 
+use crate::PrimeField64;
+
 /// The number of rows in the execution trace required to compute a permutation of Rescue Prime
 /// Optimized, represented as a field element.
 pub(crate) const HASH_CYCLE_LEN_FELT: Felt =
@@ -17,7 +19,7 @@ pub(crate) const HASH_CYCLE_LEN_FELT: Felt =
 /// Splits an element into two field elements containing 32-bit integer values
 #[inline(always)]
 pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
-    let value = value.as_int();
+    let value = value.as_canonical_u64();
     let lo = (value as u32) as u64;
     let hi = value >> 32;
     (Felt::new(hi), Felt::new(lo))
@@ -26,7 +28,7 @@ pub(crate) fn split_element(value: Felt) -> (Felt, Felt) {
 /// Splits an element into two 16 bit integer limbs. It assumes that the field element contains a
 /// valid 32-bit integer value.
 pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
-    let (hi, lo) = split_u32_into_u16(value.as_int());
+    let (hi, lo) = split_u32_into_u16(value.as_canonical_u64());
     (Felt::new(hi as u64), Felt::new(lo as u64))
 }
 

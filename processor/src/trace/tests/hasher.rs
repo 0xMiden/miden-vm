@@ -10,7 +10,7 @@ use miden_core::{
 use rstest::rstest;
 
 use super::{Felt, ONE, Operation, Word, ZERO, build_trace_from_ops_with_inputs, rand_array};
-use crate::{AdviceInputs, StackInputs};
+use crate::{AdviceInputs, PrimeField64, StackInputs};
 
 // SIBLING TABLE TESTS
 // ================================================================================================
@@ -167,7 +167,7 @@ fn init_leaf(value: u64) -> Word {
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {
-    word.iter().rev().for_each(|v| target.push(v.as_int()));
+    word.iter().rev().for_each(|v| target.push(v.as_canonical_u64()));
 }
 
 /// Describes a single entry in the sibling table which consists of a tuple `(index, node)` where
@@ -192,7 +192,7 @@ impl SiblingTableRow {
         // of the hasher state, and when the least significant bit is 1, it will be in the 2nd
         // word. we compute the value in this way to make constraint evaluation a bit easier since
         // we need to compute the 2nd and the 3rd word values for other purposes as well.
-        let lsb = self.index.as_int() & 1;
+        let lsb = self.index.as_canonical_u64() & 1;
         if lsb == 0 {
             alphas[0]
                 + alphas[3] * (self.index)

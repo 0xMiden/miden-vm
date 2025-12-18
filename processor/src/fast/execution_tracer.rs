@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{chiplets::hasher::STATE_WIDTH, rows::RowIndex};
 use miden_core::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
     crypto::merkle::MerklePath,
     mast::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
@@ -588,8 +588,8 @@ impl Tracer for ExecutionTracer {
     }
 
     fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
-        let (t1, t0) = split_u32_into_u16(u32_lo.as_int());
-        let (t3, t2) = split_u32_into_u16(u32_hi.as_int());
+        let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
         self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
     }

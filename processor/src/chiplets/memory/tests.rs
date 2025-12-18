@@ -16,7 +16,7 @@ use super::{
     TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError};
+use crate::{ContextId, MemoryAddress, MemoryError, PrimeField64};
 
 #[test]
 fn mem_init() {
@@ -499,7 +499,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.as_int().try_into().unwrap();
+            let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -546,7 +546,7 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.as_int().try_into().unwrap();
+        let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
         let remainder = addr % WORD_SIZE as u32;
         let word = Felt::from(addr - remainder);
 

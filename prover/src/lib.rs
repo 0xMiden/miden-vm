@@ -9,8 +9,7 @@ use miden_air::ProcessorAir;
 use miden_processor::Program;
 use tracing::instrument;
 
-// Trace and public input conversion utilities
-mod public_inputs;
+// Trace conversion utilities
 mod trace_adapter;
 
 // EXPORTS
@@ -22,7 +21,6 @@ pub use miden_processor::{
     SyncHost, Word, crypto, math, utils,
 };
 pub use miden_prover_p3::{Commitments, OpenedValues, Proof};
-pub use public_inputs::{build_public_values, extract_public_values_from_trace};
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
@@ -69,7 +67,7 @@ where
     };
 
     // Build public values
-    let public_values = extract_public_values_from_trace(&trace);
+    let public_values = trace.to_public_values();
 
     // Create AIR with aux trace builders
     let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
@@ -77,13 +75,9 @@ where
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
         HashFunction::Blake3_192 => {
-            // TODO: Blake3_192 currently uses Blake3_256 config (32-byte output instead of
-            // 24-byte). Proper 192-bit support requires Plonky3 to implement
-            // CryptographicHasher<u8, [u8; 24]> for Blake3. Create an issue in
-            // 0xMiden/Plonky3 to add this support.
-            let config = miden_air::config::create_blake3_256_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            // TODO: Proper 192-bit support requires Plonky3 to implement
+            // CryptographicHasher<u8, [u8; 24]> for Blake3.
+            panic!("Blake3_192 is not yet supported")
         },
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();

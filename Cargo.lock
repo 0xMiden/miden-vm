@@ -1285,6 +1285,7 @@ dependencies = [
  "p3-fri",
  "p3-keccak",
  "p3-matrix",
+ "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1395,7 +1396,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#b2ec642ac118d0384bbde7cd8fc455525edce381"
+source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#aefa201537579c6a573ebe119f85530c4ab22a90"
 dependencies = [
  "blake3",
  "cc",
@@ -1431,7 +1432,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#b2ec642ac118d0384bbde7cd8fc455525edce381"
+source = "git+https://github.com/0xMiden/crypto?branch=al-e2e-plonky3#aefa201537579c6a573ebe119f85530c4ab22a90"
 dependencies = [
  "quote",
  "syn 2.0.111",

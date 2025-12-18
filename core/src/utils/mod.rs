@@ -7,7 +7,7 @@ use core::{
 
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
-use miden_crypto::{ExtensionField, PrimeCharacteristicRing};
+use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -17,6 +17,7 @@ pub use miden_crypto::{
         uninit_vector,
     },
 };
+pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
 use crate::{Felt, Word};
 
@@ -85,10 +86,10 @@ impl IntoBytes<32> for [Felt; 4] {
     fn into_bytes(self) -> [u8; 32] {
         let mut result = [0; 32];
 
-        result[..8].copy_from_slice(&self[0].as_int().to_le_bytes());
-        result[8..16].copy_from_slice(&self[1].as_int().to_le_bytes());
-        result[16..24].copy_from_slice(&self[2].as_int().to_le_bytes());
-        result[24..].copy_from_slice(&self[3].as_int().to_le_bytes());
+        result[..8].copy_from_slice(&self[0].as_canonical_u64().to_le_bytes());
+        result[8..16].copy_from_slice(&self[1].as_canonical_u64().to_le_bytes());
+        result[16..24].copy_from_slice(&self[2].as_canonical_u64().to_le_bytes());
+        result[24..].copy_from_slice(&self[3].as_canonical_u64().to_le_bytes());
 
         result
     }
@@ -223,16 +224,14 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
     elements
         .iter()
         .flat_map(|felt| {
-            let value = felt.as_int() as u32;
+            let value = felt.as_canonical_u64() as u32;
             value.to_le_bytes()
         })
         .collect()
 }
 
-// FORMATTING
+// TESTS
 // ================================================================================================
-
-pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
 #[cfg(test)]
 mod tests {

@@ -16,8 +16,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
 /// proof. However, the proof does not contain public inputs needed to verify the proof.
-#[derive(Serialize, Deserialize)]
-#[serde(bound = "")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
@@ -101,7 +100,6 @@ impl ExecutionProof {
 
 /// A hash function used during STARK proof generation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
-#[serde(bound = "")]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 192-bit output.

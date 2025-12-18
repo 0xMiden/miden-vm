@@ -2,7 +2,7 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, PrimeCharacteristicRing,
+    Felt, PrimeCharacteristicRing, PrimeField64,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
@@ -118,7 +118,7 @@ impl fmt::Display for WordValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_list();
         for value in self.0 {
-            builder.entry(&value.as_int());
+            builder.entry(&value.as_canonical_u64());
         }
         builder.finish()
     }
@@ -148,18 +148,24 @@ impl PartialOrd for WordValue {
 impl Ord for WordValue {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let (WordValue([l0, l1, l2, l3]), WordValue([r0, r1, r2, r3])) = (self, other);
-        l0.as_int()
-            .cmp(&r0.as_int())
-            .then_with(|| l1.as_int().cmp(&r1.as_int()))
-            .then_with(|| l2.as_int().cmp(&r2.as_int()))
-            .then_with(|| l3.as_int().cmp(&r3.as_int()))
+        l0.as_canonical_u64()
+            .cmp(&r0.as_canonical_u64())
+            .then_with(|| l1.as_canonical_u64().cmp(&r1.as_canonical_u64()))
+            .then_with(|| l2.as_canonical_u64().cmp(&r2.as_canonical_u64()))
+            .then_with(|| l3.as_canonical_u64().cmp(&r3.as_canonical_u64()))
     }
 }
 
 impl core::hash::Hash for WordValue {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         let WordValue([a, b, c, d]) = self;
-        [a.as_int(), b.as_int(), c.as_int(), d.as_int()].hash(state)
+        [
+            a.as_canonical_u64(),
+            b.as_canonical_u64(),
+            c.as_canonical_u64(),
+            d.as_canonical_u64(),
+        ]
+        .hash(state)
     }
 }
 
@@ -250,7 +256,7 @@ impl IntValue {
             Self::U8(value) => *value as u64,
             Self::U16(value) => *value as u64,
             Self::U32(value) => *value as u64,
-            Self::Felt(value) => value.as_int(),
+            Self::Felt(value) => value.as_canonical_u64(),
         }
     }
 
@@ -306,9 +312,9 @@ impl core::ops::Div<IntValue> for IntValue {
 impl PartialEq<Felt> for IntValue {
     fn eq(&self, other: &Felt) -> bool {
         match self {
-            Self::U8(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U16(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U32(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U8(lhs) => (*lhs as u64) == other.as_canonical_u64(),
+            Self::U16(lhs) => (*lhs as u64) == other.as_canonical_u64(),
+            Self::U32(lhs) => (*lhs as u64) == other.as_canonical_u64(),
             Self::Felt(lhs) => lhs == other,
         }
     }
@@ -320,7 +326,7 @@ impl fmt::Display for IntValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", &value.as_int().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", &value.as_canonical_u64().to_be()),
         }
     }
 }
@@ -355,7 +361,7 @@ impl Ord for IntValue {
             (Self::U32(l), Self::U32(r)) => l.cmp(r),
             (Self::U32(_), _) => Ordering::Less,
             (Self::Felt(_), Self::U8(_) | Self::U16(_) | Self::U32(_)) => Ordering::Greater,
-            (Self::Felt(l), Self::Felt(r)) => l.as_int().cmp(&r.as_int()),
+            (Self::Felt(l), Self::Felt(r)) => l.as_canonical_u64().cmp(&r.as_canonical_u64()),
         }
     }
 }
@@ -367,7 +373,7 @@ impl core::hash::Hash for IntValue {
             Self::U8(value) => value.hash(state),
             Self::U16(value) => value.hash(state),
             Self::U32(value) => value.hash(state),
-            Self::Felt(value) => value.as_int().hash(state),
+            Self::Felt(value) => value.as_canonical_u64().hash(state),
         }
     }
 }

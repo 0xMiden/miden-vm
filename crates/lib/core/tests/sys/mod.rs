@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
-    EventId, EventName, Felt, ProgramInfo, Word,
+    EventId, EventName, Felt, ProgramInfo, Word, ZERO,
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,
@@ -53,7 +53,7 @@ fn log_precompile_request_procedure() {
     let event_id = EventId::from_name(EVENT_NAME);
     let calldata = vec![1u8, 2, 3, 4];
 
-    let tag = Word::from([event_id.as_felt(), Felt::new(1), Felt::new(0), Felt::new(7)]);
+    let tag = Word::from([event_id.as_felt(), Felt::new(1), ZERO, Felt::new(7)]);
     let comm = Word::from([Felt::new(43), Felt::new(62), Felt::new(24), Felt::new(1)]);
     let commitment = PrecompileCommitment::new(tag, comm);
 
@@ -107,7 +107,7 @@ fn log_precompile_request_procedure() {
     host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
         .expect("failed to register dummy handler");
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
     let (stack_outputs, proof) =
         miden_utils_testing::prove(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("failed to generate proof for log_precompile helper");

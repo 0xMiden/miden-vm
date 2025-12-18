@@ -3,7 +3,7 @@ use miden_air::{
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+    PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
@@ -134,7 +134,7 @@ impl HasherInterface for FastProcessor {
         on_err: impl FnOnce() -> ExecutionError,
     ) -> Result<Felt, ExecutionError> {
         let path = path.expect("fast processor expects a valid Merkle path");
-        match path.verify(index.as_int(), value, &claimed_root) {
+        match path.verify(index.as_canonical_u64(), value, &claimed_root) {
             // Return a default value for the address, as it is not needed in trace generation.
             Ok(_) => Ok(ZERO),
             Err(_) => Err(on_err()),
@@ -154,12 +154,13 @@ impl HasherInterface for FastProcessor {
         let path = path.expect("fast processor expects a valid Merkle path");
 
         // Verify the old value against the claimed old root.
-        if path.verify(index.as_int(), old_value, &claimed_old_root).is_err() {
+        if path.verify(index.as_canonical_u64(), old_value, &claimed_old_root).is_err() {
             return Err(on_err());
         };
 
         // Compute the new root.
-        let new_root = path.compute_root(index.as_int(), new_value).map_err(|_| on_err())?;
+        let new_root =
+            path.compute_root(index.as_canonical_u64(), new_value).map_err(|_| on_err())?;
 
         Ok((ZERO, new_root))
     }
@@ -406,8 +407,8 @@ pub fn eval_circuit_fast_(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
+    let num_vars = num_vars.as_canonical_u64();
+    let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {

@@ -2,7 +2,7 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Field, ONE, ZERO};
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, PrimeField64,
     fast::Tracer,
     operations::utils::assert_binary,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
@@ -190,7 +190,7 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
 pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
     let old_base = processor.stack().get(1);
     let old_acc = processor.stack().get(2);
-    let old_exp_int = processor.stack().get(3).as_int();
+    let old_exp_int = processor.stack().get(3).as_canonical_u64();
 
     // Compute new exponent.
     let new_exp = Felt::new(old_exp_int >> 1);

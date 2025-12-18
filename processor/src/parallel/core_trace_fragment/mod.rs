@@ -742,8 +742,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
     #[inline(always)]
     fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
         let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
@@ -779,8 +779,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         // For u32add, check_element_validity is false
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
@@ -789,8 +789,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32add3_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
     }
@@ -798,7 +798,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks (only `second_new` needs range checking)
-        let (t1, t0) = split_u32_into_u16(second_new.as_int());
+        let (t1, t0) = split_u32_into_u16(second_new.as_canonical_u64());
 
         [Felt::from(t0), Felt::from(t1), ZERO, ZERO, ZERO, ZERO]
     }
@@ -806,8 +806,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32mul_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
         let m = (Felt::from(u32::MAX) - hi).inverse();
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
@@ -816,8 +816,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32madd_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
         let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
@@ -826,8 +826,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
     }
@@ -835,8 +835,8 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     #[inline(always)]
     fn op_u32assert2_registers(first: Felt, second: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks for both operands
-        let (t1, t0) = split_u32_into_u16(second.as_int());
-        let (t3, t2) = split_u32_into_u16(first.as_int());
+        let (t1, t0) = split_u32_into_u16(second.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(first.as_canonical_u64());
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
     }
@@ -979,7 +979,7 @@ impl BasicBlockContext {
             // the current one, and so we would expect to shift `NUM_OP_BITS` by
             // `op_idx_in_group + 1`. However, we will apply that shift right before
             // writing to the trace, so we only shift by `op_idx_in_group` here.
-            Felt::new(current_op_group.as_int() >> (NUM_OP_BITS * op_idx_in_group))
+            Felt::new(current_op_group.as_canonical_u64() >> (NUM_OP_BITS * op_idx_in_group))
         };
 
         let group_count_in_block = {
@@ -997,7 +997,7 @@ impl BasicBlockContext {
                 // Note: This is a hacky way of doing this because `OpBatch` doesn't store the
                 // information of which operation belongs to which group.
                 let mut current_op_group =
-                    op_batches[batch_index].groups()[current_op_group_idx].as_int();
+                    op_batches[batch_index].groups()[current_op_group_idx].as_canonical_u64();
                 for _ in 0..op_idx_in_group {
                     let current_op = (current_op_group & 0b1111111) as u8;
                     if current_op == OPCODE_PUSH {
@@ -1021,10 +1021,13 @@ impl BasicBlockContext {
 
     /// Removes the operation that was just executed from the current operation group.
     fn remove_operation_from_current_op_group(&mut self) {
-        let prev_op_group = self.current_op_group.as_int();
+        let prev_op_group = self.current_op_group.as_canonical_u64();
         self.current_op_group = Felt::new(prev_op_group >> NUM_OP_BITS);
 
-        debug_assert!(prev_op_group >= self.current_op_group.as_int(), "op group underflow");
+        debug_assert!(
+            prev_op_group >= self.current_op_group.as_canonical_u64(),
+            "op group underflow"
+        );
     }
 
     /// Starts decoding a new operation group.

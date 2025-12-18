@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-concurrent = ["std", "miden-processor/concurrent"]
+concurrent = ["std", "miden-processor/concurrent", "p3-maybe-rayon/parallel"]
 std = [
   "miden-air/std",
   "miden-debug-types/std",

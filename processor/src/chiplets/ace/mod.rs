@@ -7,7 +7,7 @@ use miden_air::{
 use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing, QuadFelt, ZERO};
 
 use crate::{
-    ContextId, ExecutionError,
+    ContextId, ExecutionError, PrimeField64,
     chiplets::memory::Memory,
     errors::{AceError, ErrorContext},
     trace::TraceFragment,
@@ -296,8 +296,8 @@ pub fn eval_circuit(
     mem: &mut Memory,
     err_ctx: &impl ErrorContext,
 ) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
+    let num_vars = num_vars.as_canonical_u64();
+    let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {

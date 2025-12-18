@@ -9,7 +9,7 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, ONE, Word, ZERO,
+    EventName, Felt, ONE, PrimeField64, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
@@ -283,8 +283,10 @@ fn generate_valid_data() -> EddsaTestData {
     let pk = secret_key.public_key();
     let message = Word::new([1, 2, 3, 4].map(Felt::new));
     let sig = secret_key.sign(message);
-    let message_bytes: Vec<_> =
-        message.into_iter().flat_map(|felt| felt.as_int().to_le_bytes()).collect();
+    let message_bytes: Vec<_> = message
+        .into_iter()
+        .flat_map(|felt| felt.as_canonical_u64().to_le_bytes())
+        .collect();
 
     EddsaTestData {
         pk,

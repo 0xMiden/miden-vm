@@ -5,7 +5,7 @@ use std::{
 };
 
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_core::{Felt, WORD_SIZE, felt_from_u64_checked};
+use miden_core::{Felt, PrimeField64, QuotientMap, WORD_SIZE};
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 
@@ -276,8 +276,13 @@ impl InputFile {
                 format!("failed to convert `Word` data {word_hex} (element {i}) - expected 8 bytes")
             })?;
             let value_u64 = u64::from_le_bytes(bytes);
-            word[i] = felt_from_u64_checked(value_u64).map_err(|e| {
-                format!("failed to convert `Word` data {word_hex} (element {i}) to Felt - {e}")
+            word[i] = Felt::from_canonical_checked(value_u64).ok_or_else(|| {
+                format!(
+                    "failed to convert `Word` data {word_hex} (element {i}) to Felt - \
+                     value {} exceeds field modulus {}",
+                    value_u64,
+                    Felt::ORDER_U64
+                )
             })?;
         }
         Ok(word.into())

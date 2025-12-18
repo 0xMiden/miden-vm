@@ -5,7 +5,9 @@ use miden_core_lib::CoreLibrary;
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::ExecutionError;
 use miden_prover::Word;
-use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
+use miden_utils_testing::{
+    PrimeField64, StackInputs, Test, build_test, expect_exec_error_matches, push_inputs,
+};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS
@@ -665,15 +667,15 @@ fn procref() -> Result<(), Report> {
     test.add_event_handlers(core_lib.handlers());
 
     test.expect_stack(&[
-        mast_roots[0][3].as_int(),
-        mast_roots[0][2].as_int(),
-        mast_roots[0][1].as_int(),
-        mast_roots[0][0].as_int(),
+        mast_roots[0][3].as_canonical_u64(),
+        mast_roots[0][2].as_canonical_u64(),
+        mast_roots[0][1].as_canonical_u64(),
+        mast_roots[0][0].as_canonical_u64(),
         0,
-        mast_roots[1][3].as_int(),
-        mast_roots[1][2].as_int(),
-        mast_roots[1][1].as_int(),
-        mast_roots[1][0].as_int(),
+        mast_roots[1][3].as_canonical_u64(),
+        mast_roots[1][2].as_canonical_u64(),
+        mast_roots[1][1].as_canonical_u64(),
+        mast_roots[1][0].as_canonical_u64(),
     ]);
 
     test.prove_and_verify(vec![], false);

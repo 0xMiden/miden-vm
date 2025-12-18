@@ -17,6 +17,7 @@ use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, ONE, Operation,
     Word, ZERO, build_trace_from_ops, rand_array,
 };
+use crate::PrimeField64;
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
@@ -250,7 +251,7 @@ fn build_expected_bus_msg_from_trace(
         let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row];
         let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row];
 
-        word + idx1 * Felt::from_u16(2) + idx0
+        word + idx1.double() + idx0
     };
     let clk = trace.main_trace.get_column(MEMORY_CLK_COL_IDX)[row];
 
@@ -261,8 +262,8 @@ fn build_expected_bus_msg_from_trace(
     }
 
     if element_or_word == MEMORY_ACCESS_ELEMENT {
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_int();
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_int();
+        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_canonical_u64();
+        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
         let idx = idx1 * 2 + idx0;
 
         build_expected_bus_element_msg(alphas, op_label, ctx, addr, clk, word[idx as usize])

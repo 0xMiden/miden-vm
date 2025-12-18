@@ -10,6 +10,7 @@ use core::{
     ops::{Index, IndexMut},
 };
 
+use miden_crypto::PrimeField64;
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
@@ -644,7 +645,7 @@ impl MastForest {
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         let code: Felt = error_code_from_msg(&msg);
         // we use u64 as keys for the map
-        self.debug_info.insert_error_code(code.as_int(), msg);
+        self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
         code
     }
 }

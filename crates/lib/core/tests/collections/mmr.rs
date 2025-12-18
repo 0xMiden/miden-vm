@@ -1,4 +1,4 @@
-use miden_core::{WORD_SIZE, chiplets::hasher::hash_elements};
+use miden_core::{PrimeField64, WORD_SIZE, chiplets::hasher::hash_elements};
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
@@ -67,7 +67,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let advice_stack: Vec<u64> = merkle_root.iter().map(|f| f.as_int()).collect();
+    let advice_stack: Vec<u64> = merkle_root.iter().map(|f| f.as_canonical_u64()).collect();
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -90,7 +90,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
         let leaf = merkle_store.get_node(merkle_root, NodeIndex::new(2, pos)?)?;
 
         // the stack should be first the leaf followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(|f| f.as_int()).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(|f| f.as_canonical_u64()).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -114,8 +114,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(|f| f.as_int())
-        .chain(merkle_root2.iter().map(|f| f.as_int()))
+        .map(|f| f.as_canonical_u64())
+        .chain(merkle_root2.iter().map(|f| f.as_canonical_u64()))
         .collect();
 
     let examples = [
@@ -148,7 +148,7 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
         let test = build_test!(source, &[], advice_stack, merkle_store.clone());
 
         // the stack should be first the leaf element followed by the tree root
-        let stack: Vec<u64> = leaf.iter().map(|f| f.as_int()).rev().collect();
+        let stack: Vec<u64> = leaf.iter().map(|f| f.as_canonical_u64()).rev().collect();
         test.expect_stack(&stack);
     }
 
@@ -176,10 +176,10 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     // In the case of a single leaf, the leaf is itself also the root
-    let stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_int()).rev().collect();
+    let stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_canonical_u64()).rev().collect();
 
     // Test case for single element MMR
-    let advice_stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_int()).collect();
+    let advice_stack: Vec<u64> = merkle_root3.iter().map(|f| f.as_canonical_u64()).collect();
     let source = format!(
         "
         use miden::core::collections::mmr
@@ -201,9 +201,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     // Test case for the single element tree in a MMR with multiple trees
     let advice_stack: Vec<u64> = merkle_root1
         .iter()
-        .map(|f| f.as_int())
-        .chain(merkle_root2.iter().map(|f| f.as_int()))
-        .chain(merkle_root3.iter().map(|f| f.as_int()))
+        .map(|f| f.as_canonical_u64())
+        .chain(merkle_root2.iter().map(|f| f.as_canonical_u64()))
+        .chain(merkle_root3.iter().map(|f| f.as_canonical_u64()))
         .collect();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
@@ -473,7 +473,7 @@ fn test_mmr_pack_roundtrip() {
         end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
-    let expected_stack: Vec<u64> = hash.iter().rev().map(|e| e.as_int()).collect();
+    let expected_stack: Vec<u64> = hash.iter().rev().map(|e| e.as_canonical_u64()).collect();
 
     let mut expect_memory: Vec<u64> = Vec::new();
 
@@ -579,7 +579,7 @@ fn test_mmr_two() {
 
     let num_leaves = accumulator.num_leaves() as u64;
     let mut expected_memory = vec![num_leaves, 0, 0, 0];
-    expected_memory.extend(peak.iter().map(|v| v.as_int()));
+    expected_memory.extend(peak.iter().map(|v| v.as_canonical_u64()));
 
     build_test!(&source).expect_stack_and_memory(&[], mmr_ptr, &expected_memory);
 }
@@ -623,7 +623,7 @@ fn test_add_mmr_large() {
     expected_memory.extend(digests_to_ints(accumulator.peaks()));
 
     let expect_stack: Vec<u64> =
-        accumulator.hash_peaks().iter().rev().map(|v| v.as_int()).collect();
+        accumulator.hash_peaks().iter().rev().map(|v| v.as_canonical_u64()).collect();
     build_test!(&source).expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);
 }
 
@@ -690,8 +690,12 @@ fn test_mmr_large_add_roundtrip() {
     new_peaks.resize(16, Word::default());
     expected_memory.extend(digests_to_ints(&new_peaks));
 
-    let expect_stack: Vec<u64> =
-        new_accumulator.hash_peaks().iter().rev().map(|v| v.as_int()).collect();
+    let expect_stack: Vec<u64> = new_accumulator
+        .hash_peaks()
+        .iter()
+        .rev()
+        .map(|v| v.as_canonical_u64())
+        .collect();
 
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
     test.expect_stack_and_memory(&expect_stack, mmr_ptr, &expected_memory);
@@ -704,6 +708,6 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
     digests
         .iter()
         .flat_map(Into::<[Felt; WORD_SIZE]>::into)
-        .map(|v| v.as_int())
+        .map(|v| v.as_canonical_u64())
         .collect()
 }
