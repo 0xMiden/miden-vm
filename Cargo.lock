@@ -1400,6 +1400,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6c9d46283600a8b23483854ed4b67c2e5247b934"
 dependencies = [
  "blake3",
  "cc",
@@ -1438,6 +1439,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6c9d46283600a8b23483854ed4b67c2e5247b934"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1595,6 +1597,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.0"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6c9d46283600a8b23483854ed4b67c2e5247b934"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",
