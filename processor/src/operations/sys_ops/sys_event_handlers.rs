@@ -351,7 +351,7 @@ fn copy_map_value_length_to_adv_stack(
         ))?
         .len();
 
-    advice_provider.push_stack(Felt::try_from(values_len as u64).expect("value length too big"));
+    advice_provider.push_stack(Felt::from(values_len as u64));
 
     Ok(())
 }
@@ -401,7 +401,8 @@ fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(2);
     let coef1 = process.get_stack_item(1);
 
-    let element = QuadFelt::new([coef0, coef1]);
+    let element =
+        QuadFelt::from_basis_coefficients_slice(&[coef0, coef1]).expect("slice has correct length");
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }

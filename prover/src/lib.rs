@@ -20,7 +20,7 @@ pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
 };
-pub use miden_prover_p3::{Commitments, OpenedValues, Proof};
+pub use p3_miden_prover::{Commitments, OpenedValues, Proof};
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
@@ -81,27 +81,27 @@ where
         },
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Keccak => {
             let config = miden_air::config::create_keccak_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpo256 => {
             let config = miden_air::config::create_rpo_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
             let config = miden_air::config::create_poseidon2_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpx256 => {
             let config = miden_air::config::create_rpx_config();
-            let proof = miden_prover_p3::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
     };

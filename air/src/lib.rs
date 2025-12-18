@@ -162,7 +162,7 @@ impl<B> ProcessorAir<B> {
     }
 }
 
-impl<EF, B> miden_air_trait::MidenAir<Felt, EF> for ProcessorAir<B>
+impl<EF, B> p3_miden_air::MidenAir<Felt, EF> for ProcessorAir<B>
 where
     EF: p3_field::ExtensionField<Felt> + miden_core::ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
@@ -193,7 +193,7 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
-    fn eval<AB: miden_air_trait::MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: p3_miden_air::MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use p3_matrix::Matrix;
 
         use crate::constraints;
