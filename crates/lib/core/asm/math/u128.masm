@@ -261,3 +261,43 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     movup.2
     u32wrapping_add      # [rhh rmh rml rll ...]
 end
+
+#! Performs division of two unsigned 128 bit integers discarding the remainder.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all ...] -> [chh, cmh, cml, cll ...], where c = a / b
+
+const U128_DIV_EVENT = event("miden::core::math::u128::u128_div")
+
+pub proc div(a: u128, b: u128) -> u128
+    emit.U128_DIV_EVENT # perform advice provider div
+
+    adv_push.4          # push quotient to working stack
+
+    adv_push.4          # push remainder to working stack
+    dropw               # drop it
+end
+
+#! Performs modulo operation of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all ...] -> [chh, cmh, cml, cll ...], where c = a % b
+pub proc mod(b: u128, a: u128) -> u128
+    emit.U128_DIV_EVENT # perform advice provider div
+
+    adv_push.4          # push quotient to working stack
+    dropw               # drop it
+
+    adv_push.4          # push remainder to working stack
+end
+
+#! Performs divmod operation of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [bhh, bmh, bml, bll, ahh, amh, aml, all ...] -> [rhh, rmh, rml, rll, qhh, qmh, qml, qll ...], where r = a % b, q = a / b
+pub proc divmod(b: u128, a: u128) -> (remainder: u128, quotient: u128)
+    emit.U128_DIV_EVENT # perform advice provider div
+
+    adv_push.4          # push quotient to working stack
+    adv_push.4          # push remainder to working stack
+end

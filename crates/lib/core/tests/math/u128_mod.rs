@@ -105,6 +105,27 @@ proptest! {
         build_test!(source, &[all, aml, amh, ahh, bll, bml, bmh, bhh])
             .expect_stack(&[chh, cmh, cml, cll]);
     }
+
+    #[test]
+    fn div(a in any::<u128>(), b in any::<u128>()) {
+        if b == 0 {
+            // Skip it for now.
+        } else {
+            let (ahh, amh, aml, all) = split_u128(a);
+            let (bhh, bmh, bml, bll) = split_u128(b);
+            let (chh, cmh, cml, cll) = split_u128(a / b);
+
+            let source = "
+                use miden::core::math::u128
+                begin
+                    exec.u128::div
+                end
+            ";
+
+            build_test!(source, &[all, aml, amh, ahh, bll, bml, bmh, bhh])
+                .expect_stack(&[chh, cmh, cml, cll]);
+        }
+    }
 }
 
 fn split_u128(value: u128) -> (u64, u64, u64, u64) {
