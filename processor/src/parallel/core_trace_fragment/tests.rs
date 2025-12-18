@@ -17,7 +17,6 @@ use miden_core::{
     },
 };
 use miden_utils_testing::rand::rand_value;
-use winter_prover::Trace;
 
 use crate::{
     DefaultHost, ExecutionTrace, NoopEventHandler, PrimeField64, decoder::build_op_group,

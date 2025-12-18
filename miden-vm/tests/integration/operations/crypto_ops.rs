@@ -1,4 +1,4 @@
-use miden_core::QuadFelt;
+use miden_core::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
     Felt, PrimeField64, build_expected_hash, build_expected_perm, build_op_test, build_test,
@@ -585,8 +585,8 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result using the original algorithm
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
         // The Horner evaluation: acc_new = fold over [c0..c7] with |acc, coef| coef + alpha * acc
         // coefficients are at inputs[0..8], taken in order and reversed
@@ -605,8 +605,9 @@ proptest! {
         // The accumulator values are updated; rest of stack unchanged
         let mut expected = Vec::new();
         // Updated accumulators first (they are at the "bottom" of the visible stack, positions 14-15)
-        expected.push(acc_new.to_base_elements()[0].as_int()); // acc_low
-        expected.push(acc_new.to_base_elements()[1].as_int()); // acc_high
+        let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();
+        expected.push(acc_new_coeffs[0].as_canonical_u64()); // acc_low
+        expected.push(acc_new_coeffs[1].as_canonical_u64()); // acc_high
         // The rest of the stack (from position 2 onwards in reversed inputs = positions 0-13 original)
         expected.extend_from_slice(&inputs[2..]);
         // Reverse to get top-first order
@@ -678,13 +679,13 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
-        // Build extension field coefficients: chunks of 2, QuadFelt::new(chunk[1], chunk[0])
+        // Build extension field coefficients: chunks of 2, QuadFelt::new([chunk[1], chunk[0]])
         let acc_new = inputs[0..8]
             .chunks(2)
-            .map(|chunk| QuadFelt::new(Felt::new(chunk[1]), Felt::new(chunk[0])))
+            .map(|chunk| QuadFelt::new([Felt::new(chunk[1]), Felt::new(chunk[0])]))
             .rev()
             .fold(acc_old, |acc, coef| coef + alpha * acc);
 
@@ -696,8 +697,9 @@ proptest! {
 
         // Create the expected operand stack
         let mut expected = Vec::new();
-        expected.push(acc_new.to_base_elements()[0].as_int()); // acc_low
-        expected.push(acc_new.to_base_elements()[1].as_int()); // acc_high
+        let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();
+        expected.push(acc_new_coeffs[0].as_canonical_u64()); // acc_low
+        expected.push(acc_new_coeffs[1].as_canonical_u64()); // acc_high
         expected.extend_from_slice(&inputs[2..]);
         expected.reverse();
 

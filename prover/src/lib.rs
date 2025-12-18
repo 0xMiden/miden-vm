@@ -6,12 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use miden_air::ProcessorAir;
-use miden_processor::{
-    Program,
-    fast::FastProcessor,
-    math::Felt,
-    parallel::build_trace,
-};
+use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities
