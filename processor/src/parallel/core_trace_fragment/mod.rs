@@ -753,7 +753,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // h0 is a helper variable provided by the prover. If the top element is zero, then, h0 can
         // be set to anything otherwise set it to the inverse of the top element in the stack.
-        let h0 = if top == ZERO { ZERO } else { top.inverse() };
+        let h0 = top.try_inverse().unwrap_or(ZERO);
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
@@ -808,7 +808,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
-        let m = (Felt::from(u32::MAX) - hi).inverse();
+        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
         [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
     }
