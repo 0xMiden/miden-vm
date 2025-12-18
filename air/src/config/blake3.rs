@@ -78,7 +78,7 @@ pub fn create_blake3_256_config() -> StarkConfigBlake3_256 {
     let fri_config = FriParameters {
         log_blowup: 3,          // 8x blowup factor
         log_final_poly_len: 7,  // Final polynomial degree 2^7 = 128
-        num_queries: 27,        // Number of FRI query repetitions (~100 bits security)
+        num_queries: 27,        // Number of FRI query repetitions
         proof_of_work_bits: 16, // Grinding parameter
         mmcs: challenge_mmcs,
         log_folding_factor: 1, /* Binary folding
