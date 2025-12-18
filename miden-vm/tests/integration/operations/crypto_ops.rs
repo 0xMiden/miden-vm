@@ -585,8 +585,8 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result using the original algorithm
-        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).unwrap();
-        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).unwrap();
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
         // The Horner evaluation: acc_new = fold over [c0..c7] with |acc, coef| coef + alpha * acc
         // coefficients are at inputs[0..8], taken in order and reversed
@@ -679,15 +679,14 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result
-        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).unwrap();
-        let acc_old = QuadFelt::from_basis_coefficients_slice(&[Felt::new(acc_0), Felt::new(acc_1)]).unwrap();
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
         // Build extension field coefficients: chunks of 2
         let acc_new = inputs[0..8]
             .chunks(2)
             .map(|chunk| {
-                QuadFelt::from_basis_coefficients_slice(&[Felt::new(chunk[1]), Felt::new(chunk[0])])
-                    .expect("failed to create QuadFelt")
+                QuadFelt::new([Felt::new(chunk[1]), Felt::new(chunk[0])])
             })
             .rev()
             .fold(acc_old, |acc, coef| coef + alpha * acc);

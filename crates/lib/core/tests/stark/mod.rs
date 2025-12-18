@@ -164,16 +164,10 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 
     // 5) Compute the expected randomness-reduced value of all the kernel procedures digests
 
-    let beta = QuadFelt::from_basis_coefficients_slice(&[
-        Felt::new(auxiliary_rand_values[0]),
-        Felt::new(auxiliary_rand_values[1]),
-    ])
-    .expect("failed to create QuadFelt");
-    let alpha = QuadFelt::from_basis_coefficients_slice(&[
-        Felt::new(auxiliary_rand_values[2]),
-        Felt::new(auxiliary_rand_values[3]),
-    ])
-    .expect("failed to create QuadFelt");
+    let beta =
+        QuadFelt::new([Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1])]);
+    let alpha =
+        QuadFelt::new([Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3])]);
     let reduced_value_inv =
         reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inv();
     let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.to_base_elements();
@@ -314,11 +308,9 @@ fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     alpha
         + KERNEL_OP_LABEL.into()
         + beta
-            * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
-                acc * beta
-                    + QuadFelt::from_basis_coefficients_slice(&[Felt::new(*coef), ZERO])
-                        .expect("failed to create QuadFelt")
-            })
+            * digest
+                .iter()
+                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(*coef))
 }
 
 // CONSTANTS

@@ -129,10 +129,10 @@ impl Process {
         let v0 = self.stack.get(7);
 
         [
-            QuadFelt::from_basis_coefficients_slice(&[v0, v1]).unwrap(),
-            QuadFelt::from_basis_coefficients_slice(&[v2, v3]).unwrap(),
-            QuadFelt::from_basis_coefficients_slice(&[v4, v5]).unwrap(),
-            QuadFelt::from_basis_coefficients_slice(&[v6, v7]).unwrap(),
+            QuadFelt::new([v0, v1]),
+            QuadFelt::new([v2, v3]),
+            QuadFelt::new([v4, v5]),
+            QuadFelt::new([v6, v7]),
         ]
     }
 
@@ -159,14 +159,14 @@ impl Process {
     fn get_previous_value(&self) -> QuadFelt {
         let pe1 = self.stack.get(11);
         let pe0 = self.stack.get(12);
-        QuadFelt::from_basis_coefficients_slice(&[pe0, pe1]).unwrap()
+        QuadFelt::new([pe0, pe1])
     }
 
     /// Returns verifier challenge for the current layer.
     fn get_alpha(&self) -> QuadFelt {
         let a1 = self.stack.get(13);
         let a0 = self.stack.get(14);
-        QuadFelt::from_basis_coefficients_slice(&[a0, a1]).unwrap()
+        QuadFelt::new([a0, a1])
     }
 
     /// Returns memory address of the current layer.

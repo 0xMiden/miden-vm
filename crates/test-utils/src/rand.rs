@@ -4,7 +4,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use super::{BasedVectorSpace, Felt, QuadFelt, WORD_SIZE, Word};
+use super::{Felt, QuadFelt, WORD_SIZE, Word};
 
 pub trait Randomizable {
     fn random() -> Self;
@@ -69,8 +69,7 @@ impl Randomizable for Felt {
 
 impl Randomizable for QuadFelt {
     fn random() -> Self {
-        QuadFelt::from_basis_coefficients_slice(&[Felt::random(), Felt::random()])
-            .expect("slice has correct length")
+        QuadFelt::new([Felt::random(), Felt::random()])
     }
 }
 
