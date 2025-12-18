@@ -64,17 +64,17 @@ proptest! {
     ) {
         // Query values
         let query_values = [
-            QuadFelt::new([Felt::new(v0_0), Felt::new(v0_1)]),
-            QuadFelt::new([Felt::new(v1_0), Felt::new(v1_1)]),
-            QuadFelt::new([Felt::new(v2_0), Felt::new(v2_1)]),
-            QuadFelt::new([Felt::new(v3_0), Felt::new(v3_1)]),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v0_0), Felt::new(v0_1)]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v1_0), Felt::new(v1_1)]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v2_0), Felt::new(v2_1)]).expect("failed to create QuadFelt"),
+            QuadFelt::from_basis_coefficients_slice(&[Felt::new(v3_0), Felt::new(v3_1)]).expect("failed to create QuadFelt"),
         ];
 
         // The previous value must match query_values[d_seg] for the operation to succeed
         let prev_value = query_values[d_seg as usize];
         let prev_value_base = prev_value.as_basis_coefficients_slice();
 
-        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let alpha = QuadFelt::from_basis_coefficients_slice(&[Felt::new(alpha_0), Felt::new(alpha_1)]).expect("failed to create QuadFelt");
         let poe = Felt::new(poe);
         let f_pos = Felt::new(f_pos);
         let d_seg_felt = Felt::new(d_seg);

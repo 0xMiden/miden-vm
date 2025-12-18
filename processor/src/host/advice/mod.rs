@@ -179,8 +179,7 @@ impl AdviceProvider {
         // push the reversed map_value list and its initial length to the advice stack
         self.stack.extend(map_value.iter().rev());
         if include_len {
-            self.stack
-                .push(Felt::try_from(map_value.len() as u64).expect("value length too big"));
+            self.stack.push(Felt::from(map_value.len() as u64));
         }
 
         Ok(())

@@ -20,8 +20,8 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, PrimeField64, QuadFelt, StackInputs, StackOutputs, WORD_SIZE, Word,
-    ZERO,
+    BasedVectorSpace, EMPTY_WORD, Felt, ONE, PrimeField64, QuadFelt, StackInputs, StackOutputs,
+    WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
