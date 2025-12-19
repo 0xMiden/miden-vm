@@ -585,7 +585,7 @@ impl MastForest {
 // TEST HELPERS
 // ================================================================================================
 
-#[cfg(test)]
+#[cfg(feature = "testing")]
 impl MastForest {
     /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
     ///
