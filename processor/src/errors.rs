@@ -121,6 +121,8 @@ pub enum ExecutionError {
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
+    #[error("FRI domain size was 0")]
+    InvalidFriDomainGenerator,
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
