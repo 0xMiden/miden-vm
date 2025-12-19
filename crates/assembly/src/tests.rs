@@ -9,12 +9,10 @@ use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExp
 use miden_core::{
     EventId, Felt, Operation, Program, StackInputs, Word, assert_matches,
     field::PrimeCharacteristicRing,
-    mast::{MastNodeExt, MastNodeId},
+    mast::{MastForest, MastNodeExt, MastNodeId},
     utils::{Deserializable, Serializable},
 };
-use miden_mast_package::{
-    MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
-};
+use miden_mast_package::{MastArtifact, Package, PackageExport, PackageKind, PackageManifest};
 #[cfg(test)]
 use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
 use proptest::{
@@ -4609,6 +4607,109 @@ fn test_cross_module_constant_resolution() -> TestResult {
     let assembler = Assembler::new(context.source_manager());
 
     let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_multi_cycle_instruction_decorator_mapping() -> TestResult {
+    let context = TestContext::default();
+    // Assemble MASM code with multi-cycle instructions.
+    // `sub` compiles to [Neg, Add] - 2 operations
+    // `div` compiles to [Inv, Mul] - 2 operations
+    let source = source_file!(
+        &context,
+        r#"
+        begin
+            push.10
+            push.5
+            sub    # This compiles to [Neg, Add] - 2 operations
+            push.20
+            push.4
+            div    # This compiles to [Inv, Mul] - 2 operations
+        end
+    "#
+    );
+
+    let program = context.assemble(source)?;
+    let mast_forest: &MastForest = program.mast_forest().as_ref();
+    let entrypoint = program.entrypoint();
+
+    // Get all decorators for the entrypoint node
+    let all_decorators = mast_forest.all_decorators(entrypoint);
+
+    // Find AsmOp decorators and group them by DecoratorId
+    // to verify that all operations in a multi-cycle range share the same DecoratorId
+    let mut decorator_id_to_positions: std::collections::HashMap<_, Vec<usize>> =
+        std::collections::HashMap::new();
+
+    for (position, decorator_id) in &all_decorators {
+        // Check if this is an AsmOp decorator
+        if let miden_core::Decorator::AsmOp(_) = &mast_forest[*decorator_id] {
+            decorator_id_to_positions
+                .entry(*decorator_id)
+                .or_insert_with(Vec::new)
+                .push(*position);
+        }
+    }
+
+    // Verify that we have decorators for multi-cycle instructions
+    assert!(
+        !decorator_id_to_positions.is_empty(),
+        "Expected to find AsmOp decorators for instructions"
+    );
+
+    // For each decorator ID, verify that all operations it covers share the same ID
+    // and that they form a contiguous range
+    for (decorator_id, positions) in &decorator_id_to_positions {
+        // Sort positions to check contiguity
+        let mut sorted_positions = positions.clone();
+        sorted_positions.sort();
+
+        // Verify that all positions share the same decorator ID
+        for position in positions {
+            let decorators_at_pos: Vec<_> = all_decorators
+                .iter()
+                .filter(|(pos, _)| pos == position)
+                .map(|(_, id)| *id)
+                .collect();
+
+            // Check that at least one decorator at this position matches our decorator ID
+            assert!(
+                decorators_at_pos.contains(decorator_id),
+                "Position {} should have decorator ID {:?}",
+                position,
+                decorator_id
+            );
+        }
+
+        // For multi-cycle instructions (more than 1 position), verify they form a contiguous range
+        if sorted_positions.len() > 1 {
+            // Check that positions form a contiguous range
+            for i in 1..sorted_positions.len() {
+                assert_eq!(
+                    sorted_positions[i],
+                    sorted_positions[i - 1] + 1,
+                    "Multi-cycle instruction decorator positions should be contiguous. \
+                     Found positions: {:?} for decorator ID {:?}",
+                    sorted_positions,
+                    decorator_id
+                );
+            }
+
+            // Verify the decorator has the correct cycle count
+            if let miden_core::Decorator::AsmOp(asm_op) = &mast_forest[*decorator_id] {
+                assert_eq!(
+                    asm_op.num_cycles() as usize,
+                    sorted_positions.len(),
+                    "Decorator cycle count should match number of operations. \
+                     Expected {} cycles for positions {:?}",
+                    sorted_positions.len(),
+                    sorted_positions
+                );
+            }
+        }
+    }
 
     Ok(())
 }
