@@ -7,6 +7,9 @@ use crate::{
     processor::{OperationHelperRegisters, Processor, StackInterface},
 };
 
+#[cfg(test)]
+mod tests;
+
 #[inline(always)]
 pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor: &mut P,

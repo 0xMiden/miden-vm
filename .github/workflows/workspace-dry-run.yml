@@ -1,4 +1,4 @@
-name: Workspace release dry-run
+name: Verify workspace packaging
 
 on:
   push:
@@ -15,7 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release-dry-run:
+  verify-packaging:
     if: ${{ github.repository_owner == '0xMiden' }}
     runs-on: ubuntu-latest
 
@@ -25,7 +25,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Dry-run workspace release
+      - name: Verify workspace can be packaged
         uses: ./.github/actions/workspace-release
         with:
           mode: "dry-run"

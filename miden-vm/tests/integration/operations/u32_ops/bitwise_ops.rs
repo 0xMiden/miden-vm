@@ -1,7 +1,6 @@
 use miden_processor::{ExecutionError, math::Felt};
 use miden_utils_testing::{
-    U32_BOUND, ZERO, build_op_test, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value,
+    U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
 
 use super::test_input_out_of_bounds;
@@ -81,14 +80,14 @@ fn u32and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 }
 
@@ -164,14 +163,14 @@ fn u32or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 }
 
@@ -246,14 +245,14 @@ fn u32xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 
     let test = build_op_test!(asm_op, &[0, U32_BOUND]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)] && err_code == ZERO
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if values == vec![Felt::new(U32_BOUND)]
     );
 }
 

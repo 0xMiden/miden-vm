@@ -62,8 +62,19 @@ impl BasicBlockDataDecoder<'_> {
         &self,
         ops_offset: NodeDataOffset,
     ) -> Result<Vec<Operation>, DeserializationError> {
+        let offset = ops_offset as usize;
+
+        // Bounds check before slicing to prevent panic
+        if offset > self.node_data.len() {
+            return Err(DeserializationError::InvalidValue(format!(
+                "ops_offset {} exceeds basic_block_data length {}",
+                offset,
+                self.node_data.len()
+            )));
+        }
+
         // Read ops
-        let mut ops_data_reader = SliceReader::new(&self.node_data[ops_offset as usize..]);
+        let mut ops_data_reader = SliceReader::new(&self.node_data[offset..]);
         let operations: Vec<Operation> = ops_data_reader.read()?;
 
         Ok(operations)

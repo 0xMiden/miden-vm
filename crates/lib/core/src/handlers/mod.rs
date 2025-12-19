@@ -168,38 +168,6 @@ pub(crate) fn read_memory_packed_u32(
     Ok(out)
 }
 
-/// Converts bytes to field elements using u32 packing in little-endian format.
-///
-/// Each field element contains a u32 value representing up to 4 bytes. If the byte length
-/// is not a multiple of 4, the final field element is zero-padded.
-///
-/// This is commonly used by precompile handlers (Keccak256, ECDSA) to convert byte data
-/// into field element commitments.
-///
-/// # Arguments
-/// - `bytes`: The byte slice to convert
-///
-/// # Returns
-/// A vector of field elements, each containing 4 bytes packed in little-endian order.
-///
-/// # Examples
-/// ```ignore
-/// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
-/// let felts = bytes_to_felts(&bytes);
-/// // Returns: [Felt(0x04030201), Felt(0x00000005)]
-/// ```
-pub fn bytes_to_packed_u32_felts(bytes: &[u8]) -> Vec<Felt> {
-    bytes
-        .chunks(BYTES_PER_U32)
-        .map(|chunk| {
-            // Pack up to 4 bytes into a u32 in little-endian format
-            let mut packed = [0u8; BYTES_PER_U32];
-            packed[..chunk.len()].copy_from_slice(chunk);
-            Felt::from(u32::from_le_bytes(packed))
-        })
-        .collect()
-}
-
 // ERROR TYPES
 // ================================================================================================
 

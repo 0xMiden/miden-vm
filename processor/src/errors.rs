@@ -222,14 +222,13 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         value: Felt,
     },
-    #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
+    #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         values: Vec<Felt>,
-        err_code: Felt,
     },
     #[error(
         "Operand stack input is {input} but it is expected to fit in a u32 at clock cycle {clk}"
@@ -427,19 +426,14 @@ impl ExecutionError {
         Self::NotBinaryValueLoop { label, source_file, value }
     }
 
-    pub fn not_u32_value(value: Felt, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_value(value: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values {
-            label,
-            source_file,
-            values: vec![value],
-            err_code,
-        }
+        Self::NotU32Values { label, source_file, values: vec![value] }
     }
 
-    pub fn not_u32_values(values: Vec<Felt>, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_values(values: Vec<Felt>, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values { label, source_file, values, err_code }
+        Self::NotU32Values { label, source_file, values }
     }
 
     pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {

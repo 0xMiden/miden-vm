@@ -30,6 +30,7 @@ std = [
     "miden-debug-types/std",
     "miden-formatting/std",
     "miden-utils-indexing/std",
+    "miden-utils-sync/std",
     "thiserror/std",
     "winter-math/std",
     "winter-utils/std",
@@ -51,6 +52,7 @@ miden-debug-types.workspace = true
 miden-formatting.workspace = true
 miden-utils-core-derive.workspace = true
 miden-utils-indexing.workspace = true
+miden-utils-sync.workspace = true
 
 # External dependencies
 derive_more.workspace = true

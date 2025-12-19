@@ -13,7 +13,10 @@ use core::convert::TryInto;
 use miden_core::{
     EventName,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        bytes_to_packed_u32_elements,
+    },
 };
 use miden_crypto::{
     ZERO,
@@ -22,7 +25,7 @@ use miden_crypto::{
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::{MemoryReadError, bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::{MemoryReadError, read_memory_packed_u32};
 
 // CONSTANTS
 // ================================================================================================
@@ -131,15 +134,15 @@ impl EddsaRequest {
         let tag = [EDDSA25519_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         let pk_comm = {
-            let felts = bytes_to_packed_u32_felts(&self.pk.to_bytes());
+            let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
             Rpo256::hash_elements(&felts)
         };
         let k_digest_comm = {
-            let felts = bytes_to_packed_u32_felts(&self.k_digest);
+            let felts = bytes_to_packed_u32_elements(&self.k_digest);
             Rpo256::hash_elements(&felts)
         };
         let sig_comm = {
-            let felts = bytes_to_packed_u32_felts(&self.sig.to_bytes());
+            let felts = bytes_to_packed_u32_elements(&self.sig.to_bytes());
             Rpo256::hash_elements(&felts)
         };
 

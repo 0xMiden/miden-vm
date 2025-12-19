@@ -5,7 +5,7 @@ use miden_air::trace::chiplets::bitwise::{
     PREV_OUTPUT_COL_IDX, TRACE_WIDTH,
 };
 
-use super::{ExecutionError, Felt, TraceFragment, ZERO};
+use super::{ExecutionError, Felt, TraceFragment};
 use crate::ErrorContext;
 
 #[cfg(test)]
@@ -215,7 +215,7 @@ impl Default for Bitwise {
 pub fn assert_u32(value: Felt, err_ctx: &impl ErrorContext) -> Result<Felt, ExecutionError> {
     let val_u64 = value.as_int();
     if val_u64 > u32::MAX.into() {
-        Err(ExecutionError::not_u32_value(value, ZERO, err_ctx))
+        Err(ExecutionError::not_u32_value(value, err_ctx))
     } else {
         Ok(value)
     }

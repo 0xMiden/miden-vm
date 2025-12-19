@@ -59,13 +59,13 @@ runs:
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
 
-    # Dry-run vs real publish
-    - name: Dry-run workspace publish
+    # Package vs real publish
+    - name: Verify workspace packages
       if: ${{ inputs.mode == 'dry-run' }}
       shell: bash
       run: |
-        echo "Running cargo publish --workspace --dry-run"
-        cargo publish --workspace --dry-run
+        echo "Verifying workspace crates can be packaged"
+        cargo package --workspace --no-verify
 
     - name: Publish workspace crates
       if: ${{ inputs.mode == 'publish' }}

@@ -6,6 +6,9 @@ use crate::{
     processor::{Processor, StackInterface, SystemInterface},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Pops a value off the stack and asserts that it is equal to ONE.
 ///
 /// # Errors

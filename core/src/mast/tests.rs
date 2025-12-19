@@ -802,7 +802,7 @@ fn test_mast_forest_compaction_comprehensive() {
 
     // Action: Strip decorators first, then compact
     forest.strip_decorators();
-    forest.compact();
+    let (forest, _root_map) = forest.compact();
 
     // Verify compaction results:
     // - 7 node pairs merged into 7 single nodes
@@ -1150,12 +1150,71 @@ fn test_compaction_independent() {
     assert!(forest.debug_info.is_empty()); // No decorators from start
 
     // Compact only (should merge the two identical nodes)
-    forest.compact();
+    let (forest, _root_map) = forest.compact();
 
     // Verify nodes were merged
     assert_eq!(forest.num_nodes(), 1);
     assert_eq!(forest.num_procedures(), 1);
     assert!(forest.debug_info.is_empty());
+}
+
+#[test]
+fn test_commitment_caching() {
+    use crate::Operation;
+
+    let mut forest = MastForest::new();
+
+    // Create some nodes
+    let node1 = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let node2 = BasicBlockNodeBuilder::new(vec![Operation::Mul], vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    forest.make_root(node1);
+
+    // First access: commitment is computed and cached
+    let commitment1 = forest.commitment();
+    assert_ne!(commitment1, Word::from([Felt::ZERO; 4]));
+
+    // Second access: same commitment should be returned (from cache)
+    let commitment2 = forest.commitment();
+    assert_eq!(commitment1, commitment2);
+
+    // Mutate the forest by adding a new root
+    forest.make_root(node2);
+
+    // After mutation, commitment should be different (cache was invalidated and recomputed)
+    let commitment3 = forest.commitment();
+    assert_ne!(commitment1, commitment3);
+
+    // Accessing again should return the same cached value
+    let commitment4 = forest.commitment();
+    assert_eq!(commitment3, commitment4);
+
+    // Test that advice_map mutations don't invalidate the cache
+    forest.advice_map_mut().insert(Word::from([Felt::ZERO; 4]), vec![]);
+    let commitment5 = forest.commitment();
+    assert_eq!(
+        commitment3, commitment5,
+        "advice_map mutation should not invalidate commitment cache"
+    );
+
+    // Test that strip_decorators doesn't invalidate the cache
+    forest.strip_decorators();
+    let commitment6 = forest.commitment();
+    assert_eq!(
+        commitment3, commitment6,
+        "strip_decorators should not invalidate commitment cache"
+    );
+
+    // Test that remove_nodes invalidates the cache
+    let nodes_to_remove = alloc::collections::BTreeSet::new();
+    forest.remove_nodes(&nodes_to_remove); // Empty set, but still calls the method
+    let commitment7 = forest.commitment();
+    // Since we didn't actually remove anything, commitment should still be the same
+    assert_eq!(commitment3, commitment7);
 }
 
 // HELPER FUNCTIONS

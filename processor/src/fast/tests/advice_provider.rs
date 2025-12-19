@@ -152,7 +152,7 @@ fn test_advice_provider() {
     // fast processor
     let mut fast_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
     let processor = FastProcessor::new_debug(&stack_inputs, AdviceInputs::default());
-    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
 
     // slow processor
     let mut slow_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());

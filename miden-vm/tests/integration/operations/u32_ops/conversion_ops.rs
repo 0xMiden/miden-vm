@@ -1,6 +1,6 @@
 use miden_processor::ExecutionError;
 use miden_utils_testing::{
-    Felt, StarkField, U32_BOUND, WORD_SIZE, ZERO, build_op_test, expect_exec_error_matches,
+    Felt, StarkField, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches,
     proptest::prelude::*, rand::rand_value,
 };
 
@@ -103,10 +103,9 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 1 &&
-            values[0] == Felt::new(equal) &&
-            err_code == ZERO
+            values[0] == Felt::new(equal)
     );
 
     // --- test when a > 2^32 ---------------------------------------------------------------------
@@ -114,10 +113,9 @@ fn u32assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 1 &&
-            values[0] == Felt::new(larger) &&
-            err_code == ZERO
+            values[0] == Felt::new(larger)
     );
 }
 
@@ -148,11 +146,10 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 2 &&
             values[0] == Felt::new(value_b) &&
-            values[1] == Felt::new(value_a) &&
-            err_code == ZERO
+            values[1] == Felt::new(value_a)
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
@@ -162,10 +159,9 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 1 &&
-            values[0] == Felt::new(value_a) &&
-            err_code == ZERO
+            values[0] == Felt::new(value_a)
     );
 
     // --------- Case 3: a < 2^32 and b > 2^32 --------------------------------------------------
@@ -175,10 +171,9 @@ fn u32assert2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 1 &&
-            values[0] == Felt::new(value_b) &&
-            err_code == ZERO
+            values[0] == Felt::new(value_b)
     );
 }
 
@@ -206,10 +201,9 @@ fn u32assertw_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, err_code, label: _, source_file: _ } if
+        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 2 &&
-            values.iter().all(|v| *v == Felt::new(U32_BOUND)) &&
-            err_code == ZERO
+            values.iter().all(|v| *v == Felt::new(U32_BOUND))
     );
 }
 

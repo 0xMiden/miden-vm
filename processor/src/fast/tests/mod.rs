@@ -171,7 +171,7 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
 }
@@ -190,7 +190,7 @@ fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
 }
@@ -227,7 +227,7 @@ fn test_frie2f4() {
 
     // fast processor
     let fast_processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap();
+    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
 
     // slow processor
     let mut slow_processor = Process::new(

@@ -296,7 +296,6 @@ impl FriVerifierFold4Ext2 {
     }
 }
 
-#[expect(clippy::too_many_arguments)]
 fn iterate_query_fold_4_quad_ext(
     layer_alphas: &[QuadFelt],
     partial_trees: &[PartialMerkleTree],

@@ -521,7 +521,7 @@ fn push_transformed_stack_top(
     let stack_top: u32 = stack_top
         .as_int()
         .try_into()
-        .map_err(|_| ExecutionError::not_u32_value(stack_top, ZERO, err_ctx))?;
+        .map_err(|_| ExecutionError::not_u32_value(stack_top, err_ctx))?;
     let transformed_stack_top = f(stack_top);
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())

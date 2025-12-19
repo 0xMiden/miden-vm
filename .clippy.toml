@@ -1,0 +1,2 @@
+# Allow up to 10 arguments in functions
+too-many-arguments-threshold = 10

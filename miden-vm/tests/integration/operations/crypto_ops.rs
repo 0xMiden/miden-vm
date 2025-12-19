@@ -1,7 +1,9 @@
+use miden_core::QuadFelt;
 use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
-    Felt, build_expected_hash, build_expected_perm, build_op_test,
+    Felt, build_expected_hash, build_expected_perm, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
+    proptest::prelude::*,
     rand::rand_vector,
 };
 
@@ -512,4 +514,197 @@ fn crypto_stream_allows_adjacent_before() {
     let test = build_op_test!(asm_op, &[]);
     // Should execute without error
     test.execute().unwrap();
+}
+
+// HORNER EVALUATION TESTS
+// ================================================================================================
+
+// Constants for stack positions
+const ALPHA_ADDR_INDEX: usize = 13;
+const ACC_HIGH_INDEX: usize = 14;
+const ACC_LOW_INDEX: usize = 15;
+
+proptest! {
+    #[test]
+    fn prove_verify_horner_base(
+        // 8 coefficients (c0-c7) - top 8 stack elements
+        c0 in any::<u64>(),
+        c1 in any::<u64>(),
+        c2 in any::<u64>(),
+        c3 in any::<u64>(),
+        c4 in any::<u64>(),
+        c5 in any::<u64>(),
+        c6 in any::<u64>(),
+        c7 in any::<u64>(),
+        // Middle stack elements (8-12) - use small values to avoid issues
+        s8 in 0u64..1000,
+        s9 in 0u64..1000,
+        s10 in 0u64..1000,
+        s11 in 0u64..1000,
+        s12 in 0u64..1000,
+        // alpha evaluation point (stored in memory via advice stack)
+        alpha_0 in any::<u64>(),
+        alpha_1 in any::<u64>(),
+        // initial accumulator
+        acc_0 in any::<u64>(),
+        acc_1 in any::<u64>(),
+    ) {
+        let source = "
+            begin
+                # Load the evaluation point from the advice stack and store it at `alpha_addr`
+                padw
+                adv_loadw
+                push.1000
+                mem_storew_be
+                dropw
+
+                # Execute
+                horner_eval_base
+            end
+        ";
+
+        // Build stack inputs array following the original test pattern:
+        // Original: inputs[0..7] = coefficients, inputs[ALPHA_ADDR_INDEX] = 1000, etc.
+        // Then inputs.reverse() is called before use
+        let mut inputs = [0u64; 16];
+        inputs[0] = c7;
+        inputs[1] = c6;
+        inputs[2] = c5;
+        inputs[3] = c4;
+        inputs[4] = c3;
+        inputs[5] = c2;
+        inputs[6] = c1;
+        inputs[7] = c0;
+        inputs[8] = s8;
+        inputs[9] = s9;
+        inputs[10] = s10;
+        inputs[11] = s11;
+        inputs[12] = s12;
+        inputs[ALPHA_ADDR_INDEX] = 1000; // alpha_addr
+        inputs[ACC_HIGH_INDEX] = acc_1;
+        inputs[ACC_LOW_INDEX] = acc_0;
+
+        // Compute expected result using the original algorithm
+        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+
+        // The Horner evaluation: acc_new = fold over [c0..c7] with |acc, coef| coef + alpha * acc
+        // coefficients are at inputs[0..8], taken in order and reversed
+        let acc_new = inputs[0..8]
+            .iter()
+            .rev()
+            .fold(acc_old, |acc, &coef| QuadFelt::from(Felt::new(coef)) + alpha * acc);
+
+        // Reverse inputs for build_test! (it expects bottom-first order)
+        inputs.reverse();
+
+        // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
+        let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
+
+        // Create the expected operand stack (top-first order for expect_stack)
+        // The accumulator values are updated; rest of stack unchanged
+        let mut expected = Vec::new();
+        // Updated accumulators first (they are at the "bottom" of the visible stack, positions 14-15)
+        expected.push(acc_new.to_base_elements()[0].as_int()); // acc_low
+        expected.push(acc_new.to_base_elements()[1].as_int()); // acc_high
+        // The rest of the stack (from position 2 onwards in reversed inputs = positions 0-13 original)
+        expected.extend_from_slice(&inputs[2..]);
+        // Reverse to get top-first order
+        expected.reverse();
+
+        let test = build_test!(source, &inputs, &adv_stack);
+        test.expect_stack(&expected);
+
+        let pub_inputs: Vec<u64> = inputs.to_vec();
+        test.prove_and_verify(pub_inputs, false);
+    }
+
+    #[test]
+    fn prove_verify_horner_ext(
+        // 4 extension field coefficients (c0-c3), each is 2 base elements
+        // Stack layout: [c0_1, c0_0, c1_1, c1_0, c2_1, c2_0, c3_1, c3_0, ...]
+        c0_0 in any::<u64>(),
+        c0_1 in any::<u64>(),
+        c1_0 in any::<u64>(),
+        c1_1 in any::<u64>(),
+        c2_0 in any::<u64>(),
+        c2_1 in any::<u64>(),
+        c3_0 in any::<u64>(),
+        c3_1 in any::<u64>(),
+        // Middle stack elements (8-12) - use small values to avoid issues
+        s8 in 0u64..1000,
+        s9 in 0u64..1000,
+        s10 in 0u64..1000,
+        s11 in 0u64..1000,
+        s12 in 0u64..1000,
+        // alpha evaluation point (stored in memory via advice stack)
+        alpha_0 in any::<u64>(),
+        alpha_1 in any::<u64>(),
+        // initial accumulator
+        acc_0 in any::<u64>(),
+        acc_1 in any::<u64>(),
+    ) {
+        let source = "
+            begin
+                # Load the evaluation point from the advice stack and store it at `alpha_addr`
+                padw
+                adv_loadw
+                push.1000
+                mem_storew_be
+                dropw
+
+                # Execute
+                horner_eval_ext
+            end
+        ";
+
+        // Build stack inputs array (top-first before reversal)
+        let mut inputs = [0u64; 16];
+        inputs[0] = c0_1;
+        inputs[1] = c0_0;
+        inputs[2] = c1_1;
+        inputs[3] = c1_0;
+        inputs[4] = c2_1;
+        inputs[5] = c2_0;
+        inputs[6] = c3_1;
+        inputs[7] = c3_0;
+        inputs[8] = s8;
+        inputs[9] = s9;
+        inputs[10] = s10;
+        inputs[11] = s11;
+        inputs[12] = s12;
+        inputs[ALPHA_ADDR_INDEX] = 1000; // alpha_addr
+        inputs[ACC_HIGH_INDEX] = acc_1;
+        inputs[ACC_LOW_INDEX] = acc_0;
+
+        // Compute expected result
+        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+
+        // Build extension field coefficients: chunks of 2, QuadFelt::new(chunk[1], chunk[0])
+        let acc_new = inputs[0..8]
+            .chunks(2)
+            .map(|chunk| QuadFelt::new(Felt::new(chunk[1]), Felt::new(chunk[0])))
+            .rev()
+            .fold(acc_old, |acc, coef| coef + alpha * acc);
+
+        // Reverse inputs for build_test!
+        inputs.reverse();
+
+        // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
+        let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
+
+        // Create the expected operand stack
+        let mut expected = Vec::new();
+        expected.push(acc_new.to_base_elements()[0].as_int()); // acc_low
+        expected.push(acc_new.to_base_elements()[1].as_int()); // acc_high
+        expected.extend_from_slice(&inputs[2..]);
+        expected.reverse();
+
+        let test = build_test!(source, &inputs, &adv_stack);
+        test.expect_stack(&expected);
+
+        let pub_inputs: Vec<u64> = inputs.to_vec();
+        test.prove_and_verify(pub_inputs, false);
+    }
 }

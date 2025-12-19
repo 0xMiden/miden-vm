@@ -1,4 +1,5 @@
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
 use miden_core::{
     ONE, ZERO,
@@ -7,9 +8,9 @@ use miden_core::{
 
 use crate::{
     AsyncHost, ExecutionError,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
-    fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
 };
 
 impl FastProcessor {
@@ -23,7 +24,8 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::Start(current_node_id),
@@ -48,31 +50,30 @@ impl FastProcessor {
 
             // Corresponds to the row inserted for the LOOP operation added
             // to the trace.
-            self.increment_clk(tracer);
+            self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
         } else if condition == ZERO {
             // Start and exit the loop immediately - corresponding to adding a LOOP and END row
             // immediately since there is no body to execute.
 
             // Increment the clock, corresponding to the LOOP operation
-            self.increment_clk(tracer);
+            self.increment_clk(tracer, stopper).map_break(|_| {
+                BreakReason::Stopped(Some(Continuation::FinishLoopUnentered(current_node_id)))
+            })?;
 
-            tracer.start_clock_cycle(
-                self,
-                NodeExecutionState::End(current_node_id),
-                continuation_stack,
+            self.finish_loop_node_unentered(
+                current_node_id,
                 current_forest,
-            );
-
-            // Increment the clock, corresponding to the END operation added to the trace.
-            self.increment_clk(tracer);
-
-            // Execute decorators that should be executed after exiting the node
-            self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
+                continuation_stack,
+                host,
+                tracer,
+                stopper,
+            )
         } else {
             let err_ctx = err_ctx!(current_forest, current_node_id, host);
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
+                condition, &err_ctx,
+            )))
         }
-        Ok(())
     }
 
     /// Executes the finish phase of a Loop node.
@@ -84,7 +85,8 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         // This happens after loop body execution
         // Check condition again to see if we should continue looping
         let condition = self.stack_get(0);
@@ -106,7 +108,7 @@ impl FastProcessor {
             continuation_stack.push_start_node(loop_node.body());
 
             // Corresponds to the REPEAT operation added to the trace.
-            self.increment_clk(tracer);
+            self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
         } else if condition == ZERO {
             // Exit the loop - add END row
             tracer.start_clock_cycle(
@@ -118,12 +120,46 @@ impl FastProcessor {
             self.decrement_stack_size(tracer);
 
             // Corresponds to the END operation added to the trace.
-            self.increment_clk(tracer);
-            self.execute_after_exit_decorators(current_node_id, current_forest, host)?;
+            self.increment_clk(tracer, stopper).map_break(|_| {
+                BreakReason::Stopped(Some(Continuation::AfterExitDecorators(current_node_id)))
+            })?;
+
+            self.execute_after_exit_decorators(current_node_id, current_forest, host)
         } else {
             let err_ctx = err_ctx!(current_forest, current_node_id, host);
-            return Err(ExecutionError::not_binary_value_loop(condition, &err_ctx));
+            ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
+                condition, &err_ctx,
+            )))
         }
-        Ok(())
+    }
+
+    /// Executes the finish phase of a Loop node that was never entered.
+    ///
+    /// This corresponds to simply executing the after_exit decorators and incrementing the clock,
+    /// corresponding to the END operation added to the trace.
+    #[inline(always)]
+    pub(super) fn finish_loop_node_unentered(
+        &mut self,
+        current_node_id: MastNodeId,
+        current_forest: &Arc<MastForest>,
+        continuation_stack: &mut ContinuationStack,
+        host: &mut impl AsyncHost,
+        tracer: &mut impl Tracer,
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
+        tracer.start_clock_cycle(
+            self,
+            NodeExecutionState::End(current_node_id),
+            continuation_stack,
+            current_forest,
+        );
+
+        // Increment the clock, corresponding to the END operation added to the trace.
+        self.increment_clk(tracer, stopper).map_break(|_| {
+            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(current_node_id)))
+        })?;
+
+        // Execute decorators that should be executed after exiting the node
+        self.execute_after_exit_decorators(current_node_id, current_forest, host)
     }
 }

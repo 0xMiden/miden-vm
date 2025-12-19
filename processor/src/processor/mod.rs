@@ -97,13 +97,12 @@ pub trait Processor: Sized {
     fn execute_sync_op(
         &mut self,
         op: &Operation,
-        op_idx_in_block: usize,
         current_forest: &MastForest,
         host: &mut impl BaseHost,
         err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
     ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, op_idx_in_block, current_forest, host, err_ctx, tracer)
+        execute_sync_op(self, op, current_forest, host, err_ctx, tracer)
     }
 }
 

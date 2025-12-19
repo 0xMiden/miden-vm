@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
 use miden_crypto::{
@@ -50,12 +50,13 @@ pub const BATCH_SIZE: usize = 8;
 /// created according to these rules:
 ///
 /// - A basic block contains one or more batches.
-/// - A batch contains exactly 8 groups.
-/// - A group contains exactly 9 operations or 1 immediate value.
+/// - A batch contains up to 8 groups, and the number of groups must be a power of 2.
+/// - A group contains up to 9 operations or 1 immediate value.
+/// - Last operation in a group cannot be an operation that requires an immediate value.
 /// - NOOPs are used to fill a group or batch when necessary.
 /// - An immediate value follows the operation that requires it, using the next available group in
-///   the batch. If there are no batches available in the group, then both the operation and its
-///   immediate are moved to the next batch.
+///   the batch. If there are no groups available in the batch, then both the operation and its
+///   immediate value are moved to the next batch.
 ///
 /// Example: 8 pushes result in two operation batches:
 ///
@@ -414,6 +415,160 @@ impl BasicBlockNode {
     /// Return the MastNodeId of this `BasicBlockNode`, if in `Linked` state
     pub fn linked_id(&self) -> Option<MastNodeId> {
         self.decorators.linked_id()
+    }
+}
+
+// BATCH VALIDATION
+// ================================================================================================
+
+impl BasicBlockNode {
+    /// Validates that this BasicBlockNode satisfies the core invariants:
+    /// 1. Power-of-two number of groups in each batch
+    /// 2. No operation group ends with an operation requiring an immediate value
+    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE)
+    ///
+    /// Returns an error string describing which invariant was violated if validation fails.
+    pub fn validate_batch_invariants(&self) -> Result<(), String> {
+        // Check invariant 1: Power-of-two groups in each batch
+        self.validate_power_of_two_groups()?;
+
+        // Check invariant 2: No batch ends with immediate operation
+        self.validate_no_immediate_endings()?;
+
+        // Check invariant 3: OpBatch structural consistency
+        self.validate_batch_structure()?;
+
+        Ok(())
+    }
+
+    /// Validates that each batch has a power-of-two number of groups.
+    fn validate_power_of_two_groups(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let num_groups = batch.num_groups();
+            if !num_groups.is_power_of_two() {
+                return Err(format!(
+                    "Batch {}: {} groups is not power of two",
+                    batch_idx, num_groups
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates that no operation group ends with an operation that has an immediate value.
+    /// Also validates that the last operation group in a batch cannot contain operations
+    /// requiring immediate values.
+    fn validate_no_immediate_endings(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            let num_groups = batch.num_groups();
+            let indptr = batch.indptr();
+            let ops = batch.ops();
+
+            // Check each group in the batch
+            for group_idx in 0..num_groups {
+                let group_start = indptr[group_idx];
+                let group_end = indptr[group_idx + 1];
+
+                // Skip empty groups (they contain immediate values, not operations)
+                if group_start == group_end {
+                    continue;
+                }
+
+                let group_ops = &ops[group_start..group_end];
+
+                // Check if this is the last group in the batch
+                let is_last_group = group_idx == num_groups - 1;
+
+                if is_last_group {
+                    // Last group in a batch cannot contain ANY operations requiring immediate
+                    // values
+                    for (op_idx, op) in group_ops.iter().enumerate() {
+                        if op.imm_value().is_some() {
+                            return Err(format!(
+                                "Batch {}, group {}: operation at index {} requires immediate value, but this is the last group in batch",
+                                batch_idx, group_idx, op_idx
+                            ));
+                        }
+                    }
+                } else {
+                    // Non-last groups: check that the last operation doesn't require an immediate
+                    if let Some(last_op) = group_ops.last()
+                        && last_op.imm_value().is_some()
+                    {
+                        return Err(format!(
+                            "Batch {}, group {}: ends with operation requiring immediate value",
+                            batch_idx, group_idx
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Validates that OpBatch structure is consistent and won't cause panics during access.
+    /// Checks:
+    /// - num_groups <= BATCH_SIZE
+    /// - indptr array is monotonic non-decreasing
+    /// - indptr values are within ops bounds
+    /// - each group has at most GROUP_SIZE operations
+    fn validate_batch_structure(&self) -> Result<(), String> {
+        for (batch_idx, batch) in self.op_batches.iter().enumerate() {
+            // Check num_groups is within bounds
+            if batch.num_groups() > BATCH_SIZE {
+                return Err(format!(
+                    "Batch {}: num_groups {} exceeds maximum {}",
+                    batch_idx,
+                    batch.num_groups(),
+                    BATCH_SIZE
+                ));
+            }
+
+            // Check indptr array consistency
+            let indptr = batch.indptr();
+            let ops = batch.ops();
+
+            // indptr should be monotonic non-decreasing
+            for i in 0..batch.num_groups() {
+                if indptr[i] > indptr[i + 1] {
+                    return Err(format!(
+                        "Batch {}: indptr[{}] {} > indptr[{}] {} - array is not monotonic",
+                        batch_idx,
+                        i,
+                        indptr[i],
+                        i + 1,
+                        indptr[i + 1]
+                    ));
+                }
+            }
+
+            // All indptr values should be within ops bounds
+            let ops_len = ops.len();
+            for (i, &indptr_val) in indptr.iter().enumerate().take(batch.num_groups() + 1) {
+                if indptr_val > ops_len {
+                    return Err(format!(
+                        "Batch {}: indptr[{}] {} exceeds ops length {}",
+                        batch_idx, i, indptr_val, ops_len
+                    ));
+                }
+            }
+
+            // Check that each group has at most GROUP_SIZE operations
+            for group_idx in 0..batch.num_groups() {
+                let group_start = indptr[group_idx];
+                let group_end = indptr[group_idx + 1];
+                let group_size = group_end - group_start;
+
+                if group_size > GROUP_SIZE {
+                    return Err(format!(
+                        "Batch {}, group {}: contains {} operations, exceeds maximum {}",
+                        batch_idx, group_idx, group_size, GROUP_SIZE
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
