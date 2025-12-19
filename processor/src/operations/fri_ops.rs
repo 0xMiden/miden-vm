@@ -59,6 +59,9 @@ impl Process {
         let f_pos = self.get_folded_position();
         let d_seg = self.get_domain_segment().as_canonical_u64();
         let poe = self.get_poe();
+        if poe.is_zero() {
+            return Err(ExecutionError::InvalidFriDomainGenerator);
+        }
         let prev_value = self.get_previous_value();
         let alpha = self.get_alpha();
         let layer_ptr = self.get_layer_ptr();
@@ -77,7 +80,8 @@ impl Process {
         // compute x corresponding to the query position
         let f_tau = get_tau_factor(d_seg);
         let x = poe * f_tau * DOMAIN_OFFSET;
-        let x_inv = x.try_inverse().expect("FRI domain point must be non-zero");
+        // SAFETY: peo is not zero
+        let x_inv = x.inverse();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);

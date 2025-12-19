@@ -22,6 +22,9 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let domain_segment = processor.stack().get(9).as_canonical_u64();
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
+    if poe.is_zero() {
+        return Err(ExecutionError::InvalidFriDomainGenerator);
+    }
     // the result of the previous layer folding
     let prev_value = {
         let pe1 = processor.stack().get(11);
@@ -50,7 +53,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
     let x = poe * f_tau * DOMAIN_OFFSET;
-    let x_inv = x.try_inverse().expect("FRI domain point must be non-zero");
+    // SAFETY: peo is not zero
+    let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
     let (folded_value, tmp0, tmp1) = fold4(query_values, ev, es);
