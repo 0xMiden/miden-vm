@@ -36,6 +36,9 @@ impl<'a> TraceFragment<'a> {
     /// Otherwise, returns the length of the first column, which should be the same
     /// as the length of all other columns.
     pub fn len(&self) -> usize {
+        if self.data.is_empty() {
+            return 0;
+        }
         self.data[0].len()
     }
 
