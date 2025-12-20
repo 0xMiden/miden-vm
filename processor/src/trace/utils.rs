@@ -31,6 +31,10 @@ impl<'a> TraceFragment<'a> {
     }
 
     /// Returns the number of rows in this execution trace fragment.
+    ///
+    /// Returns `0` if the fragment has no columns (i.e., `data` is empty).
+    /// Otherwise, returns the length of the first column, which should be the same
+    /// as the length of all other columns.
     pub fn len(&self) -> usize {
         self.data[0].len()
     }
