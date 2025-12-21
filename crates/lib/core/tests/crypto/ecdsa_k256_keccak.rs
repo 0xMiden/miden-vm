@@ -14,10 +14,7 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{
-    dsa::ecdsa_k256_keccak::SecretKey,
-    hash::{algebraic_sponge::AlgebraicSponge, rpo::Rpo256},
-};
+use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use rand::{SeedableRng, rngs::StdRng};
 
