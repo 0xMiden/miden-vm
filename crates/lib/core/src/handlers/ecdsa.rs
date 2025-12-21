@@ -33,7 +33,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    AlgebraicSponge, EventName, Felt, PrimeCharacteristicRing, PrimeField64,
+    EventName, Felt, PrimeCharacteristicRing, PrimeField64,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,

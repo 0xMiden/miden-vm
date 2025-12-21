@@ -27,7 +27,7 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    AlgebraicSponge, EventName, Felt, PrimeField64, Word, ZERO,
+    EventName, Felt, PrimeField64, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };

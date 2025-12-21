@@ -58,8 +58,8 @@ pub use program::{Program, ProgramInfo};
 mod kernel;
 pub use kernel::Kernel;
 pub use miden_crypto::{
-    AlgebraicSponge, BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt,
-    Field, ONE, PrimeCharacteristicRing, PrimeField64, QuotientMap, WORD_SIZE, Word, ZERO,
+    BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt, Field, ONE,
+    PrimeCharacteristicRing, PrimeField64, QuotientMap, WORD_SIZE, Word, ZERO,
     batch_multiplicative_inverse, word::LexicographicWord,
 };
 

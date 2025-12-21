@@ -118,7 +118,7 @@ pub mod falcon512_rpo {
     // Re-export signature type for users
     pub use miden_core::crypto::dsa::falcon512_rpo::{PublicKey, SecretKey, Signature};
     use miden_core::{
-        AlgebraicSponge, Felt, Word,
+        Felt, Word,
         crypto::{dsa::falcon512_rpo::Polynomial, hash::Rpo256},
     };
 

@@ -8,7 +8,6 @@ use miden_core::{
     utils::Deserializable,
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
-use miden_crypto::hash::algebraic_sponge::AlgebraicSponge;
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
