@@ -54,5 +54,8 @@ p3-symmetric.workspace = true
 p3-uni-stark.workspace = true
 p3-util.workspace = true
 
+# Miden-specific Plonky3 crates
+p3-miden-air.workspace = true
+
 # Serialization
 serde.workspace = true

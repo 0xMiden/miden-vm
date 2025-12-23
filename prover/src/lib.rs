@@ -6,14 +6,8 @@ extern crate alloc;
 extern crate std;
 
 use miden_air::ProcessorAir;
-use miden_processor::{
-    Program, fast::FastProcessor, math::Felt, parallel::build_trace, row_major_adapter,
-};
-use p3_field::extension::BinomialExtensionField;
-use p3_miden_prover::AuxTraceConfig;
+use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
-
-type EF = BinomialExtensionField<Felt, 2>;
 
 // Trace conversion utilities
 mod trace_adapter;
@@ -96,17 +90,8 @@ pub fn prove(
     // Build public values
     let public_values = trace.to_public_values();
 
-    // Create AIR and aux trace config for the prover
-    let aux_trace_builders = trace.aux_trace_builders().clone();
-    let air = ProcessorAir::new();
-
-    let aux_config: AuxTraceConfig<Felt, EF> = AuxTraceConfig::new(
-        air.num_randomness(),
-        air.aux_width(),
-        move |main_trace, challenges| {
-            row_major_adapter::build_aux_columns(&aux_trace_builders, main_trace, challenges)
-        },
-    );
+    // Create AIR with aux trace builders
+    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
@@ -117,57 +102,27 @@ pub fn prove(
         },
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();
-            let proof = p3_miden_prover::prove(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                Some(&aux_config),
-            );
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Keccak => {
             let config = miden_air::config::create_keccak_config();
-            let proof = p3_miden_prover::prove(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                Some(&aux_config),
-            );
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpo256 => {
             let config = miden_air::config::create_rpo_config();
-            let proof = p3_miden_prover::prove(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                Some(&aux_config),
-            );
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
             let config = miden_air::config::create_poseidon2_config();
-            let proof = p3_miden_prover::prove(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                Some(&aux_config),
-            );
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpx256 => {
             let config = miden_air::config::create_rpx_config();
-            let proof = p3_miden_prover::prove(
-                &config,
-                &air,
-                &trace_matrix,
-                &public_values,
-                Some(&aux_config),
-            );
+            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
     };

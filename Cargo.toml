@@ -63,7 +63,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "p3-cleanup-and-simplify", default-features = false }
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "huitseeker/p3-rebased", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -111,29 +111,10 @@ p3-uni-stark     = { branch = "main", default-features = false, git = "https://g
 p3-util          = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 
 # Miden-specific Plonky3 crates
-p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "cleanup-and-simplify", default-features = false }
-p3-miden-goldilocks = { git = "https://github.com/0xMiden/p3-miden", branch = "cleanup-and-simplify", default-features = false }
-p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "cleanup-and-simplify", default-features = false }
+p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-goldilocks = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
-
-# Patch Plonky3 to use 0xMiden fork with periodic column support
-[patch."https://github.com/Plonky3/Plonky3"]
-p3-air = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-challenger = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-commit = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-dft = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-field = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-interpolation = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-keccak = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-lookup = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-matrix = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-maybe-rayon = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-mds = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-merkle-tree = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-poseidon2 = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-symmetric = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-uni-stark = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-p3-util = { git = "https://github.com/0xMiden/Plonky3", branch = "periodic-air-builder" }
-

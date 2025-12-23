@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use core::mem;
 
 use miden_air::{
-    PublicInputs,
+    AuxTraceBuilder as AirAuxTraceBuilder, PublicInputs,
     trace::{
         AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
         PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
@@ -15,6 +15,7 @@ use miden_core::{
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
 };
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
@@ -22,7 +23,7 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::fast::ExecutionOutput;
+use crate::{fast::ExecutionOutput, row_major_adapter};
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -429,4 +430,39 @@ fn finalize_trace(
     let main_trace = MainTrace::new(ColMatrix::new(trace), clk);
 
     (main_trace, aux_trace_hints, trace_len_summary, final_pc_transcript)
+}
+
+// PLONKY3 AUX TRACE BUILDER ADAPTER
+// ================================================================================================
+//
+// The `AuxTraceBuilder` trait is defined in `miden-air` to avoid a circular dependency:
+// `miden-prover-p3` needs aux trace building logic from `miden-processor`, but `miden-processor`
+// already depends on `miden-air`. By defining the trait in `miden-air` and implementing it here,
+// `miden-prover-p3` can depend on both crates and use the trait without creating a cycle.
+//
+// Additionally, Plonky3 uses row-major matrices while our existing aux trace building logic uses
+// column-major format. This impl adapts between the two by converting the main trace from
+// row-major to column-major, delegating to the existing logic, and converting the result back.
+
+impl<EF: ExtensionField<Felt>> AirAuxTraceBuilder<EF> for AuxTraceBuilders {
+    /// Builds auxiliary trace columns from a row-major main trace.
+    ///
+    /// This adapts the column-major `build_aux_columns` method to work with Plonky3's
+    /// row-major format by converting the input and output accordingly.
+    fn build_aux_columns(
+        &self,
+        main_trace: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> RowMajorMatrix<Felt> {
+        let _span = tracing::info_span!("build_aux_columns_wrapper").entered();
+
+        // Convert row-major to column-major MainTrace
+        let main_trace_col_major = row_major_adapter::row_major_to_main_trace(main_trace);
+
+        // Build auxiliary columns using column-major logic
+        let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+
+        // Convert column-major aux columns back to row-major
+        row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
+    }
 }
