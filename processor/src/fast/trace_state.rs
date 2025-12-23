@@ -1,4 +1,8 @@
-use alloc::{collections::{BTreeMap, VecDeque}, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_air::{
     RowIndex,
@@ -988,22 +992,13 @@ pub enum HasherOp {
 ///
 /// The hasher requests are recorded during fast processor execution and then replayed during hasher
 /// chiplet trace generation.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
     /// Deduplication map for basic block operation batches.
     /// Maps from basic block digest to its operation batches, avoiding duplication when the same
     /// basic block is entered multiple times.
     op_batches_map: BTreeMap<Word, Vec<OpBatch>>,
-}
-
-impl Default for HasherRequestReplay {
-    fn default() -> Self {
-        Self {
-            hasher_ops: VecDeque::new(),
-            op_batches_map: BTreeMap::new(),
-        }
-    }
 }
 
 impl HasherRequestReplay {
