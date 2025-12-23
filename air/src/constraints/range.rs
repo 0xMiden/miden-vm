@@ -9,7 +9,7 @@ use core::borrow::Borrow;
 
 use miden_core::PrimeCharacteristicRing;
 use p3_matrix::Matrix;
-use p3_miden_air::MidenAirBuilder;
+use p3_miden_prover::{AirBuilder, ExtensionBuilder, MidenAirBuilder};
 
 use crate::MainTraceCols;
 
@@ -162,7 +162,7 @@ where
     let s3_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv2.clone();
 
     // Memory lookup removal terms
-    let m0_term: <AB as MidenAirBuilder>::ExprEF = mflag_rc_stack.clone() * mv1.clone();
+    let m0_term: <AB as ExtensionBuilder>::ExprEF = mflag_rc_stack.clone() * mv1.clone();
     let m1_term = mflag_rc_stack.clone() * mv0.clone();
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
