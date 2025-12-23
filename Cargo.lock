@@ -1289,7 +1289,7 @@ dependencies = [
  "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-maybe-rayon 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-merkle-tree",
- "p3-miden-air 0.4.1",
+ "p3-miden-air",
  "p3-miden-fri",
  "p3-symmetric 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-uni-stark 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
@@ -1400,7 +1400,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
 dependencies = [
  "blake3",
  "cc",
@@ -1415,13 +1415,13 @@ dependencies = [
  "miden-serde-utils",
  "num",
  "num-complex",
- "p3-air 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-challenger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-field 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-miden-air 0.4.0",
- "p3-miden-goldilocks",
- "p3-miden-prover 0.4.0",
- "p3-symmetric 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-air 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
+ "p3-challenger 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
+ "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
+ "p3-goldilocks",
+ "p3-miden-air",
+ "p3-miden-prover",
+ "p3-symmetric 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "rand",
  "rand_chacha",
  "rand_core 0.9.3",
@@ -1437,7 +1437,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1580,9 +1580,9 @@ dependencies = [
  "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-maybe-rayon 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-merkle-tree",
- "p3-miden-air 0.4.1",
+ "p3-miden-air",
  "p3-miden-fri",
- "p3-miden-prover 0.4.1",
+ "p3-miden-prover",
  "p3-poseidon2 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-symmetric 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-uni-stark 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
@@ -1595,10 +1595,10 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
 dependencies = [
- "p3-field 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-miden-goldilocks",
+ "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
+ "p3-goldilocks",
  "winter-math",
  "winter-utils",
 ]
@@ -1689,9 +1689,9 @@ dependencies = [
  "p3-keccak",
  "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-merkle-tree",
- "p3-miden-air 0.4.1",
+ "p3-miden-air",
  "p3-miden-fri",
- "p3-miden-prover 0.4.1",
+ "p3-miden-prover",
  "p3-poseidon2 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-symmetric 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "p3-uni-stark 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
@@ -2218,50 +2218,22 @@ dependencies = [
 ]
 
 [[package]]
-name = "p3-miden-air"
-version = "0.4.1"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#180f17bb44fd6933b10defb6fd72f7ed92c6e3d1"
-dependencies = [
- "p3-air 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
-]
-
-[[package]]
 name = "p3-miden-fri"
-version = "0.4.1"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#180f17bb44fd6933b10defb6fd72f7ed92c6e3d1"
-dependencies = [
- "itertools 0.14.0",
- "p3-challenger 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-commit 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-dft 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-interpolation 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-maybe-rayon 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-util 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "rand",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "p3-miden-goldilocks"
 version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
 dependencies = [
- "num-bigint",
+ "itertools 0.14.0",
  "p3-challenger 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-commit 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-dft 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-field 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-mds 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-poseidon2 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-symmetric 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-interpolation 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-matrix 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-maybe-rayon 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-util 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "paste",
  "rand",
  "serde",
+ "tracing",
 ]
 
 [[package]]
@@ -2277,29 +2249,9 @@ dependencies = [
  "p3-interpolation 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-matrix 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-maybe-rayon 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "p3-miden-air 0.4.0",
- "p3-miden-uni-stark 0.4.0",
+ "p3-miden-air",
+ "p3-miden-uni-stark",
  "p3-util 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "tracing",
-]
-
-[[package]]
-name = "p3-miden-prover"
-version = "0.4.1"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#180f17bb44fd6933b10defb6fd72f7ed92c6e3d1"
-dependencies = [
- "itertools 0.14.0",
- "p3-challenger 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-commit 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-dft 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-interpolation 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-maybe-rayon 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-miden-air 0.4.1",
- "p3-miden-uni-stark 0.4.1",
- "p3-util 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "serde",
  "tracing",
 ]
@@ -2319,26 +2271,6 @@ dependencies = [
  "p3-maybe-rayon 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-uni-stark 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-util 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
- "serde",
- "thiserror",
- "tracing",
-]
-
-[[package]]
-name = "p3-miden-uni-stark"
-version = "0.4.1"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#180f17bb44fd6933b10defb6fd72f7ed92c6e3d1"
-dependencies = [
- "itertools 0.14.0",
- "p3-air 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-challenger 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-commit 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-dft 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-field 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-matrix 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-maybe-rayon 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-uni-stark 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
- "p3-util 0.4.1 (git+https://github.com/Plonky3/Plonky3?branch=main)",
  "serde",
  "thiserror",
  "tracing",
@@ -2967,6 +2899,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ryu"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62049b2877bf12821e8f9ad256ee38fdc31db7387ec2d3b3f403024de2034aea"
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3070,15 +3008,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.147"
+version = "1.0.146"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
+checksum = "217ca874ae0207aac254aa02c957ded05585a90892cc8d87f9e5fa49669dadd8"
 dependencies = [
  "itoa",
  "memchr",
+ "ryu",
  "serde",
  "serde_core",
- "zmij",
 ]
 
 [[package]]
@@ -3298,9 +3236,9 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 
 [[package]]
 name = "tempfile"
-version = "3.24.0"
+version = "3.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
+checksum = "2d31c77bdf42a745371d260a26ca7163f1e0924b64afa0b688e61b5a9fa02f16"
 dependencies = [
  "fastrand",
  "getrandom 0.3.4",
@@ -4114,9 +4052,3 @@ name = "zeroize"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
-
-[[package]]
-name = "zmij"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e404bcd8afdaf006e529269d3e85a743f9480c3cef60034d77860d02964f3ba"
