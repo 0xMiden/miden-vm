@@ -147,8 +147,7 @@ impl BasicBlockBuilder<'_> {
     /// exec, call, and syscall.
     pub fn set_instruction_cycle_count(&mut self) -> Option<DecoratorId> {
         // get the last asmop decorator and the cycle at which it was added
-        let (op_start, assembly_op_id) =
-            self.decorators[self.last_asmop_pos];
+        let (op_start, assembly_op_id) = self.decorators[self.last_asmop_pos];
 
         let assembly_op = match &mut self.mast_forest_builder[assembly_op_id] {
             Decorator::AsmOp(assembly_op) => assembly_op,
