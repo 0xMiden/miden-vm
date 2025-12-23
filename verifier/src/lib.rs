@@ -8,6 +8,7 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
+use p3_miden_prover::AuxVerifyConfig;
 
 // EXPORTS
 // ================================================================================================
@@ -131,48 +132,51 @@ fn verify_stark(
     let public_values = pub_inputs.to_elements();
     let air = ProcessorAir::new();
 
+    // Create aux verify config with dimensions from the AIR
+    let aux_verify_config = AuxVerifyConfig::new(air.num_randomness(), air.aux_width());
+
     match hash_fn {
         HashFunction::Blake3_192 => {
             // TODO: Change to Blake3_192
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            p3_miden_prover::verify(&config, &air, &proof, &public_values)
+            p3_miden_prover::verify(&config, &air, &proof, &public_values, Some(&aux_verify_config))
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
     }?;

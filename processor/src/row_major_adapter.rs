@@ -1,4 +1,8 @@
 //! Utilities for converting between row-major and column-major matrix formats.
+//!
+//! This module provides functions for:
+//! - Converting between row-major (Plonky3) and column-major (Miden) matrix formats
+//! - Building auxiliary trace columns from row-major main traces
 
 use alloc::vec::Vec;
 
@@ -6,6 +10,8 @@ use miden_air::trace::main_trace::{ColMatrix, MainTrace};
 use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;
+
+use crate::trace::AuxTraceBuilders;
 
 /// Converts a row-major Felt matrix to column-major MainTrace format.
 ///
@@ -92,4 +98,31 @@ pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
     // Use optimized cache-blocked transposition: column-major EF -> row-major EF
     let row_major_ef_matrix = RowMajorMatrix::new(col_major_ef_data, trace_len).transpose();
     row_major_ef_matrix.flatten_to_base()
+}
+
+/// Builds auxiliary trace columns from a row-major main trace.
+///
+/// This function handles the format conversion between Plonky3's row-major format and
+/// Miden's internal column-major format:
+/// 1. Converts the row-major main trace to column-major `MainTrace`
+/// 2. Builds auxiliary columns using the provided builders
+/// 3. Converts the result back to row-major format
+///
+/// This is the main entry point for auxiliary trace generation when using Plonky3.
+#[instrument(skip_all, fields(rows = main_trace.height(), cols = main_trace.width()))]
+pub fn build_aux_columns<EF: ExtensionField<Felt>>(
+    aux_builders: &AuxTraceBuilders,
+    main_trace: &RowMajorMatrix<Felt>,
+    challenges: &[EF],
+) -> RowMajorMatrix<Felt> {
+    let _span = tracing::info_span!("build_aux_columns_row_major").entered();
+
+    // Convert row-major to column-major MainTrace
+    let main_trace_col_major = row_major_to_main_trace(main_trace);
+
+    // Build auxiliary columns using column-major logic
+    let aux_columns = aux_builders.build_aux_columns(&main_trace_col_major, challenges);
+
+    // Convert column-major aux columns back to row-major
+    aux_columns_to_row_major(aux_columns, main_trace.height())
 }
