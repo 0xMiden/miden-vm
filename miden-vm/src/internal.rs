@@ -403,4 +403,131 @@ mod tests {
         let zero_word = Word::from([ZERO; 4]);
         assert_ne!(word, zero_word);
     }
+
+    #[test]
+    fn test_parse_word_too_long_hex() {
+        // Hex string longer than 64 characters after 0x
+        let too_long =
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let result = InputFile::parse_word(too_long);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to decode"));
+    }
+
+    #[test]
+    fn test_parse_word_invalid_hex_characters() {
+        // Invalid hex characters (g, h, z)
+        let invalid_chars = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg";
+        let result = InputFile::parse_word(invalid_chars);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to decode"));
+
+        let invalid_chars2 = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeh";
+        let result2 = InputFile::parse_word(invalid_chars2);
+        assert!(result2.is_err());
+
+        let invalid_chars3 = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdez";
+        let result3 = InputFile::parse_word(invalid_chars3);
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn test_parse_stack_inputs_large_numbers() {
+        // Test with u64::MAX (should fail when converting to Felt)
+        let inputs = InputFile {
+            operand_stack: vec![u64::MAX.to_string()],
+            advice_stack: None,
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result = inputs.parse_stack_inputs();
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("NotFieldElement")
+                || result.unwrap_err().contains("not a valid field element")
+        );
+
+        // Test with Felt::MODULUS - 1 (should succeed)
+        let felt_modulus_minus_one = 18446744069414584320u64;
+        let inputs2 = InputFile {
+            operand_stack: vec![felt_modulus_minus_one.to_string()],
+            advice_stack: None,
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result2 = inputs2.parse_stack_inputs();
+        assert!(result2.is_ok());
+
+        // Test with Felt::MODULUS (should fail)
+        let felt_modulus = 18446744069414584321u64;
+        let inputs3 = InputFile {
+            operand_stack: vec![felt_modulus.to_string()],
+            advice_stack: None,
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result3 = inputs3.parse_stack_inputs();
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn test_parse_advice_stack_large_numbers() {
+        // Test with u64::MAX (should fail when converting to Felt)
+        let inputs = InputFile {
+            operand_stack: Vec::new(),
+            advice_stack: Some(vec![u64::MAX.to_string()]),
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result = inputs.parse_advice_inputs();
+        assert!(result.is_err());
+        assert!(
+            result.unwrap_err().contains("NotFieldElement")
+                || result.unwrap_err().contains("not a valid field element")
+        );
+
+        // Test with Felt::MODULUS - 1 (should succeed)
+        let felt_modulus_minus_one = 18446744069414584320u64;
+        let inputs2 = InputFile {
+            operand_stack: Vec::new(),
+            advice_stack: Some(vec![felt_modulus_minus_one.to_string()]),
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result2 = inputs2.parse_advice_inputs();
+        assert!(result2.is_ok());
+    }
+
+    #[test]
+    fn test_parse_advice_map_duplicate_keys() {
+        // HashMap silently overwrites duplicates, but we should test the behavior
+        let mut map = HashMap::new();
+        map.insert(
+            "0x1400000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vec![1u64],
+        );
+        map.insert(
+            "0x1400000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vec![2u64],
+        );
+
+        // The second insert overwrites the first
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("0x1400000000000000000000000000000000000000000000000000000000000000"),
+            Some(&vec![2u64])
+        );
+
+        // Test that parsing works with the overwritten value
+        let inputs = InputFile {
+            operand_stack: Vec::new(),
+            advice_stack: None,
+            advice_map: Some(map),
+            merkle_store: None,
+        };
+        let result = inputs.parse_advice_map();
+        assert!(result.is_ok());
+        let parsed_map = result.unwrap().unwrap();
+        assert_eq!(parsed_map.len(), 1);
+    }
 }
