@@ -1624,7 +1624,6 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
- "miden-crypto",
  "miden-processor",
  "miden-prover",
  "miden-verifier",

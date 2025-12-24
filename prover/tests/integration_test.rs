@@ -204,16 +204,10 @@ mod fast_parallel {
     use miden_air::ProcessorAir;
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::Felt;
-    use miden_processor::{
-        AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace, row_major_adapter,
-    };
+    use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
     use miden_prover::{HashFunction, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
-    use p3_field::extension::BinomialExtensionField;
-    use p3_miden_prover::AuxTraceConfig;
-
-    type EF = BinomialExtensionField<Felt, 2>;
 
     /// Default fragment size for parallel trace generation
     const FRAGMENT_SIZE: usize = 1024;
@@ -260,22 +254,12 @@ mod fast_parallel {
         let trace_matrix = execution_trace_to_row_major(&trace);
         let public_values = trace.to_public_values();
 
-        // Create AIR and aux trace config for the prover
-        let aux_trace_builders = trace.aux_trace_builders().clone();
-        let air = ProcessorAir::new();
-
-        let aux_config: AuxTraceConfig<Felt, EF> = AuxTraceConfig::new(
-            air.num_randomness(),
-            air.aux_width(),
-            move |main_trace, challenges| {
-                row_major_adapter::build_aux_columns(&aux_trace_builders, main_trace, challenges)
-            },
-        );
+        // Create AIR with aux trace builders
+        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
 
         // Generate proof using Blake3_256
         let config = miden_air::config::create_blake3_256_config();
-        let proof =
-            p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values, Some(&aux_config));
+        let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
         let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
 
         let precompile_requests = trace.precompile_requests().to_vec();

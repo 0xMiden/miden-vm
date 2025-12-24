@@ -308,7 +308,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 0
         let v_00 = columns[V_0_0_IDX][row_idx];
         let v_01 = columns[V_0_1_IDX][row_idx];
-        let v_0 = QuadFelt::from([v_00, v_01]);
+        let v_0 = QuadFelt::new_complex(v_00, v_01);
 
         // Insert wire 0
         let id_0 = columns[ID_0_IDX][row_idx].as_canonical_u64();
@@ -319,7 +319,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 1
         let v_10 = columns[V_1_0_IDX][row_idx];
         let v_11 = columns[V_1_1_IDX][row_idx];
-        let v_1 = QuadFelt::from([v_10, v_11]);
+        let v_1 = QuadFelt::new_complex(v_10, v_11);
 
         // Insert wire 1
         let id_1 = columns[ID_1_IDX][row_idx].as_canonical_u64();
@@ -338,7 +338,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 0
         let v_00 = columns[V_0_0_IDX][row_idx];
         let v_01 = columns[V_0_1_IDX][row_idx];
-        let v_0 = QuadFelt::from([v_00, v_01]);
+        let v_0 = QuadFelt::new_complex(v_00, v_01);
 
         // Insert wire 0
         let id_0 = columns[ID_0_IDX][row_idx].as_canonical_u64();
@@ -354,7 +354,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 1
         let v_10 = columns[V_1_0_IDX][row_idx];
         let v_11 = columns[V_1_1_IDX][row_idx];
-        let v_1 = QuadFelt::from([v_10, v_11]);
+        let v_1 = QuadFelt::new_complex(v_10, v_11);
         assert_eq!(*v_l, v_1);
 
         // Get wire 2
@@ -365,7 +365,7 @@ fn verify_trace(context: &CircuitEvaluation, num_read_rows: usize, num_eval_rows
         // Get value 2
         let v_20 = columns[V_2_0_IDX][row_idx];
         let v_21 = columns[V_2_1_IDX][row_idx];
-        let v_2 = QuadFelt::from([v_20, v_21]);
+        let v_2 = QuadFelt::new_complex(v_20, v_21);
         assert_eq!(*v_r, v_2);
 
         // Check operation

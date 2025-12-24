@@ -9,10 +9,8 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{
-    ProgramInfo, QuadFelt, StackInputs, StackOutputs, precompile::PrecompileTranscriptState,
-};
-pub use p3_miden_air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
+pub use p3_air::{Air, AirBuilder, BaseAir};
 
 mod constraints;
 
@@ -140,34 +138,44 @@ impl Deserializable for PublicInputs {
 /// Miden VM Processor AIR implementation.
 ///
 /// This struct defines the constraints for the Miden VM processor.
-#[derive(Debug, Default)]
-pub struct ProcessorAir;
+/// Generic over aux trace builder to support different extension fields.
+pub struct ProcessorAir<B = ()> {
+    /// Auxiliary trace builder for generating auxiliary columns.
+    aux_builder: Option<B>,
+}
 
-impl ProcessorAir {
-    /// Creates a new ProcessorAir.
-    pub fn new() -> Self {
-        Self
-    }
-
-    /// Returns the width of the auxiliary trace in extension field columns.
-    pub fn aux_width(&self) -> usize {
-        AUX_TRACE_WIDTH
-    }
-
-    /// Returns the number of random challenges needed for auxiliary trace.
-    pub fn num_randomness(&self) -> usize {
-        AUX_TRACE_RAND_ELEMENTS
+impl Default for ProcessorAir<()> {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-// Implement MidenAir trait for ProcessorAir
+impl ProcessorAir<()> {
+    /// Creates a new ProcessorAir without auxiliary trace support.
+    pub fn new() -> Self {
+        Self { aux_builder: None }
+    }
+}
 
-impl MidenAir<Felt, QuadFelt> for ProcessorAir {
+impl<B> ProcessorAir<B> {
+    /// Creates a new ProcessorAir with auxiliary trace support.
+    pub fn with_aux_builder(builder: B) -> Self {
+        Self { aux_builder: Some(builder) }
+    }
+}
+
+impl<EF, B> p3_miden_air::MidenAir<Felt, EF> for ProcessorAir<B>
+where
+    EF: p3_field::ExtensionField<Felt> + miden_core::ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
     fn width(&self) -> usize {
         TRACE_WIDTH
     }
 
     fn aux_width(&self) -> usize {
+        // Return the number of extension field columns
+        // The prover will interpret the returned base field data as EF columns
         AUX_TRACE_WIDTH
     }
 
@@ -175,7 +183,19 @@ impl MidenAir<Felt, QuadFelt> for ProcessorAir {
         AUX_TRACE_RAND_ELEMENTS
     }
 
-    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn build_aux_trace(
+        &self,
+        main: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
+        let _span = tracing::info_span!("build_aux_trace").entered();
+
+        let builders = self.aux_builder.as_ref()?;
+
+        Some(builders.build_aux_columns(main, challenges))
+    }
+
+    fn eval<AB: p3_miden_air::MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use p3_matrix::Matrix;
 
         use crate::constraints;

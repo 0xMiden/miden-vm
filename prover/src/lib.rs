@@ -6,7 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use miden_air::ProcessorAir;
-use miden_processor::Program;
+use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -26,27 +26,48 @@ pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 // PROVER
 // ================================================================================================
 
-#[instrument("program proving", skip_all)]
+/// Default fragment size for trace generation.
+const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
+
+/// Executes and proves the specified `program` and returns the result together with a STARK-based
+/// proof of the program's execution.
+///
+/// - `stack_inputs` specifies the initial state of the stack for the VM.
+/// - `host` specifies the host environment which contain non-deterministic (secret) inputs for the
+///   prover
+/// - `options` defines parameters for STARK proof generation.
+///
+/// # Errors
+/// Returns an error if program execution or STARK proof generation fails for any reason.
+#[instrument("prove_program", skip_all)]
 pub fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
+    host: &mut impl AsyncHost,
     options: ProvingOptions,
-) -> Result<(StackOutputs, ExecutionProof), ExecutionError>
-where
-{
-    // execute the program to create an execution trace
-    let trace = {
-        let _span = tracing::info_span!("execute_program").entered();
-        miden_processor::execute(
-            program,
-            stack_inputs,
-            advice_inputs,
-            host,
-            *options.execution_options(),
-        )?
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    // execute the program to create an execution trace using FastProcessor
+
+    // Reverse stack inputs since FastProcessor expects them in reverse order
+    // (first element = bottom of stack, last element = top)
+    let stack_inputs_reversed: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().rev().collect();
+
+    let processor = if options.execution_options().enable_debugging() {
+        FastProcessor::new_debug(&stack_inputs_reversed, advice_inputs)
+    } else {
+        FastProcessor::new_with_advice_inputs(&stack_inputs_reversed, advice_inputs)
     };
+
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(program, host, DEFAULT_FRAGMENT_SIZE)?;
+
+    let trace = build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        program.kernel().clone(),
+    );
 
     tracing::event!(
         tracing::Level::INFO,

@@ -229,7 +229,6 @@ use super::*;
     vec![Felt::from(u32::MAX), ONE]
 )]
 fn test_masm_consistency(
-    testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
     #[case] stack_inputs: Vec<Felt>,
@@ -308,7 +307,6 @@ fn test_masm_consistency(
     vec![Felt::from(u32::MAX) + ONE, ZERO]
 )]
 fn test_masm_errors_consistency(
-    testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
     #[case] stack_inputs: Vec<Felt>,
@@ -399,11 +397,4 @@ fn test_log_precompile_correctness() {
     assert_eq!(&hasher_state[0..4], cap_next.as_slice(), "CAP_NEXT on stack mismatch");
     assert_eq!(&hasher_state[4..8], r0.as_slice(), "R0 on stack mismatch");
     assert_eq!(&hasher_state[8..12], r1.as_slice(), "R1 on stack mismatch");
-}
-
-// Workaround to make insta and rstest work together.
-// See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
-#[fixture]
-fn testname() -> String {
-    std::thread::current().name().unwrap().to_string()
 }

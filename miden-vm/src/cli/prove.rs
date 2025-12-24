@@ -3,9 +3,7 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionOptionsError, fast::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
-};
+use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
 use super::{
@@ -72,8 +70,13 @@ pub struct ProveCmd {
 
 impl ProveCmd {
     pub fn get_proof_options(&self) -> Result<ProvingOptions, ExecutionOptionsError> {
-        let exec_options =
-            ExecutionOptions::new(DEFAULT_CORE_TRACE_FRAGMENT_SIZE, self.trace, !self.release)?;
+        let exec_options = ExecutionOptions::new(
+            Some(self.max_cycles),
+            self.expected_cycles,
+            4096, // DEFAULT_CORE_TRACE_FRAGMENT_SIZE
+            self.trace,
+            !self.release,
+        )?;
 
         let hash_fn = HashFunction::try_from(self.hasher.as_str())?;
         Ok(match self.security.as_str() {
