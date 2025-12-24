@@ -24,10 +24,7 @@ use miden_core::{
 use super::{
     EMPTY_WORD, ExecutionError, Felt, MIN_TRACE_LEN, ONE, OpBatch, Operation, Process, Word, ZERO,
 };
-use crate::{PrimeField64, SyncHost, errors::ErrorContext, utils::HASH_CYCLE_LEN_FELT};
-
-mod trace;
-use trace::DecoderTrace;
+use crate::{DecoderTrace, PrimeField64, SyncHost, errors::ErrorContext, utils::HASH_CYCLE_LEN_FELT};
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
