@@ -9,8 +9,10 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
-pub use p3_air::{Air, AirBuilder, BaseAir};
+use miden_core::{
+    ProgramInfo, QuadFelt, StackInputs, StackOutputs, precompile::PrecompileTranscriptState,
+};
+pub use p3_miden_air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 
 mod constraints;
 
@@ -154,21 +156,22 @@ impl ProcessorAir {
     }
 }
 
-// Implement standard p3 traits for ProcessorAir
+// Implement MidenAir trait for ProcessorAir
 
-impl BaseAir<Felt> for ProcessorAir {
+impl MidenAir<Felt, QuadFelt> for ProcessorAir {
     fn width(&self) -> usize {
         TRACE_WIDTH
     }
-}
 
-impl p3_air::BaseAirWithPublicValues<Felt> for ProcessorAir {}
+    fn aux_width(&self) -> usize {
+        AUX_TRACE_WIDTH
+    }
 
-impl<AB> Air<AB> for ProcessorAir
-where
-    AB: p3_miden_prover::MidenAirBuilder<F = Felt>,
-{
-    fn eval(&self, builder: &mut AB) {
+    fn num_randomness(&self) -> usize {
+        AUX_TRACE_RAND_ELEMENTS
+    }
+
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use p3_matrix::Matrix;
 
         use crate::constraints;

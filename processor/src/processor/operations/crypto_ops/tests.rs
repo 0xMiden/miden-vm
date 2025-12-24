@@ -337,8 +337,8 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::from([Felt::new(alpha_0), Felt::new(alpha_1)]);
-        let acc_old = QuadFelt::from([Felt::new(acc_0), Felt::new(acc_1)]);
+        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
 
         let c0_q = QuadFelt::from(Felt::new(c0));
         let c1_q = QuadFelt::from(Felt::new(c1));
@@ -458,13 +458,13 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::from([Felt::new(alpha_0), Felt::new(alpha_1)]);
-        let acc_old = QuadFelt::from([Felt::new(acc_0), Felt::new(acc_1)]);
+        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
 
-        let c0 = QuadFelt::from([Felt::new(c0_0), Felt::new(c0_1)]);
-        let c1 = QuadFelt::from([Felt::new(c1_0), Felt::new(c1_1)]);
-        let c2 = QuadFelt::from([Felt::new(c2_0), Felt::new(c2_1)]);
-        let c3 = QuadFelt::from([Felt::new(c3_0), Felt::new(c3_1)]);
+        let c0 = QuadFelt::new_complex(Felt::new(c0_0), Felt::new(c0_1));
+        let c1 = QuadFelt::new_complex(Felt::new(c1_0), Felt::new(c1_1));
+        let c2 = QuadFelt::new_complex(Felt::new(c2_0), Felt::new(c2_1));
+        let c3 = QuadFelt::new_complex(Felt::new(c3_0), Felt::new(c3_1));
 
         let coefficients = [c0, c1, c2, c3];
 

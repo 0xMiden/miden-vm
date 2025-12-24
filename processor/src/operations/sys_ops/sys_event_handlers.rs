@@ -401,7 +401,7 @@ fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(2);
     let coef1 = process.get_stack_item(1);
 
-    let element = QuadFelt::from([coef0, coef1]);
+    let element = QuadFelt::new_complex(coef0, coef1);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }

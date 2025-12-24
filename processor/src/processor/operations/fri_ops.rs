@@ -57,13 +57,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let prev_value = {
         let pe1 = processor.stack().get(11);
         let pe0 = processor.stack().get(12);
-        QuadFelt::from([pe0, pe1])
+        QuadFelt::new_complex(pe0, pe1)
     };
     // the verifier challenge for the current layer
     let alpha = {
         let a1 = processor.stack().get(13);
         let a0 = processor.stack().get(14);
-        QuadFelt::from([a0, a1])
+        QuadFelt::new_complex(a0, a1)
     };
     // the memory address of the current layer
     let layer_ptr = processor.stack().get(15);
@@ -125,10 +125,10 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
     let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
-        QuadFelt::from([v0, v1]),
-        QuadFelt::from([v2, v3]),
-        QuadFelt::from([v4, v5]),
-        QuadFelt::from([v6, v7]),
+        QuadFelt::new_complex(v0, v1),
+        QuadFelt::new_complex(v2, v3),
+        QuadFelt::new_complex(v4, v5),
+        QuadFelt::new_complex(v6, v7),
     ]
 }
 
