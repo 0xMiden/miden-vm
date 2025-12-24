@@ -1400,7 +1400,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#7173ba5701ee2be114ffe1fdadc576787cd71116"
 dependencies = [
  "blake3",
  "cc",
@@ -1437,7 +1437,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#7173ba5701ee2be114ffe1fdadc576787cd71116"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1595,7 +1595,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#6a0cec65db88d641a5dc79de407de3382bd512f0"
+source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#7173ba5701ee2be114ffe1fdadc576787cd71116"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -2092,8 +2092,8 @@ dependencies = [
 
 [[package]]
 name = "p3-miden-air"
-version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#cf21f651cbdb2cb6ac94f0e9510f08d2a79bfa23"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2102,8 +2102,8 @@ dependencies = [
 
 [[package]]
 name = "p3-miden-fri"
-version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#cf21f651cbdb2cb6ac94f0e9510f08d2a79bfa23"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2121,8 +2121,8 @@ dependencies = [
 
 [[package]]
 name = "p3-miden-prover"
-version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#cf21f651cbdb2cb6ac94f0e9510f08d2a79bfa23"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2141,8 +2141,8 @@ dependencies = [
 
 [[package]]
 name = "p3-miden-uni-stark"
-version = "0.4.0"
-source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
+version = "0.4.2"
+source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#cf21f651cbdb2cb6ac94f0e9510f08d2a79bfa23"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
@@ -2705,12 +2705,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ryu"
-version = "1.0.21"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62049b2877bf12821e8f9ad256ee38fdc31db7387ec2d3b3f403024de2034aea"
-
-[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2814,15 +2808,15 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.146"
+version = "1.0.147"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "217ca874ae0207aac254aa02c957ded05585a90892cc8d87f9e5fa49669dadd8"
+checksum = "6af14725505314343e673e9ecb7cd7e8a36aa9791eb936235a3567cc31447ae4"
 dependencies = [
  "itoa",
  "memchr",
- "ryu",
  "serde",
  "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -3042,9 +3036,9 @@ checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
 
 [[package]]
 name = "tempfile"
-version = "3.23.0"
+version = "3.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d31c77bdf42a745371d260a26ca7163f1e0924b64afa0b688e61b5a9fa02f16"
+checksum = "655da9c7eb6305c55742045d5a8d2037996d61d8de95806335c7c86ce0f82e9c"
 dependencies = [
  "fastrand",
  "getrandom 0.3.4",
@@ -3858,3 +3852,9 @@ name = "zeroize"
 version = "1.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
+
+[[package]]
+name = "zmij"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e404bcd8afdaf006e529269d3e85a743f9480c3cef60034d77860d02964f3ba"

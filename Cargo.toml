@@ -63,7 +63,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "huitseeker/p3-rebased", default-features = false }
+miden-crypto = { git = "https://github.com/0xMiden/crypto", branch = "tracking-p3-0.4.2", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -106,37 +106,15 @@ p3-keccak        = { branch = "main", default-features = false, git = "https://g
 p3-matrix        = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-maybe-rayon   = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-merkle-tree   = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
-p3-monty-31      = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-poseidon2     = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-symmetric     = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-uni-stark     = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-util          = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 
 # Miden-specific Plonky3 crates
-p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
+p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
+p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
-
-# Patch crates.io dependencies to use git versions consistently
-# This ensures transitive deps (e.g., from p3-miden) use the same Plonky3 versions
-[patch.crates-io]
-p3-air           = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-blake3        = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-challenger    = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-commit        = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-dft           = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-field         = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-goldilocks    = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-interpolation = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-keccak        = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-matrix        = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-maybe-rayon   = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-merkle-tree   = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-monty-31      = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-poseidon2     = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-symmetric     = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-uni-stark     = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
-p3-util          = { branch = "main", git = "https://github.com/Plonky3/Plonky3" }
