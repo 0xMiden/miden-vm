@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, Word, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{Felt, PrimeField64, Word, ZERO, stack::MIN_STACK_DEPTH};
 
 use super::{
     super::stack_ops::{op_pad, op_push},
@@ -192,14 +192,14 @@ fn test_op_mstream() {
     // Word at addr 8 (word2) is at stack positions 0-3, word at addr 4 (word1) at 4-7
     // Word elements are: word[3] at top, word[2] next, etc.
     let expected = build_expected(&[
-        word2[3].into(),
-        word2[2].into(),
-        word2[1].into(),
-        word2[0].into(),
-        word1[3].into(),
-        word1[2].into(),
-        word1[1].into(),
-        word1[0].into(),
+        word2[3].as_canonical_u64(),
+        word2[2].as_canonical_u64(),
+        word2[1].as_canonical_u64(),
+        word2[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
         4,
         3,
         2,
@@ -364,14 +364,14 @@ fn test_op_pipe() {
     // Stack order: word2 (at higher addr) is at positions 0-3, word1 at 4-7
     // Word[3] is at stack top within each word
     let expected = build_expected(&[
-        word2[3].as_int(),
-        word2[2].as_int(),
-        word2[1].as_int(),
-        word2[0].as_int(),
-        word1[3].as_int(),
-        word1[2].as_int(),
-        word1[1].as_int(),
-        word1[0].as_int(),
+        word2[3].as_canonical_u64(),
+        word2[2].as_canonical_u64(),
+        word2[1].as_canonical_u64(),
+        word2[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
         4,
         3,
         2,

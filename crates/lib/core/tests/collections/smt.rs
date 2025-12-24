@@ -62,7 +62,7 @@ fn test_smt_get() {
 
     // Get an empty leaf
     expect_value_from_get(
-        Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
+        Word::new([Felt::from_u32(42), Felt::from_u32(42), Felt::from_u32(42), Felt::from_u32(42)]),
         EMPTY_WORD,
         &smt,
     );
@@ -162,7 +162,7 @@ fn test_smt_set_same_key() {
     ";
 
     let key = LEAVES[0].0;
-    let value = [Felt::from(42323_u32); 4].into();
+    let value = [Felt::from_u32(42323); 4].into();
     let (init_stack, final_stack, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
 }
@@ -180,7 +180,8 @@ fn test_smt_set_empty_value_to_empty_leaf() {
     end
     ";
 
-    let key = Word::new([41_u32.into(), 42_u32.into(), 43_u32.into(), 44_u32.into()]);
+    let key =
+        Word::new([Felt::from_u32(41), Felt::from_u32(42), Felt::from_u32(43), Felt::from_u32(44)]);
     let value = EMPTY_WORD;
     let (init_stack, final_stack, store, advice_map) = prepare_insert_or_set(key, value, &mut smt);
     build_test!(source, &init_stack, &[], store, advice_map).expect_stack(&final_stack);
@@ -225,8 +226,9 @@ fn test_set_advice_map_empty_key() {
     "
     );
 
-    let key = Word::new([41_u32.into(), 42_u32.into(), 43_u32.into(), 44_u32.into()]);
-    let value: [Felt; 4] = [42323_u32.into(); 4];
+    let key =
+        Word::new([Felt::from_u32(41), Felt::from_u32(42), Felt::from_u32(43), Felt::from_u32(44)]);
+    let value: [Felt; 4] = [Felt::from_u32(42323); 4];
     let (init_stack, _, store, advice_map) = prepare_insert_or_set(key, value.into(), &mut smt);
 
     // assert is checked in MASM
@@ -270,7 +272,7 @@ fn test_set_advice_map_single_key() {
     );
 
     let key = LEAVES[0].0;
-    let value: [Felt; 4] = [Felt::from(42323_u32); 4];
+    let value: [Felt; 4] = [Felt::from_u32(42323); 4];
     let (init_stack, _, store, advice_map) = prepare_insert_or_set(key, value.into(), &mut smt);
 
     // assert is checked in MASM
@@ -584,7 +586,7 @@ fn test_smt_peek() {
 
     // Peek an empty leaf
     expect_value_from_peek(
-        Word::new([42_u32.into(), 42_u32.into(), 42_u32.into(), 42_u32.into()]),
+        Word::new([Felt::from_u32(42), Felt::from_u32(42), Felt::from_u32(42), Felt::from_u32(42)]),
         EMPTY_WORD,
         &smt,
     );

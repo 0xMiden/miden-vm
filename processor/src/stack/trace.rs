@@ -168,7 +168,7 @@ impl StackTrace {
 
         // update stack helper columns
         let next_depth = self.helpers[0][clk.into()] + ONE;
-        self.set_helpers_at(clk, next_depth, Felt::from(clk as u32));
+        self.set_helpers_at(clk, next_depth, Felt::from_u32(clk as u32));
     }
 
     // UTILITY METHODS
@@ -225,7 +225,7 @@ impl StackTrace {
     ) {
         self.helpers[0][(clk + 1).into()] = stack_depth;
         self.helpers[1][(clk + 1).into()] = next_overflow_addr;
-        self.helpers[2][(clk + 1).into()] = stack_depth - Felt::from(MIN_STACK_DEPTH as u32);
+        self.helpers[2][(clk + 1).into()] = stack_depth - Felt::from_u32(MIN_STACK_DEPTH as u32);
     }
 
     // TEST HELPERS
@@ -309,7 +309,7 @@ fn init_helper_columns(
     let mut h0 = IndexVec::with_capacity(init_trace_capacity);
     // TODO: change type of `init_depth` to `u32`
     // TODO check if we should error
-    let h0_value = Felt::from((init_depth - MIN_STACK_DEPTH) as u64);
+    let h0_value = Felt::from_u64((init_depth - MIN_STACK_DEPTH) as u64);
     h0.push(h0_value).expect("trace capacity within u32 limits");
     for _ in 1..init_trace_capacity {
         h0.push(Felt::ZERO).expect("trace capacity within u32 limits");

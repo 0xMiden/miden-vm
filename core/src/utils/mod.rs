@@ -187,7 +187,7 @@ const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
 /// # use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
 /// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
 /// let felts = bytes_to_packed_u32_elements(&bytes);
-/// assert_eq!(felts, vec![Felt::from(0x04030201_u32), Felt::from(0x00000005_u32)]);
+/// assert_eq!(felts, vec![Felt::from_u8(0x04030201_u32), Felt::from_u8(0x00000005_u32)]);
 /// ```
 pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
     bytes
@@ -243,7 +243,7 @@ mod tests {
         #[test]
         fn proptest_packed_u32_elements_roundtrip(values in prop::collection::vec(any::<u32>(), 0..100)) {
             // Convert u32 values to Felts
-            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from(v)).collect();
+            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from_u32(v)).collect();
 
             // Roundtrip: Felts -> bytes -> Felts
             let bytes = packed_u32_elements_to_bytes(&felts);

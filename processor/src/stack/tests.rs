@@ -4,7 +4,7 @@ use miden_air::trace::{
     STACK_TRACE_WIDTH,
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS},
 };
-use miden_core::Field;
+use miden_core::{Field, PrimeCharacteristicRing};
 
 use super::*;
 use crate::{PrimeField64, stack::OverflowTableRow};
@@ -52,15 +52,15 @@ fn stack_overflow() {
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(17u8));
+    stack.set(0, Felt::from_u8(17u8));
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(18u8));
+    stack.set(0, Felt::from_u8(18u8));
     stack.advance_clock();
 
     stack.shift_right(0);
-    stack.set(0, Felt::from(19u8));
+    stack.set(0, Felt::from_u8(19u8));
     stack.advance_clock();
 
     // Prepare the expected results.

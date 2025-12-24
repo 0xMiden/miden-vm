@@ -187,12 +187,14 @@ impl Deserializable for AdviceMap {
 
 #[cfg(test)]
 mod tests {
+    use miden_crypto::PrimeCharacteristicRing;
+
     use super::*;
 
     #[test]
     fn test_advice_map_serialization() {
         let mut map1 = AdviceMap::default();
-        map1.insert(Word::default(), vec![Felt::from(1u32), Felt::from(2u32)]);
+        map1.insert(Word::default(), vec![Felt::from_u8(1), Felt::from_u8(2)]);
 
         let bytes = map1.to_bytes();
 

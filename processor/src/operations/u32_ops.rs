@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::Field;
+use miden_core::{Field, PrimeCharacteristicRing};
 use paste::paste;
 
 use super::{
@@ -226,11 +226,16 @@ impl Process {
         self.range.add_range_checks(self.system.clk(), &[t0, t1, t2, t3]);
 
         // save the range check lookups to the decoder's user operation helper columns.
-        let mut helper_values =
-            [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO];
+        let mut helper_values = [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+        ];
 
         if check_element_validity {
-            let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
+            let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
             helper_values[4] = m;
         }
 

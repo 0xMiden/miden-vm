@@ -116,7 +116,7 @@ fn push_lowerbound_result(
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
             Felt::from_bool(false),
-            Felt::from(addr_range.end),
+            Felt::from_u32(addr_range.end),
         ])]);
     }
 
@@ -159,7 +159,7 @@ fn push_lowerbound_result(
 
     Ok(vec![AdviceMutation::extend_stack(vec![
         Felt::from_bool(was_key_found),
-        Felt::from(result.unwrap_or(addr_range.end)),
+        Felt::from_u32(result.unwrap_or(addr_range.end)),
     ])])
 }
 

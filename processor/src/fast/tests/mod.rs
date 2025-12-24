@@ -3,7 +3,7 @@ use alloc::{string::ToString, sync::Arc};
 use miden_air::ExecutionOptions;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    Kernel, ONE, Operation, StackInputs, assert_matches,
+    Kernel, ONE, Operation, PrimeCharacteristicRing, StackInputs, assert_matches,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
@@ -103,7 +103,7 @@ fn test_syscall_fail() {
     let mut host = DefaultHost::default();
 
     // set the initial FMP to a value close to FMP_MAX
-    let stack_inputs = vec![5_u32.into()];
+    let stack_inputs = vec![Felt::from_u32(5)];
     let program = {
         let mut program = MastForest::new();
         let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
@@ -202,24 +202,24 @@ fn test_frie2f4() {
     let mut host = DefaultHost::default();
 
     // --- build stack inputs ---------------------------------------------
-    let previous_value = [10_u32.into(), 11_u32.into()];
+    let previous_value = [Felt::from_u32(10), Felt::from_u32(11)];
     let stack_inputs = vec![
-        1_u32.into(),
-        2_u32.into(),
-        3_u32.into(),
-        4_u32.into(),
+        Felt::from_u32(1),
+        Felt::from_u32(2),
+        Felt::from_u32(3),
+        Felt::from_u32(4),
         previous_value[0], // 4: 3rd query value and "previous value" (idx 13) must be the same
         previous_value[1], // 5: 3rd query value and "previous value" (idx 13) must be the same
-        7_u32.into(),
-        2_u32.into(), //7: domain segment, < 4
-        9_u32.into(),
-        10_u32.into(),
-        11_u32.into(),
-        12_u32.into(),
-        13_u32.into(),
+        Felt::from_u32(7),
+        Felt::from_u32(2), //7: domain segment, < 4
+        Felt::from_u32(9),
+        Felt::from_u32(10),
+        Felt::from_u32(11),
+        Felt::from_u32(12),
+        Felt::from_u32(13),
         previous_value[0], // 13: previous value
         previous_value[1], // 14: previous value
-        16_u32.into(),
+        Felt::from_u32(16),
     ];
 
     let program =
@@ -268,7 +268,7 @@ fn test_call_node_preserves_stack_overflow_table() {
 
         // before call
         let push10_push20_id = BasicBlockNodeBuilder::new(
-            vec![Operation::Push(10_u32.into()), Operation::Push(20_u32.into())],
+            vec![Operation::Push(Felt::from_u32(10)), Operation::Push(Felt::from_u32(20))],
             Vec::new(),
         )
         .add_to_forest(&mut program)
@@ -299,22 +299,22 @@ fn test_call_node_preserves_stack_overflow_table() {
 
     // initial stack: (top) [1, 2, 3, 4, ..., 16] (bot)
     let mut processor = FastProcessor::new(&[
-        16_u32.into(),
-        15_u32.into(),
-        14_u32.into(),
-        13_u32.into(),
-        12_u32.into(),
-        11_u32.into(),
-        10_u32.into(),
-        9_u32.into(),
-        8_u32.into(),
-        7_u32.into(),
-        6_u32.into(),
-        5_u32.into(),
-        4_u32.into(),
-        3_u32.into(),
-        2_u32.into(),
-        1_u32.into(),
+        Felt::from_u32(16),
+        Felt::from_u32(15),
+        Felt::from_u32(14),
+        Felt::from_u32(13),
+        Felt::from_u32(12),
+        Felt::from_u32(11),
+        Felt::from_u32(10),
+        Felt::from_u32(9),
+        Felt::from_u32(8),
+        Felt::from_u32(7),
+        Felt::from_u32(6),
+        Felt::from_u32(5),
+        Felt::from_u32(4),
+        Felt::from_u32(3),
+        Felt::from_u32(2),
+        Felt::from_u32(1),
     ]);
 
     // Execute the program
@@ -324,25 +324,25 @@ fn test_call_node_preserves_stack_overflow_table() {
         result.stack_truncated(16),
         &[
             // the sum from the call to foo
-            30_u32.into(),
+            Felt::from_u32(30),
             // rest of the stack
-            3_u32.into(),
-            4_u32.into(),
-            5_u32.into(),
-            6_u32.into(),
-            7_u32.into(),
-            8_u32.into(),
-            9_u32.into(),
-            10_u32.into(),
-            11_u32.into(),
-            12_u32.into(),
-            13_u32.into(),
-            14_u32.into(),
+            Felt::from_u32(3),
+            Felt::from_u32(4),
+            Felt::from_u32(5),
+            Felt::from_u32(6),
+            Felt::from_u32(7),
+            Felt::from_u32(8),
+            Felt::from_u32(9),
+            Felt::from_u32(10),
+            Felt::from_u32(11),
+            Felt::from_u32(12),
+            Felt::from_u32(13),
+            Felt::from_u32(14),
             // the 0 shifted in during `foo`
-            0_u32.into(),
+            Felt::from_u32(0),
             // the preserved overflow from before the call
-            15_u32.into(),
-            16_u32.into(),
+            Felt::from_u32(15),
+            Felt::from_u32(16),
         ]
     );
 }
@@ -358,7 +358,7 @@ fn test_external_node_decorator_sequencing() {
     let lib_decorator = Decorator::Trace(2);
     let lib_decorator_id = lib_forest.add_decorator(lib_decorator.clone()).unwrap();
 
-    let lib_operations = [Operation::Push(1_u32.into()), Operation::Add];
+    let lib_operations = [Operation::Push(Felt::from_u32(1)), Operation::Add];
     // Attach the decorator to the first operation (index 0)
     let lib_block_id =
         BasicBlockNodeBuilder::new(lib_operations.to_vec(), vec![(0, lib_decorator_id)])

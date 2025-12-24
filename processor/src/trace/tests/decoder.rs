@@ -5,7 +5,7 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    ExtensionField, Field, ONE, Operation, Program, Word, ZERO,
+    ExtensionField, Field, ONE, Operation, PrimeCharacteristicRing, Program, Word, ZERO,
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
@@ -882,7 +882,7 @@ impl BlockStackTableRow {
             + alphas[3] * is_loop
             + alphas[4] * Felt::from(self.parent_ctx)
             + alphas[5] * self.parent_fmp
-            + alphas[6] * Felt::from(self.parent_stack_depth)
+            + alphas[6] * Felt::from_u32(self.parent_stack_depth)
             + alphas[7] * self.parent_next_overflow_addr
             + alphas[8] * self.parent_fn_hash[0]
             + alphas[9] * self.parent_fn_hash[1]

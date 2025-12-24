@@ -77,7 +77,7 @@ impl Process {
     /// operations such as GRUOP, END etc.
     pub(super) fn op_clk(&mut self) -> Result<(), ExecutionError> {
         let clk = self.system.clk();
-        self.stack.set(0, Felt::from(clk));
+        self.stack.set(0, clk.into());
         self.stack.shift_right(0);
         Ok(())
     }

@@ -351,7 +351,7 @@ fn copy_map_value_length_to_adv_stack(
         ))?
         .len();
 
-    advice_provider.push_stack(Felt::from(values_len as u64));
+    advice_provider.push_stack(Felt::from_u64(values_len as u64));
 
     Ok(())
 }
@@ -427,7 +427,11 @@ fn push_leading_zeros(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_zeros()), err_ctx)
+    push_transformed_stack_top(
+        process,
+        |stack_top| Felt::from_u32(stack_top.leading_zeros()),
+        err_ctx,
+    )
 }
 
 /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
@@ -444,7 +448,11 @@ fn push_trailing_zeros(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_zeros()), err_ctx)
+    push_transformed_stack_top(
+        process,
+        |stack_top| Felt::from_u32(stack_top.trailing_zeros()),
+        err_ctx,
+    )
 }
 
 /// Pushes the number of the leading ones of the top stack element onto the advice stack.
@@ -461,7 +469,11 @@ fn push_leading_ones(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.leading_ones()), err_ctx)
+    push_transformed_stack_top(
+        process,
+        |stack_top| Felt::from_u32(stack_top.leading_ones()),
+        err_ctx,
+    )
 }
 
 /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
@@ -478,7 +490,11 @@ fn push_trailing_ones(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    push_transformed_stack_top(process, |stack_top| Felt::from(stack_top.trailing_ones()), err_ctx)
+    push_transformed_stack_top(
+        process,
+        |stack_top| Felt::from_u32(stack_top.trailing_ones()),
+        err_ctx,
+    )
 }
 
 /// Pushes the base 2 logarithm of the top stack element, rounded down.
@@ -502,7 +518,7 @@ fn push_ilog2(
     if n == 0 {
         return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
     }
-    let ilog2 = Felt::from(n.ilog2());
+    let ilog2 = Felt::from_u32(n.ilog2());
     process.advice_provider_mut().push_stack(ilog2);
 
     Ok(())

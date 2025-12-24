@@ -1,4 +1,4 @@
-use miden_core::{Word, assert_matches};
+use miden_core::{PrimeCharacteristicRing, Word, assert_matches};
 use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, Program};
 use miden_utils_testing::{
     ExecutionOptions, Felt, ONE, Process, StackInputs, ZERO, build_expected_hash,
@@ -133,7 +133,7 @@ fn test_memcopy_elements() {
     for addr in 2002..2020 {
         assert_eq!(
             process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
-            Felt::from(addr - 2000),
+            Felt::from_u32(addr - 2000),
             "Address {}",
             addr
         );

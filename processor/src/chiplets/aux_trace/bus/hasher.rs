@@ -41,7 +41,7 @@ pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let message = ControlBlockRequestMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         op_code: op_code_felt,
         decoder_hasher_state,
@@ -63,7 +63,7 @@ pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let span_block_message = SpanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -84,7 +84,7 @@ pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let respan_block_message = RespanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 32),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -105,8 +105,8 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let end_block_message = EndBlockMessage {
-        addr: main_trace.addr(row) + Felt::from(NUM_ROUNDS as u8),
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        addr: main_trace.addr(row) + Felt::from_u8(NUM_ROUNDS as u8),
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         digest: main_trace.decoder_hasher_state(row)[..4].try_into().unwrap(),
     };
 
@@ -152,14 +152,14 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     let s11_nxt = main_trace.stack_element(11, row + 1);
 
     let input_req = HasherMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: helper_0,
         node_index: ZERO,
         hasher_state: [s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0],
         source: "hperm input",
     };
     let output_req = HasherMessage {
-        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
+        transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
         addr_next: helper_0 + Felt::new(7),
         node_index: ZERO,
         hasher_state: [
@@ -253,7 +253,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     let state_output = [cap_next, r0, r1];
 
     let input_req = HasherMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: addr,
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_input).try_into().unwrap(),
@@ -261,7 +261,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     };
 
     let output_req = HasherMessage {
-        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
+        transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
         addr_next: addr + Felt::new(7),
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
@@ -305,7 +305,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     ];
 
     let input = HasherMessage {
-        transition_label: Felt::from(MP_VERIFY_LABEL + 16),
+        transition_label: Felt::from_u8(MP_VERIFY_LABEL + 16),
         addr_next: helper_0,
         node_index,
         hasher_state: [
@@ -326,7 +326,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     };
 
     let output = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         addr_next: helper_0 + node_depth * Felt::from_u16(8) - ONE,
         node_index: ZERO,
         hasher_state: [
@@ -394,7 +394,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     ];
 
     let input_old = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_OLD_LABEL + 16),
+        transition_label: Felt::from_u8(MR_UPDATE_OLD_LABEL + 16),
         addr_next: helper_0,
         node_index,
         hasher_state: [
@@ -415,7 +415,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     };
 
     let output_old = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8) - ONE,
         node_index: ZERO,
         hasher_state: [
@@ -436,7 +436,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     };
 
     let input_new = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_NEW_LABEL + 16),
+        transition_label: Felt::from_u8(MR_UPDATE_NEW_LABEL + 16),
         addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8),
         node_index,
         hasher_state: [
@@ -457,7 +457,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     };
 
     let output_new = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         addr_next: helper_0 + merkle_path_depth * Felt::from_u16(16) - ONE,
         node_index: ZERO,
         hasher_state: [
@@ -512,13 +512,13 @@ where
     let selector2 = main_trace.chiplet_selector_2(row);
     let selector3 = main_trace.chiplet_selector_3(row);
     let op_label = get_op_label(selector0, selector1, selector2, selector3);
-    let addr_next = Felt::from(row + 1);
+    let addr_next = (row + 1).into();
 
     // f_bp, f_mp, f_mv or f_mu == 1
     if row.as_usize().is_multiple_of(HASH_CYCLE_LEN) {
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(16_u8);
+        let transition_label = op_label + Felt::from_u8(16_u8);
 
         // f_bp == 1
         // v_all = v_h + v_a + v_b + v_c
@@ -580,7 +580,7 @@ where
     if row.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1 {
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(32_u8);
+        let transition_label = op_label + Felt::from_u8(32_u8);
 
         // f_hout == 1
         // v_res = v_h + v_b;

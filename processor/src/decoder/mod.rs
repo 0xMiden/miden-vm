@@ -13,7 +13,7 @@ use miden_air::{
 #[cfg(test)]
 use miden_core::mast::OP_GROUP_SIZE;
 use miden_core::{
-    AssemblyOp, FMP_ADDR, FMP_INIT_VALUE,
+    AssemblyOp, FMP_ADDR, FMP_INIT_VALUE, PrimeCharacteristicRing,
     mast::{
         BasicBlockNode, CallNode, DynNode, JoinNode, LoopNode, MastForest, MastNodeExt,
         OP_BATCH_SIZE, SplitNode,
@@ -721,7 +721,7 @@ impl Decoder {
     /// them (since in the next row, we start a new context, and hence the stack registers are reset
     /// to their default values).
     pub fn start_dyncall(&mut self, addr: Felt, callee_hash: Word, ctx_info: ExecutionContextInfo) {
-        let parent_stack_depth = ctx_info.parent_stack_depth.into();
+        let parent_stack_depth = Felt::from_u32(ctx_info.parent_stack_depth);
         let parent_next_overflow_addr = ctx_info.parent_next_overflow_addr;
 
         let parent_addr = self.block_stack.push(addr, BlockType::Dyncall, Some(ctx_info));
@@ -828,7 +828,7 @@ impl Decoder {
             block.parent_addr,
             ctx.num_groups_left,
             ctx.group_ops_left,
-            Felt::from(op_idx as u32),
+            Felt::from_u32(op_idx as u32),
         );
 
         // if the operation carries an immediate value, decrement the number of  operation

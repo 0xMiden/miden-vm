@@ -20,8 +20,8 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    BasedVectorSpace, EMPTY_WORD, Felt, ONE, PrimeField64, QuadFelt, StackInputs, StackOutputs,
-    WORD_SIZE, Word, ZERO,
+    BasedVectorSpace, EMPTY_WORD, Felt, ONE, PrimeCharacteristicRing, PrimeField64, QuadFelt,
+    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
@@ -729,13 +729,13 @@ impl Test {
 
 /// Appends a Word to an operand stack Vec.
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    target.extend(word.iter().map(Felt::as_int));
+    target.extend(word.iter().map(|f| f.as_canonical_u64()));
 }
 
 /// Add a Word to the bottom of the operand stack Vec.
 pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
     // Actual insertion happens when this iterator is dropped.
-    let _iterator = target.splice(0..0, word.iter().map(Felt::as_int));
+    let _iterator = target.splice(0..0, word.iter().map(|f| f.as_canonical_u64()));
 }
 
 /// Converts a slice of Felts into a vector of u64 values.

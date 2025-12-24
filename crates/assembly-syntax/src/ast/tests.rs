@@ -550,12 +550,12 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
     );
     let forms = module!(begin!(
         inst!(Push(Immediate::Value(Span::unknown(3u8.into())))),
-        inst!(U32WrappingAddImm(5u32.into())),
-        inst!(U32OverflowingAddImm(5u32.into())),
-        inst!(U32WrappingSubImm(1u32.into())),
-        inst!(U32OverflowingSubImm(1u32.into())),
-        inst!(U32WrappingMulImm(2u32.into())),
-        inst!(U32OverflowingMulImm(2u32.into()))
+        inst!(U32WrappingAddImm(5_u32.into())),
+        inst!(U32OverflowingAddImm(5_u32.into())),
+        inst!(U32WrappingSubImm(1_u32.into())),
+        inst!(U32OverflowingSubImm(1_u32.into())),
+        inst!(U32WrappingMulImm(2_u32.into())),
+        inst!(U32OverflowingMulImm(2_u32.into()))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);

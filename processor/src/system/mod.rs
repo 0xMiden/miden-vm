@@ -103,8 +103,8 @@ impl System {
 
         let clk: usize = self.clk.into();
 
-        self.clk_trace[clk] = Felt::from(self.clk);
-        self.ctx_trace[clk] = Felt::from(self.ctx);
+        self.clk_trace[clk] = self.clk.into();
+        self.ctx_trace[clk] = self.ctx.into();
 
         self.fn_hash_trace[0][clk] = self.fn_hash[0];
         self.fn_hash_trace[1][clk] = self.fn_hash[1];
@@ -172,7 +172,7 @@ impl System {
         self.clk_trace.resize(trace_len, ZERO);
         for (i, clk) in self.clk_trace.iter_mut().enumerate().skip(clk) {
             // converting from u32 is OK here because max trace length is 2^32
-            *clk = Felt::from(i as u32);
+            *clk = Felt::from_u32(i as u32);
         }
 
         // complete the ctx column by filling all values after the last clock cycle with ZEROs as
@@ -266,7 +266,7 @@ impl From<ContextId> for u64 {
 
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
-        context_id.0.into()
+        Felt::from_u32(context_id.0)
     }
 }
 
