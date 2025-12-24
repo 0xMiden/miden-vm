@@ -13,11 +13,13 @@ use crate::{Felt, utils::hash_string_to_word};
 // EVENT ID
 // ================================================================================================
 
-/// A type-safe wrapper around a [`Felt`] that represents an event identifier.
+/// A type-safe event identifier that semantically represents a [`Felt`] value.
 ///
 /// Event IDs are used to identify events that can be emitted by the VM or handled by the host.
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
-/// with other [`Felt`] values.
+/// with other field element values.
+///
+/// Internally stored as `u64` rather than [`Felt`] to enable `const` construction.
 ///
 /// [`EventId`] contains only the identifier. For events with human-readable names,
 /// use [`EventName`] instead.
@@ -40,7 +42,7 @@ impl EventId {
     /// 1. Computing the BLAKE3 hash of the event name (produces 32 bytes)
     /// 2. Taking the first 8 bytes of the hash
     /// 3. Interpreting these bytes as a little-endian u64
-    /// 4. Reducing modulo the field prime to create a valid Felt
+    /// 4. Reducing modulo the field prime to produce a valid field element
     ///
     /// Note that this is the same procedure performed by [`hash_string_to_word`], where we take
     /// the first element of the resulting [`Word`](crate::Word).
@@ -57,17 +59,17 @@ impl EventId {
         Self(event_id.as_canonical_u64())
     }
 
-    /// Creates an EventId from a u64, converting it to a [`Felt`].
+    /// Creates an EventId from a `u64` value, reducing modulo the field prime.
     pub const fn from_u64(event_id: u64) -> Self {
-        Self(event_id)
+        Self(event_id % Felt::ORDER_U64)
     }
 
-    /// Returns the underlying [`Felt`] value.
+    /// Converts this event ID to a [`Felt`].
     pub const fn as_felt(&self) -> Felt {
         Felt::new(self.0)
     }
 
-    /// Returns the underlying `u64` value.
+    /// Returns the inner `u64` representation.
     pub const fn as_u64(&self) -> u64 {
         self.0
     }
@@ -153,7 +155,7 @@ impl Serializable for EventId {
 
 impl Deserializable for EventId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self(u64::read_from(source)?))
+        Ok(Self(Felt::read_from(source)?.as_canonical_u64()))
     }
 }
 
