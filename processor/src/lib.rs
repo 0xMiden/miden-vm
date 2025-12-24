@@ -12,8 +12,8 @@ use core::fmt::{Display, LowerHex};
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, FieldElement, Kernel, ONE, Operation, Program, ProgramInfo,
-    QuadExtension, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, PrimeField64, Program, ProgramInfo,
+    QuadFelt, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -21,7 +21,6 @@ pub use miden_core::{
     sys_events::SystemEvent,
     utils::DeserializationError,
 };
-pub use winter_prover::matrix::ColMatrix;
 
 pub(crate) mod continuation_stack;
 
@@ -31,6 +30,8 @@ pub mod parallel;
 pub(crate) mod processor;
 
 mod operations;
+
+pub(crate) mod row_major_adapter;
 
 mod system;
 pub use system::ContextId;
@@ -82,18 +83,17 @@ use crate::{fast::FastProcessor, parallel::build_trace};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
-    pub use winter_prover::math::fft;
+    pub use miden_core::Felt;
 }
 
 pub mod crypto {
     pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
+        hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
         merkle::{
             MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
             SimpleSmt,
         },
-        random::{RandomCoin, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
+        random::{RpoRandomCoin, RpxRandomCoin},
     };
 }
 

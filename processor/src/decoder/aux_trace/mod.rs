@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_air::trace::main_trace::MainTrace;
 use miden_core::ExtensionField;
 
-use super::{Felt, ONE, ZERO};
+use crate::{Felt, ONE, ZERO};
 use crate::trace::AuxColumnBuilder;
 
 mod block_hash_table;

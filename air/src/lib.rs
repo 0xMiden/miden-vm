@@ -16,6 +16,10 @@ pub use p3_miden_air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 
 mod constraints;
 
+// Auxiliary trace builder trait
+mod aux_builder;
+pub use aux_builder::AuxTraceBuilder;
+
 // STARK configuration factories
 pub mod config;
 
