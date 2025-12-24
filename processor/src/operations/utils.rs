@@ -43,7 +43,7 @@ pub(crate) fn validate_dual_word_stream_addrs(
         return Err(ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess {
             ctx,
             addr: offending_addr,
-            clk: Felt::from(clk),
+            clk: clk.into(),
         }));
     }
 

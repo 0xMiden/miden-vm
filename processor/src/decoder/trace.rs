@@ -3,7 +3,7 @@ use core::ops::Range;
 
 #[cfg(test)]
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::utils::new_array_vec;
+use miden_core::{PrimeCharacteristicRing, utils::new_array_vec};
 
 use crate::PrimeField64;
 
@@ -401,7 +401,7 @@ impl DecoderTrace {
         let halt_opcode = Operation::Halt.op_code();
         for (i, mut column) in self.op_bits_trace.into_iter().enumerate() {
             debug_assert_eq!(own_len, column.len());
-            let value = Felt::from((halt_opcode >> i) & 1);
+            let value = Felt::from_u8((halt_opcode >> i) & 1);
             column.resize(trace_len, value);
             trace.push(column);
         }
@@ -494,7 +494,7 @@ impl DecoderTrace {
     fn append_opcode(&mut self, op: Operation) {
         let op_code = op.op_code();
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from((op_code >> i) & 1);
+            let bit = Felt::from_u8((op_code >> i) & 1);
             self.op_bits_trace[i].push(bit);
         }
 

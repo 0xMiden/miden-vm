@@ -1,4 +1,7 @@
+use miden_air::RowIndex;
+
 use super::*;
+use crate::ContextId;
 
 #[test]
 fn test_memory_word_access_alignment() {
@@ -9,10 +12,12 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
 
         // loadw at address 40 is allowed
-        FastProcessor::new(&[40_u32.into()]).execute_sync(&program, &mut host).unwrap();
+        FastProcessor::new(&[Felt::from_u32(40)])
+            .execute_sync(&program, &mut host)
+            .unwrap();
 
         // but loadw at address 43 is not allowed
-        let err = FastProcessor::new(&[43_u32.into()])
+        let err = FastProcessor::new(&[Felt::from_u32(43)])
             .execute_sync(&program, &mut host)
             .unwrap_err();
         assert_eq!(
@@ -26,10 +31,12 @@ fn test_memory_word_access_alignment() {
         let program = simple_program_with_ops(vec![Operation::MStoreW]);
 
         // storew at address 40 is allowed
-        FastProcessor::new(&[40_u32.into()]).execute_sync(&program, &mut host).unwrap();
+        FastProcessor::new(&[Felt::from_u32(40)])
+            .execute_sync(&program, &mut host)
+            .unwrap();
 
         // but storew at address 43 is not allowed
-        let err = FastProcessor::new(&[43_u32.into()])
+        let err = FastProcessor::new(&[Felt::from_u32(43)])
             .execute_sync(&program, &mut host)
             .unwrap_err();
         assert_eq!(
@@ -42,9 +49,9 @@ fn test_memory_word_access_alignment() {
 #[test]
 fn test_mloadw_success() {
     let mut host = DefaultHost::default();
-    let addr = Felt::from(40_u32);
-    let word_at_addr = [1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()];
-    let ctx = 0_u32.into();
+    let addr = Felt::from_u32(40);
+    let word_at_addr = [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+    let ctx = ContextId::root();
     let dummy_clk: RowIndex = 0_u32.into();
 
     // load the contents of address 40
@@ -67,7 +74,7 @@ fn test_mloadw_success() {
 
     // load the contents of address 100 (should yield the ZERO word)
     {
-        let mut processor = FastProcessor::new(&[100_u32.into()]);
+        let mut processor = FastProcessor::new(&[Felt::from_u32(100)]);
         processor
             .memory
             .write_word(ctx, addr, dummy_clk, word_at_addr.into(), &())
@@ -83,10 +90,11 @@ fn test_mloadw_success() {
 #[test]
 fn test_mstorew_success() {
     let mut host = DefaultHost::default();
-    let addr = Felt::from(40_u32);
-    let word_to_store = [1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()];
-    let ctx = 0_u32.into();
-    let clk = 0_u32.into();
+    let addr = Felt::from_u32(40);
+    let word_to_store =
+        [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+    let ctx = ContextId::root();
+    let clk: RowIndex = 0_u32.into();
 
     // Store the word at address 40
     let mut processor = FastProcessor::new(&[
@@ -110,18 +118,18 @@ fn test_mstorew_success() {
 #[case(43_u32, 42_u32)]
 fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let mut host = DefaultHost::default();
-    let ctx = 0_u32.into();
-    let clk = 1_u32.into();
-    let value_to_store = Felt::from(value_to_store);
+    let ctx = ContextId::root();
+    let clk: RowIndex = 1_u32.into();
+    let value_to_store = Felt::from_u32(value_to_store);
 
     // Store the value at address 40
-    let mut processor = FastProcessor::new(&[value_to_store, addr.into()]);
+    let mut processor = FastProcessor::new(&[value_to_store, Felt::from_u32(addr)]);
     let program = simple_program_with_ops(vec![Operation::MStore]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
-    let word = processor.memory.read_word(ctx, word_addr.into(), clk, &()).unwrap();
+    let word = processor.memory.read_word(ctx, Felt::from_u32(word_addr), clk, &()).unwrap();
     assert_eq!(word[addr as usize % WORD_SIZE], value_to_store);
 }
 
@@ -133,15 +141,15 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
 fn test_mload_success(#[case] addr_to_access: u32) {
     let mut host = DefaultHost::default();
     let addr_with_word = 40_u32;
-    let word_at_addr = [1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()];
-    let ctx = 0_u32.into();
-    let dummy_clk = 0_u32.into();
+    let word_at_addr = [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
+    let ctx = ContextId::root();
+    let dummy_clk: RowIndex = 0_u32.into();
 
     // Initialize processor with a word at address 40
-    let mut processor = FastProcessor::new(&[addr_to_access.into()]);
+    let mut processor = FastProcessor::new(&[Felt::from_u32(addr_to_access)]);
     processor
         .memory
-        .write_word(ctx, addr_with_word.into(), dummy_clk, word_at_addr.into(), &())
+        .write_word(ctx, Felt::from_u32(addr_with_word), dummy_clk, word_at_addr.into(), &())
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
@@ -158,15 +166,17 @@ fn test_mload_success(#[case] addr_to_access: u32) {
 fn test_mstream() {
     let mut host = DefaultHost::default();
     let addr = 40_u32;
-    let word_at_addr_40 = Word::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
-    let word_at_addr_44 = Word::from([Felt::from(5_u32), 6_u32.into(), 7_u32.into(), 8_u32.into()]);
-    let ctx = 0_u32.into();
-    let clk = 1_u32.into();
+    let word_at_addr_40 =
+        Word::from([ONE, Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)]);
+    let word_at_addr_44 =
+        Word::from([Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)]);
+    let ctx = ContextId::root();
+    let clk: RowIndex = 1_u32.into();
 
     let mut processor = {
         let stack_init = {
             let mut stack = vec![ZERO; 16];
-            stack[MIN_STACK_DEPTH - 1 - 12] = addr.into();
+            stack[MIN_STACK_DEPTH - 1 - 12] = Felt::from_u32(addr);
             stack
         };
         FastProcessor::new(&stack_init)
@@ -174,11 +184,11 @@ fn test_mstream() {
     // Store values at addresses 40 and 44
     processor
         .memory
-        .write_word(ctx, addr.into(), clk, word_at_addr_40, &())
+        .write_word(ctx, Felt::from_u32(addr), clk, word_at_addr_40, &())
         .unwrap();
     processor
         .memory
-        .write_word(ctx, (addr + 4).into(), clk, word_at_addr_44, &())
+        .write_word(ctx, Felt::from_u32(addr + 4), clk, word_at_addr_44, &())
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);

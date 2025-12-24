@@ -137,9 +137,7 @@ impl OverflowTable {
     /// Hence, if no entries were added to the overflow table in the current context, ZERO is
     /// returned.
     pub fn last_update_clk_in_current_ctx(&self) -> Felt {
-        self.get_current_overflow_stack()
-            .last()
-            .map_or(ZERO, |entry| Felt::from(entry.clk))
+        self.get_current_overflow_stack().last().map_or(ZERO, |entry| entry.clk.into())
     }
 
     /// Returns the total number of elements in the overflow table across all stacks in all

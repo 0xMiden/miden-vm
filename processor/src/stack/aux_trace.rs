@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
-use miden_core::{ExtensionField, OPCODE_DYNCALL};
+use miden_core::{ExtensionField, OPCODE_DYNCALL, PrimeCharacteristicRing};
 
 use super::Felt;
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
@@ -39,7 +39,7 @@ impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let is_left_shift = main_trace.is_left_shift(i);
-        let is_dyncall = main_trace.get_op_code(i) == OPCODE_DYNCALL.into();
+        let is_dyncall = main_trace.get_op_code(i) == Felt::from_u8(OPCODE_DYNCALL);
         let is_non_empty_overflow = main_trace.is_non_empty_overflow(i);
 
         if is_left_shift && is_non_empty_overflow {

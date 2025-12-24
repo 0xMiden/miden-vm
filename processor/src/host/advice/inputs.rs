@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    AdviceMap, Felt, Word,
+    AdviceMap, Felt, QuotientMap, Word,
     crypto::merkle::MerkleStore,
     errors::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
@@ -40,10 +40,14 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            .map(|v| Felt::try_checked(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(|v| {
+                Felt::from_canonical_checked(v).ok_or_else(|| {
+                    InputError::NotFieldElement(v, "value exceeds field modulus".into())
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
-        self.stack.extend(stack.iter());
+        self.stack.extend(stack);
         Ok(self)
     }
 

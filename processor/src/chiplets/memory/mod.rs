@@ -10,7 +10,7 @@ use miden_air::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{Field, WORD_SIZE, ZERO};
+use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE, ZERO};
 
 use super::{
     EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
@@ -173,7 +173,7 @@ impl Memory {
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
         self.num_trace_rows += 1;
-        self.trace.entry(ctx).or_default().read(ctx, addr, Felt::from(clk))
+        self.trace.entry(ctx).or_default().read(ctx, addr, clk.into())
     }
 
     /// Returns a word located in memory at the specified context/address.
@@ -201,7 +201,7 @@ impl Memory {
         }
 
         self.num_trace_rows += 1;
-        self.trace.entry(ctx).or_default().read_word(ctx, addr, Felt::from(clk))
+        self.trace.entry(ctx).or_default().read_word(ctx, addr, clk.into())
     }
 
     /// Writes the provided field element at the specified context/address.
@@ -222,7 +222,7 @@ impl Memory {
             .try_into()
             .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
         self.num_trace_rows += 1;
-        self.trace.entry(ctx).or_default().write(ctx, addr, Felt::from(clk), value)
+        self.trace.entry(ctx).or_default().write(ctx, addr, clk.into(), value)
     }
 
     /// Writes the provided word at the specified context/address.
@@ -248,7 +248,7 @@ impl Memory {
         }
 
         self.num_trace_rows += 1;
-        self.trace.entry(ctx).or_default().write_word(ctx, addr, Felt::from(clk), value)
+        self.trace.entry(ctx).or_default().write_word(ctx, addr, clk.into(), value)
     }
 
     // EXECUTION TRACE GENERATION
@@ -305,7 +305,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from(addr), clk - ONE),
+            Some((ctx, addr, clk)) => (ctx.into(), Felt::from_u32(addr), clk - ONE),
             None => return,
         };
 
@@ -314,11 +314,11 @@ impl Memory {
         let mut row: RowIndex = 0.into();
 
         for (ctx, segment) in self.trace {
-            let ctx = Felt::from(ctx);
+            let ctx: Felt = ctx.into();
             for (addr, addr_trace) in segment.into_inner() {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
-                let felt_addr = Felt::from(addr);
+                let felt_addr = Felt::from_u32(addr);
                 for memory_access in addr_trace {
                     let clk = memory_access.clk();
                     let value = memory_access.word();

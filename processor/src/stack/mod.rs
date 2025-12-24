@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::RowIndex;
-use miden_core::{Word, stack::MIN_STACK_DEPTH};
+use miden_core::{PrimeCharacteristicRing, Word, stack::MIN_STACK_DEPTH};
 
 use super::{ExecutionError, Felt, ONE, STACK_TRACE_WIDTH, StackInputs, StackOutputs, ZERO};
 
@@ -196,7 +196,7 @@ impl Stack {
             self.clk.into(),
             start_pos,
             // TODO: change type of `active_depth` to `u32`
-            Felt::from(self.active_depth as u64),
+            Felt::from_u64(self.active_depth as u64),
             self.overflow.last_update_clk_in_current_ctx(),
         );
     }
@@ -287,7 +287,7 @@ impl Stack {
         // Note: `start_context()` resets `active_depth` to 16, and `overflow.last_row_addr` to 0.
         self.trace.set_helpers_at(
             self.clk.as_usize(),
-            Felt::from(self.active_depth as u32),
+            Felt::from_u32(self.active_depth as u32),
             self.overflow.last_update_clk_in_current_ctx(),
         );
 

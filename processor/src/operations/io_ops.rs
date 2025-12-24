@@ -1,4 +1,4 @@
-use miden_core::WORD_SIZE;
+use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
 
 use super::{ExecutionError, Felt, Process};
 use crate::errors::ErrorContext;
@@ -153,7 +153,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // load two words from memory
         let words = [
@@ -180,7 +180,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);
@@ -208,7 +208,7 @@ impl Process {
         let ctx = self.system.ctx();
         let clk = self.system.clk();
         let addr_first_word = self.stack.get(MEM_ADDR_STACK_IDX);
-        let addr_second_word = addr_first_word + Felt::from(WORD_SIZE as u32);
+        let addr_second_word = addr_first_word + Felt::from_u32(WORD_SIZE as u32);
 
         // pop two words from the advice stack
         let words = self
@@ -239,7 +239,7 @@ impl Process {
 
         // increment the address by 8 (2 words)
         self.stack
-            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from(WORD_SIZE as u32 * 2));
+            .set(MEM_ADDR_STACK_IDX, addr_first_word + Felt::from_u32(WORD_SIZE as u32 * 2));
 
         // copy over the rest of the stack
         self.stack.copy_state(13);

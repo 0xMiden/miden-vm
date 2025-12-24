@@ -1,7 +1,7 @@
 use alloc::{collections::btree_map::Entry, vec::Vec};
 
 use miden_core::{
-    AdviceMap, Felt, Word,
+    AdviceMap, Felt, PrimeCharacteristicRing, Word,
     crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
@@ -179,7 +179,7 @@ impl AdviceProvider {
         // push the reversed map_value list and its initial length to the advice stack
         self.stack.extend(map_value.iter().rev());
         if include_len {
-            self.stack.push(Felt::from(map_value.len() as u64));
+            self.stack.push(Felt::from_u64(map_value.len() as u64));
         }
 
         Ok(())

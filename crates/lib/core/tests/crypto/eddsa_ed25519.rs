@@ -164,10 +164,13 @@ fn test_eddsa_verify_with_message() {
     let pk_commitment = Rpo256::hash_elements(&pk_felts);
 
     let stack_words = [message, pk_commitment];
-    let stack_inputs: Vec<_> =
-        Word::words_as_elements(&stack_words).iter().map(Felt::as_int).collect();
+    let stack_inputs: Vec<_> = Word::words_as_elements(&stack_words)
+        .iter()
+        .map(|f| f.as_canonical_u64())
+        .collect();
 
-    let advice: Vec<_> = eddsa_sign(&secret_key, message).iter().map(Felt::as_int).collect();
+    let advice: Vec<_> =
+        eddsa_sign(&secret_key, message).iter().map(|f| f.as_canonical_u64()).collect();
 
     let source = "
             use miden::core::crypto::dsa::eddsa_ed25519

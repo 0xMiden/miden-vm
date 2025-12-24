@@ -129,14 +129,14 @@ impl CircuitEvaluation {
         let v_l = self.wire_bus.read_value(id_l).ok_or_else(|| {
             ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
         })?;
-        let id_l = Felt::from(id_l);
+        let id_l = Felt::from_u32(id_l);
         self.col_wire_left.push(id_l, v_l);
 
         // Read value of id_r from wire bus, increasing its multiplicity
         let v_r = self.wire_bus.read_value(id_r).ok_or_else(|| {
             ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
         })?;
-        let id_r = Felt::from(id_r);
+        let id_r = Felt::from_u32(id_r);
         self.col_wire_right.push(id_r, v_r);
 
         // Compute v_out and insert it into the wire bus.
@@ -200,7 +200,7 @@ impl CircuitEvaluation {
         columns[CLK_IDX][offset..offset + num_rows].fill(clk_felt);
 
         // Fill n_eval which is constant across the read block
-        let eval_section_first_idx = Felt::from(self.num_eval_rows - 1);
+        let eval_section_first_idx = Felt::from_u32(self.num_eval_rows - 1);
         columns[READ_NUM_EVAL_IDX][read_range.clone()].fill(eval_section_first_idx);
 
         // Fill OP column for EVAL rows
@@ -222,7 +222,7 @@ impl CircuitEvaluation {
         columns[V_2_1_IDX][eval_range.clone()].copy_from_slice(&self.col_wire_right.v_1);
 
         // Fill multiplicity 0 column for all rows
-        let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from(*m));
+        let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from_u32(*m));
         // In the READ block, we inserted wires w_0 and w_1
         for row_index in read_range {
             let m_0 = multiplicities_iter
@@ -305,7 +305,7 @@ impl WireBus {
         Self {
             wires: Vec::with_capacity(num_wires as usize),
             num_wires,
-            id_next: Felt::from(num_wires - 1),
+            id_next: Felt::from_u32(num_wires - 1),
         }
     }
 
