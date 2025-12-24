@@ -11,8 +11,8 @@ pub use miden_assembly::{
 };
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, AsmOpInfo, AsyncHost, BaseHost, DefaultHost, ExecutionError,
-    ExecutionTrace, Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, VmState,
-    VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
+    ExecutionTrace, Kernel, Operation, PrimeField64, Program, ProgramInfo, StackInputs, SyncHost,
+    VmState, VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
 };
 pub use miden_prover::{
     ExecutionProof, HashFunction, InputError, Proof, ProvingOptions, StackOutputs, Word, math,

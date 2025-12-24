@@ -109,7 +109,7 @@ Here is a simple example of executing a program which pushes two numbers onto th
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, PrimeField64, ProvingOptions, Program, prove, StackInputs};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -128,7 +128,7 @@ let (outputs, proof) = prove(
 .unwrap();
 
 // the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_int());
+assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 ```
 
 ### Verifying program execution
@@ -189,7 +189,7 @@ Notice that except for the first 2 operations which initialize the stack, the se
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, Program, ProvingOptions, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, PrimeField64, Program, ProvingOptions, StackInputs};
 
 // set the number of terms to compute
 let n = 50;
@@ -227,7 +227,7 @@ let (outputs, proof) = miden_vm::prove(
 let stack = outputs.stack_truncated(1);
 
 // the output should be the 50th Fibonacci number
-assert_eq!(12586269025, stack[0].as_int());
+assert_eq!(12586269025, stack[0].as_canonical_u64());
 ```
 
 Above, we used public inputs to initialize the stack rather than using `push` operations. This makes the program a bit simpler, and also allows us to run the program from arbitrary starting points without changing program hash.
