@@ -100,6 +100,7 @@ p3-challenger    = { branch = "main", default-features = false, git = "https://g
 p3-commit        = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-dft           = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-field         = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
+p3-goldilocks    = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-interpolation = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-keccak        = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 p3-matrix        = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
@@ -111,10 +112,9 @@ p3-uni-stark     = { branch = "main", default-features = false, git = "https://g
 p3-util          = { branch = "main", default-features = false, git = "https://github.com/Plonky3/Plonky3" }
 
 # Miden-specific Plonky3 crates
-p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-goldilocks = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
+p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
+p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "tracking-0.4.2", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
