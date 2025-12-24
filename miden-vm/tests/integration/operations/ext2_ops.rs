@@ -1,5 +1,8 @@
 use miden_core::{BasedVectorSpace, Felt, Field, QuadFelt};
-use miden_utils_testing::{PrimeField64, build_op_test, rand::rand_value};
+use miden_utils_testing::{
+    PrimeField64, build_op_test,
+    rand::rand_quad_felt,
+};
 
 // EXT2 OPS ASSERTIONS - MANUAL TESTS
 // ================================================================================================
@@ -8,8 +11,8 @@ use miden_utils_testing::{PrimeField64, build_op_test, rand::rand_value};
 fn ext2add() {
     let asm_op = "ext2add";
 
-    let a = rand_value::<QuadFelt>();
-    let b = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
+    let b = rand_quad_felt();
     let c = a + b;
 
     let (a0, a1) = ext_element_to_ints(a);
@@ -27,8 +30,8 @@ fn ext2add() {
 fn ext2sub() {
     let asm_op = "ext2sub";
 
-    let a = rand_value::<QuadFelt>();
-    let b = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
+    let b = rand_quad_felt();
     let c = a - b;
 
     let (a0, a1) = ext_element_to_ints(a);
@@ -46,8 +49,8 @@ fn ext2sub() {
 fn ext2mul() {
     let asm_op = "ext2mul";
 
-    let a = rand_value::<QuadFelt>();
-    let b = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
+    let b = rand_quad_felt();
     let c = b * a;
 
     let (a0, a1) = ext_element_to_ints(a);
@@ -65,8 +68,8 @@ fn ext2mul() {
 fn ext2div() {
     let asm_op = "ext2div";
 
-    let a = rand_value::<QuadFelt>();
-    let b = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
+    let b = rand_quad_felt();
     let c = a * b.inverse();
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
@@ -83,7 +86,7 @@ fn ext2div() {
 fn ext2neg() {
     let asm_op = "ext2neg";
 
-    let a = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
     let b = -a;
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
@@ -99,7 +102,7 @@ fn ext2neg() {
 fn ext2inverse() {
     let asm_op = "ext2inv";
 
-    let a = rand_value::<QuadFelt>();
+    let a = rand_quad_felt();
     let b = a.inverse();
 
     let (a0, a1) = ext_element_to_ints(a);

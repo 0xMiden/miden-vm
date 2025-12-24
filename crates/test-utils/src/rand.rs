@@ -1,25 +1,23 @@
-use alloc::vec::Vec;
-use core::{
-    array,
-    sync::atomic::{AtomicU64, Ordering},
-};
+// Re-export miden-crypto's Randomizable trait and core test utilities
+#[cfg(feature = "std")]
+pub use miden_crypto::test_utils::{prng_array, rand_array, rand_value, rand_vector};
+pub use miden_crypto::utils::Randomizable;
 
-use super::{Felt, QuadFelt, WORD_SIZE, Word};
+use super::{Felt, Word};
+#[cfg(feature = "std")]
+use super::QuadFelt;
 
-pub trait Randomizable {
-    fn random() -> Self;
+// Helper functions for generating random QuadFelt and Word values
+// These work around orphan rules by providing functions instead of trait impls
+
+#[cfg(feature = "std")]
+pub fn rand_quad_felt() -> QuadFelt {
+    QuadFelt::new_complex(rand_value(), rand_value())
 }
 
-pub fn rand_value<T: Randomizable>() -> T {
-    T::random()
-}
-
-pub fn rand_array<T: Randomizable, const N: usize>() -> [T; N] {
-    array::from_fn(|_| T::random())
-}
-
-pub fn rand_vector<T: Randomizable>(len: usize) -> Vec<T> {
-    (0..len).map(|_| T::random()).collect()
+#[cfg(feature = "std")]
+pub fn rand_word() -> Word {
+    Word::new(rand_array())
 }
 
 pub fn seeded_word(seed: &mut u64) -> Word {
@@ -35,62 +33,6 @@ pub fn seeded_word(seed: &mut u64) -> Word {
 pub fn seeded_element(seed: &mut u64) -> Felt {
     *seed = (*seed).wrapping_add(0x9e37_79b9_7f4a_7c15);
     Felt::new(splitmix64(*seed))
-}
-
-impl Randomizable for u64 {
-    fn random() -> Self {
-        next_u64()
-    }
-}
-
-impl Randomizable for u32 {
-    fn random() -> Self {
-        next_u64() as u32
-    }
-}
-
-impl Randomizable for u16 {
-    fn random() -> Self {
-        next_u64() as u16
-    }
-}
-
-impl Randomizable for u8 {
-    fn random() -> Self {
-        next_u64() as u8
-    }
-}
-
-impl Randomizable for Felt {
-    fn random() -> Self {
-        Felt::new(next_u64())
-    }
-}
-
-impl Randomizable for QuadFelt {
-    fn random() -> Self {
-        QuadFelt::from([Felt::random(), Felt::random()])
-    }
-}
-
-impl Randomizable for Word {
-    fn random() -> Self {
-        let elements = rand_array::<Felt, WORD_SIZE>();
-        Word::new(elements)
-    }
-}
-
-fn next_u64() -> u64 {
-    static STATE: AtomicU64 = AtomicU64::new(0x4d595df4d0f33173);
-
-    let mut current = STATE.load(Ordering::Relaxed);
-    loop {
-        let next = current.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        match STATE.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
-            Ok(_) => return splitmix64(next),
-            Err(observed) => current = observed,
-        }
-    }
 }
 
 /// SplitMix64 hash function for mixing RNG state into high-quality random output.

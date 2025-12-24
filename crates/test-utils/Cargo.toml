@@ -27,6 +27,7 @@ std = [
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
 miden-core-lib.workspace = true

@@ -17,7 +17,7 @@ use miden_utils_testing::{
     crypto::{MerkleStore, Rpo256},
     expect_exec_error_matches,
     proptest::proptest,
-    rand::rand_value,
+    rand::rand_word,
 };
 use rand::{Rng, rng};
 
@@ -227,7 +227,7 @@ fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_word();
 
     let source = "
     use miden::core::crypto::dsa::falcon512rpo
@@ -274,7 +274,7 @@ fn falcon_execution() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
@@ -285,7 +285,7 @@ fn falcon_execution() {
 #[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = rand_value::<Word>();
+    let message = rand_word();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
