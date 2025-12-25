@@ -1,10 +1,10 @@
-use miden_core::{PrimeField64, WORD_SIZE, chiplets::hasher::hash_elements};
+use miden_core::WORD_SIZE;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
-    felt_slice_to_ints,
+    felt_slice_to_ints, hash_elements,
 };
 
 // TESTS
@@ -268,7 +268,7 @@ fn test_mmr_unpack() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -391,7 +391,7 @@ fn test_mmr_unpack_large_mmr() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let advice_map: &[(Word, Vec<Felt>)] = &[
@@ -520,9 +520,9 @@ fn test_mmr_pack() {
     expect_data.extend_from_slice(&[Felt::new(3), ZERO, ZERO, ZERO]); // num_leaves
     expect_data.extend_from_slice(&hash_data);
 
-    let (process, _) = build_test!(source).execute_process().unwrap();
+    let (execution_output, _) = build_test!(source).execute_for_output().unwrap();
 
-    let advice_data = process.advice.get_mapped_values(&hash_u8).unwrap();
+    let advice_data = execution_output.advice.get_mapped_values(&hash_u8).unwrap();
     assert_eq!(advice_data, &expect_data);
 }
 
@@ -658,7 +658,7 @@ fn test_mmr_large_add_roundtrip() {
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
     let num_leaves = old_accumulator.num_leaves() as u64;
-    map_data.extend_from_slice(&[Felt::from(num_leaves), ZERO, ZERO, ZERO]);
+    map_data.extend_from_slice(&[Felt::try_from(num_leaves).unwrap(), ZERO, ZERO, ZERO]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data));
 
     let advice_map: &[(Word, Vec<Felt>)] = &[

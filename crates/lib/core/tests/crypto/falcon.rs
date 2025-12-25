@@ -17,7 +17,7 @@ use miden_utils_testing::{
     crypto::{MerkleStore, Rpo256},
     expect_exec_error_matches,
     proptest::proptest,
-    rand::rand_value,
+    rand::rand_word,
 };
 use rand::{Rng, rng};
 
@@ -188,6 +188,31 @@ proptest! {
 }
 
 #[test]
+fn test_falcon512_probabilistic_product_deterministic() {
+    // Use a fixed seed to make the test deterministic
+    use miden_crypto::rand::RpoRandomCoin;
+    let seed = Word::default();
+    let mut rng = RpoRandomCoin::new(seed);
+
+    // Generate deterministic coefficients
+    let mut h_coeffs = Vec::new();
+    let mut s2_coeffs = Vec::new();
+    for _i in 0..N {
+        h_coeffs.push(Felt::new(rng.random_range(0..M)));
+        s2_coeffs.push(Felt::new(rng.random_range(0..M)));
+    }
+
+    let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
+    let s2: Polynomial<Felt> = Polynomial::new(s2_coeffs);
+    let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
+        generate_data_probabilistic_product_test(h, s2, false);
+
+    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
+    let expected_stack = &[];
+    test.expect_stack(expected_stack);
+}
+
+#[test]
 fn test_falcon512_probabilistic_product() {
     // create two random polynomials and generate the input operand stack and advice stack to
     // the probabilistic product test procedure
@@ -227,7 +252,7 @@ fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_word();
 
     let source = "
     use miden::core::crypto::dsa::falcon512rpo
@@ -274,7 +299,7 @@ fn falcon_execution() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = rand_value::<Word>();
+    let message = rand_word();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
     let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
@@ -283,9 +308,92 @@ fn falcon_execution() {
 }
 
 #[test]
+fn test_felt_conversion() {
+    // Test that Felt conversion to u64 works correctly
+    let f = Felt::new(12345);
+    let via_into: u64 = f.into();
+    let via_canonical = f.as_canonical_u64();
+
+    eprintln!("Felt::new(12345):");
+    eprintln!("  via .into(): {}", via_into);
+    eprintln!("  via .as_canonical_u64(): {}", via_canonical);
+
+    assert_eq!(via_into, via_canonical, "Felt conversion methods should match!");
+
+    // Test with small values < M
+    const M: u64 = 12289;
+    for val in [100, 1000, 5000, 10000, 12288] {
+        let f = Felt::new(val);
+        let via_into: u64 = f.into();
+        let via_canonical = f.as_canonical_u64();
+        eprintln!("Felt::new({}):", val);
+        eprintln!("  via .into(): {} (< M: {})", via_into, via_into < M);
+        eprintln!("  via .as_canonical_u64(): {} (< M: {})", via_canonical, via_canonical < M);
+        assert_eq!(via_into, via_canonical, "Felt conversion methods should match for value {}", val);
+        assert!(via_into < M, "Converted value should be < M for input {}", val);
+    }
+
+    // Test with values from a hash digest
+    let test_values = vec![Felt::new(123), Felt::new(456), Felt::new(789)];
+    let digest = Rpo256::hash_elements(&test_values);
+    for (i, &elem) in digest.as_elements().iter().enumerate() {
+        let via_into: u64 = elem.into();
+        let via_canonical = elem.as_canonical_u64();
+        eprintln!("Hash digest[{}]:", i);
+        eprintln!("  via .into(): {}", via_into);
+        eprintln!("  via .as_canonical_u64(): {}", via_canonical);
+        assert_eq!(via_into, via_canonical, "Hash element conversion should match!");
+    }
+}
+
+#[test]
+fn test_mod_12289_simple() {
+    // Simple test to debug mod_12289 with a known input
+    let source = "
+        use miden::core::crypto::dsa::falcon512rpo
+
+        begin
+            exec.falcon512rpo::mod_12289
+        end
+    ";
+
+    // Input: [a_hi, a_lo, ...] where a = a_hi * 2^32 + a_lo
+    // Test with a = 100000 (a_hi = 0, a_lo = 100000)
+    let op_stack = vec![100000u64, 0u64]; // Stack is [bottom, ..., top], so a_lo is first, a_hi is last (top)
+
+    let test = build_test!(source, &op_stack, &[]);
+
+    // Expected: 100000 % 12289 = 1688
+    test.expect_stack(&[1688]);
+}
+
+#[test]
+fn test_mod_12289_larger_value() {
+    // Test with a larger value that requires the higher 32 bits
+    let source = "
+        use miden::core::crypto::dsa::falcon512rpo
+
+        begin
+            exec.falcon512rpo::mod_12289
+        end
+    ";
+
+    // Test with a = 2^33 = 8589934592
+    // 8589934592 / 12289 = 698965 remainder 7507
+    // a_hi = 2, a_lo = 0
+    let op_stack = vec![0u64, 2u64]; // a_lo = 0, a_hi = 2
+
+    let test = build_test!(source, &op_stack, &[]);
+
+    // Expected: 8589934592 % 12289 = 7507
+    let expected = 8589934592u64 % 12289;
+    test.expect_stack(&[expected]);
+}
+
+#[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = rand_value::<Word>();
+    let message = rand_word();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
@@ -409,13 +517,22 @@ fn generate_data_probabilistic_product_test(
     let mut advice_stack = vec![challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64()];
 
     // push the polynomials to the advice stack
-    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.into()).collect();
+    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_canonical_u64()).collect();
+
+    // Debug: check first few values
+    eprintln!("Challenge values: [{}, {}]", challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64());
+    eprintln!("First 10 polynomial values on advice stack:");
+    for (i, &val) in polynomials.iter().take(10).enumerate() {
+        eprintln!("  [{}] = {} (< M={}: {})", i, val, M, val < M);
+    }
+    eprintln!("Total polynomial count: {}", polynomials.len());
+
     advice_stack.extend_from_slice(&polynomials);
 
     // compute hash of h and place it on the stack.
     let binding = Rpo256::hash_elements(&to_elements(h.clone()));
     let h_hash = binding.as_elements();
-    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| (*felt).into()).collect();
+    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| felt.as_canonical_u64()).collect();
     let operand_stack = vec![h_hash_copy[0], h_hash_copy[1], h_hash_copy[2], h_hash_copy[3]];
 
     (operand_stack, advice_stack)

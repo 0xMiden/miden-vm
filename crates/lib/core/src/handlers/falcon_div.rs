@@ -40,6 +40,9 @@ pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, 
     let dividend_hi = process.get_stack_item(1).as_canonical_u64();
     let dividend_lo = process.get_stack_item(2).as_canonical_u64();
 
+    #[cfg(test)]
+    eprintln!("FALCON_DIV: dividend_hi={}, dividend_lo={}", dividend_hi, dividend_lo);
+
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {
             value: dividend_lo,
@@ -64,6 +67,11 @@ pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, 
 
     // Assertion from the original code: r_hi should always be zero for Falcon modulus
     assert_eq!(r_hi, ZERO);
+
+    #[cfg(test)]
+    eprintln!("FALCON_DIV: quotient={} (q_hi={}, q_lo={}), remainder={} (r_hi={}, r_lo={})",
+             quotient, q_hi.as_canonical_u64(), q_lo.as_canonical_u64(),
+             remainder, r_hi.as_canonical_u64(), r_lo.as_canonical_u64());
 
     // Create mutations to extend the advice stack with the result.
     // The values are pushed in the order: r_lo, q_lo, q_hi

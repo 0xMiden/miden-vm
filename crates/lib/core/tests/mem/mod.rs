@@ -1,8 +1,8 @@
+use miden_air::RowIndex;
 use miden_core::{Word, assert_matches};
-use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, Program};
+use miden_processor::{ContextId, DefaultHost, ExecutionError, Program, fast::FastProcessor};
 use miden_utils_testing::{
-    ExecutionOptions, Felt, ONE, Process, StackInputs, ZERO, build_expected_hash,
-    build_expected_perm, felt_slice_to_ints,
+    Felt, ONE, ZERO, build_expected_hash, build_expected_perm, felt_slice_to_ints,
 };
 
 #[test]
@@ -33,63 +33,90 @@ fn test_memcopy_words() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let mut process = Process::new(
-        program.kernel().clone(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    process.execute(&program, &mut host).unwrap();
+    let processor = FastProcessor::new(&[]);
+    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+
+    let dummy_clk = RowIndex::from(0_usize);
 
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1000).unwrap(),
-        Some(Word::new([ZERO, ZERO, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(1000_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 1000"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1004).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(1004_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 1004"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1008).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(1008_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 1008"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1012).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(1012_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 1012"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1016).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(1016_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 1016"
     );
 
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2000).unwrap(),
-        Some(Word::new([ZERO, ZERO, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(2000_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 2000"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2004).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(2004_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 2004"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2008).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(2008_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 2008"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2012).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(2012_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 2012"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2016).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from(2016_u32), dummy_clk, &())
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 2016"
     );
 }
@@ -122,17 +149,15 @@ fn test_memcopy_elements() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let mut process = Process::new(
-        program.kernel().clone(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    process.execute(&program, &mut host).unwrap();
+    let processor = FastProcessor::new(&[]);
+    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    for addr in 2002..2020 {
+    for addr in 2002_u32..2020_u32 {
         assert_eq!(
-            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
+            exec_output
+                .memory
+                .read_element(ContextId::root(), Felt::from(addr), &())
+                .unwrap(),
             Felt::from(addr - 2000),
             "Address {}",
             addr

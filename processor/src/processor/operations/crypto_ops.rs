@@ -3,8 +3,8 @@ use miden_air::trace::{
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 use miden_core::{
-    BasedVectorSpace, Felt, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH, mast::MastForest,
-    stack::MIN_STACK_DEPTH, utils::range,
+    BasedVectorSpace, Felt, PrimeField64, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH,
+    mast::MastForest, stack::MIN_STACK_DEPTH, utils::range,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
@@ -163,7 +163,7 @@ pub(super) fn op_mrupdate<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     if let Some(path) = &path
-        && path.len() != depth.as_int() as usize
+        && path.len() != depth.as_canonical_u64() as usize
     {
         return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
     }

@@ -1,5 +1,5 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{BasedVectorSpace, Felt, Field, ONE, QuadFelt, ZERO};
+use miden_core::{BasedVectorSpace, Felt, Field, ONE, PrimeField64, QuadFelt, ZERO};
 
 use crate::{
     ExecutionError,
@@ -47,7 +47,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
     // the segment identifier of the position in the source domain
-    let domain_segment = processor.stack().get(9).as_int();
+    let domain_segment = processor.stack().get(9).as_canonical_u64();
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
     // the result of the previous layer folding

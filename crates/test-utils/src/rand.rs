@@ -6,9 +6,8 @@ use core::{
 
 use super::{Felt, QuadFelt, WORD_SIZE, Word};
 
-pub trait Randomizable {
-    fn random() -> Self;
-}
+// RANDOM GENERATORS
+// ================================================================================================
 
 pub fn rand_value<T: Randomizable>() -> T {
     T::random()
@@ -21,6 +20,21 @@ pub fn rand_array<T: Randomizable, const N: usize>() -> [T; N] {
 pub fn rand_vector<T: Randomizable>(len: usize) -> Vec<T> {
     (0..len).map(|_| T::random()).collect()
 }
+
+/// Generates a random QuadFelt
+#[cfg(feature = "std")]
+pub fn rand_quad_felt() -> QuadFelt {
+    QuadFelt::new_complex(rand_value(), rand_value())
+}
+
+/// Generates a random Word  
+#[cfg(feature = "std")]
+pub fn rand_word() -> Word {
+    Word::new(rand_array())
+}
+
+// SEEDED GENERATORS
+// ================================================================================================
 
 pub fn seeded_word(seed: &mut u64) -> Word {
     let elements = [
@@ -35,6 +49,13 @@ pub fn seeded_word(seed: &mut u64) -> Word {
 pub fn seeded_element(seed: &mut u64) -> Felt {
     *seed = (*seed).wrapping_add(0x9e37_79b9_7f4a_7c15);
     Felt::new(splitmix64(*seed))
+}
+
+// TRAIT AND IMPLEMENTATIONS
+// ================================================================================================
+
+pub trait Randomizable {
+    fn random() -> Self;
 }
 
 impl Randomizable for u64 {
@@ -79,6 +100,9 @@ impl Randomizable for Word {
         Word::new(elements)
     }
 }
+
+// HELPERS
+// ================================================================================================
 
 fn next_u64() -> u64 {
     static STATE: AtomicU64 = AtomicU64::new(0x4d595df4d0f33173);
