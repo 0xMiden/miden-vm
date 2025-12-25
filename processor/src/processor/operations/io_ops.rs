@@ -12,6 +12,10 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Pops an element from the advice stack and pushes it onto the operand stack.
+///
+/// # Errors
+/// Returns an error if the advice stack is empty.
 #[inline(always)]
 pub(super) fn op_advpop<P: Processor>(
     processor: &mut P,
@@ -30,6 +34,11 @@ pub(super) fn op_advpop<P: Processor>(
     Ok(())
 }
 
+/// Pops a word (4 elements) from the advice stack and overwrites the top word on the operand
+/// stack with it.
+///
+/// # Errors
+/// Returns an error if the advice stack contains fewer than four elements.
 #[inline(always)]
 pub(super) fn op_advpopw<P: Processor>(
     processor: &mut P,
@@ -47,6 +56,19 @@ pub(super) fn op_advpopw<P: Processor>(
     Ok(())
 }
 
+/// Loads a word (4 elements) starting at the specified memory address onto the stack.
+///
+/// The operation works as follows:
+/// - The memory address is popped off the stack.
+/// - A word is retrieved from memory starting at the specified address, which must be aligned to a
+///   word boundary. The memory is always initialized to ZEROs, and thus, for any of the four
+///   addresses which were not previously been written to, four ZERO elements are returned.
+/// - The top four elements of the stack are overwritten with values retrieved from memory.
+///
+/// Thus, the net result of the operation is that the stack is shifted left by one item.
+///
+/// # Errors
+/// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
 pub(super) fn op_mloadw<P: Processor>(
     processor: &mut P,
@@ -70,6 +92,17 @@ pub(super) fn op_mloadw<P: Processor>(
     Ok(())
 }
 
+/// Stores a word (4 elements) from the stack into the specified memory address.
+///
+/// The operation works as follows:
+/// - The memory address is popped off the stack.
+/// - The top four stack items are saved starting at the specified memory address, which must be
+///   aligned on a word boundary. The items are not removed from the stack.
+///
+/// Thus, the net result of the operation is that the stack is shifted left by one item.
+///
+/// # Errors
+/// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
 pub(super) fn op_mstorew<P: Processor>(
     processor: &mut P,
@@ -92,6 +125,14 @@ pub(super) fn op_mstorew<P: Processor>(
     Ok(())
 }
 
+/// Loads the element from the specified memory address onto the stack.
+///
+/// The operation works as follows:
+/// - The memory address is popped off the stack.
+/// - The element is retrieved from memory at the specified address. The memory is always
+///   initialized to ZEROs, and thus, if the specified address has never been written to, the ZERO
+///   element is returned.
+/// - The element retrieved from memory is pushed to the top of the stack.
 #[inline(always)]
 pub(super) fn op_mload<P: Processor>(
     processor: &mut P,
@@ -117,6 +158,14 @@ pub(super) fn op_mload<P: Processor>(
     Ok(())
 }
 
+/// Stores an element from the stack into the first slot at the specified memory address.
+///
+/// The operation works as follows:
+/// - The memory address is popped off the stack.
+/// - The top stack element is saved at the specified memory address. The element is not removed
+///   from the stack.
+///
+/// Thus, the net result of the operation is that the stack is shifted left by one item.
 #[inline(always)]
 pub(super) fn op_mstore<P: Processor>(
     processor: &mut P,
@@ -143,6 +192,19 @@ pub(super) fn op_mstore<P: Processor>(
     Ok(())
 }
 
+/// Loads two words from memory and replaces the top 8 elements of the stack with their
+/// contents.
+///
+/// The operation works as follows:
+/// - The memory address of the first word is retrieved from 13th stack element (position 12).
+/// - Two consecutive words, starting at this address, are loaded from memory.
+/// - Elements of these words are written to the top 8 elements of the stack (element-wise, in stack
+///   order).
+/// - Memory address (in position 12) is incremented by 8.
+/// - All other stack elements remain the same.
+///
+/// # Errors
+/// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
 pub(super) fn op_mstream<P: Processor>(
     processor: &mut P,
@@ -196,6 +258,19 @@ pub(super) fn op_mstream<P: Processor>(
     Ok(())
 }
 
+/// Moves 8 elements from the advice stack to the memory, via the operand stack.
+///
+/// The operation works as follows:
+/// - Two words are popped from the top of the advice stack.
+/// - The destination memory address for the first word is retrieved from the 13th stack element
+///   (position 12).
+/// - The two words are written to memory consecutively, starting at this address.
+/// - These words replace the top 8 elements of the stack (element-wise, in stack order).
+/// - Memory address (in position 12) is incremented by 8.
+/// - All other stack elements remain the same.
+///
+/// # Errors
+/// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
 pub(super) fn op_pipe<P: Processor>(
     processor: &mut P,

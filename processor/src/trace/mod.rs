@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
-use core::mem;
+#[cfg(any(test, feature = "testing"))]
+use core::ops::Range;
 
 use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
-    PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
+    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, PADDED_TRACE_WIDTH,
+    STACK_TRACE_OFFSET,
     decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     main_trace::MainTrace,
 };
@@ -15,7 +16,7 @@ use miden_core::{
 use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
 
 use super::{
-    AdviceProvider, ColMatrix, Felt, FieldElement, Process,
+    AdviceProvider, ColMatrix, Felt, FieldElement,
     chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
@@ -28,8 +29,6 @@ pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummar
 
 #[cfg(test)]
 mod tests;
-#[cfg(test)]
-use super::EMPTY_WORD;
 
 // CONSTANTS
 // ================================================================================================
@@ -77,41 +76,6 @@ impl ExecutionTrace {
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Builds an execution trace for the provided process.
-    pub fn new(mut process: Process, stack_outputs: StackOutputs) -> Self {
-        // use program hash to initialize random element generator; this generator will be used
-        // to inject random values at the end of the trace; using program hash here is OK because
-        // we are using random values only to stabilize constraint degrees, and not to achieve
-        // perfect zero knowledge.
-        let program_hash = process.decoder.program_hash().into();
-        let rng = RpoRandomCoin::new(program_hash);
-
-        // create a new program info instance with the underlying kernel
-        let kernel = process.kernel().clone();
-        let program_info = ProgramInfo::new(program_hash, kernel);
-        let advice = mem::take(&mut process.advice);
-        let (main_trace, aux_trace_builders, trace_len_summary, final_pc_transcript) =
-            finalize_trace(process, rng);
-        let trace_info = TraceInfo::new_multi_segment(
-            PADDED_TRACE_WIDTH,
-            AUX_TRACE_WIDTH,
-            AUX_TRACE_RAND_ELEMENTS,
-            main_trace.num_rows(),
-            vec![],
-        );
-
-        Self {
-            meta: Vec::new(),
-            trace_info,
-            aux_trace_builders,
-            main_trace,
-            program_info,
-            stack_outputs,
-            advice,
-            trace_len_summary,
-            final_pc_transcript,
-        }
-    }
 
     pub fn new_from_parts(
         program_hash: Word,
@@ -245,6 +209,8 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
+        use miden_air::trace::TRACE_WIDTH;
+
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
@@ -255,12 +221,9 @@ impl ExecutionTrace {
         }
     }
 
-    #[cfg(test)]
-    pub fn test_finalize_trace(process: Process) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-        let rng = RpoRandomCoin::new(EMPTY_WORD);
-        let (main_trace, aux_trace_builders, trace_len_summary, _final_pc_transcript) =
-            finalize_trace(process, rng);
-        (main_trace, aux_trace_builders, trace_len_summary)
+    #[cfg(any(test, feature = "testing"))]
+    pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
+        self.main_trace.get_column_range(range)
     }
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
@@ -330,90 +293,4 @@ impl Trace for ExecutionTrace {
     fn info(&self) -> &TraceInfo {
         &self.trace_info
     }
-}
-
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Converts a process into a set of execution trace columns for each component of the trace.
-///
-/// The process includes:
-/// - Determining the length of the trace required to accommodate the longest trace column.
-/// - Padding the columns to make sure all columns are of the same length.
-/// - Inserting random values in the last row of all columns. This helps ensure that there are no
-///   repeating patterns in each column and each column contains a least two distinct values. This,
-///   in turn, ensures that polynomial degrees of all columns are stable.
-fn finalize_trace(
-    process: Process,
-    mut rng: RpoRandomCoin,
-) -> (MainTrace, AuxTraceBuilders, TraceLenSummary, PrecompileTranscript) {
-    let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
-    let final_pc_transcript = PrecompileTranscript::from_state(final_capacity);
-
-    let clk = system.clk();
-
-    // Trace lengths of system and stack components must be equal to the number of executed cycles
-    assert_eq!(clk.as_usize(), system.trace_len(), "inconsistent system trace lengths");
-    assert_eq!(clk.as_usize(), decoder.trace_len(), "inconsistent decoder trace length");
-    assert_eq!(clk.as_usize(), stack.trace_len(), "inconsistent stack trace lengths");
-
-    // Add the range checks required by the chiplets to the range checker.
-    chiplets.append_range_checks(&mut range);
-
-    // Generate number of rows for the range trace.
-    let range_table_len = range.get_number_range_checker_rows();
-
-    // Get the trace length required to hold all execution trace steps.
-    let max_len = range_table_len.max(clk.into()).max(chiplets.trace_len());
-
-    // Pad the trace length to the next power of two and ensure that there is space for the
-    // Rows to hold random values
-    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
-    assert!(
-        trace_len >= MIN_TRACE_LEN,
-        "trace length must be at least {MIN_TRACE_LEN}, but was {trace_len}",
-    );
-
-    // Get the lengths of the traces: main, range, and chiplets
-    let trace_len_summary =
-        TraceLenSummary::new(clk.into(), range_table_len, ChipletsLengths::new(&chiplets));
-
-    // Combine all trace segments into the main trace
-    let system_trace = system.into_trace(trace_len, NUM_RAND_ROWS);
-    let decoder_trace = decoder.into_trace(trace_len, NUM_RAND_ROWS);
-    let stack_trace = stack.into_trace(trace_len, NUM_RAND_ROWS);
-    let chiplets_trace = chiplets.into_trace(trace_len, NUM_RAND_ROWS, final_capacity);
-
-    // Combine the range trace segment using the support lookup table
-    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len, NUM_RAND_ROWS);
-
-    // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
-    let padding = vec![vec![ZERO; trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
-
-    let mut trace = system_trace
-        .into_iter()
-        .chain(decoder_trace.trace)
-        .chain(stack_trace.trace)
-        .chain(range_check_trace.trace)
-        .chain(chiplets_trace.trace)
-        .chain(padding)
-        .collect::<Vec<_>>();
-
-    // Inject random values into the last rows of the trace
-    for i in trace_len - NUM_RAND_ROWS..trace_len {
-        for column in trace.iter_mut().take(TRACE_WIDTH) {
-            column[i] = rng.draw().expect("failed to draw a random value");
-        }
-    }
-
-    let aux_trace_hints = AuxTraceBuilders {
-        decoder: decoder_trace.aux_builder,
-        stack: StackAuxTraceBuilder,
-        range: range_check_trace.aux_builder,
-        chiplets: chiplets_trace.aux_builder,
-    };
-
-    let main_trace = MainTrace::new(ColMatrix::new(trace), clk);
-
-    (main_trace, aux_trace_hints, trace_len_summary, final_pc_transcript)
 }

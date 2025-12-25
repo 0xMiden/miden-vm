@@ -14,6 +14,8 @@
 - Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 - Removed undocumented `err_code` field from `ExecutionError::NotU32Values` ([#2419](https://github.com/0xMiden/miden-vm/pull/2419)).
 - Moved `bytes_to_packed_u32_elements` to `miden-core::utils` and added `packed_u32_elements_to_bytes` inverse function ([#2458](https://github.com/0xMiden/miden-vm/pull/2458)).
+- [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
+- [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 
 ## 0.20.1 (2025-12-14)
 

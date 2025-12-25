@@ -603,12 +603,12 @@ impl Tracer for ExecutionTracer {
     }
 
     fn increment_clk(&mut self) {
-        self.overflow_table.advance_clock();
+        // do nothing
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
         let new_overflow_value = processor.stack_get(15);
-        self.overflow_table.push(new_overflow_value);
+        self.overflow_table.push(new_overflow_value, processor.clk);
     }
 
     fn decrement_stack_size(&mut self) {

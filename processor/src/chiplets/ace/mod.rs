@@ -4,14 +4,9 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::ace::ACE_CHIPLET_NUM_COLS, main_trace::MainTrace},
 };
-use miden_core::{Felt, FieldElement, QuadFelt, ZERO};
+use miden_core::{Felt, FieldElement, ZERO};
 
-use crate::{
-    ContextId, ExecutionError,
-    chiplets::memory::Memory,
-    errors::{AceError, ErrorContext},
-    trace::TraceFragment,
-};
+use crate::trace::TraceFragment;
 
 mod trace;
 pub use trace::{CircuitEvaluation, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
@@ -273,83 +268,4 @@ impl AceHints {
             })
             .sum()
     }
-}
-
-/// Evaluates an arithmetic circuit at `(ctx, clk)` given a pointer `ptr` to its description,
-/// the number of variables/inputs to the circuit and the number of evaluation gates.
-///
-/// The description of the circuit is divided into two portions:
-///
-/// 1. `READ` made up of the inputs to the circuit followed by the constants of the circuit, both of
-///    which are quadratic extension field elements,
-/// 2. `EVAL` made up of the base field elements encoding each evaluation gate of the circuit. Each
-///    gate is encoded as `[ id_l (30 bits) || id_r (30 bits) || op (2 bits) ]`, where `id_l` is the
-///    identifier of the left input wire, `id_r` is the identifier of the right input wire and `op`
-///    is the operation executed by the gate, namely `op ∈ {0, 1, 2}` where `0` denotes a `SUB`, `1`
-///    a `MUL` and `2` an `ADD`.
-pub fn eval_circuit(
-    ctx: ContextId,
-    ptr: Felt,
-    clk: RowIndex,
-    num_vars: Felt,
-    num_eval: Felt,
-    mem: &mut Memory,
-    err_ctx: &impl ErrorContext,
-) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
-
-    let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
-    }
-
-    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
-    // quadratic extension field elements while instructions are encoded as base field elements.
-    // Hence we can pack 2 variables and 4 instructions per word.
-    if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
-    }
-    if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
-    }
-
-    // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
-    let num_eval_rows = num_eval as u32;
-
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
-
-    let mut ptr = ptr;
-    // perform READ operations
-    for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
-        evaluation_context.do_read(ptr, word)?;
-        ptr += PTR_OFFSET_WORD;
-    }
-    // perform EVAL operations
-    for _ in 0..num_eval_rows {
-        let instruction = mem.read(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
-        ptr += PTR_OFFSET_ELEM;
-    }
-
-    // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
-    }
-
-    Ok(evaluation_context)
 }

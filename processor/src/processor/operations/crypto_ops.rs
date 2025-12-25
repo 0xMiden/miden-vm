@@ -24,8 +24,12 @@ mod tests;
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
-/// Performs a hash permutation operation.
-/// Applies Rescue Prime Optimized permutation to the top 12 elements of the stack.
+/// Performs a Rescue Prime Optimized permutation to the top 12 elements of the operand stack,
+/// where the top two words are the rate (words C and B), the deepest word is the capacity
+/// (word A), and the digest output is the middle word E.
+///
+/// Stack transition:
+/// [C, B, A, ...] -> [F, E, D, ...]
 #[inline(always)]
 pub(super) fn op_hperm<P: Processor>(
     processor: &mut P,
@@ -48,7 +52,25 @@ pub(super) fn op_hperm<P: Processor>(
     P::HelperRegisters::op_hperm_registers(addr)
 }
 
-/// Verifies a Merkle path.
+/// Verifies that a Merkle path from the specified node resolves to the specified root. The
+/// stack is expected to be arranged as follows (from the top):
+/// - value of the node, 4 elements.
+/// - depth of the node, 1 element; this is expected to be the depth of the Merkle tree
+/// - index of the node, 1 element.
+/// - root of the tree, 4 elements.
+///
+/// To perform the operation we do the following:
+/// 1. Look up the Merkle path in the advice provider for the specified tree root.
+/// 2. Use the hasher to compute the root of the Merkle path for the specified node.
+/// 3. Verify that the computed root is equal to the root provided via the stack.
+/// 4. Copy the stack state over to the next clock cycle with no changes.
+///
+/// # Errors
+/// Returns an error if:
+/// - Merkle tree for the specified root cannot be found in the advice provider.
+/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
+///   the specified root.
+/// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
 pub(super) fn op_mpverify<P: Processor>(
     processor: &mut P,
@@ -86,6 +108,36 @@ pub(super) fn op_mpverify<P: Processor>(
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
 }
 
+/// Computes a new root of a Merkle tree where a node at the specified index is updated to
+/// the specified value. The stack is expected to be arranged as follows (from the top):
+/// - old value of the node, 4 elements.
+/// - depth of the node, 1 element; this is expected to be the depth of the Merkle tree.
+/// - index of the node, 1 element.
+/// - current root of the tree, 4 elements.
+/// - new value of the node, 4 elements.
+///
+/// To perform the operation we do the following:
+/// 1. Update the node at the specified index in the Merkle tree with the specified root, and get
+///    the Merkle path to it.
+/// 2. Use the hasher to update the root of the Merkle path for the specified node. For this we need
+///    to provide the old and the new node value.
+/// 3. Verify that the computed old root is equal to the input root provided via the stack.
+/// 4. Replace the old node value with the computed new root.
+///
+/// The Merkle path for the node is expected to be provided by the prover non-deterministically
+/// (via the advice provider). At the end of the operation, the old node value is replaced with
+/// the new roots value computed based on the provided path. Everything else on the stack
+/// remains the same.
+///
+/// The original Merkle tree is cloned before the update is performed, and thus, after the
+/// operation, the advice provider will keep track of both the old and the new trees.
+///
+/// # Errors
+/// Returns an error if:
+/// - Merkle tree for the specified root cannot be found in the advice provider.
+/// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
+///   the specified root.
+/// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
 pub(super) fn op_mrupdate<P: Processor>(
     processor: &mut P,
@@ -151,7 +203,51 @@ pub(super) fn op_mrupdate<P: Processor>(
 // HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
 // ================================================================================================
 
-/// Evaluates a polynomial using Horner's method (base field).
+/// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
+/// the base field using a 3-level computation to reduce constraint degree.
+///
+/// The computation is broken into 3 levels:
+/// - Level 1: tmp0 = (acc * α + c₀) * α + c₁
+/// - Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
+/// - Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+///
+/// In other words, the instruction computes the evaluation at alpha of the polynomial:
+///
+/// P(X) := c₀ * X^7 + c₁ * X^6 + c₂ * X^5 + c₃ * X^4 + c₄ * X^3 + c₅ * X^2 + c₆ * X + c₇
+///
+/// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
+/// by repeated invocations interleaved with any operation that loads the next batch of 8
+/// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
+///
+/// The stack transition of the instruction can be visualized as follows:
+///
+/// Input:
+///
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+/// |  c7  |  c6  |  c5  |  c4  |  c3  |  c2  |  c1  |  c0  | - | - | - | - | - |alpha_addr| acc1 | acc0 |
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+///
+///
+/// Output:
+///
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+/// |  c7  |  c6  |  c5  |  c4  |  c3  |  c2  |  c1  |  c0  | - | - | - | - | - |alpha_addr| acc1' | acc0' |
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+///
+///
+/// Here:
+///
+/// 1. ci for i in 0..=7 stands for the the value of the i-th coefficient in the current batch of 8
+///    coefficients of the polynomial.
+/// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
+///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
+/// 3. alpha_addr is the memory address pointing to the evaluation point α. The operation reads α₀
+///    from alpha_addr and α₁ from alpha_addr + 1.
+///
+/// The instruction uses helper registers to store intermediate values:
+/// - h₀, h₁: evaluation point α = (α₀, α₁)
+/// - h₂, h₃: Level 2 intermediate result tmp1
+/// - h₄, h₅: Level 1 intermediate result tmp0
 ///
 /// In this implementation, we replay the recorded operations and compute the result.
 #[inline(always)]
@@ -223,7 +319,53 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     Ok(P::HelperRegisters::op_horner_eval_base_registers(alpha, tmp0, tmp1))
 }
 
-/// Evaluates a polynomial using Horner's method (extension field).
+/// Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over
+/// the quadratic extension field, i.e., it computes
+///
+/// acc' = (acc_tmp * alpha + c2) * alpha + c3
+///
+/// where
+///
+/// acc_tmp = (acc * alpha + c0) * alpha + c1
+///
+///
+/// In other words, the instruction computes the evaluation at alpha of the polynomial
+///
+/// P(X) := c0 * X^3 + c1 * X^2 + c2 * X + c3
+///
+/// As can be seen from the two equations defining acc', the instruction can be used in order
+/// to compute the evaluation of polynomials of arbitrary degree by repeated invocations of
+/// the same instruction interleaved with any operation that loads the next batch of 4
+/// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
+///
+/// The stack transition of the instruction can be visualized as follows:
+///
+/// Input:
+///
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+/// | c3_1 | c3_0 | c2_1 | c2_0 | c1_1 | c1_0 | c0_1 | c0_0 | - | - | - | - | - |alpha_addr| acc1 | acc0 |
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
+///
+///
+/// Output:
+///
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+/// | c3_1 | c3_0 | c2_1 | c2_0 | c1_1 | c1_0 | c0_1 | c0_0 | - | - | - | - | - |alpha_addr| acc1' | acc0' |
+/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
+///
+///
+/// Here:
+///
+/// 1. ci for i in 0..=3 stands for the value of the i-th coefficient in the current batch of 4
+///    extension field coefficients of the polynomial.
+/// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
+///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
+/// 3. alpha_addr is the memory address of the evaluation point i.e., alpha.
+///
+/// The instruction also makes use of the helper registers to hold the value of
+/// alpha = (alpha0, alpha1) during the course of its execution.
+/// The helper registers are also used in order to hold the second half of the memory word
+/// containing (alpha0, alpha1), as well as the temporary values acc_tmp.
 ///
 /// In this implementation, we replay the recorded operations and compute the result.
 #[inline(always)]
@@ -300,6 +442,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 /// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
 /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
 ///   registers.
+/// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
+///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor>(
     processor: &mut P,
@@ -352,10 +496,19 @@ pub(super) fn op_log_precompile<P: Processor>(
 // STREAM CIPHER OPERATION
 // ================================================================================================
 
-/// Encrypts data from source memory to destination memory using RPO.
+/// Encrypts data from source memory to destination memory using RPO sponge keystream.
+///
+/// This operation performs AEAD encryption by:
+/// 1. Loading 8 elements (2 words) from source memory at stack[12]
+/// 2. Adding each element to the corresponding rate element (stack[0..7])
+/// 3. Writing the resulting ciphertext to destination memory at stack[13]
+/// 4. Updating stack[0..7] with the ciphertext (becomes new rate for next hperm)
+/// 5. Preserving capacity (stack[8..11])
+/// 6. Incrementing both source and destination pointers by 8
 ///
 /// Stack transition:
-/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8, ...]
+/// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
+/// ...]
 #[inline(always)]
 pub(super) fn op_crypto_stream<P: Processor>(
     processor: &mut P,

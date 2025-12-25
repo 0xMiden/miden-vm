@@ -15,10 +15,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 
-use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, Kernel, Operation, Process,
-    StackInputs,
-};
+use crate::{DefaultHost, ExecutionTrace, Kernel, Operation, fast::FastProcessor};
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 
@@ -119,10 +116,10 @@ fn build_trace(
     operations: Vec<Operation>,
     kernel: Kernel,
 ) -> (ChipletsTrace, usize) {
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
+    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new(*v)).collect();
+    let processor = FastProcessor::new(&stack_inputs);
+
     let mut host = DefaultHost::default();
-    let mut process =
-        Process::new(kernel, stack_inputs, AdviceInputs::default(), ExecutionOptions::default());
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -133,10 +130,17 @@ fn build_trace(
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    process.execute(&program, &mut host).unwrap();
 
-    let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host, 1 << 10).unwrap();
+    let trace = crate::parallel::build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        kernel,
+    );
+
+    let trace_len = trace.get_trace_len() - ExecutionTrace::NUM_RAND_ROWS;
 
     (
         trace

@@ -89,8 +89,6 @@ impl OverflowStack {
 #[derive(Debug, Clone)]
 pub struct OverflowTable {
     overflow: IndexVec<RowIndex, OverflowStack>,
-    clk: RowIndex,
-    history: Option<OverflowTableHistory>,
 }
 
 impl OverflowTable {
@@ -98,15 +96,11 @@ impl OverflowTable {
     ///
     /// If `save_history` is set to true, the table will keep track of the history of the overflow
     /// table at every clock cycle. This is used for debugging purposes.
-    pub fn new(save_history: bool) -> Self {
+    pub fn new() -> Self {
         let mut overflow = IndexVec::new();
         let _ = overflow.push(OverflowStack::new());
 
-        Self {
-            overflow,
-            clk: RowIndex::from(0),
-            history: save_history.then(OverflowTableHistory::new),
-        }
+        Self { overflow }
     }
 
     // PUBLIC ACCESSORS
@@ -117,18 +111,6 @@ impl OverflowTable {
     pub fn append_into(&self, target: &mut Vec<Felt>) {
         let current_overflow_stack = self.get_current_overflow_stack();
         target.extend(current_overflow_stack.iter().rev().map(OverflowStackEntry::value));
-    }
-
-    /// Appends the values from the overflow table at the given clock cycle to the end of the
-    /// provided vector.
-    ///
-    /// # Panics
-    /// - if the overflow history is not enabled.
-    pub fn append_from_history_at(&self, clk: RowIndex, target: &mut Vec<Felt>) {
-        let history = self.history.as_ref().expect("overflow history not enabled");
-
-        let overflow_at_clk = history.get_at(clk);
-        target.extend(overflow_at_clk);
     }
 
     /// Returns the clock cycle at which the latest overflow table entry was added in the current
@@ -176,29 +158,17 @@ impl OverflowTable {
     // --------------------------------------------------------------------------------------------
 
     /// Pushes a value into the overflow table in the current context.
-    pub fn push(&mut self, value: Felt) {
-        // 1. push value
-        let clk = self.clk;
+    pub fn push(&mut self, value: Felt, clk: RowIndex) {
         self.get_current_overflow_stack_mut().push(OverflowStackEntry::new(value, clk));
-
-        // 2. save history
-        self.save_stack_to_history();
     }
 
     /// Removes the last value from the overflow table in the current context, if any, and returns
     /// it.
     pub fn pop(&mut self) -> Option<Felt> {
-        // 1. pop value
-        let value_popped = self
-            .get_current_overflow_stack_mut()
+        self.get_current_overflow_stack_mut()
             .pop()
             .as_ref()
-            .map(OverflowStackEntry::value);
-
-        // 2. save history
-        self.save_stack_to_history();
-
-        value_popped
+            .map(OverflowStackEntry::value)
     }
 
     /// Starts the specified context.
@@ -208,11 +178,7 @@ impl OverflowTable {
     /// Note: It is possible to return to context 0 with a syscall; in this case, each instantiation
     /// of context 0 will get a separate overflow table.
     pub fn start_context(&mut self) {
-        // 1. Initialize the overflow stack for the new context.
         let _ = self.overflow.push(OverflowStack::new());
-
-        // 2. save history
-        self.save_stack_to_history();
     }
 
     /// Restores the specified context.
@@ -228,14 +194,6 @@ impl OverflowTable {
             overflow_stack_for_ctx.is_empty(),
             "the overflow stack for the current context should be empty when restoring a context"
         );
-
-        // 2. save history
-        self.save_stack_to_history();
-    }
-
-    /// Increments the clock cycle.
-    pub fn advance_clock(&mut self) {
-        self.clk += 1_u32;
     }
 
     // HELPERS
@@ -258,95 +216,10 @@ impl OverflowTable {
         let len = self.overflow.len();
         &mut self.overflow[RowIndex::from(len - 1)]
     }
-
-    /// Saves the overflow stack in the current context to the history.
-    ///
-    /// It is important that this function is called after the overflow stack is updated, so that
-    /// the history is saved after the update. This is done in the `push`, `pop`, `start_context`,
-    /// and `restore_context` functions.
-    fn save_stack_to_history(&mut self) {
-        let clk = self.clk;
-        let stack_after_op: Vec<Felt> = self
-            .get_current_overflow_stack()
-            .iter()
-            .map(OverflowStackEntry::value)
-            .collect();
-
-        if let Some(history) = &mut self.history {
-            history.save_stack_to_history(clk, stack_after_op);
-        }
-    }
 }
 
 impl Default for OverflowTable {
     fn default() -> Self {
-        Self::new(false)
-    }
-}
-
-/// Stores the history of the overflow table at every clock cycle, where only the relevant context
-/// is stored in the history for each clock cycle.
-///
-/// The events which update the overflow table history are:
-/// - `push` operation,
-/// - `pop` operation,
-/// - a new context is started,
-/// - a former context is restored.
-#[derive(Debug, Clone)]
-struct OverflowTableHistory {
-    /// Stores the full state of the overflow table for every clock cycle at which there was a
-    /// change.
-    history: Vec<(RowIndex, Vec<Felt>)>,
-}
-
-impl OverflowTableHistory {
-    /// Creates a new empty overflow table history.
-    pub fn new() -> Self {
-        // The initial overflow table at the start of the program is empty, and the clock cycle is
-        // 0.
-        let init_overflow = (RowIndex::from(0), vec![]);
-
-        Self { history: vec![init_overflow] }
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the overflow table at the given clock cycle in the active context at that clock
-    /// cycle.
-    ///
-    /// The first element returned by the iterator is the top of the overflow table.
-    pub fn get_at(&self, target_clk: RowIndex) -> impl Iterator<Item = &Felt> {
-        match self.history.binary_search_by_key(&target_clk, |entry| entry.0) {
-            Ok(idx) => self.history[idx].1.iter().rev(),
-            Err(insertion_idx) => {
-                if insertion_idx > 0 {
-                    self.history[insertion_idx - 1].1.iter().rev()
-                } else {
-                    [].iter().rev()
-                }
-            },
-        }
-    }
-
-    // PUBLIC MUTATORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Saves the current state of the overflow table at the given clock cycle to the history.
-    ///
-    /// That is, `stack` is the state of the overflow table at the given clock cycle *after* the
-    /// update.
-    pub fn save_stack_to_history(&mut self, clk: RowIndex, stack: Vec<Felt>) {
-        // The unwrap is OK because we always have at least one entry in the history. When `clk` is
-        // the same as the last clock cycle in the history,this indicates that the overflow stack
-        // was updated twice in the same clock cycle, which only occurs with the `DYNCALL`
-        // operation. In this case, we just ignore the 2nd update.
-        if let Some(last_entry) = self.history.last()
-            && last_entry.0 == clk
-        {
-            return;
-        }
-
-        self.history.push((clk, stack));
+        Self::new()
     }
 }

@@ -20,8 +20,7 @@ use miden_utils_testing::rand::rand_value;
 use winter_prover::Trace;
 
 use crate::{
-    DefaultHost, ExecutionTrace, NoopEventHandler, decoder::build_op_group, fast::FastProcessor,
-    parallel::build_trace,
+    DefaultHost, ExecutionTrace, NoopEventHandler, fast::FastProcessor, parallel::build_trace,
 };
 
 // CONSTANTS
@@ -1828,4 +1827,22 @@ fn build_expected_hasher_state(values: &[Felt]) -> [Felt; NUM_HASHER_COLUMNS] {
         result[i] = *value;
     }
     result
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+/// Build an operation group from the specified list of operations.
+#[cfg(test)]
+pub fn build_op_group(ops: &[Operation]) -> Felt {
+    use miden_core::mast::OP_GROUP_SIZE;
+
+    let mut group = 0u64;
+    let mut i = 0;
+    for op in ops.iter() {
+        group |= (op.op_code() as u64) << (Operation::OP_BITS * i);
+        i += 1;
+    }
+    assert!(i <= OP_GROUP_SIZE, "too many ops");
+    Felt::new(group)
 }

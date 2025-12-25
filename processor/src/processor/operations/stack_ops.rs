@@ -67,7 +67,11 @@ pub(super) fn dup_nth<P: Processor>(
     Ok(())
 }
 
-/// Analogous to `Process::op_cswap`.
+/// Pops an element off the stack, and if the element is 1, swaps the top two elements on the
+/// stack. If the popped element is 0, the stack remains unchanged.
+///
+/// # Errors
+/// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
 pub(super) fn op_cswap<P: Processor>(
     processor: &mut P,
@@ -92,7 +96,11 @@ pub(super) fn op_cswap<P: Processor>(
     Ok(())
 }
 
-/// Analogous to `Process::op_cswapw`.
+/// Pops an element off the stack, and if the element is 1, swaps elements 0, 1, 2, and 3 with
+/// elements 4, 5, 6, and 7. If the popped element is 0, the stack remains unchanged.
+///
+/// # Errors
+/// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
 pub(super) fn op_cswapw<P: Processor>(
     processor: &mut P,

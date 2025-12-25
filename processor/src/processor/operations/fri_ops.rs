@@ -10,6 +10,34 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+/// Performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2
+/// extension of the base field. Additionally, performs several computations which simplify
+/// FRI verification procedure.
+///
+/// Specifically:
+/// - Folds 4 query values (v0, v1), (v2, v3), (v4, v5), (v6, v7) into a single value (ne0, ne1).
+/// - Computes new value of the domain generator power: poe' = poe^4.
+/// - Increments layer pointer (cptr) by 8.
+/// - Checks that the previous folding was done correctly.
+/// - Shifts the stack to the left to move an item from the overflow table to stack position 15.
+///
+/// Stack transition for this operation looks as follows:
+///
+/// Input:
+/// [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
+///
+/// Output:
+/// [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0, eptr,
+/// ...]
+///
+/// In the above, eptr is moved from the stack overflow table and is expected to be the address
+/// of the final FRI layer.
+///
+/// To keep the degree of the constraints low, a number of intermediate values are used.
+/// Specifically, the operation relies on all 6 helper registers, and also uses the first 10
+/// elements of the stack at the next state for degree reduction purposes. Thus, once the
+/// operation has been executed, the top 10 elements of the stack can be considered to be
+/// "garbage".
 #[inline(always)]
 pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor: &mut P,

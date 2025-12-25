@@ -44,6 +44,9 @@ mod split;
 #[cfg(test)]
 mod tests;
 
+/// The default size of core trace fragments when generating execution traces.
+pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
+
 /// The size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some

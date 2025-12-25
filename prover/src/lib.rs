@@ -17,7 +17,7 @@ use miden_processor::{
         Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
         Rpx256, RpxRandomCoin, WinterRandomCoin,
     },
-    fast::FastProcessor,
+    fast::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, FastProcessor},
     math::{Felt, FieldElement},
     parallel::build_trace,
 };
@@ -47,9 +47,6 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 
 // PROVER
 // ================================================================================================
-
-/// Default fragment size for trace generation.
-const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
 
 /// Executes and proves the specified `program` and returns the result together with a STARK-based
 /// proof of the program's execution.
@@ -85,7 +82,7 @@ pub fn prove(
     };
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host, DEFAULT_FRAGMENT_SIZE)?;
+        processor.execute_for_trace_sync(program, host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)?;
 
     let mut trace = build_trace(
         execution_output,

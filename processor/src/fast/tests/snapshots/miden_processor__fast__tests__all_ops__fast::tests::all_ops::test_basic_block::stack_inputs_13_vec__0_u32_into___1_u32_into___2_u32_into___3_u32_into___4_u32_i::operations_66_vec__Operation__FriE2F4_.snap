@@ -1,0 +1,16 @@
+---
+source: processor/src/fast/tests/all_ops.rs
+expression: fast_stack_outputs
+---
+Err(
+    InvalidFriLayerFolding(
+        QuadExtension(
+            0,
+            0,
+        ),
+        QuadExtension(
+            8,
+            9,
+        ),
+    ),
+)

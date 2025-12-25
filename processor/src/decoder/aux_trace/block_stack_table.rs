@@ -1,10 +1,10 @@
 use miden_air::RowIndex;
 use miden_core::{
-    OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP, OPCODE_RESPAN,
-    OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL,
+    ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP,
+    OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, ZERO,
 };
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace, ONE, ZERO};
+use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace};
 use crate::debug::BusDebugger;
 
 // BLOCK STACK TABLE COLUMN BUILDER

@@ -45,13 +45,11 @@ To execute a program on Miden VM, you can use either `execute()` or `execute_ite
 
 The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
 
-The `execute_iter()` function takes similar arguments (but without the `options`) and returns a `VmStateIterator` . This iterator can be used to iterate over the cycles of the executed program for debug purposes. In fact, when we execute a program using this function, a lot of the debug information is retained and we can get a precise picture of the VM's state at any cycle. Moreover, if the execution results in an error, the `VmStateIterator` can still be used to inspect VM states right up to the cycle at which the error occurred.
-
 For example:
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, DefaultHost, Program, StackInputs};
 use miden_processor::ExecutionOptions;
 
 // instantiate the assembler
@@ -74,19 +72,6 @@ let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
 let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
-
-// now, execute the same program in debug mode and iterate over VM states
-for vm_state in execute_iter(
-    &program,
-    stack_inputs,
-    advice_inputs,
-    &mut host,
-) {
-    match vm_state {
-        Ok(vm_state) => println!("{:?}", vm_state),
-        Err(_) => println!("something went terribly wrong!"),
-    }
-}
 ```
 
 ### Proving program execution
