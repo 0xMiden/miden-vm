@@ -19,7 +19,6 @@ use crate::fast::{FastProcessor, NoopTracer, step::NeverStopper};
 /// Tests that the pre-computed FRI constants are correct.
 #[test]
 fn test_constants() {
-    // tau is the primitive 4th root of unity (i.e., generator of multiplicative subgroup of size 4)
     let tau = Felt::two_adic_generator(2);
 
     assert_eq!(TAU_INV, tau.inverse());

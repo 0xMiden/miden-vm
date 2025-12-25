@@ -109,6 +109,7 @@ pub fn aux_columns_to_row_major<EF: ExtensionField<Felt>>(
 /// 3. Converts the result back to row-major format
 ///
 /// This is the main entry point for auxiliary trace generation when using Plonky3.
+#[allow(dead_code)]
 #[instrument(skip_all, fields(rows = main_trace.height(), cols = main_trace.width()))]
 pub fn build_aux_columns<EF: ExtensionField<Felt>>(
     aux_builders: &AuxTraceBuilders,

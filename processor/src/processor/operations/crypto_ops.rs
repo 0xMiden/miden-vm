@@ -9,7 +9,7 @@ use miden_core::{
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ErrorContext, ExecutionError, ONE, PrimeField64,
+    ErrorContext, ExecutionError, ONE,
     fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
     processor::{
@@ -163,7 +163,7 @@ pub(super) fn op_mrupdate<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     if let Some(path) = &path
-        && path.len() != depth.as_canonical_u64() as usize
+        && path.len() != depth.as_int() as usize
     {
         return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
     }
@@ -299,7 +299,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Read the current accumulator
     let acc = QuadFelt::new_complex(
-        processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX),
+        processor.stack().get(ACC_LOW_INDEX),
+        processor.stack().get(ACC_HIGH_INDEX),
     );
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
@@ -386,10 +387,14 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
     // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
     let coef = [
-        QuadFelt::new_complex(processor.stack().get(1), processor.stack().get(0)), // c0: (c0_0, c0_1)
-        QuadFelt::new_complex(processor.stack().get(3), processor.stack().get(2)), // c1: (c1_0, c1_1)
-        QuadFelt::new_complex(processor.stack().get(5), processor.stack().get(4)), // c2: (c2_0, c2_1)
-        QuadFelt::new_complex(processor.stack().get(7), processor.stack().get(6)), // c3: (c3_0, c3_1)
+        QuadFelt::new_complex(processor.stack().get(1), processor.stack().get(0)), /* c0: (c0_0,
+                                                                                    * c0_1) */
+        QuadFelt::new_complex(processor.stack().get(3), processor.stack().get(2)), /* c1: (c1_0,
+                                                                                    * c1_1) */
+        QuadFelt::new_complex(processor.stack().get(5), processor.stack().get(4)), /* c2: (c2_0,
+                                                                                    * c2_1) */
+        QuadFelt::new_complex(processor.stack().get(7), processor.stack().get(6)), /* c3: (c3_0,
+                                                                                    * c3_1) */
     ];
 
     // Read the evaluation point alpha from memory
@@ -411,7 +416,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Read the current accumulator
     let acc_old = QuadFelt::new_complex(
-        processor.stack().get(ACC_LOW_INDEX), processor.stack().get(ACC_HIGH_INDEX), // acc1
+        processor.stack().get(ACC_LOW_INDEX),  // acc0
+        processor.stack().get(ACC_HIGH_INDEX), // acc1
     );
 
     // Compute the temporary accumulator (first 2 coefficients: c0, c1)

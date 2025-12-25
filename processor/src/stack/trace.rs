@@ -29,8 +29,7 @@ impl TraceLen for [Vec<Felt>] {
 }
 
 use super::{Felt, MAX_TOP_IDX, ZERO};
-use crate::{ONE, STACK_TRACE_WIDTH};
-use crate::utils::invert_column_allow_zeros;
+use crate::{ONE, STACK_TRACE_WIDTH, utils::invert_column_allow_zeros};
 
 // STACK TRACE
 // ================================================================================================

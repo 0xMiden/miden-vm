@@ -1,7 +1,7 @@
 use miden_core::{Felt, ZERO};
 
 use crate::{
-    ErrorContext, ExecutionError, PrimeField64,
+    ErrorContext, ExecutionError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -81,7 +81,7 @@ pub(super) fn op_cswap<P: Processor>(
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
-    match condition.as_canonical_u64() {
+    match condition.as_int() {
         0 => {
             // do nothing, a and b are already in the right place
         },
@@ -110,7 +110,7 @@ pub(super) fn op_cswapw<P: Processor>(
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
-    match condition.as_canonical_u64() {
+    match condition.as_int() {
         0 => {
             // do nothing, the words are already in the right place
         },

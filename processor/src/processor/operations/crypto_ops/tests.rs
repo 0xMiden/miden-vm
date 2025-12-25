@@ -318,7 +318,7 @@ proptest! {
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, 0, 0]
-        let alpha_word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
         processor.memory.write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),
@@ -442,7 +442,7 @@ proptest! {
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, k0, k1] (k0, k1 are unused but read)
-        let alpha_word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
         processor.memory.write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),

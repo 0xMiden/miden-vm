@@ -1,8 +1,8 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{BasedVectorSpace, Felt, Field, ONE, PrimeCharacteristicRing, QuadFelt, ZERO};
+use miden_core::{BasedVectorSpace, Felt, Field, ONE, QuadFelt, ZERO};
 
 use crate::{
-    ExecutionError, PrimeField64,
+    ExecutionError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface},
 };
@@ -47,12 +47,9 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
     // the segment identifier of the position in the source domain
-    let domain_segment = processor.stack().get(9).as_canonical_u64();
+    let domain_segment = processor.stack().get(9).as_int();
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
-    if poe.is_zero() {
-        return Err(ExecutionError::InvalidFriDomainGenerator);
-    }
     // the result of the previous layer folding
     let prev_value = {
         let pe1 = processor.stack().get(11);
@@ -81,7 +78,6 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
     let x = poe * f_tau * DOMAIN_OFFSET;
-    // SAFETY: peo is not zero
     let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
@@ -93,8 +89,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let ds = get_domain_segment_flags(d_seg);
     let folded_value = folded_value.as_basis_coefficients_slice();
 
-    let poe2 = poe.square();
-    let poe4 = poe2.square();
+    let poe2 = poe * poe;
+    let poe4 = poe2 * poe2;
 
     processor.stack().decrement_size(tracer);
 
@@ -121,8 +117,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// value in the folded domain.
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(0).into();
-    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(4).into();
+    let [v4, v5, v6, v7] = processor.stack().get_word(0).into();
+    let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
 
     [
         QuadFelt::new_complex(v0, v1),
@@ -138,7 +134,7 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);
 
-const DOMAIN_OFFSET: Felt = Felt::GENERATOR;
+const DOMAIN_OFFSET: Felt = Felt::new(7); // Goldilocks generator
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at
@@ -172,7 +168,7 @@ fn get_domain_segment_flags(domain_segment: usize) -> [Felt; 4] {
 /// Computes 2 evaluation points needed for [fold4] function.
 fn compute_evaluation_points(alpha: QuadFelt, x_inv: Felt) -> (QuadFelt, QuadFelt) {
     let ev = alpha * x_inv;
-    let es = ev.square();
+    let es = ev * ev;
     (ev, es)
 }
 
@@ -190,5 +186,5 @@ fn fold4(values: [QuadFelt; 4], ev: QuadFelt, es: QuadFelt) -> (QuadFelt, QuadFe
 /// Performs folding by a factor of 2. ep is a value computed based on x and verifier challenge
 /// alpha.
 fn fold2(f_x: QuadFelt, f_neg_x: QuadFelt, ep: QuadFelt) -> QuadFelt {
-    (f_x + f_neg_x + (f_x - f_neg_x) * ep) * TWO_INV
+    (f_x + f_neg_x + ((f_x - f_neg_x) * ep)) * TWO_INV
 }
