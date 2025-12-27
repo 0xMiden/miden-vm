@@ -901,6 +901,14 @@ impl FastProcessor {
     }
 
     /// Convenience sync wrapper to [Self::execute].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_sync(
         self,
         program: &Program,
@@ -908,23 +916,13 @@ impl FastProcessor {
     ) -> Result<ExecutionOutput, ExecutionError> {
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
-                #[cfg(feature = "std")]
-                {
-                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
-                    tokio::task::block_in_place(|| {
-                        // Create a new runtime in this blocking context
-                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                        rt.block_on(self.execute(program, host))
-                    })
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    // No std - cannot use block_in_place, must panic
-                    panic!(
-                        "Cannot call execute_sync from within a Tokio runtime in no_std. \
-                         Use the async execute() method instead."
-                    )
-                }
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync from within a Tokio runtime. \
+                     Use the async execute() method instead."
+                )
             },
             Err(_) => {
                 // No runtime exists - create one and use it
@@ -935,6 +933,14 @@ impl FastProcessor {
     }
 
     /// Convenience sync wrapper to [Self::execute_for_trace].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute_for_trace()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_for_trace_sync(
         self,
         program: &Program,
@@ -943,23 +949,13 @@ impl FastProcessor {
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
-                #[cfg(feature = "std")]
-                {
-                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
-                    tokio::task::block_in_place(|| {
-                        // Create a new runtime in this blocking context
-                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                        rt.block_on(self.execute_for_trace(program, host, fragment_size))
-                    })
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    // No std - cannot use block_in_place, must panic
-                    panic!(
-                        "Cannot call execute_for_trace_sync from within a Tokio runtime in no_std. \
-                         Use the async execute_for_trace() method instead."
-                    )
-                }
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_for_trace_sync from within a Tokio runtime. \
+                     Use the async execute_for_trace() method instead."
+                )
             },
             Err(_) => {
                 // No runtime exists - create one and use it
@@ -970,7 +966,14 @@ impl FastProcessor {
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
-    #[cfg(any(test, feature = "testing"))]
+    ///
+    /// This method is only available on non-wasm32 targets for testing. On wasm32, use
+    /// async execution methods directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use async execution
+    /// methods instead in async contexts.
+    #[cfg(all(any(test, feature = "testing"), not(target_arch = "wasm32")))]
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,
@@ -1008,23 +1011,13 @@ impl FastProcessor {
 
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
-                #[cfg(feature = "std")]
-                {
-                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
-                    tokio::task::block_in_place(|| {
-                        // Create a new runtime in this blocking context
-                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                        rt.block_on(execute_fut)
-                    })
-                }
-                #[cfg(not(feature = "std"))]
-                {
-                    // No std - cannot use block_in_place, must panic
-                    panic!(
-                        "Cannot call execute_sync_mut from within a Tokio runtime in no_std. \
-                         Use async execution methods instead."
-                    )
-                }
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync_mut from within a Tokio runtime. \
+                     Use async execution methods instead."
+                )
             },
             Err(_) => {
                 // No runtime exists - create one and use it

@@ -35,6 +35,8 @@ use miden_processor::{
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
     parallel::build_trace,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use miden_prover::prove_sync;
 use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
@@ -247,6 +249,7 @@ impl Test {
 
     /// Builds a final stack from the provided stack-ordered array and asserts that executing the
     /// test will result in the expected final stack state.
+    #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn expect_stack(&self, final_stack: &[u64]) {
         let result = self.get_last_stack_state().as_int_vec();
@@ -257,6 +260,7 @@ impl Test {
     /// Executes the test and validates that the process memory has the elements of `expected_mem`
     /// at address `mem_start_addr` and that the end of the stack execution trace matches the
     /// `final_stack`.
+    #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn expect_stack_and_memory(
         &self,
@@ -366,6 +370,7 @@ impl Test {
     ///
     /// Internally, this also checks that the slow and fast processors agree on the stack
     /// outputs.
+    #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
         // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
@@ -403,6 +408,7 @@ impl Test {
     /// Compiles the test's source to a Program and executes it with the tests inputs.
     ///
     /// Returns the [`ExecutionOutput`] once execution is finished.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
@@ -419,6 +425,7 @@ impl Test {
     /// the [`StackOutputs`] and a [`String`] containing all debug output.
     ///
     /// If the execution fails, the output is printed `stderr`.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
         let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
 
@@ -450,10 +457,11 @@ impl Test {
     /// Compiles the test's code into a program, then generates and verifies a proof of execution
     /// using the given public inputs and the specified number of stack outputs. When `test_fail`
     /// is true, this function will force a failure by modifying the first output.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = miden_prover::prove(
+        let (mut stack_outputs, proof) = miden_prover::prove_sync(
             &program,
             stack_inputs.clone(),
             self.advice_inputs.clone(),
@@ -475,6 +483,7 @@ impl Test {
     }
 
     /// Returns the last state of the stack after executing a test.
+    #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
         let trace = self

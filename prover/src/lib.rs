@@ -32,6 +32,8 @@ const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
 /// Executes and proves the specified `program` and returns the result together with a STARK-based
 /// proof of the program's execution.
 ///
+/// This is an async function that works on all platforms including wasm32.
+///
 /// - `stack_inputs` specifies the initial state of the stack for the VM.
 /// - `host` specifies the host environment which contain non-deterministic (secret) inputs for the
 ///   prover
@@ -40,7 +42,7 @@ const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
 #[instrument("prove_program", skip_all)]
-pub fn prove(
+pub async fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -60,7 +62,7 @@ pub fn prove(
     };
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host, DEFAULT_FRAGMENT_SIZE)?;
+        processor.execute_for_trace(program, host, DEFAULT_FRAGMENT_SIZE).await?;
 
     let trace = build_trace(
         execution_output,
@@ -130,4 +132,39 @@ pub fn prove(
     let proof = miden_air::ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
 
     Ok((stack_outputs, proof))
+}
+
+/// Synchronous wrapper for the async `prove()` function.
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the
+/// async `prove()` method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use the async `prove()`
+/// method instead in async contexts.
+#[cfg(not(target_arch = "wasm32"))]
+#[instrument("prove_program_sync", skip_all)]
+pub fn prove_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl AsyncHost,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(_handle) => {
+            // We're already inside a Tokio runtime - this is not supported
+            // because we cannot safely create a nested runtime or move the
+            // non-Send host reference to another thread
+            panic!(
+                "Cannot call prove_sync from within a Tokio runtime. \
+                 Use the async prove() method instead."
+            )
+        },
+        Err(_) => {
+            // No runtime exists - create one and use it
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
+        },
+    }
 }

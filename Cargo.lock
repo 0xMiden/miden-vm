@@ -1526,6 +1526,7 @@ dependencies = [
  "p3-util",
  "rand",
  "serde",
+ "tokio",
  "tracing",
 ]
 

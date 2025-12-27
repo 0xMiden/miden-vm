@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_prover::{AdviceInputs, HashFunction, ProvingOptions, StackInputs, prove};
+use miden_prover::{AdviceInputs, HashFunction, ProvingOptions, StackInputs, prove_sync};
 use miden_verifier::verify;
 use miden_vm::DefaultHost;
 
@@ -31,7 +31,7 @@ fn test_blake3_256_prove_verify() {
 
     println!("Proving with Blake3_256...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -69,7 +69,7 @@ fn test_keccak_prove_verify() {
     // Prove the program
     println!("Proving with Keccak...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -109,7 +109,7 @@ fn test_rpo_prove_verify() {
     // Prove the program
     println!("Proving with RPO...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -145,7 +145,7 @@ fn test_poseidon2_prove_verify() {
 
     println!("Proving with Poseidon2...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -181,7 +181,7 @@ fn test_rpx_prove_verify() {
 
     println!("Proving with RPX...");
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
