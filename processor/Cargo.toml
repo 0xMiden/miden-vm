@@ -26,6 +26,7 @@ std = [
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
+    "tokio/rt-multi-thread",
 ]
 testing = ["miden-air/testing"]
 # Removes proper error context from the error messages. Enable in production builds that need

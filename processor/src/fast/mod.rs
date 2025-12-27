@@ -906,10 +906,32 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute(program, host))
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                #[cfg(feature = "std")]
+                {
+                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
+                    tokio::task::block_in_place(|| {
+                        // Create a new runtime in this blocking context
+                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                        rt.block_on(self.execute(program, host))
+                    })
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    // No std - cannot use block_in_place, must panic
+                    panic!(
+                        "Cannot call execute_sync from within a Tokio runtime in no_std. \
+                         Use the async execute() method instead."
+                    )
+                }
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute(program, host))
+            },
+        }
     }
 
     /// Convenience sync wrapper to [Self::execute_for_trace].
@@ -919,10 +941,32 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         fragment_size: usize,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute_for_trace(program, host, fragment_size))
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                #[cfg(feature = "std")]
+                {
+                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
+                    tokio::task::block_in_place(|| {
+                        // Create a new runtime in this blocking context
+                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                        rt.block_on(self.execute_for_trace(program, host, fragment_size))
+                    })
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    // No std - cannot use block_in_place, must panic
+                    panic!(
+                        "Cannot call execute_for_trace_sync from within a Tokio runtime in no_std. \
+                         Use the async execute_for_trace() method instead."
+                    )
+                }
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute_for_trace(program, host, fragment_size))
+            },
+        }
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
@@ -932,8 +976,6 @@ impl FastProcessor {
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
@@ -942,7 +984,7 @@ impl FastProcessor {
             .extend_map(current_forest.advice_map())
             .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
 
-        rt.block_on(async {
+        let execute_fut = async {
             match self
                 .execute_impl(
                     &mut continuation_stack,
@@ -962,7 +1004,34 @@ impl FastProcessor {
                     },
                 },
             }
-        })
+        };
+
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                #[cfg(feature = "std")]
+                {
+                    // We're in a runtime - use block_in_place to avoid blocking the worker thread
+                    tokio::task::block_in_place(|| {
+                        // Create a new runtime in this blocking context
+                        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                        rt.block_on(execute_fut)
+                    })
+                }
+                #[cfg(not(feature = "std"))]
+                {
+                    // No std - cannot use block_in_place, must panic
+                    panic!(
+                        "Cannot call execute_sync_mut from within a Tokio runtime in no_std. \
+                         Use async execution methods instead."
+                    )
+                }
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(execute_fut)
+            },
+        }
     }
 }
 
