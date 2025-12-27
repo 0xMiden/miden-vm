@@ -329,7 +329,11 @@ fn test_felt_conversion() {
         eprintln!("Felt::new({}):", val);
         eprintln!("  via .into(): {} (< M: {})", via_into, via_into < M);
         eprintln!("  via .as_canonical_u64(): {} (< M: {})", via_canonical, via_canonical < M);
-        assert_eq!(via_into, via_canonical, "Felt conversion methods should match for value {}", val);
+        assert_eq!(
+            via_into, via_canonical,
+            "Felt conversion methods should match for value {}",
+            val
+        );
         assert!(via_into < M, "Converted value should be < M for input {}", val);
     }
 
@@ -520,7 +524,11 @@ fn generate_data_probabilistic_product_test(
     let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_canonical_u64()).collect();
 
     // Debug: check first few values
-    eprintln!("Challenge values: [{}, {}]", challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64());
+    eprintln!(
+        "Challenge values: [{}, {}]",
+        challenge.0.as_canonical_u64(),
+        challenge.1.as_canonical_u64()
+    );
     eprintln!("First 10 polynomial values on advice stack:");
     for (i, &val) in polynomials.iter().take(10).enumerate() {
         eprintln!("  [{}] = {} (< M={}: {})", i, val, M, val < M);

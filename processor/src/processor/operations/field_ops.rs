@@ -215,18 +215,21 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 /// Gets the top four values from the stack [b1, b0, a1, a0], where a = (a1, a0) and
 /// b = (b1, b0) are elements of the extension field, and outputs the product c = (c1, c0)
 /// where c0 = b0 * a0 - 2 * b1 * a1 and c1 = (b0 + b1) * (a1 + a0) - b0 * a0. It pushes 0 to
-/// the first and second positions on the stack, c1 and c2 to the third and fourth positions,
-/// and leaves the rest of the stack unchanged.
+/// where c0 = a0 * b0 + 7 * a1 * b1 and c1 = a0 * b1 + a1 * b0. The extension field is
+/// defined by the irreducible polynomial x² - 7. It pushes b1, b0 to the first and second
+/// positions on the stack, c1 and c0 to the third and fourth positions, and leaves the rest
+/// of the stack unchanged.
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
-    const TWO: Felt = Felt::new(2);
-    let [a0, a1, b0, b1] = processor.stack().get_word(0).into();
+    const SEVEN: Felt = Felt::new(7);
+    let [a0, a1, b0, b1]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 
     let b0_times_a0 = b0 * a0;
-    processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0);
-    processor.stack().set(3, b0_times_a0 - TWO * b1 * a1);
+    let b1_times_a1 = b1 * a1;
+    processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0 - b1_times_a1);
+    processor.stack().set(3, b0_times_a0 + SEVEN * b1_times_a1);
 }
 
 // HELPERS
