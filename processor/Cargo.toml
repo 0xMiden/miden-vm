@@ -26,7 +26,6 @@ std = [
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
     "thiserror/std",
-    "tokio/rt-multi-thread",
 ]
 testing = ["miden-air/testing"]
 # Removes proper error context from the error messages. Enable in production builds that need
@@ -48,13 +47,21 @@ paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"] }
 
 p3-field.workspace = true
 p3-matrix.workspace = true
 p3-maybe-rayon.workspace = true
 p3-util.workspace = true
 itertools.workspace = true
+
+# Platform-specific tokio dependencies
+# On non-wasm targets, enable rt-multi-thread for better performance
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+# On wasm32, only basic tokio features are supported
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
 miden-assembly.workspace = true
