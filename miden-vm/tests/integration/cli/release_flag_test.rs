@@ -4,6 +4,8 @@ use miden_processor::ExecutionOptions;
 /// Tests the exact logic from run.rs: ExecutionOptions::new(..., !release)
 #[test]
 fn test_cli_release_flag_controls_execution() {
+    const DEFAULT_FRAGMENT_SIZE: usize = 4096;
+
     // Requirement 1: Debug mode can be turned on/off by CLI --release flag
     let debug_options = ExecutionOptions::new(
         Some(ExecutionOptions::MAX_CYCLES),

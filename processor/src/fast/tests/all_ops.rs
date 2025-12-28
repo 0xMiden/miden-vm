@@ -11,6 +11,7 @@ use super::*;
 /// operations.
 #[rstest]
 fn test_basic_block(
+    testname: String,
     #[values(
         vec![],
         vec![0_u32.into()],

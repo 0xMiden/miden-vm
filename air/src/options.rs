@@ -158,9 +158,16 @@ impl ExecutionOptions {
         Ok(ExecutionOptions {
             max_cycles,
             expected_cycles,
+            core_trace_fragment_size,
             enable_tracing,
             enable_debugging,
         })
+    }
+
+    /// Sets the fragment size for core trace generation.
+    pub fn with_core_trace_fragment_size(mut self, size: usize) -> Self {
+        self.core_trace_fragment_size = size;
+        self
     }
 
     /// Enables execution of the `trace` instructions.
@@ -196,6 +203,11 @@ impl ExecutionOptions {
     /// cycles is equal to the number of actual cycles.
     pub fn expected_cycles(&self) -> u32 {
         self.expected_cycles
+    }
+
+    /// Returns the fragment size for core trace generation.
+    pub fn core_trace_fragment_size(&self) -> usize {
+        self.core_trace_fragment_size
     }
 
     /// Returns a flag indicating whether the VM should execute `trace` instructions.

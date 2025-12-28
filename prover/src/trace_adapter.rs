@@ -30,7 +30,7 @@ pub fn execution_trace_to_row_major(trace: &ExecutionTrace) -> RowMajorMatrix<Fe
     // Extract column-major data into a flat buffer (columns are contiguous)
     let mut col_major_data = Vec::with_capacity(TRACE_WIDTH * trace_len);
     for col_idx in 0..TRACE_WIDTH {
-        col_major_data.extend_from_slice(trace.main_trace.get_column(col_idx));
+        col_major_data.extend_from_slice(trace.main_trace().get_column(col_idx));
     }
 
     // Build a column-major matrix and transpose to row-major using Plonky3's optimized transpose

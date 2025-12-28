@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
-use core::mem;
+#[cfg(any(test, feature = "testing"))]
+use core::ops::Range;
 
+#[cfg(feature = "std")]
+use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     AuxTraceBuilder, PublicInputs,
     trace::{
-        AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, MIN_TRACE_LEN,
-        PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, TRACE_WIDTH,
+        DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
         main_trace::{ColMatrix, MainTrace},
     },
@@ -18,7 +20,7 @@ use miden_core::{
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
-    AdviceProvider, Felt, Process, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
+    AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
@@ -31,6 +33,12 @@ pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummar
 #[cfg(test)]
 mod tests;
 
+// CONSTANTS
+// ================================================================================================
+
+/// Number of rows at the end of an execution trace which are injected with random values.
+pub const NUM_RAND_ROWS: usize = 1;
+
 // VM EXECUTION TRACE
 // ================================================================================================
 
@@ -40,69 +48,6 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: StackAuxTraceBuilder,
     pub(crate) range: RangeCheckerAuxTraceBuilder,
     pub(crate) chiplets: ChipletsAuxTraceBuilder,
-}
-
-impl AuxTraceBuilders {
-    /// Builds auxiliary columns for all trace segments given the main trace and challenges.
-    pub fn build_aux_columns<E>(&self, main_trace: &MainTrace, challenges: &[E]) -> Vec<Vec<E>>
-    where
-        E: ExtensionField<Felt>,
-    {
-        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
-        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
-        let range_cols = self.range.build_aux_columns(main_trace, challenges);
-        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
-
-        decoder_cols
-            .into_iter()
-            .chain(stack_cols)
-            .chain(range_cols)
-            .chain(chiplets_cols)
-            .collect()
-    }
-}
-
-// TRACE METADATA
-// ================================================================================================
-
-#[derive(Debug, Clone)]
-pub struct TraceMetadata {
-    main_width: usize,
-    aux_width: usize,
-    num_rand_elements: usize,
-    trace_len: usize,
-}
-
-impl TraceMetadata {
-    pub fn new(
-        main_width: usize,
-        aux_width: usize,
-        num_rand_elements: usize,
-        trace_len: usize,
-    ) -> Self {
-        Self {
-            main_width,
-            aux_width,
-            num_rand_elements,
-            trace_len,
-        }
-    }
-
-    pub fn main_width(&self) -> usize {
-        self.main_width
-    }
-
-    pub fn aux_width(&self) -> usize {
-        self.aux_width
-    }
-
-    pub fn num_rand_elements(&self) -> usize {
-        self.num_rand_elements
-    }
-
-    pub fn trace_len(&self) -> usize {
-        self.trace_len
-    }
 }
 
 /// Execution trace which is generated when a program is executed on the VM.
@@ -115,8 +60,7 @@ impl TraceMetadata {
 #[derive(Debug)]
 pub struct ExecutionTrace {
     meta: Vec<u8>,
-    trace_metadata: TraceMetadata,
-    pub main_trace: MainTrace,
+    main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
@@ -126,37 +70,14 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
+    // CONSTANTS
+    // --------------------------------------------------------------------------------------------
+
+    /// Number of rows at the end of an execution trace which are injected with random values.
+    pub const NUM_RAND_ROWS: usize = NUM_RAND_ROWS;
+
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
-    /// Builds an execution trace for the provided process.
-    pub fn new(mut process: Process, stack_outputs: StackOutputs) -> Self {
-        let program_hash = process.decoder.program_hash().into();
-
-        // create a new program info instance with the underlying kernel
-        let kernel = process.kernel().clone();
-        let program_info = ProgramInfo::new(program_hash, kernel);
-        let advice = mem::take(&mut process.advice);
-        let (main_trace, aux_trace_builders, trace_len_summary, final_pc_transcript) =
-            finalize_trace(process);
-        let trace_metadata = TraceMetadata::new(
-            PADDED_TRACE_WIDTH,
-            AUX_TRACE_WIDTH,
-            AUX_TRACE_RAND_ELEMENTS,
-            main_trace.num_rows(),
-        );
-
-        Self {
-            meta: Vec::new(),
-            trace_metadata,
-            aux_trace_builders,
-            main_trace,
-            program_info,
-            stack_outputs,
-            advice,
-            trace_len_summary,
-            final_pc_transcript,
-        }
-    }
 
     pub fn new_from_parts(
         program_hash: Word,
@@ -167,16 +88,9 @@ impl ExecutionTrace {
         trace_len_summary: TraceLenSummary,
     ) -> Self {
         let program_info = ProgramInfo::new(program_hash, kernel);
-        let trace_metadata = TraceMetadata::new(
-            PADDED_TRACE_WIDTH,
-            AUX_TRACE_WIDTH,
-            AUX_TRACE_RAND_ELEMENTS,
-            main_trace.num_rows(),
-        );
 
         Self {
             meta: Vec::new(),
-            trace_metadata,
             aux_trace_builders,
             main_trace,
             program_info,
@@ -200,19 +114,40 @@ impl ExecutionTrace {
         self.program_info.program_hash()
     }
 
-    /// Returns a reference to the main trace segment.
+    /// Returns outputs of the program execution which resulted in this execution trace.
+    pub fn stack_outputs(&self) -> &StackOutputs {
+        &self.stack_outputs
+    }
+
+    /// Returns the public values for this execution trace.
+    pub fn to_public_values(&self) -> Vec<Felt> {
+        let public_inputs = PublicInputs::new(
+            self.program_info.clone(),
+            self.init_stack_state(),
+            self.stack_outputs.clone(),
+            self.final_pc_transcript.state(),
+        );
+        public_inputs.to_elements()
+    }
+
+    /// Returns a clone of the auxiliary trace builders.
+    pub fn aux_trace_builders(&self) -> AuxTraceBuilders {
+        self.aux_trace_builders.clone()
+    }
+
+    /// Returns a reference to the main trace.
+    pub fn main_trace(&self) -> &MainTrace {
+        &self.main_trace
+    }
+
+    /// Returns a reference to the main segment of the trace.
     pub fn main_segment(&self) -> &MainTrace {
         &self.main_trace
     }
 
-    /// Returns a mutable reference to the main trace segment.
+    /// Returns a mutable reference to the main segment of the trace.
     pub fn main_segment_mut(&mut self) -> &mut MainTrace {
         &mut self.main_trace
-    }
-
-    /// Returns outputs of the program execution which resulted in this execution trace.
-    pub fn stack_outputs(&self) -> &StackOutputs {
-        &self.stack_outputs
     }
 
     /// Returns the precompile requests generated during program execution.
@@ -231,25 +166,6 @@ impl ExecutionTrace {
     /// Returns the final precompile transcript after executing all precompile requests.
     pub fn final_precompile_transcript(&self) -> PrecompileTranscript {
         self.final_pc_transcript
-    }
-
-    /// Returns the public values as a vector of field elements.
-    ///
-    /// The public values are encoded in a canonical order:
-    /// 1. Program info elements (program hash, kernel procedures, etc.)
-    /// 2. Stack inputs (up to 16 elements)
-    /// 3. Stack outputs (up to 16 elements)
-    /// 4. Precompile transcript state (4 elements)
-    ///
-    /// This encoding must match the order expected by the AIR constraints and the verifier.
-    pub fn to_public_values(&self) -> Vec<Felt> {
-        let public_inputs = PublicInputs::new(
-            self.program_info.clone(),
-            self.init_stack_state(),
-            self.stack_outputs.clone(),
-            self.final_pc_transcript.state(),
-        );
-        public_inputs.to_elements()
     }
 
     /// Returns the initial state of the top 16 stack registers.
@@ -286,7 +202,7 @@ impl ExecutionTrace {
         self.main_trace.num_rows()
     }
 
-    /// Legacy alias retained for tests that still call `length()`.
+    /// Returns the length of the trace (number of rows in the main trace).
     pub fn length(&self) -> usize {
         self.get_trace_len()
     }
@@ -306,16 +222,6 @@ impl ExecutionTrace {
         &self.meta
     }
 
-    /// Returns metadata describing trace dimensions.
-    pub fn trace_metadata(&self) -> &TraceMetadata {
-        &self.trace_metadata
-    }
-
-    /// Returns auxiliary trace builders (decoder/stack/range/chiplets).
-    pub fn aux_trace_builders(&self) -> AuxTraceBuilders {
-        self.aux_trace_builders.clone()
-    }
-
     /// Destructures this execution trace into the process’s final stack and advice states.
     pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
         (self.stack_outputs, self.advice)
@@ -326,29 +232,28 @@ impl ExecutionTrace {
 
     /// Returns the index of the last row in the trace.
     fn last_step(&self) -> usize {
-        self.main_trace.num_rows() - 1
+        self.length() - NUM_RAND_ROWS - 1
     }
 
     // TEST HELPERS
     // --------------------------------------------------------------------------------------------
     #[cfg(feature = "std")]
     pub fn print(&self) {
-        use crate::PrimeField64;
+        use miden_air::trace::TRACE_WIDTH;
+
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
-        for i in 0..self.main_trace.num_rows() {
+        for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
             std::println!(
                 "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
+                row.iter().take(TRACE_WIDTH).map(|v| v.as_int()).collect::<Vec<_>>()
             );
         }
     }
 
-    #[cfg(test)]
-    pub fn test_finalize_trace(process: Process) -> (MainTrace, AuxTraceBuilders, TraceLenSummary) {
-        let (main_trace, aux_trace_builders, trace_len_summary, _final_pc_transcript) =
-            finalize_trace(process);
-        (main_trace, aux_trace_builders, trace_len_summary)
+    #[cfg(any(test, feature = "testing"))]
+    pub fn get_column_range(&self, range: Range<usize>) -> Vec<Vec<Felt>> {
+        self.main_trace.get_column_range(range)
     }
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
@@ -362,74 +267,32 @@ impl ExecutionTrace {
     }
 }
 
-// HELPER FUNCTIONS
+// TRACE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-/// Converts a process into a set of execution trace columns for each component of the trace.
-///
-/// The process includes:
-/// - Determining the length of the trace required to accommodate the longest trace column.
-/// - Padding the columns to make sure all columns are of the same length.
-fn finalize_trace(
-    process: Process,
-) -> (MainTrace, AuxTraceBuilders, TraceLenSummary, PrecompileTranscript) {
-    let (system, decoder, stack, mut range, chiplets, final_capacity) = process.into_parts();
-    let final_pc_transcript = PrecompileTranscript::from_state(final_capacity);
+// AUX TRACE BUILDERS
+// ================================================================================================
 
-    let clk = system.clk();
+impl AuxTraceBuilders {
+    /// Builds auxiliary columns for all trace segments given the main trace and challenges.
+    ///
+    /// This is the internal column-major version used by the processor.
+    pub fn build_aux_columns<E>(&self, main_trace: &MainTrace, challenges: &[E]) -> Vec<Vec<E>>
+    where
+        E: ExtensionField<Felt>,
+    {
+        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
+        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
+        let range_cols = self.range.build_aux_columns(main_trace, challenges);
+        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
 
-    // Trace lengths of system and stack components must be equal to the number of executed cycles
-    assert_eq!(clk.as_usize(), system.trace_len(), "inconsistent system trace lengths");
-    assert_eq!(clk.as_usize(), decoder.trace_len(), "inconsistent decoder trace length");
-    assert_eq!(clk.as_usize(), stack.trace_len(), "inconsistent stack trace lengths");
-
-    // Add the range checks required by the chiplets to the range checker.
-    chiplets.append_range_checks(&mut range);
-
-    // Generate number of rows for the range trace.
-    let range_table_len = range.get_number_range_checker_rows();
-
-    // Get the trace length required to hold all execution trace steps.
-    let max_len = range_table_len.max(clk.into()).max(chiplets.trace_len());
-
-    // Pad the trace length to the next power of two (min MIN_TRACE_LEN).
-    let trace_len = max_len.next_power_of_two().max(MIN_TRACE_LEN);
-
-    // Get the lengths of the traces: main, range, and chiplets
-    let trace_len_summary =
-        TraceLenSummary::new(clk.into(), range_table_len, ChipletsLengths::new(&chiplets));
-
-    // Combine all trace segments into the main trace
-    let system_trace = system.into_trace(trace_len);
-    let decoder_trace = decoder.into_trace(trace_len);
-    let stack_trace = stack.into_trace(trace_len);
-    let chiplets_trace = chiplets.into_trace(trace_len, final_capacity);
-
-    // Combine the range trace segment using the support lookup table
-    let range_check_trace = range.into_trace_with_table(range_table_len, trace_len);
-
-    // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
-    let padding = vec![vec![ZERO; trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
-
-    let trace = system_trace
-        .into_iter()
-        .chain(decoder_trace.trace)
-        .chain(stack_trace.trace)
-        .chain(range_check_trace.trace)
-        .chain(chiplets_trace.trace)
-        .chain(padding)
-        .collect::<Vec<_>>();
-
-    let aux_trace_hints = AuxTraceBuilders {
-        decoder: decoder_trace.aux_builder,
-        stack: StackAuxTraceBuilder,
-        range: range_check_trace.aux_builder,
-        chiplets: chiplets_trace.aux_builder,
-    };
-
-    let main_trace = MainTrace::new(ColMatrix::new(trace), clk);
-
-    (main_trace, aux_trace_hints, trace_len_summary, final_pc_transcript)
+        decoder_cols
+            .into_iter()
+            .chain(stack_cols)
+            .chain(range_cols)
+            .chain(chiplets_cols)
+            .collect()
+    }
 }
 
 // PLONKY3 AUX TRACE BUILDER ADAPTER

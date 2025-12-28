@@ -287,6 +287,7 @@ impl AceHints {
 ///    identifier of the left input wire, `id_r` is the identifier of the right input wire and `op`
 ///    is the operation executed by the gate, namely `op ∈ {0, 1, 2}` where `0` denotes a `SUB`, `1`
 ///    a `MUL` and `2` an `ADD`.
+#[allow(dead_code)]
 pub fn eval_circuit(
     ctx: ContextId,
     ptr: Felt,
