@@ -8,7 +8,7 @@
 
 use alloc::vec;
 
-use miden_crypto::BinomialExtensionField;
+use miden_crypto::{BinomialExtensionField, StarkConfig};
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
@@ -16,7 +16,6 @@ use p3_dft::Radix2DitParallel;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 use p3_symmetric::{CompressionFunctionFromHasher, SerializingHasher};
-use p3_uni_stark::StarkConfig;
 
 use crate::Felt;
 

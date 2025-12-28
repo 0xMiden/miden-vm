@@ -4,14 +4,13 @@
 //! hash function, which is Miden's native algebraic hash function.
 
 use miden_crypto::{
-    BinomialExtensionField,
+    BinomialExtensionField, StarkConfig,
     hash::algebraic_sponge::{RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256},
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
-use p3_uni_stark::StarkConfig;
 
 use crate::Felt;
 
