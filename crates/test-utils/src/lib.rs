@@ -570,7 +570,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack.clone()),
+            fast_result.as_ref().map(|(output, _)| output.stack),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",
