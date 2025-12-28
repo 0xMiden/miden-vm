@@ -15,6 +15,8 @@ pub use miden_processor::{
     AdviceInputs, AdviceProvider, AsyncHost, BaseHost, DefaultHost, ExecutionError, ExecutionTrace,
     Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, ZERO, crypto, execute, utils,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use miden_prover::prove_sync;
 pub use miden_prover::{
     ExecutionProof, HashFunction, InputError, Proof, ProvingOptions, StackOutputs, Word, math,
     prove,

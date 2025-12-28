@@ -51,7 +51,7 @@ For example:
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute_sync, DefaultHost, Program, StackInputs};
 use miden_processor::ExecutionOptions;
 
 // instantiate the assembler
@@ -73,20 +73,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
-
-// now, execute the same program in debug mode and iterate over VM states
-for vm_state in execute_iter(
-    &program,
-    stack_inputs,
-    advice_inputs,
-    &mut host,
-) {
-    match vm_state {
-        Ok(vm_state) => println!("{:?}", vm_state),
-        Err(_) => println!("something went terribly wrong!"),
-    }
-}
+let trace = execute_sync(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
@@ -109,7 +96,7 @@ Here is a simple example of executing a program which pushes two numbers onto th
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -118,7 +105,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof) = prove(
+let (outputs, proof) = prove_sync(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -214,7 +201,7 @@ let mut host = DefaultHost::default();
 let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
 
 // execute the program
-let (outputs, proof) = miden_vm::prove(
+let (outputs, proof) = miden_vm::prove_sync(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
