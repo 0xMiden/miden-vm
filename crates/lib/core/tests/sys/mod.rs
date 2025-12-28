@@ -110,7 +110,7 @@ fn log_precompile_request_procedure() {
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
     let (stack_outputs, proof) = miden_utils_testing::prove(
         &program,
-        stack_inputs.clone(),
+        stack_inputs,
         advice_inputs,
         &mut host,
         options,
