@@ -4,10 +4,11 @@
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
 use miden_crypto::{
-    BinomialExtensionField, StarkConfig,
-    hash::algebraic_sponge::{
+    field::BinomialExtensionField,
+    hash::poseidon2::{
         Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
     },
+    stark::StarkConfig,
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;

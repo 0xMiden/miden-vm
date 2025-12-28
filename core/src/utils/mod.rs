@@ -5,9 +5,9 @@ use core::{
     slice,
 };
 
+use miden_crypto::field::{PrimeCharacteristicRing, PrimeField64};
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
-use miden_crypto::{PrimeCharacteristicRing, PrimeField64};
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_crypto::{
@@ -22,7 +22,7 @@ pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 use crate::{Felt, Word};
 
 pub mod math {
-    pub use miden_crypto::batch_multiplicative_inverse as batch_inversion;
+    pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
 }
 
 // UTILITY FUNCTIONS

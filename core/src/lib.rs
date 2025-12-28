@@ -58,9 +58,12 @@ pub use program::{Program, ProgramInfo};
 mod kernel;
 pub use kernel::Kernel;
 pub use miden_crypto::{
-    BasedVectorSpace, BinomialExtensionField, EMPTY_WORD, ExtensionField, Felt, Field, ONE,
-    PrimeCharacteristicRing, PrimeField64, QuotientMap, WORD_SIZE, Word, ZERO,
-    batch_multiplicative_inverse, word::LexicographicWord,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    field::{
+        BasedVectorSpace, BinomialExtensionField, ExtensionField, Field, PrimeCharacteristicRing,
+        PrimeField64, QuotientMap, batch_multiplicative_inverse,
+    },
+    word::LexicographicWord,
 };
 
 pub mod crypto {

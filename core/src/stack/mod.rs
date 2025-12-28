@@ -1,4 +1,4 @@
-use miden_crypto::PrimeField64;
+use miden_crypto::field::PrimeField64;
 
 use super::{
     Felt,

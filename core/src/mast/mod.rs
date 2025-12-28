@@ -10,7 +10,7 @@ use core::{
     ops::{Index, IndexMut},
 };
 
-use miden_crypto::PrimeField64;
+use miden_crypto::field::PrimeField64;
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]

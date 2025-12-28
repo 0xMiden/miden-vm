@@ -16,7 +16,7 @@ mod trace_adapter;
 // ================================================================================================
 
 pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions, config};
-pub use miden_crypto::{Commitments, OpenedValues, Proof};
+pub use miden_crypto::stark::{Commitments, OpenedValues, Proof};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,

@@ -8,7 +8,7 @@
 
 use alloc::vec;
 
-use miden_crypto::{BinomialExtensionField, StarkConfig};
+use miden_crypto::{field::BinomialExtensionField, stark::StarkConfig};
 use p3_blake3::Blake3;
 use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;

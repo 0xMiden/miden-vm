@@ -4,8 +4,9 @@
 //! hash function, which is Miden's native algebraic hash function with extension field rounds.
 
 use miden_crypto::{
-    BinomialExtensionField, StarkConfig,
-    hash::algebraic_sponge::{RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256},
+    field::BinomialExtensionField,
+    hash::rpx::{RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256},
+    stark::StarkConfig,
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;

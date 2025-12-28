@@ -4,8 +4,9 @@
 //! hash function, which is Miden's native algebraic hash function.
 
 use miden_crypto::{
-    BinomialExtensionField, StarkConfig,
-    hash::algebraic_sponge::{RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256},
+    field::BinomialExtensionField,
+    hash::rpo::{RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256},
+    stark::StarkConfig,
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;

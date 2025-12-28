@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
 use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
-pub use miden_crypto::{Air, AirBuilder, BaseAir};
+pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir};
 
 mod constraints;
 

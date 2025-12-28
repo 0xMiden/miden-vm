@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_crypto::{PrimeCharacteristicRing, WORD_SIZE, test_utils::prng_array};
+use miden_crypto::{WORD_SIZE, field::PrimeCharacteristicRing, rand::test_utils::prng_array};
 use proptest::prelude::*;
 
 use crate::{
