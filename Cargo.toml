@@ -113,11 +113,11 @@ p3-uni-stark     = { version = "0.4.1", default-features = false }
 p3-util          = { version = "0.4.1", default-features = false }
 
 # Miden-specific Plonky3 crates
-p3-miden-air        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-fri        = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-goldilocks = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-prover     = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
-p3-miden-uni-stark  = { git = "https://github.com/0xMiden/p3-miden", branch = "main", default-features = false }
+p3-miden-air        = { version = "0.4", default-features = false }
+p3-miden-fri        = { version = "0.4", default-features = false }
+p3-miden-goldilocks = { version = "0.4", default-features = false }
+p3-miden-prover     = { version = "0.4", default-features = false }
+p3-miden-uni-stark  = { version = "0.4", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
