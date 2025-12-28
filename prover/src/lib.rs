@@ -126,21 +126,15 @@ pub fn prove(
             maybe_await!(prover.prove(trace))
         },
         HashFunction::Rpo256 => {
-            let prover = ExecutionProver::<Rpo256, RpoRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs,
-            );
+            let prover =
+                ExecutionProver::<Rpo256, RpoRandomCoin>::new(options, stack_inputs, stack_outputs);
             #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
             let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpo256);
             maybe_await!(prover.prove(trace))
         },
         HashFunction::Rpx256 => {
-            let prover = ExecutionProver::<Rpx256, RpxRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs,
-            );
+            let prover =
+                ExecutionProver::<Rpx256, RpxRandomCoin>::new(options, stack_inputs, stack_outputs);
             #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
             let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpx256);
             maybe_await!(prover.prove(trace))

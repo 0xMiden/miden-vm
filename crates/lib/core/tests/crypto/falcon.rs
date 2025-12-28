@@ -298,14 +298,9 @@ fn falcon_prove_verify() {
         .unwrap();
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) = miden_utils_testing::prove(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        options,
-    )
-    .expect("failed to generate proof");
+    let (stack_outputs, proof) =
+        miden_utils_testing::prove(&program, stack_inputs, advice_inputs, &mut host, options)
+            .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);
     let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
