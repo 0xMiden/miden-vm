@@ -3,7 +3,7 @@
 //! This module provides a STARK configuration using the Rescue Prime Optimized (RPO)
 //! hash function, which is Miden's native algebraic hash function.
 
-use miden_crypto::hash::algebraic_sponge::rescue::rpo::{
+use miden_crypto::hash::algebraic_sponge::{
     RpoChallenger, RpoCompression, RpoHasher, RpoPermutation256,
 };
 use p3_commit::ExtensionMmcs;

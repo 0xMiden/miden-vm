@@ -3,7 +3,7 @@
 //! This module provides a STARK configuration using the Poseidon2 hash function,
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
-use miden_crypto::hash::algebraic_sponge::poseidon2::{
+use miden_crypto::hash::algebraic_sponge::{
     Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
 };
 use p3_commit::ExtensionMmcs;

@@ -1232,9 +1232,9 @@ dependencies = [
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-miden-air",
+ "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
  "p3-miden-fri",
- "p3-miden-prover",
+ "p3-miden-prover 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
  "p3-symmetric",
  "p3-uni-stark",
  "proptest",
@@ -1344,7 +1344,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#7ba721b2aaac96ed23d1ef5e9685f9357870444e"
 dependencies = [
  "blake3",
  "cc",
@@ -1362,9 +1362,9 @@ dependencies = [
  "p3-air",
  "p3-challenger",
  "p3-field",
- "p3-miden-air",
- "p3-miden-goldilocks",
- "p3-miden-prover",
+ "p3-miden-air 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-miden-goldilocks 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-miden-prover 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "p3-symmetric",
  "rand",
  "rand_chacha",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#7ba721b2aaac96ed23d1ef5e9685f9357870444e"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1518,8 +1518,8 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-miden-fri",
- "p3-miden-goldilocks",
- "p3-miden-prover",
+ "p3-miden-goldilocks 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-prover 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -1533,10 +1533,10 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#bb8a40da5b0e0befff3b89cb9a75086a32b6d4cf"
+source = "git+https://github.com/0xMiden/crypto?branch=huitseeker%2Fp3-rebased#7ba721b2aaac96ed23d1ef5e9685f9357870444e"
 dependencies = [
  "p3-field",
- "p3-miden-goldilocks",
+ "p3-miden-goldilocks 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winter-math",
  "winter-utils",
 ]
@@ -1627,8 +1627,8 @@ dependencies = [
  "p3-matrix",
  "p3-merkle-tree",
  "p3-miden-fri",
- "p3-miden-goldilocks",
- "p3-miden-prover",
+ "p3-miden-goldilocks 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-prover 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
  "p3-poseidon2",
  "p3-symmetric",
  "p3-uni-stark",
@@ -2006,6 +2006,17 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4217edd6ea816e81c1282c8e052516973582cb86add4729036bdbaabdb38d8f"
+dependencies = [
+ "p3-air",
+ "p3-field",
+ "p3-matrix",
+]
+
+[[package]]
+name = "p3-miden-air"
+version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
 dependencies = [
  "p3-air",
@@ -2035,6 +2046,25 @@ dependencies = [
 [[package]]
 name = "p3-miden-goldilocks"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a883bc797df1c43b06f2d467340625ee736f748928d1ceb402d27eb05e694394"
+dependencies = [
+ "num-bigint",
+ "p3-challenger",
+ "p3-dft",
+ "p3-field",
+ "p3-mds",
+ "p3-poseidon2",
+ "p3-symmetric",
+ "p3-util",
+ "paste",
+ "rand",
+ "serde",
+]
+
+[[package]]
+name = "p3-miden-goldilocks"
+version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
 dependencies = [
  "num-bigint",
@@ -2053,6 +2083,27 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e043fcf77772ac765e21335d73b513d76ba9b4adb54994d925ba38dcd557811"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-interpolation",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-miden-air 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-miden-uni-stark 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "p3-util",
+ "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-prover"
+version = "0.4.0"
 source = "git+https://github.com/0xMiden/p3-miden?branch=main#431e808b8a1b362c779f1ddbb522021f721806e1"
 dependencies = [
  "itertools 0.14.0",
@@ -2063,10 +2114,31 @@ dependencies = [
  "p3-interpolation",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-miden-air",
- "p3-miden-uni-stark",
+ "p3-miden-air 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
+ "p3-miden-uni-stark 0.4.0 (git+https://github.com/0xMiden/p3-miden?branch=main)",
  "p3-util",
  "serde",
+ "tracing",
+]
+
+[[package]]
+name = "p3-miden-uni-stark"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6580b5e0fca4e3fb03e9a1d0a70e2068ec26ea04fe84932815a49c02bedf319f"
+dependencies = [
+ "itertools 0.14.0",
+ "p3-air",
+ "p3-challenger",
+ "p3-commit",
+ "p3-dft",
+ "p3-field",
+ "p3-matrix",
+ "p3-maybe-rayon",
+ "p3-uni-stark",
+ "p3-util",
+ "serde",
+ "thiserror",
  "tracing",
 ]
 
