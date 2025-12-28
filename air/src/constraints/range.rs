@@ -8,8 +8,8 @@
 use core::borrow::Borrow;
 
 use miden_core::PrimeCharacteristicRing;
+use miden_crypto::MidenAirBuilder;
 use p3_matrix::Matrix;
-use p3_miden_air::MidenAirBuilder;
 
 use crate::MainTraceCols;
 

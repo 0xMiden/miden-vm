@@ -7,7 +7,7 @@
 //! - (Future: decoder, stack, chiplets)
 
 use miden_core::PrimeCharacteristicRing;
-use p3_miden_air::MidenAirBuilder;
+use miden_crypto::MidenAirBuilder;
 
 use crate::MainTraceCols;
 

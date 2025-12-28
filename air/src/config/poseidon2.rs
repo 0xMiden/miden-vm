@@ -3,12 +3,14 @@
 //! This module provides a STARK configuration using the Poseidon2 hash function,
 //! which is an algebraic hash function designed for STARK-friendly operations.
 
-use miden_crypto::hash::algebraic_sponge::{
-    Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
+use miden_crypto::{
+    BinomialExtensionField,
+    hash::algebraic_sponge::{
+        Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
+    },
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 use p3_uni_stark::StarkConfig;

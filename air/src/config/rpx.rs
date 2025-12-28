@@ -3,12 +3,12 @@
 //! This module provides a STARK configuration using the Rescue Prime eXtension (RPX)
 //! hash function, which is Miden's native algebraic hash function with extension field rounds.
 
-use miden_crypto::hash::algebraic_sponge::{
-    RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256,
+use miden_crypto::{
+    BinomialExtensionField,
+    hash::algebraic_sponge::{RpxChallenger, RpxCompression, RpxHasher, RpxPermutation256},
 };
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
-use p3_field::extension::BinomialExtensionField;
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 use p3_uni_stark::StarkConfig;

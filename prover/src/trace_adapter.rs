@@ -9,8 +9,8 @@ use miden_air::{
     Felt,
     trace::{AUX_TRACE_WIDTH, TRACE_WIDTH, main_trace::ColMatrix},
 };
+use miden_crypto::ExtensionField;
 use miden_processor::ExecutionTrace;
-use p3_field::ExtensionField;
 use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 
