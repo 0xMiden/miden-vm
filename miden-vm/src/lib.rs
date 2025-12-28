@@ -9,6 +9,8 @@ pub use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use miden_processor::execute_sync;
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, AsyncHost, BaseHost, DefaultHost, ExecutionError, ExecutionTrace,
     Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, ZERO, crypto, execute, utils,

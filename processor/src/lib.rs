@@ -159,10 +159,15 @@ pub struct ChipletsTrace {
 /// Returns an execution trace resulting from executing the provided program against the provided
 /// inputs.
 ///
+/// This is an async function that works on all platforms including wasm32.
+///
 /// The `host` parameter is used to provide the external environment to the program being executed,
 /// such as access to the advice provider and libraries that the program depends on.
+///
+/// # Errors
+/// Returns an error if program execution fails for any reason.
 #[tracing::instrument("execute_program", skip_all)]
-pub fn execute(
+pub async fn execute(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -171,8 +176,9 @@ pub fn execute(
 ) -> Result<ExecutionTrace, ExecutionError> {
     let stack_inputs: Vec<Felt> = stack_inputs.into_iter().rev().collect();
     let processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host, options.core_trace_fragment_size())?;
+    let (execution_output, trace_generation_context) = processor
+        .execute_for_trace(program, host, options.core_trace_fragment_size())
+        .await?;
 
     let trace = build_trace(
         execution_output,
@@ -183,6 +189,41 @@ pub fn execute(
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)
+}
+
+/// Synchronous wrapper for the async `execute()` function.
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the
+/// async `execute()` method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use the async `execute()`
+/// method instead in async contexts.
+#[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument("execute_program_sync", skip_all)]
+pub fn execute_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl AsyncHost,
+    options: ExecutionOptions,
+) -> Result<ExecutionTrace, ExecutionError> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(_handle) => {
+            // We're already inside a Tokio runtime - this is not supported
+            // because we cannot safely create a nested runtime or move the
+            // non-Send host reference to another thread
+            panic!(
+                "Cannot call execute_sync from within a Tokio runtime. \
+                 Use the async execute() method instead."
+            )
+        },
+        Err(_) => {
+            // No runtime exists - create one and use it
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(execute(program, stack_inputs, advice_inputs, host, options))
+        },
+    }
 }
 
 // PROCESS STATE
