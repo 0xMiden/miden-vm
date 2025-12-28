@@ -101,7 +101,7 @@ pub fn prove(
         now.elapsed().as_millis()
     );
 
-    let stack_outputs = trace.stack_outputs().clone();
+    let stack_outputs = *trace.stack_outputs();
     let hash_fn = options.hash_fn();
 
     // extract precompile requests from the trace to include in the proof
@@ -113,7 +113,7 @@ pub fn prove(
             let prover = ExecutionProver::<Blake3_192, WinterRandomCoin<_>>::new(
                 options,
                 stack_inputs,
-                stack_outputs.clone(),
+                stack_outputs,
             );
             maybe_await!(prover.prove(trace))
         },
@@ -121,7 +121,7 @@ pub fn prove(
             let prover = ExecutionProver::<Blake3_256, WinterRandomCoin<_>>::new(
                 options,
                 stack_inputs,
-                stack_outputs.clone(),
+                stack_outputs,
             );
             maybe_await!(prover.prove(trace))
         },
@@ -129,7 +129,7 @@ pub fn prove(
             let prover = ExecutionProver::<Rpo256, RpoRandomCoin>::new(
                 options,
                 stack_inputs,
-                stack_outputs.clone(),
+                stack_outputs,
             );
             #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
             let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpo256);
@@ -139,7 +139,7 @@ pub fn prove(
             let prover = ExecutionProver::<Rpx256, RpxRandomCoin>::new(
                 options,
                 stack_inputs,
-                stack_outputs.clone(),
+                stack_outputs,
             );
             #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
             let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpx256);
@@ -149,7 +149,7 @@ pub fn prove(
             let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
                 options,
                 stack_inputs,
-                stack_outputs.clone(),
+                stack_outputs,
             );
             maybe_await!(prover.prove(trace))
         },
@@ -249,8 +249,8 @@ where
         let final_pc_transcript = trace.final_precompile_transcript();
         PublicInputs::new(
             program_info,
-            self.stack_inputs.clone(),
-            self.stack_outputs.clone(),
+            self.stack_inputs,
+            self.stack_outputs,
             final_pc_transcript.state(),
         )
     }
