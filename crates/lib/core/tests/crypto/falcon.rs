@@ -523,18 +523,6 @@ fn generate_data_probabilistic_product_test(
     // push the polynomials to the advice stack
     let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_canonical_u64()).collect();
 
-    // Debug: check first few values
-    eprintln!(
-        "Challenge values: [{}, {}]",
-        challenge.0.as_canonical_u64(),
-        challenge.1.as_canonical_u64()
-    );
-    eprintln!("First 10 polynomial values on advice stack:");
-    for (i, &val) in polynomials.iter().take(10).enumerate() {
-        eprintln!("  [{}] = {} (< M={}: {})", i, val, M, val < M);
-    }
-    eprintln!("Total polynomial count: {}", polynomials.len());
-
     advice_stack.extend_from_slice(&polynomials);
 
     // compute hash of h and place it on the stack.
