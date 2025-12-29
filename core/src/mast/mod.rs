@@ -602,15 +602,33 @@ impl MastForest {
             // If a target operation index is provided, return the assembly op associated with that
             // operation.
             Some(target_op_idx) => {
+                // With the 1-1 mapping, every operation covered by an AsmOp is explicitly linked
+                // to that AsmOp. We need to find the minimum op_idx for each unique AsmOp decorator
+                // to determine the start of its range, then check if target_op_idx falls within
+                // that range.
+                let mut asmop_ranges: std::collections::HashMap<DecoratorId, (usize, usize)> = std::collections::HashMap::new();
+                
+                // First pass: collect all AsmOp decorators and find their minimum op_idx
                 for (op_idx, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
+                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id) {
+                        let num_cycles = assembly_op.num_cycles() as usize;
+                        asmop_ranges
+                            .entry(decorator_id)
+                            .and_modify(|(min_idx, cycles)| {
+                                *min_idx = (*min_idx).min(op_idx);
+                                *cycles = num_cycles; // num_cycles should be the same for same decorator_id
+                            })
+                            .or_insert((op_idx, num_cycles));
+                    }
+                }
+                
+                // Second pass: check if target_op_idx falls within any AsmOp's range
+                for (decorator_id, (min_op_idx, num_cycles)) in asmop_ranges {
+                    if target_op_idx >= min_op_idx
+                        && target_op_idx < min_op_idx + num_cycles
+                        && let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
                     {
-                        // With the 1-1 mapping, every operation covered by an AsmOp is linked to
-                        // that AsmOp. We can directly check if this decorator is linked to the
-                        // target operation index.
-                        if op_idx == target_op_idx {
-                            return Some(assembly_op);
-                        }
+                        return Some(assembly_op);
                     }
                 }
             },
