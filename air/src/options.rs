@@ -1,8 +1,6 @@
 use winter_air::BatchingMethod;
 
-use super::{
-    ExecutionOptionsError, FieldExtension, HashFunction, WinterProofOptions, trace::MIN_TRACE_LEN,
-};
+use super::{ExecutionOptionsError, FieldExtension, HashFunction, WinterProofOptions};
 
 // PROVING OPTIONS
 // ================================================================================================
@@ -170,14 +168,17 @@ impl From<ProvingOptions> for WinterProofOptions {
 // EXECUTION OPTIONS
 // ================================================================================================
 
+/// Duplicate of `miden_processor::fast::DEFAULT_CORE_TRACE_FRAGMENT_SIZE` until `ExecutionOptions`
+/// is moved to `miden_air`.
+const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
+
 /// A set of parameters specifying execution parameters of the VM.
 ///
 /// - `max_cycles` specifies the maximum number of cycles a program is allowed to execute.
 /// - `expected_cycles` specifies the number of cycles a program is expected to execute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionOptions {
-    max_cycles: u32,
-    expected_cycles: u32,
+    core_trace_fragment_size: usize,
     enable_tracing: bool,
     enable_debugging: bool,
 }
@@ -185,8 +186,7 @@ pub struct ExecutionOptions {
 impl Default for ExecutionOptions {
     fn default() -> Self {
         ExecutionOptions {
-            max_cycles: Self::MAX_CYCLES,
-            expected_cycles: MIN_TRACE_LEN as u32,
+            core_trace_fragment_size: DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             enable_tracing: false,
             enable_debugging: false,
         }
@@ -207,46 +207,21 @@ impl ExecutionOptions {
     ///
     /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
     pub fn new(
-        max_cycles: Option<u32>,
-        expected_cycles: u32,
+        core_trace_fragment_size: usize,
         enable_tracing: bool,
         enable_debugging: bool,
     ) -> Result<Self, ExecutionOptionsError> {
-        // Validate max cycles.
-        let max_cycles = if let Some(max_cycles) = max_cycles {
-            if max_cycles > Self::MAX_CYCLES {
-                return Err(ExecutionOptionsError::MaxCycleNumTooBig {
-                    max_cycles,
-                    max_cycles_limit: Self::MAX_CYCLES,
-                });
-            }
-            if max_cycles < MIN_TRACE_LEN as u32 {
-                return Err(ExecutionOptionsError::MaxCycleNumTooSmall {
-                    max_cycles,
-                    min_cycles_limit: MIN_TRACE_LEN,
-                });
-            }
-            max_cycles
-        } else {
-            Self::MAX_CYCLES
-        };
-        // Validate expected cycles.
-        if max_cycles < expected_cycles {
-            return Err(ExecutionOptionsError::ExpectedCyclesTooBig {
-                max_cycles,
-                expected_cycles,
-            });
-        }
-        // Round up the expected number of cycles to the next power of two. If it is smaller than
-        // MIN_TRACE_LEN -- pad expected number to it.
-        let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
-
         Ok(ExecutionOptions {
-            max_cycles,
-            expected_cycles,
+            core_trace_fragment_size,
             enable_tracing,
             enable_debugging,
         })
+    }
+
+    /// Sets the size of core trace fragments when generating execution traces.
+    pub fn with_core_trace_fragment_size(mut self, size: usize) -> Self {
+        self.core_trace_fragment_size = size;
+        self
     }
 
     /// Enables execution of the `trace` instructions.
@@ -270,18 +245,9 @@ impl ExecutionOptions {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns maximum number of cycles a program is allowed to execute for.
-    pub fn max_cycles(&self) -> u32 {
-        self.max_cycles
-    }
-
-    /// Returns the number of cycles a program is expected to take.
-    ///
-    /// This will serve as a hint to the VM for how much memory to allocate for a program's
-    /// execution trace and may result in performance improvements when the number of expected
-    /// cycles is equal to the number of actual cycles.
-    pub fn expected_cycles(&self) -> u32 {
-        self.expected_cycles
+    /// Returns the size of core trace fragments when generating execution traces.
+    pub fn core_trace_fragment_size(&self) -> usize {
+        self.core_trace_fragment_size
     }
 
     /// Returns a flag indicating whether the VM should execute `trace` instructions.

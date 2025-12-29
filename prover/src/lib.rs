@@ -17,7 +17,9 @@ use miden_processor::{
         Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
         Rpx256, RpxRandomCoin, WinterRandomCoin,
     },
+    fast::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, FastProcessor},
     math::{Felt, FieldElement},
+    parallel::build_trace,
 };
 use tracing::instrument;
 use winter_maybe_async::{maybe_async, maybe_await};
@@ -62,19 +64,33 @@ pub fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
+    host: &mut impl AsyncHost,
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
-    // execute the program to create an execution trace
+    // execute the program to create an execution trace using FastProcessor
     #[cfg(feature = "std")]
     let now = Instant::now();
-    let mut trace = miden_processor::execute(
-        program,
-        stack_inputs.clone(),
-        advice_inputs,
-        host,
-        *options.execution_options(),
-    )?;
+
+    // Reverse stack inputs since FastProcessor expects them in reverse order
+    // (first element = bottom of stack, last element = top)
+    let stack_inputs_reversed: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().rev().collect();
+
+    let processor = if options.execution_options().enable_debugging() {
+        FastProcessor::new_debug(&stack_inputs_reversed, advice_inputs)
+    } else {
+        FastProcessor::new_with_advice_inputs(&stack_inputs_reversed, advice_inputs)
+    };
+
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(program, host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)?;
+
+    let mut trace = build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        program.kernel().clone(),
+    );
+
     #[cfg(feature = "std")]
     tracing::event!(
         tracing::Level::INFO,

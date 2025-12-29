@@ -11,12 +11,13 @@ use core::array;
 use miden_core::{
     EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::rpo::Rpo256;
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use sha2::{Digest, Sha512};
 
-use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
 /// Event name for the SHA512 hash_bytes operation.
 pub const SHA512_HASH_BYTES_EVENT_NAME: EventName =
@@ -104,7 +105,7 @@ impl Sha512Preimage {
     }
 
     pub fn as_felts(&self) -> Vec<Felt> {
-        bytes_to_packed_u32_felts(self.as_ref())
+        bytes_to_packed_u32_elements(self.as_ref())
     }
 
     pub fn input_commitment(&self) -> Word {

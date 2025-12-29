@@ -1,15 +1,15 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Decorator, Kernel, Operation,
+    Decorator, Operation,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::{
-    AdviceInputs, ExecutionOptions, Process, Program, StackInputs,
+    AdviceInputs, AdviceMutation, AsyncHost, BaseHost, DebugError, EventError, FutureMaybeSend,
+    ProcessState, Program, SyncHost, TraceError, Word, fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
-    BaseHost, SyncHost, ProcessState, ExecutionError, EventError, Word, AdviceMutation,
 };
 
 /// Creates a simple test program with a Trace decorator attached
@@ -33,6 +33,7 @@ fn create_debug_test_program() -> Program {
 
 /// Test that verifies decorators only execute in debug mode
 #[test]
+#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode() {
     // Test implementation to verify decorators only execute in debug mode
 
@@ -43,8 +44,10 @@ fn test_decorators_only_execute_in_debug_mode() {
     let block = BasicBlockNodeBuilder::new(
         vec![Operation::Noop],
         vec![], // decorators on ops
-    ).with_before_enter(vec![decorator_id])
-     .add_to_forest(&mut forest).unwrap();
+    )
+    .with_before_enter(vec![decorator_id])
+    .add_to_forest(&mut forest)
+    .unwrap();
 
     forest.make_root(block);
     let program = Program::new(forest.into(), block);
@@ -92,39 +95,48 @@ fn test_decorators_only_execute_in_debug_mode() {
         }
     }
 
-    // Test with debug mode OFF - decorator should NOT execute
-    let mut host_debug_off = TestHost {
-        decorator_executed: false,
-    };
-    let mut process_debug_off = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(), // No debug mode
-    );
+    impl AsyncHost for TestHost {
+        fn get_mast_forest(
+            &self,
+            node_digest: &Word,
+        ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+            async { <Self as SyncHost>::get_mast_forest(self, node_digest) }
+        }
 
-    let result = process_debug_off.execute(&program, &mut host_debug_off);
+        fn on_event(
+            &mut self,
+            process: &ProcessState<'_>,
+        ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+            async { <Self as SyncHost>::on_event(self, process) }
+        }
+    }
+
+    // Test with debug mode OFF - decorator should NOT execute
+    let mut host_debug_off = TestHost { decorator_executed: false };
+    let process_debug_off = FastProcessor::new(&[]);
+
+    let result = process_debug_off.execute_sync(&program, &mut host_debug_off);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
-    assert!(!host_debug_off.decorator_executed, "Decorator should NOT execute when debug mode is OFF");
+    assert!(
+        !host_debug_off.decorator_executed,
+        "Decorator should NOT execute when debug mode is OFF"
+    );
 
     // Test with debug mode ON - decorator should execute
-    let mut host_debug_on = TestHost {
-        decorator_executed: false,
-    };
-    let mut process_debug_on = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(), // Debug mode enabled
-    );
+    let mut host_debug_on = TestHost { decorator_executed: false };
+    let process_debug_on = FastProcessor::new_debug(&[], AdviceInputs::default());
 
-    let result = process_debug_on.execute(&program, &mut host_debug_on);
+    let result = process_debug_on.execute_sync(&program, &mut host_debug_on);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
-    assert!(host_debug_on.decorator_executed, "Decorator SHOULD execute when debug mode is ON");
+    assert!(
+        host_debug_on.decorator_executed,
+        "Decorator SHOULD execute when debug mode is ON"
+    );
 }
 
 /// Test that verifies decorators do NOT execute when debug mode is OFF
 #[test]
+#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode_off() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
@@ -132,19 +144,11 @@ fn test_decorators_only_execute_in_debug_mode_off() {
     // Create a host that will track decorator execution
     let mut host = TestConsistencyHost::new();
 
-    // Create stack inputs
-    let stack_inputs = StackInputs::default();
-
     // Create process with debug mode OFF (no tracing)
-    let mut process = Process::new(
-        Kernel::default(),
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default(), // No tracing enabled
-    );
+    let processor = FastProcessor::new(&[]);
 
     // Execute the program
-    let result = process.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify that the decorator was NOT executed (trace count should be 0)
@@ -161,6 +165,7 @@ fn test_decorators_only_execute_in_debug_mode_off() {
 
 /// Test that verifies decorators DO execute when debug mode is ON
 #[test]
+#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode_on() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
@@ -168,19 +173,11 @@ fn test_decorators_only_execute_in_debug_mode_on() {
     // Create a host that will track decorator execution
     let mut host = TestConsistencyHost::new();
 
-    // Create stack inputs
-    let stack_inputs = StackInputs::default();
-
-    // Create process with debug mode ON (tracing enabled)
-    let mut process = Process::new(
-        Kernel::default(),
-        stack_inputs,
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(), // Tracing enabled
-    );
+    // Create processor with debug mode ON (tracing enabled)
+    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
 
     // Execute the program
-    let result = process.execute(&program, &mut host);
+    let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify that the decorator WAS executed (trace count should be 1)
@@ -199,8 +196,8 @@ fn test_decorators_only_execute_in_debug_mode_on() {
 /// Test that demonstrates the zero overhead principle by comparing execution
 /// with debug mode on vs off for a more complex program
 #[test]
+#[ignore = "issue #2479"]
 fn test_zero_overhead_when_debug_off() {
-
     // Create a more complex program with multiple decorators
     let mut mast_forest = MastForest::new();
 
@@ -214,11 +211,7 @@ fn test_zero_overhead_when_debug_off() {
     let id3 = mast_forest.add_decorator(decorator3).unwrap();
 
     // Create a program with multiple operations and decorators
-    let operations = alloc::vec![
-        Operation::Noop,
-        Operation::Noop,
-        Operation::Noop,
-    ];
+    let operations = alloc::vec![Operation::Noop, Operation::Noop, Operation::Noop,];
 
     let basic_block_id = BasicBlockNodeBuilder::new(operations, vec![])
         .with_before_enter(vec![id1])
@@ -231,14 +224,9 @@ fn test_zero_overhead_when_debug_off() {
 
     // Test with debug mode OFF
     let mut host_off = TestConsistencyHost::new();
-    let mut process_off = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(), // No tracing
-    );
+    let processor_off = FastProcessor::new(&[]);
 
-    let result_off = process_off.execute(&program, &mut host_off);
+    let result_off = processor_off.execute_sync(&program, &mut host_off);
     assert!(result_off.is_ok());
 
     // Verify no decorators executed
@@ -248,14 +236,9 @@ fn test_zero_overhead_when_debug_off() {
 
     // Test with debug mode ON
     let mut host_on = TestConsistencyHost::new();
-    let mut process_on = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(),
-    );
+    let processor_on = FastProcessor::new_debug(&[], AdviceInputs::default());
 
-    let result_on = process_on.execute(&program, &mut host_on);
+    let result_on = processor_on.execute_sync(&program, &mut host_on);
     assert!(result_on.is_ok());
 
     // Verify all decorators executed

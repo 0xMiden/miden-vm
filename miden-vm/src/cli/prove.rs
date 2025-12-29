@@ -3,7 +3,9 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, ExecutionOptionsError, fast::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
 use super::{
@@ -62,16 +64,16 @@ pub struct ProveCmd {
     /// Disable debug instructions (release mode)
     #[arg(long = "release")]
     release: bool,
+
+    /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl ProveCmd {
     pub fn get_proof_options(&self) -> Result<ProvingOptions, ExecutionOptionsError> {
-        let exec_options = ExecutionOptions::new(
-            Some(self.max_cycles),
-            self.expected_cycles,
-            self.trace,
-            !self.release,
-        )?;
+        let exec_options =
+            ExecutionOptions::new(DEFAULT_CORE_TRACE_FRAGMENT_SIZE, self.trace, !self.release)?;
 
         let hash_fn = HashFunction::try_from(self.hasher.as_str())?;
         Ok(match self.security.as_str() {
@@ -89,6 +91,16 @@ impl ProveCmd {
         // load libraries from files
         let libraries = Libraries::new(&self.library_paths)?;
 
+        // validate kernel file if provided
+        if let Some(ref kernel_path) = self.kernel_file
+            && !kernel_path.is_file()
+        {
+            return Err(Report::msg(format!(
+                "Kernel file `{}` must be a file.",
+                kernel_path.display()
+            )));
+        }
+
         // determine file type based on extension
         let ext = self
             .program_file
@@ -104,7 +116,12 @@ impl ProveCmd {
         let (program, mut host) = match ext.as_str() {
             "masp" => (get_masp_program(&self.program_file)?, host),
             "masm" => {
-                let (program, source_manager) = get_masm_program(&self.program_file, &libraries)?;
+                let (program, source_manager) = get_masm_program(
+                    &self.program_file,
+                    &libraries,
+                    !self.release,
+                    self.kernel_file.as_deref(),
+                )?;
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),

@@ -14,16 +14,13 @@ use miden_core::{Felt, QuadFelt, WORD_SIZE, Word, ZERO};
 
 use crate::{
     ContextId,
-    chiplets::{
-        ace::{
-            eval_circuit,
-            instruction::{Op, decode_instruction},
-            tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
-            trace::CircuitEvaluation,
-        },
-        memory::Memory,
+    chiplets::ace::{
+        instruction::{Op, decode_instruction},
+        tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
+        trace::CircuitEvaluation,
     },
     errors::ErrorContext,
+    fast::{Memory, NoopTracer, eval_circuit_fast_},
 };
 
 mod circuit;
@@ -235,6 +232,7 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
     let clk = RowIndex::from(0);
     let mut mem = Memory::default();
     let err_ctx = ();
+    let mut tracer = NoopTracer;
 
     let circuit_mem = generate_memory(circuit, inputs);
 
@@ -244,7 +242,7 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         ptr_curr += Felt::from(4u8);
     }
 
-    eval_circuit(
+    eval_circuit_fast_(
         ctx,
         ptr,
         clk + 1,
@@ -252,6 +250,7 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         Felt::from(circuit.num_eval() as u32),
         &mut mem,
         &err_ctx,
+        &mut tracer,
     )
     .unwrap();
 }

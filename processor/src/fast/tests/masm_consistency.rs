@@ -1,3 +1,7 @@
+use alloc::string::String;
+
+use rstest::fixture;
+
 use super::*;
 
 #[rstest]
@@ -225,6 +229,7 @@ use super::*;
     vec![Felt::from(u32::MAX), ONE]
 )]
 fn test_masm_consistency(
+    testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
     #[case] stack_inputs: Vec<Felt>,
@@ -257,7 +262,7 @@ fn test_masm_consistency(
 
     // fast processor
     let processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     // fast processor by step
     let stepped_stack_outputs = {
@@ -265,17 +270,8 @@ fn test_masm_consistency(
         processor.execute_by_step_sync(&program, &mut host).unwrap()
     };
 
-    // slow processor
-    let mut slow_processor = Process::new(
-        kernel_lib.map(|k| k.kernel().clone()).unwrap_or_default(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap();
-
     assert_eq!(fast_stack_outputs, stepped_stack_outputs);
-    assert_eq!(fast_stack_outputs, slow_stack_outputs);
+    insta::assert_debug_snapshot!(testname, fast_stack_outputs);
 }
 
 /// Tests that emitted errors are consistent between the fast and slow processors.
@@ -312,6 +308,7 @@ fn test_masm_consistency(
     vec![Felt::from(u32::MAX) + ONE, ZERO]
 )]
 fn test_masm_errors_consistency(
+    testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
     #[case] stack_inputs: Vec<Felt>,
@@ -352,17 +349,8 @@ fn test_masm_errors_consistency(
         processor.execute_by_step_sync(&program, &mut host).unwrap_err()
     };
 
-    // slow processor
-    let mut slow_processor = Process::new(
-        kernel_lib.map(|k| k.kernel().clone()).unwrap_or_default(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    let slow_err = slow_processor.execute(&program, &mut host).unwrap_err();
-
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
-    assert_eq!(fast_err.to_string(), slow_err.to_string());
+    insta::assert_debug_snapshot!(testname, fast_err);
 }
 
 /// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
@@ -401,14 +389,21 @@ fn test_log_precompile_correctness() {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(&stack_inputs);
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap();
+    let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
     // Verify stack outputs: [R1, R0, CAP_NEXT, ...]
-    let r1 = stack_outputs.get_stack_word_be(0).unwrap();
-    let r0 = stack_outputs.get_stack_word_be(4).unwrap();
-    let cap_next = stack_outputs.get_stack_word_be(8).unwrap();
+    let r1 = execution_output.stack.get_stack_word_be(0).unwrap();
+    let r0 = execution_output.stack.get_stack_word_be(4).unwrap();
+    let cap_next = execution_output.stack.get_stack_word_be(8).unwrap();
 
     assert_eq!(&hasher_state[0..4], cap_next.as_slice(), "CAP_NEXT on stack mismatch");
     assert_eq!(&hasher_state[4..8], r0.as_slice(), "R0 on stack mismatch");
     assert_eq!(&hasher_state[8..12], r1.as_slice(), "R1 on stack mismatch");
+}
+
+// Workaround to make insta and rstest work together.
+// See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
+#[fixture]
+fn testname() -> String {
+    std::thread::current().name().unwrap().to_string()
 }

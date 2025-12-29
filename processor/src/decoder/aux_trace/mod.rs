@@ -1,9 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::main_trace::MainTrace;
+use miden_air::{Felt, trace::main_trace::MainTrace};
 use miden_core::FieldElement;
 
-use super::{Felt, ONE, ZERO};
 use crate::trace::AuxColumnBuilder;
 
 mod block_hash_table;

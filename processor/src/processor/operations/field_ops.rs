@@ -8,6 +8,9 @@ use crate::{
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
 };
 
+#[cfg(test)]
+mod tests;
+
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]

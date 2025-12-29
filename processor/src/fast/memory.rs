@@ -156,6 +156,15 @@ impl Memory {
 
         Ok(word)
     }
+
+    // TEST HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the number of words that were accessed at least once across all contexts.
+    #[cfg(test)]
+    pub fn num_accessed_words(&self) -> usize {
+        self.memory.len()
+    }
 }
 
 // HELPERS

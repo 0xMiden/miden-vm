@@ -57,6 +57,7 @@ miden-assembly.workspace = true
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { version = "1.4" }
+proptest.workspace = true
 rstest = { version = "0.26" }
 winter-fri.workspace = true
 winter-utils.workspace = true

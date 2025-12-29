@@ -29,11 +29,12 @@ use core::array;
 use miden_core::{
     EventName, Felt, Word, ZERO,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 
-use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
 /// Event name for the keccak256 hash_bytes operation.
 pub const KECCAK_HASH_BYTES_EVENT_NAME: EventName =
@@ -154,7 +155,7 @@ impl KeccakPreimage {
     ///
     /// Produces the same u32‑packed format expected by RPO hashing in MASM wrappers.
     pub fn as_felts(&self) -> Vec<Felt> {
-        bytes_to_packed_u32_felts(self.as_ref())
+        bytes_to_packed_u32_elements(self.as_ref())
     }
 
     /// Computes the RPO hash of the input data in field element format.

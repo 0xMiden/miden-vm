@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 
-use super::{Felt, ONE, Word, ZERO};
+use miden_air::Felt;
+use miden_core::{ONE, Word, ZERO};
+
 use crate::system::ContextId;
 
 // BLOCK STACK

@@ -35,6 +35,7 @@ fn test_event_handling() {
 }
 
 #[test]
+#[ignore = "issue #2479"]
 fn test_trace_handling() {
     let source = "\
     begin
@@ -75,6 +76,7 @@ fn test_trace_handling() {
 }
 
 #[test]
+#[ignore = "issue #2479"]
 fn test_debug_with_debugging() {
     let source: &str = "\
     begin

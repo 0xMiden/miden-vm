@@ -11,6 +11,9 @@ use crate::{
     utils::split_element,
 };
 
+#[cfg(test)]
+mod tests;
+
 const U32_MAX: u64 = u32::MAX as u64;
 
 macro_rules! require_u32_operands {

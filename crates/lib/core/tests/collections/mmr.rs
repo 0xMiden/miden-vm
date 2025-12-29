@@ -520,9 +520,9 @@ fn test_mmr_pack() {
     expect_data.extend_from_slice(&[Felt::new(3), ZERO, ZERO, ZERO]); // num_leaves
     expect_data.extend_from_slice(&hash_data);
 
-    let (process, _) = build_test!(source).execute_process().unwrap();
+    let (execution_output, _) = build_test!(source).execute_for_output().unwrap();
 
-    let advice_data = process.advice.get_mapped_values(&hash_u8).unwrap();
+    let advice_data = execution_output.advice.get_mapped_values(&hash_u8).unwrap();
     assert_eq!(advice_data, &expect_data);
 }
 

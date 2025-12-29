@@ -6,12 +6,20 @@
 
 #### Changes
 
+- Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
 - [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).
 - Run batch inversion concurrently per fragment in parallel trace generation ([#2405](https://github.com/0xMiden/miden-vm/issues/2405)).
 - Adds a cached commitment to the `MastForest` ([#2447](https://github.com/0xMiden/miden-vm/pull/2447))
 - Add MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).
 - Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
 - Removed undocumented `err_code` field from `ExecutionError::NotU32Values` ([#2419](https://github.com/0xMiden/miden-vm/pull/2419)).
+- Moved `bytes_to_packed_u32_elements` to `miden-core::utils` and added `packed_u32_elements_to_bytes` inverse function ([#2458](https://github.com/0xMiden/miden-vm/pull/2458)).
+- [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
+- [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
+
+## 0.20.1 (2025-12-14)
+
+- Fix issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
 
 ## 0.20.0 (2025-12-05)
 

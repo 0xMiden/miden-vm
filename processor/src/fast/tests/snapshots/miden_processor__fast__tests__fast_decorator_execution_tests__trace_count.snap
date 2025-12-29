@@ -1,0 +1,8 @@
+---
+source: processor/src/fast/tests/fast_decorator_execution_tests.rs
+expression: "(host.get_trace_count(1), host.get_trace_count(2))"
+---
+(
+    1,
+    1,
+)

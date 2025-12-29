@@ -10,9 +10,8 @@ pub use miden_assembly::{
     diagnostics,
 };
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, AsmOpInfo, AsyncHost, BaseHost, DefaultHost, ExecutionError,
-    ExecutionTrace, Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, VmState,
-    VmStateIterator, ZERO, crypto, execute, execute_iter, utils,
+    AdviceInputs, AdviceProvider, AsyncHost, BaseHost, DefaultHost, ExecutionError, ExecutionTrace,
+    Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, ZERO, crypto, execute, utils,
 };
 pub use miden_prover::{
     ExecutionProof, FieldExtension, HashFunction, InputError, Proof, ProvingOptions, StackOutputs,

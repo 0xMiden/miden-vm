@@ -149,6 +149,11 @@ where
     pub fn source_manager(&self) -> &Arc<S> {
         &self.source_manager
     }
+
+    /// Returns a reference to the AST module.
+    pub fn ast(&self) -> &Module {
+        &self.ast
+    }
 }
 
 // PROOF FILE

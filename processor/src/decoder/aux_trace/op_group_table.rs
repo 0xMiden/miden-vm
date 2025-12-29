@@ -2,9 +2,9 @@ use miden_air::{
     RowIndex,
     trace::decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use miden_core::{OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
+use miden_core::{ONE, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace, ONE};
+use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace};
 use crate::debug::BusDebugger;
 
 // OP GROUP TABLE COLUMN
