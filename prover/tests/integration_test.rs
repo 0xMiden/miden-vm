@@ -204,6 +204,7 @@ mod fast_parallel {
     use miden_air::ProcessorAir;
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::Felt;
+    use miden_crypto::stark;
     use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
     use miden_prover::{HashFunction, execution_trace_to_row_major};
     use miden_verifier::verify;
@@ -259,7 +260,7 @@ mod fast_parallel {
 
         // Generate proof using Blake3_256
         let config = miden_air::config::create_blake3_256_config();
-        let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+        let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
         let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
 
         let precompile_requests = trace.precompile_requests().to_vec();

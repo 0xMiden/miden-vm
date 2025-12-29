@@ -6,6 +6,7 @@ extern crate alloc;
 extern crate std;
 
 use miden_air::ProcessorAir;
+use miden_crypto::stark;
 use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
 
@@ -104,27 +105,27 @@ pub async fn prove(
         },
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();
-            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Keccak => {
             let config = miden_air::config::create_keccak_config();
-            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpo256 => {
             let config = miden_air::config::create_rpo_config();
-            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Poseidon2 => {
             let config = miden_air::config::create_poseidon2_config();
-            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
         HashFunction::Rpx256 => {
             let config = miden_air::config::create_rpx_config();
-            let proof = p3_miden_prover::prove(&config, &air, &trace_matrix, &public_values);
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
             bincode::serialize(&proof).expect("Failed to serialize proof")
         },
     };

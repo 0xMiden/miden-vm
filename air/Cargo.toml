@@ -39,16 +39,11 @@ p3-challenger.workspace = true
 p3-commit.workspace = true
 p3-dft.workspace = true
 p3-maybe-rayon.workspace = true
-p3-field.workspace = true
 p3-miden-fri.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
 p3-merkle-tree.workspace = true
 p3-symmetric.workspace = true
-
-# Miden-specific Plonky3 crates
-p3-miden-air.workspace = true
-p3-miden-prover.workspace = true
 
 # Serialization
 serde.workspace = true

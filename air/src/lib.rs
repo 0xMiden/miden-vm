@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
 use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
-pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir};
+pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 
 mod constraints;
 
@@ -164,9 +164,9 @@ impl<B> ProcessorAir<B> {
     }
 }
 
-impl<EF, B> p3_miden_air::MidenAir<Felt, EF> for ProcessorAir<B>
+impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
 where
-    EF: p3_field::ExtensionField<Felt> + miden_core::ExtensionField<Felt>,
+    EF: miden_core::ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
@@ -195,7 +195,7 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
-    fn eval<AB: p3_miden_air::MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use p3_matrix::Matrix;
 
         use crate::constraints;

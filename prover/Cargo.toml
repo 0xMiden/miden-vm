@@ -35,24 +35,14 @@ rand.workspace = true
 getrandom.workspace = true
 
 # Plonky3 dependencies
-p3-blake3.workspace = true
-p3-challenger.workspace = true
-p3-commit.workspace = true
 p3-dft = { workspace = true, features = ["parallel"] }
-p3-field.workspace = true
 p3-miden-fri.workspace = true
-p3-miden-goldilocks.workspace = true
 p3-interpolation.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
 p3-maybe-rayon.workspace = true
 p3-merkle-tree.workspace = true
-p3-poseidon2.workspace = true
-p3-symmetric.workspace = true
 p3-util = { workspace = true, features = ["parallel"] }
-
-# Miden-specific Plonky3 crates
-p3-miden-prover.workspace = true
 
 # Serialization
 serde.workspace = true
