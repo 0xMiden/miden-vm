@@ -869,13 +869,14 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
     let decorator_id = forest.add_decorator(Decorator::AsmOp(assembly_op.clone())).unwrap();
 
     // Add a basic block node with the decorator at index 2
+    // With 1-to-1 mapping, all operations covered by the AsmOp (indices 2, 3, 4) should be linked
     let operations = vec![
         Operation::Push(Felt::new(1)),
         Operation::Push(Felt::new(2)),
         Operation::Mul,
         Operation::Add,
     ];
-    let decorators = vec![(2, decorator_id)]; // Decorator at operation index 2
+    let decorators = vec![(2, decorator_id), (3, decorator_id), (4, decorator_id)]; // Decorator linked to all operations it covers
     let node_id = BasicBlockNodeBuilder::new(operations, decorators)
         .add_to_forest(&mut forest)
         .unwrap();
