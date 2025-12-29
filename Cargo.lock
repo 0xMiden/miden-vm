@@ -1327,7 +1327,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=bobbin-crate-exports#3ad8d73917ae3015ca1a8dcc9edbe9fd1c3f7e3a"
+source = "git+https://github.com/0xMiden/crypto?branch=next#8a3cf75248a323cfe64163942825d518bb286c9f"
 dependencies = [
  "blake3",
  "cc",
@@ -1364,7 +1364,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=bobbin-crate-exports#3ad8d73917ae3015ca1a8dcc9edbe9fd1c3f7e3a"
+source = "git+https://github.com/0xMiden/crypto?branch=next#8a3cf75248a323cfe64163942825d518bb286c9f"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1513,7 +1513,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.0"
-source = "git+https://github.com/0xMiden/crypto?branch=bobbin-crate-exports#3ad8d73917ae3015ca1a8dcc9edbe9fd1c3f7e3a"
+source = "git+https://github.com/0xMiden/crypto?branch=next#8a3cf75248a323cfe64163942825d518bb286c9f"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",
