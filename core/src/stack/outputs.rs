@@ -1,10 +1,7 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{
-    WORD_SIZE, Word, ZERO,
-    field::{PrimeField64, QuotientMap},
-};
+use miden_crypto::{WORD_SIZE, Word, ZERO, field::PrimeField64};
 
 use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
@@ -35,7 +32,7 @@ impl StackOutputs {
     pub fn new(mut stack: Vec<Felt>) -> Result<Self, OutputError> {
         // validate stack length
         if stack.len() > MIN_STACK_DEPTH {
-            return Err(OutputError::OutputSizeTooBig(stack.len()));
+            return Err(OutputError::OutputStackTooBig(stack.len(), MIN_STACK_DEPTH));
         }
         stack.resize(MIN_STACK_DEPTH, ZERO);
 
@@ -55,12 +52,8 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            .map(|v| {
-                Felt::from_canonical_checked(v)
-                    .ok_or_else(|| format!("value {} exceeds field modulus {}", v, Felt::ORDER_U64))
-            })
-            .collect::<Result<Vec<Felt>, _>>()
-            .map_err(OutputError::InvalidStackElement)?;
+            .map(|v| Felt::try_checked(v).map_err(|e| OutputError::InvalidStackElement(v, e)))
+            .collect::<Result<Vec<Felt>, _>>()?;
 
         Self::new(stack)
     }
