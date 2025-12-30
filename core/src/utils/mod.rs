@@ -2,42 +2,28 @@ use alloc::vec::Vec;
 use core::{
     fmt::Debug,
     ops::{Bound, Range},
-    slice,
 };
 
-use miden_crypto::field::{PrimeCharacteristicRing, PrimeField64};
-#[cfg(feature = "std")]
-pub use miden_crypto::utils::ReadAdapter;
 // RE-EXPORTS
 // ================================================================================================
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     hash::blake::{Blake3_256, Blake3Digest},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-        uninit_vector,
+        flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector,
     },
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
-use crate::{Felt, Word};
+use crate::{
+    Felt, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 
 pub mod math {
     pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
-}
-
-// UTILITY FUNCTIONS
-// ================================================================================================
-
-/// Transmutes a slice of `n` elements into a slice of `n` / `N` elements,
-/// each of which is an array of `N` elements.
-///
-/// # Panics
-/// Panics if `n` is not divisible by `N`.
-pub fn group_slice_elements<T, const N: usize>(source: &[T]) -> &[[T; N]] {
-    assert_eq!(source.len() % N, 0, "source length must be divisible by {N}");
-    let p = source.as_ptr();
-    let len = source.len() / N;
-    unsafe { slice::from_raw_parts(p as *const [T; N], len) }
 }
 
 // TO ELEMENTS
