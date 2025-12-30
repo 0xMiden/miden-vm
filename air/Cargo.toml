@@ -35,7 +35,6 @@ tracing.workspace = true
 
 # Plonky3 dependencies
 p3-blake3.workspace = true
-p3-challenger.workspace = true
 p3-commit.workspace = true
 p3-dft.workspace = true
 p3-maybe-rayon.workspace = true

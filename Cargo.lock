@@ -1209,7 +1209,6 @@ dependencies = [
  "miden-crypto",
  "miden-utils-indexing",
  "p3-blake3",
- "p3-challenger",
  "p3-commit",
  "p3-dft",
  "p3-keccak",

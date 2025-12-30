@@ -8,9 +8,14 @@
 
 use alloc::vec;
 
-use miden_crypto::{field::BinomialExtensionField, stark::StarkConfig};
+use miden_crypto::{
+    field::BinomialExtensionField,
+    stark::{
+        StarkConfig,
+        challenger::{HashChallenger, SerializingChallenger64},
+    },
+};
 use p3_blake3::Blake3;
-use p3_challenger::{HashChallenger, SerializingChallenger64};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_merkle_tree::MerkleTreeMmcs;

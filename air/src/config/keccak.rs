@@ -2,8 +2,13 @@
 
 use alloc::vec;
 
-use miden_crypto::{field::BinomialExtensionField, stark::StarkConfig};
-use p3_challenger::{HashChallenger, SerializingChallenger64};
+use miden_crypto::{
+    field::BinomialExtensionField,
+    stark::{
+        StarkConfig,
+        challenger::{HashChallenger, SerializingChallenger64},
+    },
+};
 use p3_commit::ExtensionMmcs;
 use p3_dft::Radix2DitParallel;
 use p3_keccak::{Keccak256Hash, KeccakF};
