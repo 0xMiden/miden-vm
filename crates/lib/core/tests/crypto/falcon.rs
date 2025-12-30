@@ -315,10 +315,6 @@ fn test_felt_conversion() {
     let via_into: u64 = f.into();
     let via_canonical = f.as_canonical_u64();
 
-    eprintln!("Felt::new(12345):");
-    eprintln!("  via .into(): {}", via_into);
-    eprintln!("  via .as_canonical_u64(): {}", via_canonical);
-
     assert_eq!(via_into, via_canonical, "Felt conversion methods should match!");
 
     // Test with small values < M
@@ -327,9 +323,6 @@ fn test_felt_conversion() {
         let f = Felt::new(val);
         let via_into: u64 = f.into();
         let via_canonical = f.as_canonical_u64();
-        eprintln!("Felt::new({}):", val);
-        eprintln!("  via .into(): {} (< M: {})", via_into, via_into < M);
-        eprintln!("  via .as_canonical_u64(): {} (< M: {})", via_canonical, via_canonical < M);
         assert_eq!(
             via_into, via_canonical,
             "Felt conversion methods should match for value {}",
@@ -341,12 +334,9 @@ fn test_felt_conversion() {
     // Test with values from a hash digest
     let test_values = vec![Felt::new(123), Felt::new(456), Felt::new(789)];
     let digest = Rpo256::hash_elements(&test_values);
-    for (i, &elem) in digest.as_elements().iter().enumerate() {
+    for &elem in digest.as_elements().iter() {
         let via_into: u64 = elem.into();
         let via_canonical = elem.as_canonical_u64();
-        eprintln!("Hash digest[{}]:", i);
-        eprintln!("  via .into(): {}", via_into);
-        eprintln!("  via .as_canonical_u64(): {}", via_canonical);
         assert_eq!(via_into, via_canonical, "Hash element conversion should match!");
     }
 }
