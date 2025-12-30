@@ -32,7 +32,7 @@ impl StackOutputs {
     pub fn new(mut stack: Vec<Felt>) -> Result<Self, OutputError> {
         // validate stack length
         if stack.len() > MIN_STACK_DEPTH {
-            return Err(OutputError::OutputStackTooBig(stack.len(), MIN_STACK_DEPTH));
+            return Err(OutputError::OutputStackTooBig(MIN_STACK_DEPTH, stack.len()));
         }
         stack.resize(MIN_STACK_DEPTH, ZERO);
 
