@@ -194,12 +194,12 @@ pub async fn execute(
 
 /// Synchronous wrapper for the async `execute()` function.
 ///
-/// This method is only available on non-wasm32 targets. On wasm32, use the
-/// async `execute()` method directly since wasm32 runs in the browser's event loop.
+/// This method is only available on non-wasm32 targets. On wasm32, use the async `execute()`
+/// method directly since wasm32 runs in the browser's event loop.
 ///
 /// # Panics
-/// Panics if called from within an existing Tokio runtime. Use the async `execute()`
-/// method instead in async contexts.
+/// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
+/// instead in async contexts.
 #[cfg(not(target_arch = "wasm32"))]
 #[tracing::instrument("execute_program_sync", skip_all)]
 pub fn execute_sync(
@@ -211,9 +211,8 @@ pub fn execute_sync(
 ) -> Result<ExecutionTrace, ExecutionError> {
     match tokio::runtime::Handle::try_current() {
         Ok(_handle) => {
-            // We're already inside a Tokio runtime - this is not supported
-            // because we cannot safely create a nested runtime or move the
-            // non-Send host reference to another thread
+            // We're already inside a Tokio runtime - this is not supported because we cannot
+            // safely create a nested runtime or move the non-Send host reference to another thread
             panic!(
                 "Cannot call execute_sync from within a Tokio runtime. \
                  Use the async execute() method instead."
