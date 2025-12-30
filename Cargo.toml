@@ -98,7 +98,6 @@ p3-blake3        = { version = "0.4", default-features = false }
 p3-challenger    = { version = "0.4", default-features = false }
 p3-commit        = { version = "0.4", default-features = false }
 p3-dft           = { version = "0.4", default-features = false }
-p3-field         = { version = "0.4", default-features = false }
 p3-interpolation = { version = "0.4", default-features = false }
 p3-keccak        = { version = "0.4", default-features = false }
 p3-matrix        = { version = "0.4", default-features = false }

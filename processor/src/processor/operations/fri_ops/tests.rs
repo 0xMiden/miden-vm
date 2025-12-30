@@ -1,5 +1,6 @@
-use miden_core::{BasedVectorSpace, Felt, Field, PrimeCharacteristicRing, QuadFelt};
-use p3_field::TwoAdicField;
+use miden_core::{
+    BasedVectorSpace, Felt, Field, PrimeCharacteristicRing, QuadFelt, field::TwoAdicField,
+};
 use proptest::prelude::*;
 
 use super::{

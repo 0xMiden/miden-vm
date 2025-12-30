@@ -988,9 +988,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.45.0"
+version = "1.45.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b76866be74d68b1595eb8060cb9191dca9c021db2316558e52ddc5d55d41b66c"
+checksum = "983e3b24350c84ab8a65151f537d67afbbf7153bb9f1110e03e9fa9b07f67a5c"
 dependencies = [
  "console",
  "once_cell",
@@ -1323,9 +1323,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f616701654d174d7c2a36e3b62090563fdbb7bdcc53df4ff7d0123506f1cca9b"
+checksum = "5faabb0c18b902bc08e0af0375ecd96252939492ab138f0fc94c112a8dcb40e3"
 dependencies = [
  "blake3",
  "cc",
@@ -1361,9 +1361,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ac7d0e73d4cf3a5682846dfabcc53fc28d24fa2462a5668ef1f8d5d65614d3f"
+checksum = "e7565cb2457f722c5125428c1293f2e6fd8a5873c495f05a4bc9c02c6a19a853"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1458,7 +1458,6 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
- "p3-field",
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-util",
@@ -1503,9 +1502,9 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.20.0"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6448da86226ead305347408061e224d9214deafa2bd946bd2e471b48419b289f"
+checksum = "f1b99de56b2a1dcac1caf76e7906721ec2ea212d7ddb32dcb7dc135602bbac27"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",
@@ -3635,6 +3634,6 @@ checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 
 [[package]]
 name = "zmij"
-version = "1.0.1"
+version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5858cd3a46fff31e77adea2935e357e3a2538d870741617bfb7c943e218fee6"
+checksum = "e9747e91771f56fd7893e1164abd78febd14a670ceec257caad15e051de35f06"

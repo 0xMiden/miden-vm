@@ -66,6 +66,10 @@ pub use miden_crypto::{
     word::LexicographicWord,
 };
 
+pub mod field {
+    pub use miden_crypto::field::*;
+}
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
