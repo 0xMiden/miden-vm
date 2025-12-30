@@ -4,17 +4,17 @@
 //!
 //! - Padded operations (variable size)
 //! - Batch count (4 bytes)
-//! - Indptr array per batch (9 bytes each)
+//! - Delta-encoded indptr per batch (4 bytes each: 8 deltas × 4 bits, packed)
 //! - Padding flags per batch (1 byte each, bit-packed)
 //!
-//! **Total**: `ops_size + 4 + (10 * num_batches)` bytes
+//! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
 
 use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
     Operation,
-    mast::BasicBlockNode,
+    mast::{BasicBlockNode, OP_GROUP_SIZE},
     utils::{ByteReader, DeserializationError, Serializable, SliceReader},
 };
 
@@ -54,13 +54,11 @@ impl BasicBlockDataBuilder {
         // Write number of batches
         (num_batches as u32).write_into(&mut self.node_data);
 
-        // Write indptr arrays for each batch (9 u8s per batch, since max index is 72)
+        // Write delta-encoded indptr arrays for each batch (4 bytes per batch)
         for batch in op_batches {
             let indptr = batch.indptr();
-            for &idx in indptr {
-                debug_assert!(idx <= 72, "batch index {} exceeds maximum of 72", idx);
-                (idx as u8).write_into(&mut self.node_data);
-            }
+            let packed = pack_indptr_deltas(indptr);
+            packed.write_into(&mut self.node_data);
         }
 
         // Write padding metadata (1 byte per batch, bit-packed)
@@ -82,6 +80,58 @@ impl BasicBlockDataBuilder {
     pub fn finalize(self) -> Vec<u8> {
         self.node_data
     }
+}
+
+// INDPTR DELTA ENCODING
+// ================================================================================================
+
+/// Packs 8 indptr deltas into 4 bytes (4 bits each). Elides indptr[0] which is always 0.
+///
+/// Requires full array monotonicity. OpBatch only semantically uses the `[0..num_groups+1]`
+/// prefix, but the tail must be filled (with final ops count) to avoid underflow when
+/// computing deltas for serialization.
+fn pack_indptr_deltas(indptr: &[usize; 9]) -> [u8; 4] {
+    debug_assert_eq!(indptr[0], 0, "indptr must start at 0");
+
+    let mut packed = [0u8; 4];
+    for i in 0..8 {
+        let delta = indptr[i + 1] - indptr[i];
+        debug_assert!(delta <= 9, "delta {} exceeds maximum of 9", delta);
+
+        let byte_idx = i / 2;
+        let nibble_shift = (i % 2) * 4;
+        packed[byte_idx] |= (delta as u8) << nibble_shift;
+    }
+    packed
+}
+
+/// Unpacks 4 bytes of delta-encoded indptr into a full indptr array.
+///
+/// Validates that each delta is in [0, GROUP_SIZE] and reconstructs the cumulative indptr array
+/// starting from the implicit indptr[0] = 0.
+///
+/// # Errors
+///
+/// Returns `DeserializationError::InvalidValue` if any delta exceeds GROUP_SIZE.
+fn unpack_indptr_deltas(packed: &[u8; 4]) -> Result<[usize; 9], DeserializationError> {
+    let mut indptr = [0usize; 9];
+
+    for i in 0..8 {
+        let byte_idx = i / 2;
+        let nibble_shift = (i % 2) * 4;
+        let delta = ((packed[byte_idx] >> nibble_shift) & 0x0f) as usize;
+
+        if delta > OP_GROUP_SIZE {
+            return Err(DeserializationError::InvalidValue(format!(
+                "indptr delta {} exceeds maximum of {} at position {} (operation groups comprise at most {} ops)",
+                delta, OP_GROUP_SIZE, i, OP_GROUP_SIZE
+            )));
+        }
+
+        indptr[i + 1] = indptr[i] + delta;
+    }
+
+    Ok(indptr)
 }
 
 // BASIC BLOCK DATA DECODER
@@ -127,14 +177,11 @@ impl BasicBlockDataDecoder<'_> {
         let num_batches: u32 = ops_data_reader.read()?;
         let num_batches = num_batches as usize;
 
-        // Read indptr arrays (9 u8s per batch)
+        // Read delta-encoded indptr arrays (4 bytes per batch)
         let mut batch_indptrs: Vec<[usize; 9]> = Vec::with_capacity(num_batches);
         for _ in 0..num_batches {
-            let mut indptr = [0usize; 9];
-            for idx in indptr.iter_mut() {
-                let val: u8 = ops_data_reader.read()?;
-                *idx = val as usize;
-            }
+            let packed: [u8; 4] = ops_data_reader.read()?;
+            let indptr = unpack_indptr_deltas(&packed)?;
             batch_indptrs.push(indptr);
         }
 
@@ -205,5 +252,39 @@ impl BasicBlockDataDecoder<'_> {
         }
 
         Ok(op_batches)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::ToString;
+
+    use rstest::rstest;
+
+    use super::*;
+
+    #[rstest]
+    #[case::all_empty([0, 0, 0, 0, 0, 0, 0, 0, 0])]
+    #[case::max_deltas([0, 9, 18, 27, 36, 45, 54, 63, 72])]
+    #[case::min_non_zero_deltas([0, 1, 2, 3, 4, 5, 6, 7, 8])]
+    #[case::mixed_deltas([0, 3, 6, 9, 12, 15, 18, 21, 24])]
+    #[case::some_zero_deltas([0, 0, 5, 5, 10, 10, 15, 15, 20])]
+    fn test_pack_unpack_indptr_roundtrip(#[case] indptr: [usize; 9]) {
+        let packed = pack_indptr_deltas(&indptr);
+        let unpacked = unpack_indptr_deltas(&packed).unwrap();
+        assert_eq!(indptr, unpacked);
+    }
+
+    #[rstest]
+    #[case::delta_10_position_0([0x0a, 0x00, 0x00, 0x00], "delta 10 exceeds maximum of 9")]
+    #[case::delta_15_position_0([0x0f, 0x00, 0x00, 0x00], "delta 15 exceeds maximum of 9")]
+    #[case::delta_10_position_1([0x0a, 0x00, 0x00, 0x00], "delta 10 exceeds maximum of 9")]
+    #[case::delta_11_position_3([0x00, 0xb0, 0x00, 0x00], "delta 11 exceeds maximum of 9")]
+    #[case::delta_14_position_7([0x00, 0x00, 0x00, 0x0e], "delta 14 exceeds maximum of 9")]
+    fn test_unpack_invalid_delta(#[case] packed: [u8; 4], #[case] expected_msg: &str) {
+        let result = unpack_indptr_deltas(&packed);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains(expected_msg));
     }
 }

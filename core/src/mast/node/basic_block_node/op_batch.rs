@@ -17,22 +17,20 @@ use super::{BATCH_SIZE, Felt, GROUP_SIZE, Operation, ZERO};
 pub struct OpBatch {
     /// A list of operations in this batch, including padding noops.
     pub(super) ops: Vec<Operation>,
-    /// An array of indexes in the ops array, marking the beginning and end of each group.
+    /// Indexes marking the start and end of each group in the ops array.
     ///
-    /// The array maintains the invariant that the i-th group (i <= BATCH_SIZE-1) is at
-    /// `self.ops[self.indptr[i]..self.indptr[i+1]]`.
+    /// Group i is at `self.ops[self.indptr[i]..self.indptr[i+1]]`. Groups with immediate values
+    /// have zero-length slices.
     ///
-    /// By convention, the groups containing immediate values have a zero-length slice of the ops
-    /// array.
+    /// Only `[0..num_groups+1]` is valid data. The tail is undefined but must be monotonic
+    /// (filled with final ops count) for delta encoding during serialization.
     pub(super) indptr: [usize; Self::BATCH_SIZE_PLUS_ONE],
-    /// An array of bits representing whether a group had undergone padding
+    /// Whether each group had padding added. Only `[0..num_groups]` is valid.
     pub(super) padding: [bool; BATCH_SIZE],
-    /// Value of groups in the batch, which includes operations and immediate values.
+    /// Group hashes and immediate values. Only `[0..num_groups]` is valid.
     pub(super) groups: [Felt; BATCH_SIZE],
-    /// Number of groups in this batch.
-    ///
-    /// The arrays above are meaningful in their [0..self.num_groups] prefix
-    /// (or [0..self.num_groups + 1] in the case of the indptr array).
+    /// Number of groups. Determines valid prefix sizes: indptr `[0..num_groups+1]`, padding and
+    /// groups `[0..num_groups]`.
     pub(super) num_groups: usize,
 }
 
@@ -134,7 +132,62 @@ impl OpBatch {
         groups: [Felt; BATCH_SIZE],
         num_groups: usize,
     ) -> Self {
-        Self { ops, indptr, padding, groups, num_groups }
+        let batch = Self { ops, indptr, padding, groups, num_groups };
+        #[cfg(debug_assertions)]
+        batch.validate_invariants();
+        batch
+    }
+
+    /// Validates invariants in debug builds: num_groups in range, indptr monotonic (full array),
+    /// final indptr equals ops.len().
+    #[cfg(debug_assertions)]
+    fn validate_invariants(&self) {
+        // Validate num_groups is in valid range
+        assert!(
+            self.num_groups <= BATCH_SIZE,
+            "num_groups {} exceeds BATCH_SIZE {}",
+            self.num_groups,
+            BATCH_SIZE
+        );
+
+        // Validate indptr starts at 0
+        assert_eq!(self.indptr[0], 0, "indptr must start at 0, got {}", self.indptr[0]);
+
+        // Validate monotonicity in the semantically valid prefix [0..num_groups+1]
+        for i in 0..self.num_groups {
+            assert!(
+                self.indptr[i] <= self.indptr[i + 1],
+                "indptr not monotonic in valid prefix: indptr[{}]={} > indptr[{}]={}",
+                i,
+                self.indptr[i],
+                i + 1,
+                self.indptr[i + 1]
+            );
+        }
+
+        // Validate monotonicity across ENTIRE array (required for serialization)
+        for i in 0..Self::BATCH_SIZE_PLUS_ONE - 1 {
+            assert!(
+                self.indptr[i] <= self.indptr[i + 1],
+                "indptr not monotonic at index {}: indptr[{}]={} > indptr[{}]={} \
+                 (full array monotonicity required for delta encoding)",
+                i,
+                i,
+                self.indptr[i],
+                i + 1,
+                self.indptr[i + 1]
+            );
+        }
+
+        // Validate final indptr value matches ops length
+        let final_indptr = self.indptr[Self::BATCH_SIZE_PLUS_ONE - 1];
+        assert_eq!(
+            final_indptr,
+            self.ops.len(),
+            "final indptr value {} doesn't match ops.len() {}",
+            final_indptr,
+            self.ops.len()
+        );
     }
 
     /// Returns the (op_group_idx, op_idx_in_group) given an operation index in the batch. Returns
@@ -327,13 +380,26 @@ impl OpBatchAccumulator {
         self.pad_if_needed();
         self.finalize_indptr();
 
-        OpBatch {
+        // Fill the unused tail of indptr array with the final value to maintain monotonicity
+        // This is required for delta encoding which expects indptr to be monotonically
+        // non-decreasing
+        let final_ops_count = self.ops.len();
+        for i in self.next_group_idx..OpBatch::BATCH_SIZE_PLUS_ONE {
+            self.indptr[i] = final_ops_count;
+        }
+
+        let batch = OpBatch {
             ops: self.ops,
             indptr: self.indptr,
             padding: self.padding,
             groups: self.groups,
             num_groups: self.next_group_idx,
-        }
+        };
+
+        #[cfg(debug_assertions)]
+        batch.validate_invariants();
+
+        batch
     }
 
     // HELPER METHODS

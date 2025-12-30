@@ -1,5 +1,6 @@
 ---
 source: core/src/mast/node/basic_block_node/tests.rs
+assertion_line: 44
 expression: batches
 ---
 [
@@ -15,12 +16,12 @@ expression: batches
             0,
             3,
             3,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
+            3,
+            3,
+            3,
+            3,
+            3,
+            3,
         ],
         padding: [
             true,
