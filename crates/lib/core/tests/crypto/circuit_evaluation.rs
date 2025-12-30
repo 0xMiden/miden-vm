@@ -2,7 +2,7 @@ use miden_core::{
     Felt, ONE, ZERO,
     field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64, QuadFelt},
 };
-use miden_utils_testing::rand::rand_value;
+use miden_utils_testing::rand::rand_quad_felt;
 
 #[test]
 fn circuit_evaluation_prove_verify() {
@@ -39,7 +39,7 @@ fn circuit_evaluation_prove_verify() {
     );
 
     // the circuit
-    let input_0: QuadFelt = rand_value::<QuadFelt>();
+    let input_0 = rand_quad_felt();
     let input_1 = input_0 * (input_0 - QuadFelt::ONE);
     // inputs
     let input_0_coeffs = input_0.as_basis_coefficients_slice();

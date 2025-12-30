@@ -1531,6 +1531,7 @@ dependencies = [
  "miden-air",
  "miden-assembly",
  "miden-core",
+ "miden-crypto",
  "miden-processor",
  "miden-prover",
  "miden-verifier",
