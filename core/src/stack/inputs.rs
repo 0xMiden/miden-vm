@@ -5,7 +5,7 @@ use super::{
     super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
 };
 use crate::{
-    PrimeField64, QuotientMap,
+    field::{PrimeField64, QuotientMap},
     utils::{ByteReader, Deserializable, DeserializationError},
 };
 

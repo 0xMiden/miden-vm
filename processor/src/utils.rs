@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 // RE-EXPORTS
 // ================================================================================================
 pub use miden_core::utils::*;
-use miden_core::{Felt, Field, ONE, ZERO};
+use miden_core::{Felt, ONE, ZERO, field::Field};
 use rayon::prelude::*;
 
 use crate::PrimeField64;

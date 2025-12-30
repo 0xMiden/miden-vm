@@ -5,7 +5,8 @@ use alloc::{string::String, sync::Arc, vec::Vec};
 
 use miden_air::RowIndex;
 use miden_core::{
-    EventId, EventName, Felt, QuadFelt, Word,
+    EventId, EventName, Felt, Word,
+    field::QuadFelt,
     mast::{DecoratorId, MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,

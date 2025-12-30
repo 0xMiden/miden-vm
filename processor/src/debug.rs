@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::fmt;
 
-use miden_core::ExtensionField;
+use miden_core::field::ExtensionField;
 
 use crate::Felt;
 

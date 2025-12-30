@@ -5,7 +5,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, PrimeField64, ZERO};
+use miden_core::{EventName, ZERO, field::PrimeField64};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;

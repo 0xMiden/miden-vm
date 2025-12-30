@@ -2,7 +2,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_core::{
-    PrimeCharacteristicRing,
+    field::PrimeCharacteristicRing,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};

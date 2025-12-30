@@ -5,7 +5,10 @@ use std::{
 };
 
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
-use miden_core::{Felt, PrimeField64, QuotientMap, WORD_SIZE};
+use miden_core::{
+    Felt, WORD_SIZE,
+    field::{PrimeField64, QuotientMap},
+};
 use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 

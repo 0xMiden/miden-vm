@@ -1,4 +1,4 @@
-use miden_core::PrimeField64;
+use miden_core::field::PrimeField64;
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 use miden_utils_testing::prepend_word_to_vec as prepend_word;
 

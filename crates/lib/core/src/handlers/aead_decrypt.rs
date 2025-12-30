@@ -7,7 +7,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, PrimeField64};
+use miden_core::{EventName, field::PrimeField64};
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},

@@ -1,4 +1,4 @@
-use miden_core::{Felt, PrimeField64, ZERO};
+use miden_core::{Felt, ZERO, field::PrimeField64};
 
 use crate::{
     ErrorContext, ExecutionError,

@@ -11,7 +11,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    BasedVectorSpace, Felt, PrimeCharacteristicRing, QuadFelt, WORD_SIZE, Word, ZERO,
+    Felt, WORD_SIZE, Word, ZERO,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
 };
 
 use crate::{

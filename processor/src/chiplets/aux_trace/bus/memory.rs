@@ -14,8 +14,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, PrimeCharacteristicRing,
-    ZERO,
+    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing},
 };
 
 use crate::{

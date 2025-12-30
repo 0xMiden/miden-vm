@@ -1,4 +1,4 @@
-use miden_core::{BasedVectorSpace, QuadFelt};
+use miden_core::field::{BasedVectorSpace, QuadFelt};
 use miden_processor::{ExecutionError, MemoryError};
 use miden_utils_testing::{
     Felt, PrimeField64, build_expected_hash, build_expected_perm, build_op_test, build_test,

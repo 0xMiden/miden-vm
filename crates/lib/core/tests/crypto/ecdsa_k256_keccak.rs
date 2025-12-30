@@ -6,7 +6,8 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    EventName, Felt, PrimeCharacteristicRing, Word,
+    EventName, Felt, Word,
+    field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };

@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{PrimeCharacteristicRing, WORD_SIZE};
+use miden_core::{WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::{Felt, Kernel, KernelRom, TRACE_WIDTH, TraceFragment};
 use crate::{ONE, ZERO};

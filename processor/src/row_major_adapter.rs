@@ -7,7 +7,10 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::{ColMatrix, MainTrace};
-use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing};
+use miden_core::{
+    Felt,
+    field::{ExtensionField, PrimeCharacteristicRing},
+};
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;
 

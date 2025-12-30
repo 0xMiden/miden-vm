@@ -18,8 +18,9 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT,
-    PrimeCharacteristicRing, ZERO, utils::range,
+    Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing},
+    utils::range,
 };
 
 use super::get_op_label;

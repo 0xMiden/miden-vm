@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, PrimeCharacteristicRing, ZERO, crypto::hash::Rpo256};
+use miden_core::{Felt, ZERO, crypto::hash::Rpo256, field::PrimeCharacteristicRing};
 
 use super::*;
 use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};

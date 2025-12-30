@@ -7,7 +7,7 @@ use miden_air::{
         range::{M_COL_IDX, V_COL_IDX},
     },
 };
-use miden_core::{ExtensionField, ZERO};
+use miden_core::{ZERO, field::ExtensionField};
 
 use super::{Felt, uninit_vector};
 use crate::PrimeField64;

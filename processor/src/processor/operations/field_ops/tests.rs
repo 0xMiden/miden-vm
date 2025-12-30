@@ -1,6 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{BasedVectorSpace, Felt, Field, ONE, QuadFelt, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{BasedVectorSpace, Field, QuadFelt},
+    stack::MIN_STACK_DEPTH,
+};
 use miden_utils_testing::rand::rand_value;
 
 use super::{

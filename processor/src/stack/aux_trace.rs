@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::{RowIndex, trace::main_trace::MainTrace};
-use miden_core::{ExtensionField, OPCODE_DYNCALL};
+use miden_core::{OPCODE_DYNCALL, field::ExtensionField};
 
 use super::Felt;
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};

@@ -1,4 +1,4 @@
-use miden_core::{Felt, PrimeField64, WORD_SIZE};
+use miden_core::{Felt, WORD_SIZE, field::PrimeField64};
 use miden_processor::ProcessState;
 
 pub mod aead_decrypt;

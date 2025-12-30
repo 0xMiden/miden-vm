@@ -18,9 +18,10 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Field, Program, Word,
+    Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    field::Field,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
 };

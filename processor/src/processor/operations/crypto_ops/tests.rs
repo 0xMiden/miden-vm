@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    BasedVectorSpace, Felt, QuadFelt, Word, ZERO,
+    Felt, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, apply_permutation},
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
     stack::MIN_STACK_DEPTH,
 };

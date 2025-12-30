@@ -9,7 +9,10 @@ extern crate std;
 use alloc::vec::Vec;
 use core::borrow::{Borrow, BorrowMut};
 
-use miden_core::{ProgramInfo, StackInputs, StackOutputs, precompile::PrecompileTranscriptState};
+use miden_core::{
+    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
+    precompile::PrecompileTranscriptState,
+};
 pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 
 mod constraints;
@@ -166,7 +169,7 @@ impl<B> ProcessorAir<B> {
 
 impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
 where
-    EF: miden_core::ExtensionField<Felt>,
+    EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {

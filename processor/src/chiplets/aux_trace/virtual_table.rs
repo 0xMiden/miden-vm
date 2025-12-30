@@ -8,7 +8,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ExtensionField, Felt, OPCODE_LOGPRECOMPILE, precompile::PrecompileTranscriptState,
+    Felt, OPCODE_LOGPRECOMPILE, field::ExtensionField, precompile::PrecompileTranscriptState,
 };
 
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};

@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::main_trace::MainTrace;
-use miden_core::{ExtensionField, Kernel, precompile::PrecompileTranscriptState};
+use miden_core::{Kernel, field::ExtensionField, precompile::PrecompileTranscriptState};
 use wiring_bus::WiringBusBuilder;
 
 use super::{super::trace::AuxColumnBuilder, Felt, ace::AceHints};

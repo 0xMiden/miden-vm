@@ -4,7 +4,10 @@ use miden_air::{
     RowIndex,
     trace::{chiplets::ace::ACE_CHIPLET_NUM_COLS, main_trace::MainTrace},
 };
-use miden_core::{ExtensionField, Felt, PrimeCharacteristicRing, QuadFelt, ZERO};
+use miden_core::{
+    Felt, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing, QuadFelt},
+};
 
 use crate::{
     ContextId, ExecutionError, PrimeField64,

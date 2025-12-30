@@ -5,7 +5,8 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    ExtensionField, Field, ONE, Operation, Program, Word, ZERO,
+    ONE, Operation, Program, Word, ZERO,
+    field::{ExtensionField, Field},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,

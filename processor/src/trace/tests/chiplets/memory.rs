@@ -11,7 +11,10 @@ use miden_air::{
         },
     },
 };
-use miden_core::{Field, PrimeCharacteristicRing, WORD_SIZE};
+use miden_core::{
+    WORD_SIZE,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, ONE, Operation,

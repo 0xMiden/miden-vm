@@ -4,7 +4,7 @@ use core::{
     ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
 };
 
-use miden_core::{Felt, PrimeCharacteristicRing};
+use miden_core::{Felt, field::PrimeCharacteristicRing};
 
 /// Represents the types of errors that can occur when converting from and into [`RowIndex`] and
 /// using its operations.

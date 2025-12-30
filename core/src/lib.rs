@@ -57,17 +57,12 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_crypto::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
-    field::{
-        BasedVectorSpace, BinomialExtensionField, ExtensionField, Field, PrimeCharacteristicRing,
-        PrimeField64, QuotientMap, batch_multiplicative_inverse,
-    },
-    word::LexicographicWord,
-};
+pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
 
 pub mod field {
     pub use miden_crypto::field::*;
+
+    pub type QuadFelt = BinomialExtensionField<super::Felt, 2>;
 }
 
 pub mod crypto {
@@ -100,8 +95,6 @@ pub mod crypto {
 }
 
 pub mod mast;
-
-pub type QuadFelt = BinomialExtensionField<Felt, 2>;
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

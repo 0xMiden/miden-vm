@@ -1,5 +1,5 @@
 use miden_air::RowIndex;
-use miden_core::PrimeField64;
+use miden_core::field::PrimeField64;
 use miden_processor::{ExecutionError, ZERO};
 use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 

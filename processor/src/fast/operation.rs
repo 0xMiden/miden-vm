@@ -3,8 +3,9 @@ use miden_air::{
     trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    PrimeCharacteristicRing, PrimeField64, QuadFelt, WORD_SIZE, Word, ZERO,
+    WORD_SIZE, Word, ZERO,
     crypto::{hash::Rpo256, merkle::MerklePath},
+    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 

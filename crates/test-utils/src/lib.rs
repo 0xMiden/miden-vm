@@ -20,9 +20,9 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, Field, ONE, PrimeField64, QuadFelt, StackInputs, StackOutputs, WORD_SIZE,
-    Word, ZERO,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
+    field::{Field, PrimeField64, QuadFelt},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
@@ -46,7 +46,10 @@ use proptest::prelude::{Arbitrary, Strategy};
 pub use test_case::test_case;
 
 pub mod math {
-    pub use miden_core::{ExtensionField, Field, PrimeField64, QuadFelt, utils::ToElements};
+    pub use miden_core::{
+        field::{ExtensionField, Field, PrimeField64, QuadFelt},
+        utils::ToElements,
+    };
 }
 
 pub mod serde {

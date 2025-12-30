@@ -9,7 +9,7 @@ use miden_air::{
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{Field, ONE, WORD_SIZE, Word, ZERO, assert_matches};
+use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
 
 use super::{
     CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,

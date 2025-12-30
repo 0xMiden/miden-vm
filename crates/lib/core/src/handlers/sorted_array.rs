@@ -1,6 +1,9 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, LexicographicWord, PrimeCharacteristicRing, PrimeField64, Word};
+use miden_core::{
+    EventName, Felt, LexicographicWord, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Event name for the lowerbound_array operation.

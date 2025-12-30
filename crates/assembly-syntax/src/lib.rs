@@ -7,7 +7,10 @@ extern crate alloc;
 extern crate std;
 
 pub use miden_core::{
-    Felt, PrimeCharacteristicRing, PrimeField64, Word, prettier, utils::DisplayHex,
+    Felt, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+    prettier,
+    utils::DisplayHex,
 };
 pub use miden_debug_types as debuginfo;
 pub use miden_utils_diagnostics::{self as diagnostics, Report};

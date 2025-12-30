@@ -2,8 +2,9 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{chiplets::hasher::STATE_WIDTH, rows::RowIndex};
 use miden_core::{
-    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
+    field::PrimeField64,
     mast::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,

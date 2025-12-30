@@ -6,7 +6,7 @@
 //! - Range checker constraints
 //! - (Future: decoder, stack, chiplets)
 
-use miden_core::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceCols;

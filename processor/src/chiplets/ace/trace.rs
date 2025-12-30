@@ -9,7 +9,10 @@ use miden_air::{
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
-use miden_core::{BasedVectorSpace, Felt, PrimeCharacteristicRing, QuadFelt, Word};
+use miden_core::{
+    Felt, Word,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+};
 
 use crate::{
     ContextId, ExecutionError,

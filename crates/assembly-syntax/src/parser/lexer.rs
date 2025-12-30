@@ -1,7 +1,7 @@
 use alloc::{borrow::Cow, string::String};
 use core::{num::IntErrorKind, ops::Range};
 
-use miden_core::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 use miden_debug_types::{ByteOffset, SourceId, SourceSpan};
 
 use super::{
@@ -627,7 +627,7 @@ fn parse_hex<'input>(
     span: SourceSpan,
     hex_digits: &'input str,
 ) -> Result<Token<'input>, ParsingError> {
-    use miden_core::{Felt, PrimeField64};
+    use miden_core::{Felt, field::PrimeField64};
 
     // Handle odd-length hex strings by padding with a leading zero
     let hex_digits = pad_hex_if_needed(hex_digits);

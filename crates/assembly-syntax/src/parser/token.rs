@@ -2,7 +2,8 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, PrimeCharacteristicRing, PrimeField64,
+    Felt,
+    field::{PrimeCharacteristicRing, PrimeField64},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]

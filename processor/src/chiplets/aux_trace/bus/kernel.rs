@@ -7,7 +7,7 @@ use miden_air::{
         main_trace::MainTrace,
     },
 };
-use miden_core::{ExtensionField, Felt, Word};
+use miden_core::{Felt, Word, field::ExtensionField};
 
 use crate::{
     chiplets::aux_trace::build_value,

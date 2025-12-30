@@ -3,8 +3,12 @@ use miden_air::trace::{
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 use miden_core::{
-    BasedVectorSpace, Felt, PrimeField64, QuadFelt, Word, ZERO, chiplets::hasher::STATE_WIDTH,
-    mast::MastForest, stack::MIN_STACK_DEPTH, utils::range,
+    Felt, Word, ZERO,
+    chiplets::hasher::STATE_WIDTH,
+    field::{BasedVectorSpace, PrimeField64, QuadFelt},
+    mast::MastForest,
+    stack::MIN_STACK_DEPTH,
+    utils::range,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};

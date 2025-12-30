@@ -1,5 +1,8 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{Felt, Field, ONE, PrimeField64, ZERO};
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{Field, PrimeField64},
+};
 
 use crate::{
     ErrorContext, ExecutionError,

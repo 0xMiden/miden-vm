@@ -3,8 +3,9 @@ use std::{sync::Arc, vec};
 use miden_air::{Felt, ProvingOptions, RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{
-    EventName, PrimeField64, ZERO,
+    EventName, ZERO,
     crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
+    field::PrimeField64,
     utils::Deserializable,
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};

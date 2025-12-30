@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 
 use miden_air::{RowIndex, trace::chiplets::kernel_rom::TRACE_WIDTH};
-use miden_core::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 
 use super::{ExecutionError, Felt, Kernel, TraceFragment, Word as Digest};
 use crate::ErrorContext;
