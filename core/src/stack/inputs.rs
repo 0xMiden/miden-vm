@@ -4,10 +4,7 @@ use core::{ops::Deref, slice};
 use super::{
     super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
 };
-use crate::{
-    field::{PrimeField64, QuotientMap},
-    utils::{ByteReader, Deserializable, DeserializationError},
-};
+use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 // STACK INPUTS
 // ================================================================================================
@@ -51,14 +48,7 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            .map(|v| {
-                Felt::from_canonical_checked(v).ok_or_else(|| {
-                    InputError::NotFieldElement(
-                        v,
-                        format!("value {} exceeds field modulus {}", v, Felt::ORDER_U64),
-                    )
-                })
-            })
+            .map(|v| Felt::try_checked(v).map_err(|e| InputError::NotFieldElement(v, e)))
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)

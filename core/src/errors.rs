@@ -11,7 +11,7 @@ pub enum InputError {
     DuplicateAdviceRoot([u8; 32]),
     #[error("number of input values can not exceed {0}, but {1} was provided")]
     InputLengthExceeded(usize, usize),
-    #[error("{0} is not a valid field element: {1}")]
+    #[error("{1}")]
     NotFieldElement(u64, String),
 }
 

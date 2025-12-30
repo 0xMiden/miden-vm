@@ -45,9 +45,6 @@ pub use miden_core::{
 pub use options::{ExecutionOptions, ProvingOptions};
 pub use proof::{ExecutionProof, HashFunction};
 
-// PROCESSOR AIR
-// ================================================================================================
-
 // PUBLIC INPUTS
 // ================================================================================================
 
@@ -138,6 +135,9 @@ impl Deserializable for PublicInputs {
     }
 }
 
+// PROCESSOR AIR
+// ================================================================================================
+
 /// Miden VM Processor AIR implementation.
 ///
 /// This struct defines the constraints for the Miden VM processor.
@@ -222,6 +222,9 @@ where
         constraints::range::enforce_range_bus_constraint(builder, local);
     }
 }
+
+// MAIN TRACE
+// ================================================================================================
 
 #[derive(Debug)]
 #[repr(C)]
