@@ -1,4 +1,8 @@
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_air::{
     RowIndex,
@@ -978,7 +982,7 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<OpBatch>, Word)),
+    HashBasicBlock(Word), // Only stores the digest; op_batches are looked up from op_batches_map
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -991,6 +995,10 @@ pub enum HasherOp {
 #[derive(Debug, Default)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
+    /// Deduplication map for basic block operation batches.
+    /// Maps from basic block digest to its operation batches, avoiding duplication when the same
+    /// basic block is entered multiple times.
+    op_batches_map: BTreeMap<Word, Vec<OpBatch>>,
 }
 
 impl HasherRequestReplay {
@@ -1012,8 +1020,36 @@ impl HasherRequestReplay {
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
+    ///
+    /// Deduplicates operation batches by storing them in a map keyed by the basic block digest.
+    /// If the same basic block is entered multiple times, only one copy of the operation batches
+    /// is stored.
     pub fn record_hash_basic_block(&mut self, op_batches: Vec<OpBatch>, expected_hash: Word) {
-        self.hasher_ops.push_back(HasherOp::HashBasicBlock((op_batches, expected_hash)));
+        // Only store the op_batches if we haven't seen this digest before
+        // If the digest already exists, we verify that the op_batches match (they should, since
+        // the digest is computed from the op_batches)
+        match self.op_batches_map.entry(expected_hash) {
+            alloc::collections::btree_map::Entry::Vacant(entry) => {
+                entry.insert(op_batches);
+            },
+            alloc::collections::btree_map::Entry::Occupied(_) => {
+                // Digest already exists, skip storing (deduplication)
+                // The existing op_batches should match, but we don't verify to avoid overhead
+            },
+        }
+        // Store only the digest in the operation record
+        self.hasher_ops.push_back(HasherOp::HashBasicBlock(expected_hash));
+    }
+
+    /// Returns a reference to the operation batches map for looking up batches during replay.
+    pub fn op_batches_map(&self) -> &BTreeMap<Word, Vec<OpBatch>> {
+        &self.op_batches_map
+    }
+
+    /// Consumes `HasherRequestReplay` and returns both the hasher operations and the operation
+    /// batches map. This allows accessing the map during iteration without cloning.
+    pub fn into_parts(self) -> (VecDeque<HasherOp>, BTreeMap<Word, Vec<OpBatch>>) {
+        (self.hasher_ops, self.op_batches_map)
     }
 
     /// Records a `Hasher::build_merkle_root()` request.

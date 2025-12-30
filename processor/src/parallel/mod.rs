@@ -460,8 +460,11 @@ fn initialize_chiplets(
 ) -> Chiplets {
     let mut chiplets = Chiplets::new(kernel);
 
+    // Extract both the hasher operations and the op_batches_map to avoid cloning
+    let (hasher_ops, op_batches_map) = hasher_for_chiplet.into_parts();
+
     // populate hasher chiplet
-    for hasher_op in hasher_for_chiplet.into_iter() {
+    for hasher_op in hasher_ops.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
                 chiplets.hasher.permute(input_state);
@@ -469,8 +472,18 @@ fn initialize_chiplets(
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
-            HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+            HasherOp::HashBasicBlock(expected_hash) => {
+                // Look up the operation batches from the deduplication map
+                let op_batches = op_batches_map.get(&expected_hash).unwrap_or_else(|| {
+                    panic!(
+                        "op_batches should exist in map for recorded digest {:?}. Map contains {} entries with keys: {:?}",
+                        expected_hash,
+                        op_batches_map.len(),
+                        op_batches_map.keys().collect::<Vec<_>>()
+                    );
+                });
+                // Convert &Vec<OpBatch> to &[OpBatch] for hash_basic_block
+                chiplets.hasher.hash_basic_block(op_batches.as_slice(), expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
                 chiplets.hasher.build_merkle_root(value, &path, index);
