@@ -103,8 +103,8 @@ fn test_rpo_prove_verify() {
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-    // Create proving options with RPO (128-bit security)
-    let options = ProvingOptions::with_128_bit_security(HashFunction::Rpo256);
+    // Create proving options with RPO (96-bit security)
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Rpo256);
 
     // Prove the program
     println!("Proving with RPO...");
@@ -140,8 +140,8 @@ fn test_poseidon2_prove_verify() {
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-    // Create proving options with Poseidon2 (128-bit security)
-    let options = ProvingOptions::with_128_bit_security(HashFunction::Poseidon2);
+    // Create proving options with Poseidon2 (96-bit security)
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Poseidon2);
 
     println!("Proving with Poseidon2...");
     let (stack_outputs, proof) =
@@ -176,8 +176,8 @@ fn test_rpx_prove_verify() {
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-    // Create proving options with RPX (128-bit security)
-    let options = ProvingOptions::with_128_bit_security(HashFunction::Rpx256);
+    // Create proving options with RPX (96-bit security)
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Rpx256);
 
     println!("Proving with RPX...");
     let (stack_outputs, proof) =

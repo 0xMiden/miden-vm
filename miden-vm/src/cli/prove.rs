@@ -81,8 +81,7 @@ impl ProveCmd {
         let hash_fn = HashFunction::try_from(self.hasher.as_str())?;
         Ok(match self.security.as_str() {
             "96bits" => ProvingOptions::with_96_bit_security(hash_fn),
-            "128bits" => ProvingOptions::with_128_bit_security(hash_fn),
-            other => panic!("{other} is not a valid security setting"),
+            other => panic!("{other} is not a valid security setting. Currently only '96bits' is supported."),
         }
         .with_execution_options(exec_options))
     }

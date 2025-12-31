@@ -59,7 +59,7 @@ impl ExecutionProof {
     ///
     /// TODO(Al): Migrate security estimator from Winterfell to 0xMiden/Plonky3
     ///
-    /// Currently returns a hardcoded 128 bits. Once the security estimator is implemented
+    /// Currently returns a hardcoded 96 bits. Once the security estimator is implemented
     /// in Plonky3, this should calculate the actual conjectured security level based on:
     /// - Proof parameters (FRI folding factor, number of queries, etc.)
     /// - Hash function collision resistance

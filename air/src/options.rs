@@ -37,14 +37,6 @@ impl ProvingOptions {
         Self::new(hash_fn)
     }
 
-    /// Creates a new instance of [ProvingOptions] targeting 128-bit security level.
-    ///
-    /// Note: The actual security parameters are hardcoded in the prover's config module.
-    /// This is a convenience constructor that is equivalent to `new(hash_fn)`.
-    pub fn with_128_bit_security(hash_fn: HashFunction) -> Self {
-        Self::new(hash_fn)
-    }
-
     /// Sets [ExecutionOptions] for this [ProvingOptions].
     ///
     /// This sets the maximum number of cycles a program is allowed to execute as well as
@@ -77,8 +69,7 @@ impl Default for ProvingOptions {
 // EXECUTION OPTIONS
 // ================================================================================================
 
-/// Duplicate of `miden_processor::fast::DEFAULT_CORE_TRACE_FRAGMENT_SIZE` until `ExecutionOptions`
-/// is moved to `miden_air`.
+/// Default fragment size for core trace generation.
 const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
 
 /// A set of parameters specifying execution parameters of the VM.
