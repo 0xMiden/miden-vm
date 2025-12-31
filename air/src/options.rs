@@ -70,7 +70,7 @@ impl Default for ProvingOptions {
 // ================================================================================================
 
 /// Default fragment size for core trace generation.
-const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
+pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
 
 /// A set of parameters specifying execution parameters of the VM.
 ///

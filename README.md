@@ -77,6 +77,8 @@ The project is organized into several crates like so:
 
 ## Performance
 
+> **Note:** The benchmarks in this section are outdated and need to be updated following the migration to the Plonky3 backend. Additionally, 128-bit security level is not currently supported.
+
 The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons for this are twofold:
 
 1. Not all constraints have been implemented yet, and we expect that there will be some slowdown once constraint evaluation is completed.

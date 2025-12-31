@@ -18,8 +18,8 @@ pub use miden_processor::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
 pub use miden_prover::{
-    ExecutionProof, HashFunction, InputError, Proof, ProvingOptions, StackOutputs, Word, math,
-    prove,
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionProof, HashFunction, InputError, Proof,
+    ProvingOptions, StackOutputs, Word, math, prove,
 };
 pub use miden_verifier::VerificationError;
 

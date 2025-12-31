@@ -4,7 +4,9 @@ use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
-use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
+use miden_vm::{
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, HashFunction, ProvingOptions, internal::InputFile,
+};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -73,7 +75,7 @@ impl ProveCmd {
         let exec_options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
-            4096, // DEFAULT_CORE_TRACE_FRAGMENT_SIZE
+            DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             self.trace,
             !self.release,
         )?;
@@ -81,7 +83,9 @@ impl ProveCmd {
         let hash_fn = HashFunction::try_from(self.hasher.as_str())?;
         Ok(match self.security.as_str() {
             "96bits" => ProvingOptions::with_96_bit_security(hash_fn),
-            other => panic!("{other} is not a valid security setting. Currently only '96bits' is supported."),
+            other => panic!(
+                "{other} is not a valid security setting. Currently only '96bits' is supported."
+            ),
         }
         .with_execution_options(exec_options))
     }

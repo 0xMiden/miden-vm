@@ -21,7 +21,7 @@ mod errors;
 pub use errors::ExecutionOptionsError;
 
 mod options;
-pub use options::{ExecutionOptions, ProvingOptions};
+pub use options::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ProvingOptions};
 
 mod proof;
 pub use proof::{ExecutionProof, HashFunction};

@@ -16,7 +16,10 @@ mod trace_adapter;
 // EXPORTS
 // ================================================================================================
 
-pub use miden_air::{DeserializationError, ExecutionProof, HashFunction, ProvingOptions, config};
+pub use miden_air::{
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, DeserializationError, ExecutionProof, HashFunction,
+    ProvingOptions, config,
+};
 pub use miden_crypto::stark::{Commitments, OpenedValues, Proof};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
