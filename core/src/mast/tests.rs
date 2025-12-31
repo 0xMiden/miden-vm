@@ -260,6 +260,46 @@ fn test_decorator_storage_after_strip_decorators() {
 }
 
 #[test]
+fn test_strip_decorators_edge_cases() {
+    // Empty forest
+    let mut forest = MastForest::new();
+    forest.strip_decorators();
+    assert_eq!(forest.debug_info.num_decorators(), 0);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
+
+    // Idempotent: stripping twice should be safe
+    let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.strip_decorators();
+    forest.strip_decorators();
+    assert_eq!(forest.debug_info.num_decorators(), 0);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
+    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
+}
+
+#[test]
+fn test_strip_decorators_multiple_node_types() {
+    let mut forest = MastForest::new();
+    let deco = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(
+        vec![Operation::Push(Felt::new(1)), Operation::Add],
+        vec![(0, deco)],
+    )
+    .add_to_forest(&mut forest)
+    .unwrap();
+
+    JoinNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
+    SplitNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
+
+    forest.strip_decorators();
+
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 3);
+    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
+}
+
+#[test]
 fn test_mast_forest_roundtrip_with_basic_blocks_and_decorators() {
     use crate::mast::MastNode;
 
