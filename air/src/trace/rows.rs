@@ -6,6 +6,9 @@ use core::{
 
 use miden_core::{Felt, field::PrimeCharacteristicRing};
 
+// ROW INDEX
+// ================================================================================================
+
 /// Represents the types of errors that can occur when converting from and into [`RowIndex`] and
 /// using its operations.
 #[derive(Debug, thiserror::Error)]
@@ -14,9 +17,6 @@ pub enum RowIndexError {
     #[error("value {0} is larger than u32::MAX so it cannot be converted into a RowIndex")]
     InvalidSize(Box<str>),
 }
-
-// ROW INDEX
-// ================================================================================================
 
 /// A newtype wrapper around a usize value representing a step in the execution trace.
 #[derive(Debug, Default, Copy, Clone, Eq, Ord, PartialOrd)]
@@ -282,6 +282,7 @@ impl RangeBounds<RowIndex> for RowIndex {
 
 // TESTS
 // ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use alloc::collections::BTreeMap;

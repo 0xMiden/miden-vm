@@ -17,16 +17,11 @@ pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirB
 
 mod constraints;
 
-// Auxiliary trace builder trait
-mod aux_builder;
-pub use aux_builder::AuxTraceBuilder;
-
 // STARK configuration factories
 pub mod config;
 
 pub mod trace;
-use trace::*;
-pub use trace::{TRACE_WIDTH, rows::RowIndex};
+pub use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, TRACE_WIDTH, rows::RowIndex};
 
 mod errors;
 mod options;
@@ -183,7 +178,7 @@ where
     }
 
     fn num_randomness(&self) -> usize {
-        AUX_TRACE_RAND_ELEMENTS
+        trace::AUX_TRACE_RAND_ELEMENTS
     }
 
     fn build_aux_trace(
