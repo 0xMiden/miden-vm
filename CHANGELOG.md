@@ -17,6 +17,7 @@
 - [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
+- Fix issue where calling `strip_decorators()` would panic on further decorator access ([#2524](https://github.com/0xMiden/miden-vm/pull/2524)).
 
 ## 0.20.1 (2025-12-14)
 
