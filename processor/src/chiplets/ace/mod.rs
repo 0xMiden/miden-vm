@@ -2,7 +2,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::{
     RowIndex,
-    trace::{chiplets::ace::ACE_CHIPLET_NUM_COLS, main_trace::MainTrace},
+    trace::{MainTrace, chiplets::ace::ACE_CHIPLET_NUM_COLS},
 };
 use miden_core::{
     Felt, ZERO,

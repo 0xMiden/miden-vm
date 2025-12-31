@@ -3,7 +3,7 @@ use alloc::{collections::BTreeMap, vec::Vec};
 use miden_air::{
     RowIndex,
     trace::{
-        main_trace::MainTrace,
+        MainTrace,
         range::{M_COL_IDX, V_COL_IDX},
     },
 };

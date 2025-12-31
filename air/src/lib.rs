@@ -7,7 +7,7 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use core::borrow::{Borrow, BorrowMut};
+use core::borrow::Borrow;
 
 use miden_core::{
     ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
@@ -21,7 +21,7 @@ mod constraints;
 pub mod config;
 
 pub mod trace;
-pub use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, TRACE_WIDTH, rows::RowIndex};
+pub use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH, rows::RowIndex};
 
 mod errors;
 mod options;
@@ -205,8 +205,8 @@ where
         let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
 
         // Use structured column access via MainTraceCols
-        let local: &MainTraceCols<AB::Var> = (*local).borrow();
-        let next: &MainTraceCols<AB::Var> = (*next).borrow();
+        let local: &MainTraceRow<AB::Var> = (*local).borrow();
+        let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
         // SYSTEM CONSTRAINTS
         constraints::enforce_clock_constraint(builder, local, next);
@@ -215,51 +215,5 @@ where
         constraints::range::enforce_range_boundary_constraints(builder, local);
         constraints::range::enforce_range_transition_constraint(builder, local, next);
         constraints::range::enforce_range_bus_constraint(builder, local);
-    }
-}
-
-// MAIN TRACE
-// ================================================================================================
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct MainTraceCols<T> {
-    // System
-    pub clk: T,
-    pub ctx: T,
-    pub fn_hash: [T; 4],
-
-    // Decoder
-    pub decoder: [T; 24],
-
-    // Stack
-    pub stack: [T; 19],
-
-    // Range checker
-    pub range: [T; 2],
-
-    // Chiplets
-    pub chiplets: [T; 20],
-}
-
-impl<T> Borrow<MainTraceCols<T>> for [T] {
-    fn borrow(&self) -> &MainTraceCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceCols<T>>() };
-        debug_assert!(prefix.is_empty(), "Alignment should match");
-        debug_assert!(suffix.is_empty(), "Alignment should match");
-        debug_assert_eq!(shorts.len(), 1);
-        &shorts[0]
-    }
-}
-
-impl<T> BorrowMut<MainTraceCols<T>> for [T] {
-    fn borrow_mut(&mut self) -> &mut MainTraceCols<T> {
-        debug_assert_eq!(self.len(), TRACE_WIDTH);
-        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceCols<T>>() };
-        debug_assert!(prefix.is_empty(), "Alignment should match");
-        debug_assert!(suffix.is_empty(), "Alignment should match");
-        debug_assert_eq!(shorts.len(), 1);
-        &mut shorts[0]
     }
 }

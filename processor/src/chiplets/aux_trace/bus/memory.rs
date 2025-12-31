@@ -3,6 +3,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 use miden_air::{
     RowIndex,
     trace::{
+        MainTrace,
         chiplets::{
             ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
             memory::{
@@ -10,7 +11,6 @@ use miden_air::{
                 MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL, MEMORY_WRITE_WORD_LABEL,
             },
         },
-        main_trace::MainTrace,
     },
 };
 use miden_core::{

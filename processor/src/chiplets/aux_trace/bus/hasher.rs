@@ -3,6 +3,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 use miden_air::{
     RowIndex,
     trace::{
+        MainTrace,
         chiplets::{
             hasher,
             hasher::{
@@ -14,7 +15,6 @@ use miden_air::{
             HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
             STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
         },
-        main_trace::MainTrace,
     },
 };
 use miden_core::{

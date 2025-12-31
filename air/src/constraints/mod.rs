@@ -9,7 +9,7 @@
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
-use crate::MainTraceCols;
+use crate::MainTraceRow;
 
 pub mod range;
 
@@ -18,8 +18,8 @@ pub mod range;
 /// The clock must increment by 1 at each step, ensuring proper sequencing of operations.
 pub fn enforce_clock_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceCols<AB::Var>,
-    next: &MainTraceCols<AB::Var>,
+    local: &MainTraceRow<AB::Var>,
+    next: &MainTraceRow<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {

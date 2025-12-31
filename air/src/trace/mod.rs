@@ -5,10 +5,12 @@ use miden_core::utils::range;
 
 pub mod chiplets;
 pub mod decoder;
-pub mod main_trace;
 pub mod range;
 pub mod rows;
 pub mod stack;
+
+mod main_trace;
+pub use main_trace::{MainTrace, MainTraceRow};
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;

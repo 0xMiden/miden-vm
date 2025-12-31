@@ -1,8 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::P1_COL_IDX, main_trace::MainTrace,
-};
+use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, MainTrace, chiplets::hasher::P1_COL_IDX};
 use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{ExtensionField, Field},

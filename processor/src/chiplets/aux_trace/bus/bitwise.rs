@@ -2,7 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::{
     RowIndex,
-    trace::{chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN, main_trace::MainTrace},
+    trace::{MainTrace, chiplets::bitwise::OP_CYCLE_LEN as BITWISE_OP_CYCLE_LEN},
 };
 use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 

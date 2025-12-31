@@ -11,13 +11,13 @@ use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 use p3_matrix::Matrix;
 
-use crate::MainTraceCols;
+use crate::MainTraceRow;
 
 /// Enforces boundary constraints for the range checker.
 ///
 /// - First row: V[0] = 0 (range checker starts at 0)
 /// - Last row: V[last] = 65535 (range checker ends at 2^16 - 1)
-pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTraceCols<AB::Var>)
+pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: MidenAirBuilder,
 {
@@ -38,8 +38,8 @@ where
 /// This is a degree-9 constraint.
 pub fn enforce_range_transition_constraint<AB>(
     builder: &mut AB,
-    local: &MainTraceCols<AB::Var>,
-    next: &MainTraceCols<AB::Var>,
+    local: &MainTraceRow<AB::Var>,
+    next: &MainTraceRow<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -76,7 +76,7 @@ pub fn enforce_range_transition_constraint<AB>(
 /// and transitions according to the LogUp update rule.
 ///
 /// This is a degree-9 constraint.
-pub fn enforce_range_bus_constraint<AB>(builder: &mut AB, local: &MainTraceCols<AB::Var>)
+pub fn enforce_range_bus_constraint<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: MidenAirBuilder,
 {
@@ -88,7 +88,7 @@ where
 
     let main = builder.main();
     let _next = main.row_slice(1).expect("Matrix should have at least 2 rows");
-    let _next: &MainTraceCols<AB::Var> = (*_next).borrow();
+    let _next: &MainTraceRow<AB::Var> = (*_next).borrow();
 
     // Extract values needed for constraints
     let (b_local_val, b_next_val, alpha_val) = {

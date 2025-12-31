@@ -1,5 +1,8 @@
 use alloc::vec::Vec;
-use core::ops::{Deref, Range};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    ops::{Deref, Range},
+};
 
 use miden_core::{
     Felt, ONE, Word, ZERO,
@@ -36,6 +39,53 @@ use crate::RowIndex;
 
 const DECODER_HASHER_RANGE: Range<usize> =
     range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
+
+// MAIN TRACE ROW
+// ================================================================================================
+
+/// Column layout of the main trace row.
+#[derive(Debug)]
+#[repr(C)]
+pub struct MainTraceRow<T> {
+    // System
+    pub clk: T,
+    pub ctx: T,
+    pub fn_hash: [T; 4],
+
+    // Decoder
+    pub decoder: [T; 24],
+
+    // Stack
+    pub stack: [T; 19],
+
+    // Range checker
+    pub range: [T; 2],
+
+    // Chiplets
+    pub chiplets: [T; 20],
+}
+
+impl<T> Borrow<MainTraceRow<T>> for [T] {
+    fn borrow(&self) -> &MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<MainTraceRow<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &mut shorts[0]
+    }
+}
 
 // MAIN TRACE MATRIX
 // ================================================================================================

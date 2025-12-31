@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::main_trace::MainTrace;
+use miden_air::trace::MainTrace;
 use miden_core::{Kernel, field::ExtensionField, precompile::PrecompileTranscriptState};
 use wiring_bus::WiringBusBuilder;
 

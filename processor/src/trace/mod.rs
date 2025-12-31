@@ -7,9 +7,8 @@ use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     AuxTraceBuilder, PublicInputs,
     trace::{
-        DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET,
+        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-        main_trace::MainTrace,
     },
 };
 use miden_core::{

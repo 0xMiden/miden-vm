@@ -2,7 +2,7 @@ use core::fmt::{Display, Formatter, Result as FmtResult};
 
 use miden_air::{
     RowIndex,
-    trace::{chiplets::ace::ACE_INIT_LABEL, main_trace::MainTrace},
+    trace::{MainTrace, chiplets::ace::ACE_INIT_LABEL},
 };
 use miden_core::{Felt, ONE, field::ExtensionField};
 

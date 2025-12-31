@@ -1,10 +1,9 @@
 use miden_air::{
     RowIndex,
     trace::{
-        LOG_PRECOMPILE_LABEL,
+        LOG_PRECOMPILE_LABEL, MainTrace,
         chiplets::hasher::DIGEST_RANGE,
         log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
-        main_trace::MainTrace,
     },
 };
 use miden_core::{

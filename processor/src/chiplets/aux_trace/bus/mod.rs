@@ -15,6 +15,7 @@ use memory::{
 use miden_air::{
     RowIndex,
     trace::{
+        MainTrace,
         chiplets::{
             hasher::LINEAR_HASH_LABEL,
             memory::{
@@ -22,7 +23,6 @@ use miden_air::{
                 MEMORY_WRITE_WORD_LABEL,
             },
         },
-        main_trace::MainTrace,
     },
 };
 use miden_core::{
