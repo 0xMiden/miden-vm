@@ -1006,15 +1006,6 @@ checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
 name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
@@ -1581,16 +1572,9 @@ name = "miden-verifier"
 version = "0.21.0"
 dependencies = [
  "bincode",
- "itertools 0.12.1",
  "miden-air",
  "miden-core",
  "miden-crypto",
- "p3-dft",
- "p3-keccak",
- "p3-merkle-tree",
- "p3-miden-fri",
- "p3-util",
- "serde",
  "thiserror",
  "tracing",
 ]

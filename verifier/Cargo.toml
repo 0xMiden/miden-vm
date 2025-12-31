@@ -19,11 +19,7 @@ doctest = false
 
 [features]
 default = ["std"]
-std = [
-  "miden-air/std",
-  "miden-core/std",
-  "thiserror/std",
-]
+std = ["miden-air/std", "miden-core/std", "thiserror/std"]
 
 [dependencies]
 # Miden dependencies
@@ -34,15 +30,4 @@ miden-crypto.workspace = true
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
-itertools = "0.12"
 bincode = "1.3"
-
-# Plonky3 dependencies
-p3-dft.workspace = true
-p3-miden-fri.workspace = true
-p3-keccak.workspace = true
-p3-merkle-tree.workspace = true
-p3-util.workspace = true
-
-# Serialization
-serde.workspace = true

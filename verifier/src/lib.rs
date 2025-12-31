@@ -189,10 +189,6 @@ fn verify_stark(
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
     ProgramVerificationError(Word),
-    #[error("the input {0} is not a valid field element")]
-    InputNotFieldElement(u64),
-    #[error("the output {0} is not a valid field element")]
-    OutputNotFieldElement(u64),
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
 }
