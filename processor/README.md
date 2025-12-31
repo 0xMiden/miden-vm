@@ -34,7 +34,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, self.stack_inputs &mut host, exec_options).unwrap();
+let trace = execute(&program, stack_inputs, &mut host, exec_options).unwrap();
 
 // now, execute the same program in debug mode and iterate over VM states
 for vm_state in execute_iter(&program, stack_inputs, &mut host, exec_options) {
