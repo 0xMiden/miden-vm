@@ -318,8 +318,12 @@ fn iterate_query_fold_4_quad_ext(
     let arr = vec![evaluation];
     let a = QuadFelt::slice_as_base_elements(&arr);
 
-    let position_evaluation =
-        vec![a[0].as_canonical_u64(), a[1].as_canonical_u64(), position as u64, init_exp.as_canonical_u64()];
+    let position_evaluation = vec![
+        a[0].as_canonical_u64(),
+        a[1].as_canonical_u64(),
+        position as u64,
+        init_exp.as_canonical_u64(),
+    ];
 
     let mut alphas = vec![];
     for depth in 0..number_of_layers {

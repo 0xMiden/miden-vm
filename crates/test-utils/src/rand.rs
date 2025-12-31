@@ -1,9 +1,12 @@
+#[cfg(feature = "std")]
 pub use miden_crypto::rand::{
     random_felt, random_word,
     test_utils::{rand_array, rand_value, rand_vector},
 };
 
-use super::{Felt, QuadFelt, Word};
+use super::{Felt, Word};
+#[cfg(feature = "std")]
+use super::QuadFelt;
 // RANDOM GENERATORS
 // ================================================================================================
 
