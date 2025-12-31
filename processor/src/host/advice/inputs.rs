@@ -4,6 +4,7 @@ use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::MerkleStore,
     errors::InputError,
+    field::QuotientMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -40,7 +41,11 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            .map(|v| Felt::try_checked(v).map_err(|e| InputError::InvalidStackElement(v, e)))
+            .map(|v| {
+                Felt::from_canonical_checked(v).ok_or_else(|| {
+                    InputError::InvalidStackElement(v, format!("value {} exceeds field modulus", v))
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         self.stack.extend(stack.iter());
