@@ -1,4 +1,4 @@
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 
 use super::{ExecutionError, Felt};
 use crate::{ContextId, ErrorContext, MemoryError, ONE, PrimeField64, ZERO};

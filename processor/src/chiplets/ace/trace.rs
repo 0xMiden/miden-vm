@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::ace::{
+    chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
         READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,

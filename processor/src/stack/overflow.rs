@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_utils_indexing::IndexVec;
 
 use super::{Felt, ZERO};

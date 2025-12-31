@@ -1,9 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::{
-    RowIndex,
-    trace::{MainTrace, chiplets::ace::ACE_CHIPLET_NUM_COLS},
-};
+use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
 use miden_core::{
     Felt, ZERO,
     field::{ExtensionField, PrimeCharacteristicRing},

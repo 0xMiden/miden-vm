@@ -1,6 +1,6 @@
 use miden_air::{
-    Felt, RowIndex,
-    trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
+    Felt,
+    trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,

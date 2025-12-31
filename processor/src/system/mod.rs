@@ -1,6 +1,6 @@
 use core::fmt::{self, Display};
 
-use miden_air::{Felt, RowIndex};
+use miden_air::{Felt, trace::RowIndex};
 
 // EXECUTION CONTEXT
 // ================================================================================================

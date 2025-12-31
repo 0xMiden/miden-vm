@@ -1,9 +1,9 @@
 use core::ops::ControlFlow;
 
 use miden_air::{
-    Felt, RowIndex,
+    Felt,
     trace::{
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        RowIndex, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };

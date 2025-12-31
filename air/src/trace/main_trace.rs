@@ -11,7 +11,7 @@ use miden_core::{
 };
 
 use super::{
-    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
+    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RowIndex,
     STACK_TRACE_OFFSET,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
@@ -32,7 +32,6 @@ use super::{
     },
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
 };
-use crate::RowIndex;
 
 // CONSTANTS
 // ================================================================================================

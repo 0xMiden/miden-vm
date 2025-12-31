@@ -1,9 +1,6 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{MainTrace, chiplets::ace::ACE_INIT_LABEL},
-};
+use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
 use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::{

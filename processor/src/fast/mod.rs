@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{Felt, RowIndex};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},

@@ -3,7 +3,7 @@
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{
     EventId, EventName, Felt, Word,
     field::QuadFelt,

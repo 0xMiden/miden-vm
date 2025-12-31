@@ -1,15 +1,12 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        MainTrace,
-        chiplets::{
-            ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-            memory::{
-                MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ_ELEMENT_LABEL,
-                MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL, MEMORY_WRITE_WORD_LABEL,
-            },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::{
+        ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
+        memory::{
+            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ_ELEMENT_LABEL,
+            MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL, MEMORY_WRITE_WORD_LABEL,
         },
     },
 };

@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::memory::{
+    chiplets::memory::{
         FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
         IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,

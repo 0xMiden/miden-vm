@@ -1,20 +1,17 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        MainTrace,
-        chiplets::{
-            hasher,
-            hasher::{
-                HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
-                MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
-            },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::{
+        hasher,
+        hasher::{
+            HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
+            MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
-        log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
-        },
+    },
+    log_precompile::{
+        HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
+        STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
     },
 };
 use miden_core::{

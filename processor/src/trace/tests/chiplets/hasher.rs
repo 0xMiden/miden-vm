@@ -1,21 +1,18 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        CLK_COL_IDX, DECODER_TRACE_OFFSET,
-        chiplets::{
-            HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, HASHER_TRACE_OFFSET,
-            hasher::{
-                CAPACITY_DOMAIN_IDX, CAPACITY_LEN, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState,
-                LINEAR_HASH, LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW,
-                MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RETURN_HASH,
-                RETURN_HASH_LABEL, RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
-            },
+use miden_air::trace::{
+    CLK_COL_IDX, DECODER_TRACE_OFFSET, RowIndex,
+    chiplets::{
+        HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, HASHER_TRACE_OFFSET,
+        hasher::{
+            CAPACITY_DOMAIN_IDX, CAPACITY_LEN, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState,
+            LINEAR_HASH, LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW,
+            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RETURN_HASH,
+            RETURN_HASH_LABEL, RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
         },
-        decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
     },
+    decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
 };
 use miden_core::{
     Program, Word,

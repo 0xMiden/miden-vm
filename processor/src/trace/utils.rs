@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 use core::slice;
 
-use miden_air::{RowIndex, trace::MainTrace};
+use miden_air::trace::{MainTrace, RowIndex};
 use miden_core::field::ExtensionField;
 #[cfg(test)]
 use miden_core::{Operation, utils::ToElements};

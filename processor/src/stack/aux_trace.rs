@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::{RowIndex, trace::MainTrace};
+use miden_air::trace::{MainTrace, RowIndex};
 use miden_core::{OPCODE_DYNCALL, field::ExtensionField};
 
 use super::Felt;

@@ -75,7 +75,7 @@ pub async fn prove(
     tracing::event!(
         tracing::Level::INFO,
         "Generated execution trace of {} columns and {} steps (padded from {})",
-        miden_air::TRACE_WIDTH,
+        miden_air::trace::TRACE_WIDTH,
         trace.trace_len_summary().padded_trace_len(),
         trace.trace_len_summary().main_trace_len()
     );

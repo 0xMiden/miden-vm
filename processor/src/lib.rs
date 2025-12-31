@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use core::fmt::{Display, LowerHex};
 
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
+pub use miden_air::{ExecutionOptions, ExecutionOptionsError, trace::RowIndex};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
     StackOutputs, WORD_SIZE, Word, ZERO,

@@ -1,6 +1,6 @@
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::{
+    chiplets::{
         MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
         MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
         MEMORY_WORD_COL_IDX,

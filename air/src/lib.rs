@@ -13,32 +13,35 @@ use miden_core::{
     ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
     precompile::PrecompileTranscriptState,
 };
-pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 
+pub mod config;
 mod constraints;
 
-// STARK configuration factories
-pub mod config;
+mod errors;
+pub use errors::ExecutionOptionsError;
+
+mod options;
+pub use options::{ExecutionOptions, ProvingOptions};
+
+mod proof;
+pub use proof::{ExecutionProof, HashFunction};
 
 pub mod trace;
-pub use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH, rows::RowIndex};
-
-mod errors;
-mod options;
-mod proof;
+use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
 
 // RE-EXPORTS
 // ================================================================================================
+mod export {
+    pub use miden_core::{
+        Felt,
+        utils::{
+            ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
+        },
+    };
+    pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+}
 
-pub use errors::ExecutionOptionsError;
-pub use miden_core::{
-    Felt,
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
-    },
-};
-pub use options::{ExecutionOptions, ProvingOptions};
-pub use proof::{ExecutionProof, HashFunction};
+pub use export::*;
 
 // PUBLIC INPUTS
 // ================================================================================================

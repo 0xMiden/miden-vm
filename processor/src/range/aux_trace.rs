@@ -1,11 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        MainTrace,
-        range::{M_COL_IDX, V_COL_IDX},
-    },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    range::{M_COL_IDX, V_COL_IDX},
 };
 use miden_core::{ZERO, field::ExtensionField};
 

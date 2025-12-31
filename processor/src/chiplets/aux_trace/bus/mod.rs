@@ -12,16 +12,13 @@ use memory::{
     build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
     build_pipe_request,
 };
-use miden_air::{
-    RowIndex,
-    trace::{
-        MainTrace,
-        chiplets::{
-            hasher::LINEAR_HASH_LABEL,
-            memory::{
-                MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL,
-                MEMORY_WRITE_WORD_LABEL,
-            },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::{
+        hasher::LINEAR_HASH_LABEL,
+        memory::{
+            MEMORY_READ_ELEMENT_LABEL, MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL,
+            MEMORY_WRITE_WORD_LABEL,
         },
     },
 };

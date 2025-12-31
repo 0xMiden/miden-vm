@@ -1,11 +1,8 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        MainTrace,
-        chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
-    },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
 use miden_core::{Felt, Word, field::ExtensionField};
 

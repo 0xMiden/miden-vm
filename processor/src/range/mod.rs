@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 
 use super::{Felt, RangeCheckTrace, ZERO};
 use crate::utils::uninit_vector;

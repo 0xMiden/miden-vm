@@ -1,6 +1,6 @@
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::{
+    chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, BITWISE_TRACE_OFFSET,
         bitwise::{BITWISE_AND, BITWISE_AND_LABEL, BITWISE_XOR, BITWISE_XOR_LABEL, OP_CYCLE_LEN},
     },

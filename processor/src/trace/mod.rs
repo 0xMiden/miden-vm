@@ -5,9 +5,9 @@ use core::ops::Range;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
-    AuxTraceBuilder, PublicInputs,
+    PublicInputs,
     trace::{
-        DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };

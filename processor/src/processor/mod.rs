@@ -1,7 +1,4 @@
-use miden_air::{
-    RowIndex,
-    trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
-};
+use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
     Felt, Operation, Word, crypto::merkle::MerklePath, field::QuadFelt, mast::MastForest,
     precompile::PrecompileTranscriptState,

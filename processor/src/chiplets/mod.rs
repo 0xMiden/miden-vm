@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_air::{RowIndex, trace::chiplets::hasher::HasherState};
+use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
     Kernel, field::PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
 };

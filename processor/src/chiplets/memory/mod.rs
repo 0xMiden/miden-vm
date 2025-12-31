@@ -1,9 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt::Debug;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::memory::{
+    chiplets::memory::{
         CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
         FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
         IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,

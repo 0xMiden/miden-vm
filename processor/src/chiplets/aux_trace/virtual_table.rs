@@ -1,10 +1,7 @@
-use miden_air::{
-    RowIndex,
-    trace::{
-        LOG_PRECOMPILE_LABEL, MainTrace,
-        chiplets::hasher::DIGEST_RANGE,
-        log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
-    },
+use miden_air::trace::{
+    LOG_PRECOMPILE_LABEL, MainTrace, RowIndex,
+    chiplets::hasher::DIGEST_RANGE,
+    log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 use miden_core::{
     Felt, OPCODE_LOGPRECOMPILE, field::ExtensionField, precompile::PrecompileTranscriptState,

@@ -3,7 +3,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::WORD_SIZE;
 
 use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
