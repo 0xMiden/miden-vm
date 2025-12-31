@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "testing"))]
 use alloc::vec::Vec;
 use core::{
     borrow::{Borrow, BorrowMut},
