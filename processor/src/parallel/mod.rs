@@ -12,12 +12,14 @@ use miden_air::{
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
-        main_trace::{ColMatrix, MainTrace},
+        main_trace::MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
+    Kernel, ONE, Operation, Word, ZERO,
+    stack::MIN_STACK_DEPTH,
+    utils::{ColMatrix, uninit_vector},
 };
 use rayon::prelude::*;
 

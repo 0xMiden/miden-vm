@@ -25,6 +25,7 @@ std = [
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
+miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true

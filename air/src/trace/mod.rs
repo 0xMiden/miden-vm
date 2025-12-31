@@ -10,8 +10,8 @@ pub mod range;
 pub mod rows;
 pub mod stack;
 
-mod aux_builder;
-pub use aux_builder::AuxTraceBuilder;
+mod aux_trace;
+pub use aux_trace::AuxTraceBuilder;
 
 // CONSTANTS
 // ================================================================================================

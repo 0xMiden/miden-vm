@@ -9,7 +9,7 @@ use miden_air::{
     trace::{
         DECODER_TRACE_OFFSET, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-        main_trace::{ColMatrix, MainTrace},
+        main_trace::MainTrace,
     },
 };
 use miden_core::{
@@ -17,6 +17,7 @@ use miden_core::{
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
+    utils::ColMatrix,
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 

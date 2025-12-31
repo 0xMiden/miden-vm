@@ -6,10 +6,11 @@
 
 use alloc::vec::Vec;
 
-use miden_air::trace::main_trace::{ColMatrix, MainTrace};
+use miden_air::trace::main_trace::MainTrace;
 use miden_core::{
     Felt,
     field::{ExtensionField, PrimeCharacteristicRing},
+    utils::ColMatrix,
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;

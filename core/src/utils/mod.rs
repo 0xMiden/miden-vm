@@ -4,6 +4,8 @@ use core::{
     ops::{Bound, Range},
 };
 
+mod col_matrix;
+pub use col_matrix::ColMatrix;
 // RE-EXPORTS
 // ================================================================================================
 #[cfg(feature = "std")]
