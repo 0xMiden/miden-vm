@@ -1207,7 +1207,6 @@ dependencies = [
  "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-miden-fri",
- "p3-symmetric",
  "proptest",
  "serde",
  "thiserror",

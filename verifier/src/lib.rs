@@ -10,7 +10,7 @@ use alloc::vec::Vec;
 use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
 use miden_crypto::stark;
 
-// EXPORTS
+// RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
@@ -118,6 +118,9 @@ pub fn verify_with_precompiles(
     Ok((security_level, digest))
 }
 
+// HELPER FUNCTIONS
+// ================================================================================================
+
 fn verify_stark(
     program_info: ProgramInfo,
     stack_inputs: StackInputs,
@@ -140,15 +143,15 @@ fn verify_stark(
             stark::verify(&config, &air, &proof, &public_values)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-        HashFunction::Keccak => {
-            let config = config::create_keccak_config();
+        HashFunction::Rpo256 => {
+            let config = config::create_rpo_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
             stark::verify(&config, &air, &proof, &public_values)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-        HashFunction::Rpo256 => {
-            let config = config::create_rpo_config();
+        HashFunction::Rpx256 => {
+            let config = config::create_rpx_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
             stark::verify(&config, &air, &proof, &public_values)
@@ -161,8 +164,8 @@ fn verify_stark(
             stark::verify(&config, &air, &proof, &public_values)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
-        HashFunction::Rpx256 => {
-            let config = config::create_rpx_config();
+        HashFunction::Keccak => {
+            let config = config::create_keccak_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
             stark::verify(&config, &air, &proof, &public_values)

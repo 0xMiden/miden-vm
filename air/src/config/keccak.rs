@@ -7,6 +7,7 @@ use miden_crypto::{
     stark::{
         StarkConfig,
         challenger::{HashChallenger, SerializingChallenger64},
+        symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher},
     },
 };
 use p3_commit::ExtensionMmcs;
@@ -14,7 +15,6 @@ use p3_dft::Radix2DitParallel;
 use p3_keccak::{Keccak256Hash, KeccakF};
 use p3_merkle_tree::MerkleTreeMmcs;
 use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
-use p3_symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher};
 
 use crate::Felt;
 

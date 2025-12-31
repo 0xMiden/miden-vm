@@ -42,7 +42,6 @@ p3-miden-fri.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
 p3-merkle-tree.workspace = true
-p3-symmetric.workspace = true
 
 # Serialization
 serde.workspace = true
