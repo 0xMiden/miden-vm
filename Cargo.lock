@@ -1459,7 +1459,6 @@ dependencies = [
  "miden-utils-indexing",
  "p3-matrix",
  "p3-maybe-rayon",
- "p3-util",
  "paste",
  "pretty_assertions",
  "proptest",
@@ -1486,13 +1485,11 @@ dependencies = [
  "miden-verifier",
  "miden-vm",
  "p3-dft",
- "p3-interpolation",
  "p3-keccak",
  "p3-matrix",
  "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-miden-fri",
- "p3-util",
  "rand",
  "serde",
  "tokio",
@@ -2129,7 +2126,6 @@ version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a92074eab13c8a30d23ad7bcf99b82787a04c843133a0cba39ca1cf39d434492"
 dependencies = [
- "rayon",
  "serde",
 ]
 

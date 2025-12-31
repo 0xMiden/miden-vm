@@ -37,12 +37,10 @@ getrandom.workspace = true
 # Plonky3 dependencies
 p3-dft = { workspace = true, features = ["parallel"] }
 p3-miden-fri.workspace = true
-p3-interpolation.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true
 p3-maybe-rayon.workspace = true
 p3-merkle-tree.workspace = true
-p3-util = { workspace = true, features = ["parallel"] }
 
 # Serialization
 serde.workspace = true
