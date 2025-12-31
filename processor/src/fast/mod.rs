@@ -777,7 +777,7 @@ impl FastProcessor {
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest
             .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, err_ctx))?;
+            .ok_or(ExecutionError::malformed_mast_forest_in_host(node_digest, err_ctx))?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same

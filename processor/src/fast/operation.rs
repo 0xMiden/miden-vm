@@ -277,7 +277,7 @@ impl StackInterface for FastProcessor {
             self.increment_stack_size(tracer);
             Ok(())
         } else {
-            Err(ExecutionError::FailedToExecuteProgram("stack overflow"))
+            Err(ExecutionError::Internal("stack overflow"))
         }
     }
 
