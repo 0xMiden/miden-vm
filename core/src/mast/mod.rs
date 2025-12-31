@@ -163,24 +163,11 @@ impl MastForest {
         id_remappings
     }
 
-    /// Removes all decorators from this MAST forest.
+    /// Removes all decorators and error codes while keeping CSR structure valid.
     ///
-    /// This method modifies the forest in-place, removing all decorator information
-    /// including operation-indexed decorators, before-enter decorators, after-exit
-    /// decorators, and error codes.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let mut forest = MastForest::new();
-    /// // Add decorators and nodes to the forest
-    /// forest.strip_decorators(); // forest is now stripped
-    /// ```
+    /// Useful for performance benchmarking without decorator overhead.
     pub fn strip_decorators(&mut self) {
-        // Clear all debug info (decorators and error codes)
-        self.debug_info.clear();
+        self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.

@@ -241,40 +241,22 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 fn test_decorator_storage_after_strip_decorators() {
     let mut forest = MastForest::new();
 
-    // Create decorators
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
-
-    // Create operations and decorators
     let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
-    let decorators = vec![(0, deco1), (1, deco2)];
-
-    // Add block to forest
-    let block_id = BasicBlockNodeBuilder::new(operations, decorators)
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, deco1), (1, deco2)])
         .add_to_forest(&mut forest)
         .unwrap();
 
-    // Verify decorators exist initially
-    assert!(!forest.debug_info.op_decorator_storage().is_empty());
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
+    assert_eq!(forest.debug_info.num_decorators(), 2);
     assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 2);
 
-    // Strip decorators
     forest.strip_decorators();
 
-    // Verify decorators are cleared from storage
-    assert!(forest.debug_info.op_decorator_storage().is_empty());
-    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
-    assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 0);
-
-    // Verify block also has no decorators after stripping
-    let block = if let crate::mast::MastNode::Block(block) = &forest[block_id] {
-        block
-    } else {
-        panic!("Expected a block node");
-    };
-    let block_decorators: Vec<_> = block.indexed_decorator_iter(&forest).collect();
-    assert_eq!(block_decorators, []);
+    assert_eq!(forest.debug_info.num_decorators(), 0);
+    assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
+    assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
+    assert!(forest.get_assembly_op(block_id, Some(0)).is_none());
 }
 
 #[test]
