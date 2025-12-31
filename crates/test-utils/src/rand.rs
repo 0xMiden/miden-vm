@@ -4,9 +4,9 @@ pub use miden_crypto::rand::{
     test_utils::{rand_array, rand_value, rand_vector},
 };
 
-use super::{Felt, Word};
 #[cfg(feature = "std")]
 use super::QuadFelt;
+use super::{Felt, Word};
 // RANDOM GENERATORS
 // ================================================================================================
 

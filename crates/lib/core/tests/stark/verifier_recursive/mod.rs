@@ -60,7 +60,8 @@ pub fn generate_advice_inputs(
     // add the public inputs, which is nothing but the input and output stacks to the VM as well as
     // the digests of the procedures making up the kernel against which the program was compiled,
     // to the advice tape
-    let pub_inputs_int: Vec<u64> = pub_inputs_elements.iter().map(|a| a.as_canonical_u64()).collect();
+    let pub_inputs_int: Vec<u64> =
+        pub_inputs_elements.iter().map(|a| a.as_canonical_u64()).collect();
     advice_stack.extend_from_slice(&pub_inputs_int);
 
     // add a placeholder for the auxiliary randomness
@@ -98,9 +99,12 @@ pub fn generate_advice_inputs(
     let alpha = aux_trace_rand_elements[0][0].to_owned();
     let beta = aux_trace_rand_elements[0][2].to_owned();
     advice_stack[aux_rand_insertion_index] = QuadFelt::base_element(&beta, 0).as_canonical_u64();
-    advice_stack[aux_rand_insertion_index + 1] = QuadFelt::base_element(&beta, 1).as_canonical_u64();
-    advice_stack[aux_rand_insertion_index + 2] = QuadFelt::base_element(&alpha, 0).as_canonical_u64();
-    advice_stack[aux_rand_insertion_index + 3] = QuadFelt::base_element(&alpha, 1).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 1] =
+        QuadFelt::base_element(&beta, 1).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 2] =
+        QuadFelt::base_element(&alpha, 0).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 3] =
+        QuadFelt::base_element(&alpha, 1).as_canonical_u64();
 
     // 3 ----- constraint composition trace -------------------------------------------------------
 
@@ -223,5 +227,8 @@ pub fn digest_to_int_vec(digest: &[Word]) -> Vec<u64> {
 }
 
 pub fn to_int_vec(ext_felts: &[QuadFelt]) -> Vec<u64> {
-    QuadFelt::slice_as_base_elements(ext_felts).iter().map(|e| e.as_canonical_u64()).collect()
+    QuadFelt::slice_as_base_elements(ext_felts)
+        .iter()
+        .map(|e| e.as_canonical_u64())
+        .collect()
 }

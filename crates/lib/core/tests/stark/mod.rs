@@ -17,7 +17,7 @@ use rand_chacha::ChaCha20Rng;
 use rstest::rstest;
 use verifier_recursive::{VerifierData, generate_advice_inputs};
 
-//mod verifier_recursive;
+mod verifier_recursive;
 
 // Note: Changes to Miden VM may cause this test to fail when some of the assumptions documented
 // in `crates/lib/core/asm/sys/vm/mod.masm` are violated.
