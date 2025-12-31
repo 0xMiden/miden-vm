@@ -78,7 +78,7 @@ pub mod crypto {
 
     pub mod hash {
         pub use miden_crypto::hash::{
-            blake::{Blake3_192, Blake3_256, Blake3Digest},
+            blake::{Blake3_256, Blake3Digest},
             poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,

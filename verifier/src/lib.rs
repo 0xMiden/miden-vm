@@ -133,14 +133,6 @@ fn verify_stark(
     let air = ProcessorAir::new();
 
     match hash_fn {
-        HashFunction::Blake3_192 => {
-            // TODO: Change to Blake3_192
-            let config = config::create_blake3_256_config();
-            let proof = bincode::deserialize(&proof_bytes)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
-                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
-        },
         HashFunction::Blake3_256 => {
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)

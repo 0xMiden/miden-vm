@@ -98,11 +98,6 @@ pub async fn prove(
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
-        HashFunction::Blake3_192 => {
-            // TODO: Proper 192-bit support requires Plonky3 to implement
-            // CryptographicHasher<u8, [u8; 24]> for Blake3.
-            panic!("Blake3_192 is not yet supported")
-        },
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);

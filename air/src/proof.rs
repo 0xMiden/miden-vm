@@ -1,7 +1,7 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
@@ -102,8 +102,6 @@ impl ExecutionProof {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HashFunction {
-    /// BLAKE3 hash function with 192-bit output.
-    Blake3_192 = 0x00,
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
     /// RPO hash function with 256-bit output.
@@ -120,7 +118,6 @@ impl HashFunction {
     /// Returns the collision resistance level (in bits) of this hash function.
     pub const fn collision_resistance(&self) -> u32 {
         match self {
-            HashFunction::Blake3_192 => Blake3_192::COLLISION_RESISTANCE,
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
@@ -135,7 +132,6 @@ impl TryFrom<u8> for HashFunction {
 
     fn try_from(repr: u8) -> Result<Self, Self::Error> {
         match repr {
-            0x00 => Ok(Self::Blake3_192),
             0x01 => Ok(Self::Blake3_256),
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
@@ -153,7 +149,6 @@ impl TryFrom<&str> for HashFunction {
 
     fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
         match hash_fn_str {
-            "blake3-192" => Ok(Self::Blake3_192),
             "blake3-256" => Ok(Self::Blake3_256),
             "rpo" => Ok(Self::Rpo256),
             "rpx" => Ok(Self::Rpx256),
