@@ -95,12 +95,9 @@ impl PublicInputs {
     /// - precompile transcript state
     pub fn to_elements(&self) -> Vec<Felt> {
         let mut result = self.program_info.to_elements();
-        let mut ins = self.stack_inputs.to_vec();
-        result.append(&mut ins);
-        let mut outs = self.stack_outputs.to_vec();
-        result.append(&mut outs);
-        let pc_state: [Felt; 4] = self.pc_transcript_state.into();
-        result.extend_from_slice(&pc_state);
+        result.extend_from_slice(self.stack_inputs.as_ref());
+        result.extend_from_slice(self.stack_outputs.as_ref());
+        result.extend_from_slice(self.pc_transcript_state.as_ref());
         result
     }
 }
