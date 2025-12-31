@@ -5,6 +5,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use alloc::string::ToString;
+
 use miden_air::ProcessorAir;
 use miden_crypto::stark;
 use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
@@ -104,27 +106,27 @@ pub async fn prove(
         HashFunction::Blake3_256 => {
             let config = miden_air::config::create_blake3_256_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            serialize_proof(&proof)?
         },
         HashFunction::Keccak => {
             let config = miden_air::config::create_keccak_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            serialize_proof(&proof)?
         },
         HashFunction::Rpo256 => {
             let config = miden_air::config::create_rpo_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            serialize_proof(&proof)?
         },
         HashFunction::Poseidon2 => {
             let config = miden_air::config::create_poseidon2_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            serialize_proof(&proof)?
         },
         HashFunction::Rpx256 => {
             let config = miden_air::config::create_rpx_config();
             let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
-            bincode::serialize(&proof).expect("Failed to serialize proof")
+            serialize_proof(&proof)?
         },
     };
 
@@ -166,4 +168,12 @@ pub fn prove_sync(
             rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
         },
     }
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+/// Serializes a proof to bytes, converting serialization errors to ExecutionError.
+fn serialize_proof<T: serde::Serialize>(proof: &T) -> Result<alloc::vec::Vec<u8>, ExecutionError> {
+    bincode::serialize(proof).map_err(|e| ExecutionError::ProofSerializationError(e.to_string()))
 }

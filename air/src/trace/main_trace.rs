@@ -1,3 +1,4 @@
+use alloc::vec::Vec;
 use core::{
     borrow::{Borrow, BorrowMut},
     ops::{Deref, Range},

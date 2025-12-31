@@ -276,6 +276,8 @@ pub enum ExecutionError {
         path_len: usize,
         depth: Felt,
     },
+    #[error("failed to serialize proof: {0}")]
+    ProofSerializationError(String),
 }
 
 impl ExecutionError {
