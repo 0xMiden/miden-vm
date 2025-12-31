@@ -41,11 +41,7 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            .map(|v| {
-                Felt::from_canonical_checked(v).ok_or_else(|| {
-                    InputError::InvalidStackElement(v, format!("value {} exceeds field modulus", v))
-                })
-            })
+            .map(|v| Felt::from_canonical_checked(v).ok_or(InputError::InvalidStackElement(v)))
             .collect::<Result<Vec<_>, _>>()?;
 
         self.stack.extend(stack.iter());

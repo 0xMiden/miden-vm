@@ -55,14 +55,7 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            .map(|v| {
-                Felt::from_canonical_checked(v).ok_or_else(|| {
-                    OutputError::InvalidStackElement(
-                        v,
-                        format!("value {} exceeds field modulus", v),
-                    )
-                })
-            })
+            .map(|v| Felt::from_canonical_checked(v).ok_or(OutputError::InvalidStackElement(v)))
             .collect::<Result<Vec<Felt>, _>>()?;
 
         Self::new(stack)
