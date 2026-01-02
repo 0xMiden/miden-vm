@@ -8,10 +8,7 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 pub use miden_assembly_syntax::{Version, VersionError};
-use miden_core::{
-    Program, Word,
-    utils::{Deserializable, Serializable},
-};
+use miden_core::{Program, Word};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,7 +16,6 @@ pub use self::{
     kind::{InvalidPackageKindError, PackageKind},
     manifest::{ConstantExport, PackageExport, PackageManifest, ProcedureExport, TypeExport},
     section::{InvalidSectionIdError, Section, SectionId},
-    sections::DebugFunctions,
 };
 use crate::MastArtifact;
 
@@ -137,21 +133,15 @@ impl Package {
         }
     }
 
-    /// Returns the debug functions section if present.
-    pub fn debug_functions(&self) -> Option<DebugFunctions> {
-        self.sections
-            .iter()
-            .find(|s| s.id == SectionId::DEBUG_FUNCTIONS)
-            .and_then(|s| DebugFunctions::read_from_bytes(&s.data).ok())
+    /// Returns the procedure name for the given MAST root digest, if present.
+    ///
+    /// This allows debuggers to resolve human-readable procedure names during execution.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.mast.mast_forest().procedure_name(digest)
     }
 
-    /// Sets the debug functions section, replacing any existing one.
-    pub fn set_debug_functions(&mut self, debug_functions: DebugFunctions) {
-        // Remove existing debug_functions section if present
-        self.sections.retain(|s| s.id != SectionId::DEBUG_FUNCTIONS);
-
-        // Serialize and add new section
-        let data = debug_functions.to_bytes();
-        self.sections.push(Section::new(SectionId::DEBUG_FUNCTIONS, data));
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &alloc::string::String)> {
+        self.mast.mast_forest().procedure_names()
     }
 }
