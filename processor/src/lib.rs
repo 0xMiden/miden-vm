@@ -52,7 +52,7 @@ mod host;
 pub use host::{
     AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
     SyncHost,
-    advice::{AdviceError, AdviceInputs, AdviceProvider},
+    advice::{AdviceError, AdviceInputs, AdviceProvider, AdviceStackBuilder},
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{

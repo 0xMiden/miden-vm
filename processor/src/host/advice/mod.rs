@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 mod inputs;
-pub use inputs::AdviceInputs;
+pub use inputs::{AdviceInputs, AdviceStackBuilder};
 
 mod errors;
 pub use errors::AdviceError;
