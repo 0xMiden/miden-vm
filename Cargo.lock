@@ -1312,8 +1312,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5faabb0c18b902bc08e0af0375ecd96252939492ab138f0fc94c112a8dcb40e3"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#7e076ab897e1a6c43f7dbb29c13f0799e47ff43e"
 dependencies = [
  "blake3",
  "cc",
@@ -1350,8 +1349,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7565cb2457f722c5125428c1293f2e6fd8a5873c495f05a4bc9c02c6a19a853"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#7e076ab897e1a6c43f7dbb29c13f0799e47ff43e"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1480,8 +1478,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1b99de56b2a1dcac1caf76e7906721ec2ea212d7ddb32dcb7dc135602bbac27"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#7e076ab897e1a6c43f7dbb29c13f0799e47ff43e"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",
