@@ -1465,13 +1465,10 @@ dependencies = [
  "getrandom 0.2.16",
  "getrandom 0.3.4",
  "miden-air",
- "miden-assembly",
  "miden-core",
  "miden-crypto",
  "miden-debug-types",
  "miden-processor",
- "miden-verifier",
- "miden-vm",
  "p3-matrix",
  "p3-merkle-tree",
  "rand",
@@ -1577,6 +1574,7 @@ name = "miden-vm"
 version = "0.21.0"
 dependencies = [
  "assert_cmd",
+ "bincode",
  "blake3",
  "clap",
  "criterion",

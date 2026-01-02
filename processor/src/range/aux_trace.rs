@@ -109,6 +109,9 @@ impl AuxTraceBuilder {
         // after the padded section of the range checker table, include the lookup value specified
         // by the range checker into the running sum at each step, and remove lookups from user ops
         // at any step where user ops were executed.
+        //
+        // Note: we take `num_rows - 1` because the loop writes to `b_range[row_idx + 1]`, so we
+        // need to stop one row early to avoid writing past the end of the array.
         for (row_idx, (multiplicity, lookup)) in main_trace
             .get_column(M_COL_IDX)
             .iter()

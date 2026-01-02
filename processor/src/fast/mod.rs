@@ -9,6 +9,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
+use tracing::instrument;
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
@@ -338,6 +339,7 @@ impl FastProcessor {
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
     /// context necessary to build the trace.
+    #[instrument(name = "execute_for_trace", skip_all)]
     pub async fn execute_for_trace(
         self,
         program: &Program,
@@ -941,6 +943,7 @@ impl FastProcessor {
     /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
     /// method instead in async contexts.
     #[cfg(not(target_arch = "wasm32"))]
+    #[instrument(name = "execute_for_trace_sync", skip_all)]
     pub fn execute_for_trace_sync(
         self,
         program: &Program,

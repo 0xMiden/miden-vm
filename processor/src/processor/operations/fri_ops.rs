@@ -140,7 +140,7 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);
 
-const DOMAIN_OFFSET: Felt = Felt::new(7); // Goldilocks generator
+const DOMAIN_OFFSET: Felt = Felt::GENERATOR;
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at

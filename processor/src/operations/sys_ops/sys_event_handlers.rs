@@ -353,6 +353,9 @@ fn copy_map_value_length_to_adv_stack(
         ))?
         .len();
 
+    // Note: we assume values_len fits within the field modulus. This is always true
+    // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
+    // practical vector length that could fit in memory.
     advice_provider.push_stack(Felt::from(values_len as u64));
 
     Ok(())

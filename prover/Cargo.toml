@@ -53,9 +53,3 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 getrandom = { version = "0.3", default-features = false, features = ["wasm_js"] }
 tokio = { workspace = true, features = ["rt", "macros"] }
 
-[dev-dependencies]
-miden-assembly.workspace = true
-miden-core.workspace = true
-miden-processor = { workspace = true, features = ["testing"] }
-miden-verifier.workspace = true
-miden-vm = { path = "../miden-vm", version = "0.21", default-features = false }

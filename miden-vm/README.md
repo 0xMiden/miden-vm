@@ -36,7 +36,7 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use either `execute()` or `execute_iter()` functions. The `execute()` function takes the following arguments:
+To execute a program on Miden VM, you can use `execute()` which takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -44,8 +44,6 @@ To execute a program on Miden VM, you can use either `execute()` or `execute_ite
 - `options: ExecutionOptions` - a set of options for executing the specified program (e.g., max allowed number of cycles).
 
 The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
-
-The `execute_iter()` function takes similar arguments (but without the `options`) and returns a `VmStateIterator` . This iterator can be used to iterate over the cycles of the executed program for debug purposes. In fact, when we execute a program using this function, a lot of the debug information is retained and we can get a precise picture of the VM's state at any cycle. Moreover, if the execution results in an error, the `VmStateIterator` can still be used to inspect VM states right up to the cycle at which the error occurred.
 
 For example:
 

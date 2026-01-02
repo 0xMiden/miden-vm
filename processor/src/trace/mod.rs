@@ -34,12 +34,6 @@ pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummar
 #[cfg(test)]
 mod tests;
 
-// CONSTANTS
-// ================================================================================================
-
-/// Number of rows at the end of an execution trace which are injected with random values.
-pub const NUM_RAND_ROWS: usize = 1;
-
 // VM EXECUTION TRACE
 // ================================================================================================
 
@@ -71,12 +65,6 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
-    // CONSTANTS
-    // --------------------------------------------------------------------------------------------
-
-    /// Number of rows at the end of an execution trace which are injected with random values.
-    pub const NUM_RAND_ROWS: usize = NUM_RAND_ROWS;
-
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -141,13 +129,8 @@ impl ExecutionTrace {
         &self.main_trace
     }
 
-    /// Returns a reference to the main segment of the trace.
-    pub fn main_segment(&self) -> &MainTrace {
-        &self.main_trace
-    }
-
-    /// Returns a mutable reference to the main segment of the trace.
-    pub fn main_segment_mut(&mut self) -> &mut MainTrace {
+    /// Returns a mutable reference to the main trace.
+    pub fn main_trace_mut(&mut self) -> &mut MainTrace {
         &mut self.main_trace
     }
 
@@ -233,7 +216,7 @@ impl ExecutionTrace {
 
     /// Returns the index of the last row in the trace.
     fn last_step(&self) -> usize {
-        self.length() - NUM_RAND_ROWS - 1
+        self.length() - 1
     }
 
     // TEST HELPERS

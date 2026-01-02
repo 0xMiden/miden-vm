@@ -319,9 +319,9 @@ fn test_trace_generation_at_fragment_boundaries(
     // Ensure that the trace generated from multiple fragments is identical to the one generated
     // from a single fragment.
     for (col_idx, (col_from_fragments, col_from_single_fragment)) in trace_from_fragments
-        .main_segment()
+        .main_trace()
         .columns()
-        .zip(trace_from_single_fragment.main_segment().columns())
+        .zip(trace_from_single_fragment.main_trace().columns())
         .enumerate()
     {
         if col_from_fragments != col_from_single_fragment {

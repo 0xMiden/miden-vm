@@ -1,4 +1,4 @@
-//! Integration tests for the unified prove/verify flow
+//! Integration tests for the prove/verify flow with different hash functions.
 
 use alloc::sync::Arc;
 
@@ -6,8 +6,6 @@ use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_prover::{AdviceInputs, HashFunction, ProvingOptions, StackInputs, prove_sync};
 use miden_verifier::verify;
 use miden_vm::DefaultHost;
-
-extern crate alloc;
 
 #[test]
 fn test_blake3_256_prove_verify() {
@@ -201,12 +199,12 @@ fn test_rpx_prove_verify() {
 mod fast_parallel {
     use alloc::sync::Arc;
 
-    use miden_air::ProcessorAir;
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::Felt;
-    use miden_crypto::stark;
     use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
-    use miden_prover::{HashFunction, execution_trace_to_row_major};
+    use miden_prover::{
+        ExecutionProof, HashFunction, ProcessorAir, config, execution_trace_to_row_major, stark,
+    };
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -259,17 +257,13 @@ mod fast_parallel {
         let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
 
         // Generate proof using Blake3_256
-        let config = miden_air::config::create_blake3_256_config();
+        let config = config::create_blake3_256_config();
         let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
         let proof_bytes = bincode::serialize(&proof).expect("Failed to serialize proof");
 
         let precompile_requests = trace.precompile_requests().to_vec();
 
-        let proof = miden_air::ExecutionProof::new(
-            proof_bytes,
-            HashFunction::Blake3_256,
-            precompile_requests,
-        );
+        let proof = ExecutionProof::new(proof_bytes, HashFunction::Blake3_256, precompile_requests);
 
         // Verify the proof
         verify(program.into(), stack_inputs, fast_stack_outputs, proof)

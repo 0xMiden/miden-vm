@@ -7,8 +7,6 @@ extern crate std;
 
 use alloc::string::ToString;
 
-use miden_air::ProcessorAir;
-use miden_crypto::stark;
 use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
 
@@ -20,9 +18,12 @@ mod trace_adapter;
 
 pub use miden_air::{
     DEFAULT_CORE_TRACE_FRAGMENT_SIZE, DeserializationError, ExecutionProof, HashFunction,
-    ProvingOptions, config,
+    ProcessorAir, ProvingOptions, config,
 };
-pub use miden_crypto::stark::{Commitments, OpenedValues, Proof};
+pub use miden_crypto::{
+    stark,
+    stark::{Commitments, OpenedValues, Proof},
+};
 pub use miden_processor::{
     AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
     SyncHost, Word, crypto, math, utils,
@@ -31,9 +32,6 @@ pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
 // ================================================================================================
-
-/// Default fragment size for trace generation.
-const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
 
 /// Executes and proves the specified `program` and returns the result together with a STARK-based
 /// proof of the program's execution.
@@ -67,8 +65,9 @@ pub async fn prove(
         FastProcessor::new_with_advice_inputs(&stack_inputs_reversed, advice_inputs)
     };
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace(program, host, DEFAULT_FRAGMENT_SIZE).await?;
+    let (execution_output, trace_generation_context) = processor
+        .execute_for_trace(program, host, options.execution_options().core_trace_fragment_size())
+        .await?;
 
     let trace = build_trace(
         execution_output,

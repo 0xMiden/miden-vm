@@ -6,14 +6,15 @@ use core::{
 };
 
 use miden_core::{
-    Felt, ONE, Word, ZERO,
+    Felt, ONE, WORD_SIZE, Word, ZERO,
     field::PrimeCharacteristicRing,
     utils::{ColMatrix, range},
 };
 
 use super::{
-    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, RowIndex,
-    STACK_TRACE_OFFSET,
+    CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
+    STACK_TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -50,19 +51,19 @@ pub struct MainTraceRow<T> {
     // System
     pub clk: T,
     pub ctx: T,
-    pub fn_hash: [T; 4],
+    pub fn_hash: [T; WORD_SIZE],
 
     // Decoder
-    pub decoder: [T; 24],
+    pub decoder: [T; DECODER_TRACE_WIDTH],
 
     // Stack
-    pub stack: [T; 19],
+    pub stack: [T; STACK_TRACE_WIDTH],
 
     // Range checker
-    pub range: [T; 2],
+    pub range: [T; RANGE_CHECK_TRACE_WIDTH],
 
     // Chiplets
-    pub chiplets: [T; 20],
+    pub chiplets: [T; CHIPLETS_WIDTH],
 }
 
 impl<T> Borrow<MainTraceRow<T>> for [T] {

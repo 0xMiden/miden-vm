@@ -21,6 +21,7 @@ use miden_core::{
     utils::{ColMatrix, uninit_vector},
 };
 use rayon::prelude::*;
+use tracing::instrument;
 
 use crate::{
     ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
@@ -52,6 +53,7 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
+#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,

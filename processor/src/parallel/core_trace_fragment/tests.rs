@@ -1651,7 +1651,7 @@ fn build_call_trace_helper(
 fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
     use miden_air::trace::DECODER_TRACE_RANGE;
 
-    let main_segment = trace.main_segment();
+    let main_segment = trace.main_trace();
     DECODER_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
@@ -1659,7 +1659,7 @@ fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
 fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
     use miden_air::trace::SYS_TRACE_RANGE;
 
-    let main_segment = trace.main_segment();
+    let main_segment = trace.main_trace();
     SYS_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
