@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-concurrent = ["std", "miden-processor/concurrent", "p3-maybe-rayon/parallel"]
+concurrent = ["std", "miden-processor/concurrent"]
 std = [
   "miden-air/std",
   "miden-debug-types/std",
@@ -36,11 +36,7 @@ rand.workspace = true
 getrandom.workspace = true
 
 # Plonky3 dependencies
-p3-dft = { workspace = true, features = ["parallel"] }
-p3-miden-fri.workspace = true
-p3-keccak.workspace = true
 p3-matrix.workspace = true
-p3-maybe-rayon.workspace = true
 p3-merkle-tree.workspace = true
 
 # Serialization

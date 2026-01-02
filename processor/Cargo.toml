@@ -43,14 +43,12 @@ miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+itertools.workspace = true
+p3-matrix.workspace = true
 paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
-
-p3-matrix.workspace = true
-p3-maybe-rayon.workspace = true
-itertools.workspace = true
 
 # Platform-specific tokio dependencies
 # On non-wasm targets, enable rt-multi-thread for better performance

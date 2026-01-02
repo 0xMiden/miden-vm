@@ -1204,7 +1204,6 @@ dependencies = [
  "p3-dft",
  "p3-keccak",
  "p3-matrix",
- "p3-maybe-rayon",
  "p3-merkle-tree",
  "p3-miden-fri",
  "proptest",
@@ -1448,7 +1447,6 @@ dependencies = [
  "miden-utils-diagnostics",
  "miden-utils-indexing",
  "p3-matrix",
- "p3-maybe-rayon",
  "paste",
  "pretty_assertions",
  "proptest",
@@ -1474,12 +1472,8 @@ dependencies = [
  "miden-processor",
  "miden-verifier",
  "miden-vm",
- "p3-dft",
- "p3-keccak",
  "p3-matrix",
- "p3-maybe-rayon",
  "p3-merkle-tree",
- "p3-miden-fri",
  "rand",
  "serde",
  "tokio",
@@ -1907,9 +1901,6 @@ name = "p3-maybe-rayon"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0db6a290f867061aed54593d48f0dfd7ff2d0f706a603d03209fd0eac79518f3"
-dependencies = [
- "rayon",
-]
 
 [[package]]
 name = "p3-mds"
