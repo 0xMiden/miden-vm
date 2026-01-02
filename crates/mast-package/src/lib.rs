@@ -27,8 +27,8 @@ pub use self::{
         },
     },
     package::{
-        ConstantExport, InvalidPackageKindError, InvalidSectionIdError, Package, PackageExport,
-        PackageKind, PackageManifest, ProcedureExport, Section, SectionId, TypeExport, Version,
-        VersionError,
+        ConstantExport, DebugFunctions, InvalidPackageKindError, InvalidSectionIdError, Package,
+        PackageExport, PackageKind, PackageManifest, ProcedureExport, Section, SectionId,
+        TypeExport, Version, VersionError,
     },
 };
