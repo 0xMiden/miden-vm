@@ -118,34 +118,36 @@ pub fn u32mul(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Opt
 /// Translates u32div assembly instructions to VM operations.
 ///
 /// VM cycles per mode:
-/// - u32div: 2 cycles
+/// - u32div: 3 cycles
 /// - u32div.b:
-///    - 4 cycles if b is 1
-///    - 3 cycles if b is not 1
+///    - 5 cycles if b is 1
+///    - 4 cycles if b is not 1
 pub fn u32div(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
     imm: Option<Span<u32>>,
 ) -> Result<(), Report> {
     handle_division(span_builder, proc_ctx, imm)?;
-    span_builder.push_op(Drop);
+    // U32div outputs [quotient, remainder], swap before drop to keep quotient
+    span_builder.push_ops([Swap, Drop]);
     Ok(())
 }
 
 /// Translates u32mod assembly instructions to VM operations.
 ///
 /// VM cycles per mode:
-/// - u32mod: 3 cycle
+/// - u32mod: 2 cycles
 /// - u32mod.b:
-///    - 5 cycles if b is 1
-///    - 4 cycles if b is not 1
+///    - 4 cycles if b is 1
+///    - 3 cycles if b is not 1
 pub fn u32mod(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
     imm: Option<Span<u32>>,
 ) -> Result<(), Report> {
     handle_division(span_builder, proc_ctx, imm)?;
-    span_builder.push_ops([Swap, Drop]);
+    // U32div outputs [quotient, remainder], drop quotient to keep remainder
+    span_builder.push_op(Drop);
     Ok(())
 }
 
@@ -176,7 +178,8 @@ pub fn u32divmod(
 pub fn u32not(span_builder: &mut BasicBlockBuilder) {
     #[rustfmt::skip]
     let ops = [
-        // Perform the operation
+        // Perform the operation: compute MAX - value
+        // U32sub computes second - top (a - b for [b, a]), so we need [value, MAX, ...]
         Push(Felt::from(u32::MAX)),
         U32assert2(ZERO),
         Swap,
@@ -194,8 +197,8 @@ pub fn u32not(span_builder: &mut BasicBlockBuilder) {
 /// the value to be shifted and splitting the result.
 ///
 /// VM cycles per mode:
-/// - u32shl: 18 cycles
-/// - u32shl.b: 3 cycles
+/// - u32shl: 19 cycles
+/// - u32shl.b: 4 cycles
 pub fn u32shl(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
@@ -204,7 +207,8 @@ pub fn u32shl(
 ) -> Result<(), Report> {
     prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, proc_ctx, imm, span)?;
     if imm != Some(0) {
-        span_builder.push_ops([U32mul, Drop]);
+        // U32mul outputs [lo, hi], swap before drop to keep lo (the shifted value)
+        span_builder.push_ops([U32mul, Swap, Drop]);
     }
     Ok(())
 }
@@ -215,8 +219,8 @@ pub fn u32shl(
 /// be shifted by it and returning the quotient.
 ///
 /// VM cycles per mode:
-/// - u32shr: 18 cycles
-/// - u32shr.b: 3 cycles
+/// - u32shr: 20 cycles
+/// - u32shr.b: 5 cycles
 pub fn u32shr(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
@@ -225,7 +229,10 @@ pub fn u32shr(
 ) -> Result<(), Report> {
     prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, proc_ctx, imm, span)?;
     if imm != Some(0) {
-        span_builder.push_ops([U32div, Drop]);
+        // After prepare_bitwise, stack is [2^b, value, ...]
+        // U32div computes top/second, so swap to get value on top for value / 2^b
+        // U32div outputs [quotient, remainder], swap before drop to keep quotient
+        span_builder.push_ops([Swap, U32div, Swap, Drop]);
     }
     Ok(())
 }
@@ -257,7 +264,7 @@ pub fn u32rotl(
 /// b is the shift amount, then adding the overflow limb to the shifted limb.
 ///
 /// VM cycles per mode:
-/// - u32rotr: 23 cycles
+/// - u32rotr: 22 cycles
 /// - u32rotr.b: 3 cycles
 pub fn u32rotr(
     span_builder: &mut BasicBlockBuilder,
@@ -282,6 +289,9 @@ pub fn u32rotr(
             span_builder.push_ops([U32mul, Add]);
         },
         None => {
+            // Compute 32 - b, where b is rotation amount on top of stack
+            // Stack: [b, ...], push 32 to get [32, b, ...], swap to get [b, 32, ...]
+            // U32sub computes second - top = 32 - b
             span_builder.push_ops([Push(Felt::new(32)), Swap, U32sub, Drop]);
             append_pow2_op(span_builder);
             span_builder.push_ops([Mul, U32split, Add]);
@@ -292,19 +302,22 @@ pub fn u32rotr(
 
 /// Translates u32popcnt assembly instructions to VM operations.
 ///
-/// This operation takes 33 cycles.
+/// This operation takes 32 cycles.
 pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
     #[rustfmt::skip]
     let ops = [
         // i = i - ((i >> 1) & 0x55555555);
+        // U32div computes second/top. Stack: [i, ...], push 2 to get [2, i, ...].
+        // U32div gives i/2. Output [quotient, remainder], swap drop to keep quotient.
         Dup0,
-        Push(Felt::new(1 << 1)), U32div, Drop,
+        Push(Felt::new(1 << 1)), U32div, Swap, Drop,
         Push(Felt::new(0x55555555)),
         U32and,
+        // U32sub computes second - top. Stack: [masked, i], gives i - masked
         U32sub, Drop,
         // i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
         Dup0,
-        Push(Felt::new(1 << 2)), U32div, Drop,
+        Push(Felt::new(1 << 2)), U32div, Swap, Drop,
         Push(Felt::new(0x33333333)),
         U32and,
         Swap,
@@ -313,14 +326,15 @@ pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
         U32add, Drop,
         // i = (i + (i >> 4)) & 0x0F0F0F0F;
         Dup0,
-        Push(Felt::new(1 << 4)), U32div, Drop,
+        Push(Felt::new(1 << 4)), U32div, Swap, Drop,
         U32add, Drop,
         Push(Felt::new(0x0F0F0F0F)),
         U32and,
         // return (i * 0x01010101) >> 24;
+        // U32mul outputs [lo, hi], swap before drop to keep lo
         Push(Felt::new(0x01010101)),
-        U32mul, Drop,
-        Push(Felt::new(1 << 24)), U32div, Drop
+        U32mul, Swap, Drop,
+        Push(Felt::new(1 << 24)), U32div, Swap, Drop
     ];
     span_builder.push_ops(ops);
 }
@@ -329,7 +343,7 @@ pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
 /// leading zeros of the value using non-deterministic technique (i.e. it takes help of advice
 /// provider).
 ///
-/// This operation takes 42 VM cycles.
+/// This operation takes 41 VM cycles.
 pub fn u32clz(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(SystemEvent::U32Clz);
     block_builder.push_op(AdvPop); // [clz, n, ...]
@@ -353,7 +367,7 @@ pub fn u32ctz(block_builder: &mut BasicBlockBuilder) {
 /// leading ones of the value using non-deterministic technique (i.e. it takes help of advice
 /// provider).
 ///
-/// This operation takes 41 VM cycles.
+/// This operation takes 40 VM cycles.
 pub fn u32clo(block_builder: &mut BasicBlockBuilder) {
     block_builder.push_system_event(SystemEvent::U32Clo);
     block_builder.push_op(AdvPop); // [clo, n, ...]
@@ -386,13 +400,23 @@ fn handle_arithmetic_operation(
 ) {
     if let Some(imm) = imm {
         push_u32_value(block_builder, imm);
+        // For U32sub with stack [a, ...], after push we have [imm, a, ...].
+        // U32sub computes second - top = a - imm, which is what we want.
+        // No swap needed.
     }
 
     block_builder.push_op(op);
 
-    // in the wrapping mode, drop high 32 bits
+    // in the wrapping mode, drop overflow/carry bits
     if matches!(op_mode, U32OpMode::Wrapping) {
-        block_builder.push_op(Drop);
+        // U32mul outputs [lo, hi] where lo is on top, so swap before drop to keep lo
+        // U32add outputs [carry, sum] where carry is on top, so just drop to keep sum
+        // U32sub outputs [borrow, diff] where borrow is on top, so just drop to keep diff
+        if matches!(op, U32mul) {
+            block_builder.push_ops([Swap, Drop]);
+        } else {
+            block_builder.push_op(Drop);
+        }
     }
 }
 
@@ -489,7 +513,7 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
 ///
 /// `[clz, n, ... ] -> [clz, ... ]`
 ///
-/// VM cycles: 42
+/// VM cycles: 41
 fn verify_clz(block_builder: &mut BasicBlockBuilder) {
     // [clz, n, ...]
     #[rustfmt::skip]
@@ -513,7 +537,9 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         // NOTE: This first step is an intermediate computation.
         //
         // #=> [(2^(32 - clz) - 1) / 2, clz, n, ...]
-        Push(2u8.into()), U32div, Drop,
+        // U32div computes second/top. Stack: [mask, ...], push 2 to get [2, mask, ...].
+        // U32div gives mask/2. Output [quotient, remainder], swap drop to keep quotient.
+        Push(2u8.into()), U32div, Swap, Drop,
         // Save the intermediate result of dividing by 2 for reuse in the next step
         //
         // #=> [((2^(32 - clz) - 1) / 2) + 1, (2^(32 - clz) - 1) / 2, clz, n, ...]
@@ -570,7 +596,7 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
 ///
 /// `[clo, n, ... ] -> [clo, ... ]`
 ///
-/// VM cycle: 40
+/// VM cycles: 39
 fn verify_clo(block_builder: &mut BasicBlockBuilder) {
     // [clo, n, ...]
     #[rustfmt::skip]
@@ -590,7 +616,9 @@ fn verify_clo(block_builder: &mut BasicBlockBuilder) {
         // 2. Obtain a mask for `32 - clo - 1` trailing bits
         //
         // #=> [(2^(32 - clo) - 1) / 2, 2^(32 - clo) - 1, clo, n]
-        Dup0, Push(2u8.into()), U32div, Drop,
+        // U32div computes second/top. Stack: [mask, ...], Dup0 push 2 to get [2, mask, mask, ...].
+        // U32div gives mask/2. Output [quotient, remainder], swap drop to keep quotient.
+        Dup0, Push(2u8.into()), U32div, Swap, Drop,
         // 3. Invert the mask from Step 2, to get one that covers `clo + 1` leading bits
         //
         // #=> [u32::MAX - ((2^(32 - clo) - 1) / 2), 2^(32 - clo) - 1, clo, n]
@@ -846,9 +874,10 @@ pub fn u32max(block_builder: &mut BasicBlockBuilder) {
 /// Inserts the VM operations to check if the second element is less than
 /// the top element. This takes 3 cycles.
 fn compute_lt(block_builder: &mut BasicBlockBuilder) {
-    block_builder.push_ops([
-        U32sub, Swap, Drop, // Perform the operations
-    ])
+    // For stack [b, a, ...], U32sub computes second - top = a - b.
+    // If a < b, borrow = 1. Output is [borrow, diff, ...].
+    // Swap drop to return just the borrow flag.
+    block_builder.push_ops([U32sub, Swap, Drop])
 }
 
 /// Duplicate the top two elements in the stack and determine the min and max between them.
@@ -860,6 +889,9 @@ fn compute_max_and_min(block_builder: &mut BasicBlockBuilder) {
 
     #[rustfmt::skip]
     block_builder.push_ops([
+        // For stack [b, a, ...], U32sub computes second - top = a - b.
+        // If a < b, borrow = 1. Output is [borrow, diff, ...].
+        // Swap drop to get just the borrow flag.
         U32sub, Swap, Drop,
 
         // Check the underflow flag, if it's zero
