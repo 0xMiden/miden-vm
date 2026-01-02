@@ -1,6 +1,5 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 2564
 expression: program
 ---
 begin
@@ -20,6 +19,6 @@ begin
             asmOp(push.0, 1)
             pad
         end
-        external.0x3cff5b58a573dc9d25fd3c57130cc57e5b1b381dc58b5ae3594b390c59835e63
+        external.0xdb212ddcf6bb142e387e0e58999e69813d9d6602a19c3fd4e33194f46a1b4c53
     end
 end
