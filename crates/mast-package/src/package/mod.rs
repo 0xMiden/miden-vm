@@ -1,13 +1,17 @@
 mod kind;
 mod manifest;
 mod section;
+pub mod sections;
 mod serialization;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 pub use miden_assembly_syntax::{Version, VersionError};
-use miden_core::{Program, Word};
+use miden_core::{
+    Program, Word,
+    utils::{Deserializable, Serializable},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +19,7 @@ pub use self::{
     kind::{InvalidPackageKindError, PackageKind},
     manifest::{ConstantExport, PackageExport, PackageManifest, ProcedureExport, TypeExport},
     section::{InvalidSectionIdError, Section, SectionId},
+    sections::DebugFunctions,
 };
 use crate::MastArtifact;
 
@@ -130,5 +135,23 @@ impl Package {
                 "invalid entrypoint: library does not export '{entrypoint}'"
             )))
         }
+    }
+
+    /// Returns the debug functions section if present.
+    pub fn debug_functions(&self) -> Option<DebugFunctions> {
+        self.sections
+            .iter()
+            .find(|s| s.id == SectionId::DEBUG_FUNCTIONS)
+            .and_then(|s| DebugFunctions::read_from_bytes(&s.data).ok())
+    }
+
+    /// Sets the debug functions section, replacing any existing one.
+    pub fn set_debug_functions(&mut self, debug_functions: DebugFunctions) {
+        // Remove existing debug_functions section if present
+        self.sections.retain(|s| s.id != SectionId::DEBUG_FUNCTIONS);
+
+        // Serialize and add new section
+        let data = debug_functions.to_bytes();
+        self.sections.push(Section::new(SectionId::DEBUG_FUNCTIONS, data));
     }
 }
