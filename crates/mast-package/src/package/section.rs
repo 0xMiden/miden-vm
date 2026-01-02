@@ -19,10 +19,6 @@ pub struct SectionId(Cow<'static, str>);
 impl SectionId {
     /// The section containing debug information (source locations, spans)
     pub const DEBUG_INFO: Self = Self(Cow::Borrowed("debug_info"));
-    /// This section contains the names of all procedures (both exported and private)
-    /// in a package, keyed by their MAST root digest. This allows debuggers to
-    /// resolve human-readable procedure names during execution.
-    pub const DEBUG_FUNCTIONS: Self = Self(Cow::Borrowed("debug_functions"));
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
@@ -70,7 +66,6 @@ impl FromStr for SectionId {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "debug_info" => Ok(Self::DEBUG_INFO),
-            "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             custom => Self::custom(custom),
         }

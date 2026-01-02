@@ -649,6 +649,25 @@ impl MastForest {
     }
 }
 
+// ------------------------------------------------------------------------------------------------
+/// Procedure name methods
+impl MastForest {
+    /// Returns the procedure name for the given MAST root digest, if present.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.debug_info.procedure_name(digest)
+    }
+
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &String)> {
+        self.debug_info.procedure_names()
+    }
+
+    /// Inserts a procedure name for the given MAST root digest.
+    pub fn insert_procedure_name(&mut self, digest: Word, name: String) {
+        self.debug_info.insert_procedure_name(digest, name);
+    }
+}
+
 // TEST HELPERS
 // ================================================================================================
 
