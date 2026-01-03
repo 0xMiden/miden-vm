@@ -50,6 +50,10 @@ pub struct RunCmd {
     /// Disable debug instructions (release mode)
     #[arg(short = 'r', long = "release")]
     release: bool,
+
+    /// Strip decorators from the program before running
+    #[arg(long = "strip-decorators")]
+    strip_decorators: bool,
 }
 
 impl RunCmd {
@@ -127,6 +131,13 @@ impl RunCmd {
 fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Report> {
     let program = get_masp_program(&params.program_file)?;
 
+    // Strip decorators if requested
+    let program = if params.strip_decorators {
+        program.with_decorators_stripped()
+    } else {
+        program
+    };
+
     // use simplified input data reading
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
@@ -171,6 +182,14 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     // load program from file and compile
     let (program, source_manager) = get_masm_program(&params.program_file, &libraries)?;
+
+    // Strip decorators if requested
+    let program = if params.strip_decorators {
+        program.with_decorators_stripped()
+    } else {
+        program
+    };
+
     let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     let execution_options = ExecutionOptions::new(
