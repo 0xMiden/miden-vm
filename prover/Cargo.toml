@@ -15,23 +15,30 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-async = ["winter-maybe-async/async"]
-concurrent = ["std", "miden-processor/concurrent", "winter-prover/concurrent"]
-metal = ["dep:miden-gpu", "dep:elsa", "dep:pollster", "concurrent", "std"]
-std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std", "winter-prover/std"]
+concurrent = ["std", "miden-processor/concurrent"]
+std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
+miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
+miden-crypto.workspace = true
 
 # External dependencies
+bincode = "1.3"
+p3-matrix.workspace = true
+p3-merkle-tree.workspace = true
+serde.workspace = true
 tracing.workspace = true
-winter-maybe-async = { version = "0.13", default-features = false }
-winter-prover.workspace = true
 
-[target.'cfg(all(target_arch = "aarch64", target_os = "macos"))'.dependencies]
-elsa = { version = "1.11", optional = true }
-miden-gpu = { version = "0.6", optional = true }
-pollster = { version = "0.4", optional = true }
+# Platform-specific tokio dependencies
+# On non-wasm targets, enable rt-multi-thread for better performance
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+# On wasm32, only basic tokio features are supported
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+

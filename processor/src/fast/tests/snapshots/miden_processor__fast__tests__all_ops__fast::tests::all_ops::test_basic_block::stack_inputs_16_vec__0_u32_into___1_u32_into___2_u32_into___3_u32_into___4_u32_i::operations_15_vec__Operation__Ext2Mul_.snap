@@ -1,5 +1,6 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 133
 expression: fast_stack_outputs
 ---
 Ok(
@@ -7,8 +8,8 @@ Ok(
         elements: [
             14,
             13,
-            478,
-            18446744069414584128,
+            310,
+            1319,
             10,
             9,
             8,

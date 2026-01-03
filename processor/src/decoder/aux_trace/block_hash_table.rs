@@ -1,11 +1,11 @@
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{
-    ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN,
-    OPCODE_LOOP, OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO,
+    OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
+    OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO, field::ExtensionField,
 };
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace};
-use crate::debug::BusDebugger;
+use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
+use crate::{PrimeField64, debug::BusDebugger};
 
 // BLOCK HASH TABLE COLUMN BUILDER
 // ================================================================================================
@@ -24,7 +24,7 @@ use crate::debug::BusDebugger;
 #[derive(Default)]
 pub struct BlockHashTableColumnBuilder {}
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
     fn init_responses(
         &self,
         main_trace: &MainTrace,
@@ -42,7 +42,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockHashTableCo
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_END => BlockHashTableRow::from_end(main_trace, row).collapse(alphas),
@@ -58,7 +58,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockHashTableCo
         row: RowIndex,
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        let op_code = main_trace.get_op_code(row).as_int() as u8;
+        let op_code = main_trace.get_op_code(row).as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_JOIN => {
@@ -121,7 +121,7 @@ impl BlockHashTableRow {
     /// Computes the row to be removed from the block hash table when encountering an `END`
     /// operation.
     pub fn from_end(main_trace: &MainTrace, row: RowIndex) -> Self {
-        let op_code_next = main_trace.get_op_code(row + 1).as_int() as u8;
+        let op_code_next = main_trace.get_op_code(row + 1).as_canonical_u64() as u8;
         let parent_block_id = main_trace.addr(row + 1);
         let child_block_hash = main_trace.decoder_hasher_state_first_half(row);
 
@@ -137,10 +137,12 @@ impl BlockHashTableRow {
         let is_first_child = op_code_next != OPCODE_END
             && op_code_next != OPCODE_REPEAT
             && op_code_next != OPCODE_HALT;
-        let is_loop_body = main_trace
-            .is_loop_body_flag(row)
-            .try_into()
-            .expect("expected loop body flag to be a boolean");
+
+        let is_loop_body = match main_trace.is_loop_body_flag(row).as_canonical_u64() {
+            0 => false,
+            1 => true,
+            other => panic!("expected loop body flag to be 0 or 1, got {other}"),
+        };
 
         Self {
             parent_block_id,
@@ -246,17 +248,17 @@ impl BlockHashTableRow {
     /// Collapses this row to a single field element in the field specified by E by taking a random
     /// linear combination of all the columns. This requires 8 alpha values, which are assumed to
     /// have been drawn randomly.
-    pub fn collapse<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn collapse<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         let is_first_child = if self.is_first_child { ONE } else { ZERO };
         let is_loop_body = if self.is_loop_body { ONE } else { ZERO };
         alphas[0]
-            + alphas[1].mul_base(self.parent_block_id)
-            + alphas[2].mul_base(self.child_block_hash[0])
-            + alphas[3].mul_base(self.child_block_hash[1])
-            + alphas[4].mul_base(self.child_block_hash[2])
-            + alphas[5].mul_base(self.child_block_hash[3])
-            + alphas[6].mul_base(is_first_child)
-            + alphas[7].mul_base(is_loop_body)
+            + alphas[1] * self.parent_block_id
+            + alphas[2] * self.child_block_hash[0]
+            + alphas[3] * self.child_block_hash[1]
+            + alphas[4] * self.child_block_hash[2]
+            + alphas[5] * self.child_block_hash[3]
+            + alphas[6] * is_first_child
+            + alphas[7] * is_loop_body
     }
 
     // TEST

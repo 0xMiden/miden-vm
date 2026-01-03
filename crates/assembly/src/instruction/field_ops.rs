@@ -3,7 +3,11 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use miden_core::{
+    Operation::*,
+    field::{Field, PrimeField64},
+    sys_events::SystemEvent,
+};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
@@ -106,7 +110,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inv()), Mul]);
+        span_builder.push_ops([Push(imm.into_inner().inverse()), Mul]);
     }
     Ok(())
 }
@@ -199,12 +203,12 @@ pub fn exp_imm(
     pow: Felt,
     span: SourceSpan,
 ) -> Result<(), Report> {
-    if pow.as_int() <= 7 {
-        perform_exp_for_small_power(span_builder, pow.as_int());
+    if pow.as_canonical_u64() <= 7 {
+        perform_exp_for_small_power(span_builder, pow.as_canonical_u64());
         Ok(())
     } else {
         // compute the bits length of the exponent
-        let num_pow_bits = (64 - pow.as_int().leading_zeros()) as u8;
+        let num_pow_bits = (64 - pow.as_canonical_u64().leading_zeros()) as u8;
 
         // pushing the exponent onto the stack.
         span_builder.push_op(Push(pow));

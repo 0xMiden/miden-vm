@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use miden_utils_testing::{Felt, StarkField, crypto::MerkleStore};
+use miden_utils_testing::{Felt, PrimeField64, crypto::MerkleStore};
 
 mod channel;
 
@@ -45,7 +45,7 @@ fn fri_fold4_ext2_remainder64() {
     );
 
     let advice_map: BTreeMap<Word, Vec<Felt>> = BTreeMap::from_iter(advice_maps);
-    let domain_generator = Felt::get_root_of_unity(domain_size.ilog2()).as_int();
+    let domain_generator = Felt::get_root_of_unity(domain_size.ilog2()).as_canonical_u64();
 
     let mut store = MerkleStore::new();
     for partial_tree in &partial_trees {
@@ -93,7 +93,7 @@ fn fri_fold4_ext2_remainder128() {
     );
 
     let advice_map: BTreeMap<Word, Vec<Felt>> = BTreeMap::from_iter(advice_maps);
-    let domain_generator = Felt::get_root_of_unity(domain_size.ilog2()).as_int();
+    let domain_generator = Felt::get_root_of_unity(domain_size.ilog2()).as_canonical_u64();
 
     let mut store = MerkleStore::new();
     for partial_tree in &partial_trees {

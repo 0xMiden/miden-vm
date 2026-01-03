@@ -7,6 +7,7 @@ use miden_processor::{
     ProcessState, SyncHost, TraceError,
 };
 use miden_prover::Word;
+use miden_utils_testing::PrimeField64;
 
 mod advice;
 mod events;
@@ -53,7 +54,7 @@ impl SyncHost for TestHost {
     }
 
     fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = process.get_stack_item(0).as_int().try_into().unwrap();
+        let event_id = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
         Ok(Vec::new())
     }
@@ -71,7 +72,7 @@ impl AsyncHost for TestHost {
         &mut self,
         process: &ProcessState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let event_id = process.get_stack_item(0).as_int().try_into().unwrap();
+        let event_id = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
         async move { Ok(Vec::new()) }
     }

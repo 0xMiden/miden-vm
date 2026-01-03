@@ -413,7 +413,7 @@ impl Library {
 
         // NOTE: We catch panics due to i/o errors here due to the fact that the ByteWriter
         // trait does not provide fallible APIs, so WriteAdapter will panic if the underlying
-        // writes fail. This needs to be addressed in winterfell at some point
+        // writes fail. This needs to be addressed upstream at some point
         std::panic::catch_unwind(|| {
             let mut file = std::fs::File::create(path)?;
             self.write_into(&mut file);
@@ -801,7 +801,7 @@ impl Serializable for LibraryExport {
     }
 }
 
-/// A wrapper type for [FunctionType] that provides serialization support via the winter-utils
+/// A wrapper type for [FunctionType] that provides serialization support via the miden-crypto
 /// serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
@@ -819,7 +819,7 @@ impl Serializable for FunctionTypeSerializer<'_> {
     }
 }
 
-/// A wrapper type for [FunctionType] that provides deserialization support via the winter-utils
+/// A wrapper type for [FunctionType] that provides deserialization support via the miden-crypto
 /// serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
@@ -863,7 +863,7 @@ impl Deserializable for FunctionTypeDeserializer {
     }
 }
 
-/// A wrapper type for [Type] that provides serialization support via the winter-utils serializer.
+/// A wrapper type for [Type] that provides serialization support via the miden-crypto serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
 /// but in a future release we'll either rely on the `serde` serialization for these types, or
@@ -936,7 +936,7 @@ impl Serializable for TypeSerializer<'_> {
     }
 }
 
-/// A wrapper type for [Type] that provides deserialization support via the winter-utils serializer.
+/// A wrapper type for [Type] that provides deserialization support via the miden-crypto serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
 /// but in a future release we'll either rely on the `serde` serialization for these types, or

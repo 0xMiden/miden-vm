@@ -4207,7 +4207,7 @@ fn duplicate_nodes_with_debug_decorators() {
 
     // Verify the program can be executed (functional test)
     let mut host = DefaultHost::default();
-    let result = miden_processor::execute(
+    let result = miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

@@ -32,15 +32,15 @@ WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,testing,internal
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
-FAST_TEST_FEATURES       := concurrent,testing,metal,no_err_ctx
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
+FAST_TEST_FEATURES       := concurrent,testing,no_err_ctx
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
-FEATURES_METAL_EXEC      := --features concurrent,executable,metal,tracing-forest
+FEATURES_METAL_EXEC      := --features concurrent,executable,tracing-forest
 FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 
 # Per-crate default features
@@ -48,9 +48,9 @@ FEATURES_air             := testing
 FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
-FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_miden-vm        := concurrent,executable,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
-FEATURES_prover          := concurrent,metal
+FEATURES_prover          := concurrent
 FEATURES_core-lib        :=FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
@@ -198,10 +198,6 @@ exec: ## Builds an executable with optimized profile and features
 .PHONY: exec-single
 exec-single: ## Builds a single-threaded executable
 	cargo build --profile optimized --features executable
-
-.PHONY: exec-metal
-exec-metal: ## Builds an executable with Metal acceleration enabled
-	cargo build --profile optimized $(FEATURES_METAL_EXEC)
 
 .PHONY: exec-avx2
 exec-avx2: ## Builds an executable with AVX2 acceleration enabled

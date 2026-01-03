@@ -1,9 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_air::{RowIndex, trace::main_trace::MainTrace};
-use miden_core::OPCODE_DYNCALL;
+use miden_air::trace::{MainTrace, RowIndex};
+use miden_core::{OPCODE_DYNCALL, field::ExtensionField};
 
-use super::{Felt, FieldElement};
+use super::Felt;
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 // AUXILIARY TRACE BUILDER
@@ -11,13 +11,13 @@ use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
 
 /// Describes how to construct execution traces of stack-related auxiliary trace segment columns
 /// (used in multiset checks).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder;
 
 impl AuxTraceBuilder {
     /// Builds and returns stack auxiliary trace columns. Currently this consists of a single
     /// column p1 describing states of the stack overflow table.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -29,7 +29,7 @@ impl AuxTraceBuilder {
     }
 }
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for AuxTraceBuilder {
     /// Removes a row from the stack overflow table.
     fn get_requests_at(
         &self,
@@ -106,10 +106,7 @@ impl OverflowTableRow {
 impl OverflowTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
-        alphas[0]
-            + alphas[1].mul_base(self.clk)
-            + alphas[2].mul_base(self.val)
-            + alphas[3].mul_base(self.prev)
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
+        alphas[0] + alphas[1] * self.clk + alphas[2] * self.val + alphas[3] * self.prev
     }
 }

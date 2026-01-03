@@ -1,16 +1,23 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
     InvalidFriLayerFolding(
-        QuadExtension(
-            0,
-            1,
-        ),
-        QuadExtension(
-            11,
-            12,
-        ),
+        BinomialExtensionField {
+            value: [
+                0,
+                1,
+            ],
+            _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
+        },
+        BinomialExtensionField {
+            value: [
+                11,
+                12,
+            ],
+            _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
+        },
     ),
 )

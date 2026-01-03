@@ -1,8 +1,8 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 
-use super::{Felt, FieldElement, RangeCheckTrace, ZERO, trace::NUM_RAND_ROWS};
+use super::{Felt, RangeCheckTrace, ZERO};
 use crate::utils::uninit_vector;
 
 mod aux_trace;
@@ -101,24 +101,15 @@ impl RangeChecker {
     /// If the number of rows needed to represent execution trace of this range checker is smaller
     /// than `target_len` parameter, the trace is padded with extra rows.
     ///
-    /// `num_rand_rows` indicates the number of rows at the end of the trace which will be
-    /// overwritten with random values. Values in these rows are not initialized.
-    ///
     /// # Panics
     /// Panics if `target_len` is not a power of two or is smaller than the trace length needed
     /// to represent all lookups in this range checker.
-    pub fn into_trace_with_table(
-        self,
-        trace_len: usize,
-        target_len: usize,
-        num_rand_rows: usize,
-    ) -> RangeCheckTrace {
+    pub fn into_trace_with_table(self, trace_len: usize, target_len: usize) -> RangeCheckTrace {
         assert!(target_len.is_power_of_two(), "target trace length is not a power of two");
 
         // determine the length of the trace required to support all the lookups in this range
-        // checker, and make sure this length is smaller than or equal to the target trace length,
-        // accounting for rows with random values.
-        assert!(trace_len + num_rand_rows <= target_len, "target trace length too small");
+        // checker, and make sure this length is smaller than or equal to the target trace length.
+        assert!(trace_len <= target_len, "target trace length too small");
 
         // allocated memory for the trace; this memory is un-initialized but this is not a problem
         // because we'll overwrite all values in it anyway.
@@ -126,7 +117,7 @@ impl RangeChecker {
 
         // determine the number of padding rows needed to get to target trace length and pad the
         // table with the required number of rows.
-        let num_padding_rows = target_len - trace_len - num_rand_rows;
+        let num_padding_rows = target_len - trace_len;
         trace[0][..num_padding_rows].fill(ZERO);
         trace[1][..num_padding_rows].fill(ZERO);
 
@@ -189,14 +180,14 @@ impl RangeChecker {
         self.get_number_range_checker_rows()
     }
 
-    /// Converts this [RangeChecker] into an execution trace with 3 columns and the number of rows
+    /// Converts this [RangeChecker] into an execution trace with 2 columns and the number of rows
     /// specified by the `target_len` parameter.
     ///
     /// Wrapper for [`RangeChecker::into_trace_with_table`].
     #[cfg(test)]
-    pub fn into_trace(self, target_len: usize, num_rand_rows: usize) -> RangeCheckTrace {
+    pub fn into_trace(self, target_len: usize) -> RangeCheckTrace {
         let table_len = self.get_number_range_checker_rows();
-        self.into_trace_with_table(table_len, target_len, num_rand_rows)
+        self.into_trace_with_table(table_len, target_len)
     }
 }
 

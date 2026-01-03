@@ -1,11 +1,13 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, FieldElement, QuadFelt, WORD_SIZE, Word, ZERO, crypto::hash::Rpo256,
+    Felt, WORD_SIZE, Word, ZERO,
+    crypto::hash::Rpo256,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     sys_events::SystemEvent,
 };
 
-use crate::{AdviceError, ExecutionError, ProcessState, errors::ErrorContext};
+use crate::{AdviceError, ExecutionError, PrimeField64, ProcessState, errors::ErrorContext};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -351,7 +353,10 @@ fn copy_map_value_length_to_adv_stack(
         ))?
         .len();
 
-    advice_provider.push_stack(Felt::try_from(values_len as u64).expect("value length too big"));
+    // Note: we assume values_len fits within the field modulus. This is always true
+    // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
+    // practical vector length that could fit in memory.
+    advice_provider.push_stack(Felt::from(values_len as u64));
 
     Ok(())
 }
@@ -372,7 +377,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     let map_key = process.get_stack_word_be(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
-    process.advice_provider_mut().push_stack(Felt::from(presence_flag));
+    process.advice_provider_mut().push_stack(Felt::from_bool(presence_flag));
 
     Ok(())
 }
@@ -401,11 +406,12 @@ fn push_ext2_inv_result(
     let coef0 = process.get_stack_item(2);
     let coef1 = process.get_stack_item(1);
 
-    let element = QuadFelt::new(coef0, coef1);
+    let element = QuadFelt::new_complex(coef0, coef1);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }
-    let result = element.inv().to_base_elements();
+    let result = element.inverse();
+    let result = result.as_basis_coefficients_slice();
 
     process.advice_provider_mut().push_stack(result[1]);
     process.advice_provider_mut().push_stack(result[0]);
@@ -497,7 +503,7 @@ fn push_ilog2(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let n = process.get_stack_item(1).as_int();
+    let n = process.get_stack_item(1).as_canonical_u64();
     if n == 0 {
         return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
     }
@@ -519,7 +525,7 @@ fn push_transformed_stack_top(
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
     let stack_top: u32 = stack_top
-        .as_int()
+        .as_canonical_u64()
         .try_into()
         .map_err(|_| ExecutionError::not_u32_value(stack_top, err_ctx))?;
     let transformed_stack_top = f(stack_top);

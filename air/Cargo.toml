@@ -17,27 +17,33 @@ edition.workspace = true
 bench = false
 doctest = false
 
-[[bench]]
-name = "compute_op_flags"
-harness = false
-
-[[bench]]
-name = "enforce_stack_constraint"
-harness = false
-
 [features]
 default = ["std"]
-std = ["miden-core/std", "winter-air/std", "thiserror/std"]
+std = ["miden-core/std", "thiserror/std"]
+concurrent = ["std"]
 testing = []
 
 [dependencies]
-thiserror.workspace = true
-miden-core.workspace = true
-winter-air.workspace = true
-winter-prover.workspace = true
+# Miden dependencies
+miden-core = { workspace = true, features = ["serde"] }
+miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
 
+# External dependencies
+thiserror.workspace = true
+tracing.workspace = true
+
+# Plonky3 dependencies
+p3-blake3.workspace = true
+p3-commit.workspace = true
+p3-dft.workspace = true
+p3-miden-fri.workspace = true
+p3-keccak.workspace = true
+p3-matrix.workspace = true
+p3-merkle-tree.workspace = true
+
+# Serialization
+serde.workspace = true
+
 [dev-dependencies]
-criterion.workspace = true
 proptest.workspace = true
-winter-rand-utils.workspace = true
