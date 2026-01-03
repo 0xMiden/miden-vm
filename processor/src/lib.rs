@@ -371,14 +371,14 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, program, host),
                     err_ctx,
                 )?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, program, host),
                     err_ctx,
@@ -435,7 +435,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         }
 
@@ -468,7 +468,7 @@ impl Process {
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
             }
 
@@ -479,7 +479,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host)
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
             Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
         }
     }
@@ -497,10 +497,10 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, host);
+            let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
             self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
         }
-        let err_ctx = err_ctx!(program, call_node, host);
+        let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
 
         self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
@@ -518,7 +518,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
+        let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
@@ -651,7 +651,8 @@ impl Process {
             }
 
             // decode and execute the operation
-            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
+            let err_ctx =
+                err_ctx!(program, basic_block, host, self.decoder.in_debug_mode(), i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
 

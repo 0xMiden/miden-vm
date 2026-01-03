@@ -575,7 +575,11 @@ impl Test {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs = self.advice_inputs.clone();
-        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let fast_process = if self.in_debug_mode {
+            FastProcessor::new_debug(&stack_inputs, advice_inputs)
+        } else {
+            FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
+        };
         let fast_stack_outputs = fast_process.execute_sync(&program, &mut host).unwrap();
 
         assert_eq!(
@@ -593,7 +597,11 @@ impl Test {
 
         let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
         let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-        let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let fast_process = if self.in_debug_mode {
+            FastProcessor::new_debug(&stack_inputs, advice_inputs)
+        } else {
+            FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
+        };
         let fast_result = fast_process.execute_sync(&program, &mut host);
 
         match (fast_result, slow_result) {
