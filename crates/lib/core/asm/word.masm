@@ -1,3 +1,5 @@
+use miden::core::math::u64
+
 # ===== WORD FUNCTIONS ==========================================================================
 
 #! Reverses order of the first four elements on the stack
@@ -15,7 +17,7 @@ end
 # CONVERSION UTILITIES
 #! Writes the components of a word to memory as eight u32 limbs in little-endian order.
 #!
-#! Inputs:  [w3, w2, w1, w0, out_ptr, ...]
+#! Inputs:  [w0, w1, w2, w3, out_ptr, ...]
 #! Outputs: [...]
 #!
 #! Where:
@@ -25,23 +27,20 @@ end
 #!
 #! Cycles: 8 * (split + store pair) ~= 176
 pub proc store_word_u32s_le
-    reversew
-    # => [w0, w1, w2, w3, out_ptr, ...]
-
-    u32split
+    exec.u64::u32split_be
     # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
 
-    movup.2 u32split
+    movup.2 exec.u64::u32split_be
     # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
 
     # Store w0 and w1 limbs, then drop them from the stack
     dup.6 mem_storew_be dropw
     # => [w2, w3, out_ptr, ...]
 
-    u32split
+    exec.u64::u32split_be
     # => [w2_hi, w2_lo, w3, out_ptr, ...]
 
-    movup.2 u32split
+    movup.2 exec.u64::u32split_be
     # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
 
     # Store w2 and w3 limbs at out_ptr+4
@@ -155,6 +154,12 @@ pub proc gt(rhs: word, lhs: word) -> i1
     # => [is_lhs_less]
 end
 
+#! Similar to word::gt except that its inputs are in LE/canonical order.
+pub proc gt_le(rhs: word, lhs: word) -> i1
+    reversew swapw reversew swapw
+    exec.gt
+end
+
 #! Returns true if LHS is greater than or equal to RHS.
 #!
 #! Inputs:  [RHS, LHS]
@@ -217,6 +222,12 @@ pub proc lt(rhs: word, lhs: word) -> i1
 
     swap drop
     # => [is_lhs_greater]
+end
+
+#! Similar to word::lt except that its inputs are in LE/canonical order.
+pub proc lt_le(rhs: word, lhs: word) -> i1
+    reversew swapw reversew swapw
+    exec.lt
 end
 
 #! Returns true if LHS is less than or equal to RHS, false otherwise.

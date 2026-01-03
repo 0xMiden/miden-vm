@@ -242,7 +242,7 @@ pub proc add
   # [mmr_end, num_leaves, EL]
 
   # find how many MMR peaks will be merged (41 cycles)
-  swap u32split exec.u64::cto
+  swap exec.u32split_be exec.u64::cto_be
   # => [num_merges, mmr_end, EL]
 
   # optimization: negate num_merges to use add.1 instead of sub.1 (1 cycles)
@@ -263,15 +263,15 @@ pub proc add
 
   while.true # (39 cycles)
     # load peak (4 cycles)
-    dup.9 sub.4 mem_loadw_be
+    dup.9 sub.4 mem_loadw_le
     # => [PEAK, EL, -num_merges, mmr_end]
 
     # merge the nodes (17 cycles)
-    swapw mtree_merge
+    mtree_merge
     # => [EL', -num_merges, mmr_end]
 
     # erase existing peak (6 cycles)
-    padw dup.9 mem_storew_be
+    padw dup.9 mem_storew_le
     # => [PAD, EL', -num_merges, mmr_end]
 
     # update control (7 cycles)
@@ -288,9 +288,13 @@ pub proc add
   # =>: [EL, -num_merges+1, mmr_end-4]
 
   # save the new peak (2 cycles)
-  movup.5 mem_storew_be
+  movup.5 mem_storew_le
   # =>: [EL, -num_merges+1]
 
   # clean stack (5 cycles)
   dropw drop
+end
+
+proc u32split_be
+  u32split swap
 end

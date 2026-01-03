@@ -135,7 +135,7 @@ pub proc hash_words
     # => [start_addr, end_addr, is_odd, ...]
 
     # prepare hasher state (14 cycles)
-    dup.2 mul.4 push.0.0.0 padw padw
+    dup.2 mul.4 push.0.0.0 movup.3 padw padw
     # => [C, B, A, start_addr, end_addr, is_odd, ...]
 
     # (4 + 3 * words cycles)
@@ -150,7 +150,7 @@ pub proc hash_words
     if.true
         # start_addr and end_addr are equal after calling `absorb_double_words_from_memory`, and both
         # point to the last element. Load the last word (6 cycles)
-        dropw dup.9 mem_loadw_be
+        dropw dup.9 mem_loadw_le
         # => [D, A', end_addr, end_addr, ...]
 
         # set the padding and compute the permutation (5 cycles)
@@ -193,7 +193,7 @@ pub proc prepare_hasher_state
     # => [num_elements, ptr, pad_inputs_flag]
 
     # get the number of double words
-    u32divmod.8 swap
+    u32divmod.8
     # => [num_elements/8, num_elements%8, ptr, pad_inputs_flag]
 
     # get the end address for absorb_double_words_from_memory procedure (end address for pairs of
@@ -211,7 +211,7 @@ pub proc prepare_hasher_state
     # => [capacity, ptr, end_pairs_addr, num_elements%8]
 
     # prepare hasher state for RPO permutation
-    push.0.0.0 padw padw
+    push.0.0.0 movup.3 padw padw
     # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
 end
 
@@ -258,7 +258,10 @@ pub proc hash_elements_with_state
         # get the number of elements we need to drop
         # notice that drop_counter could be any number from 1 to 7
         push.8 movup.13 sub movdn.12
-        # => [E, D, A', drop_counter]
+        # => [D, E, C', drop_counter]
+
+        # TODO(Al): remove this work-around 
+        reversew swapw reversew
 
         ### 0th value ########################################################
 
@@ -345,6 +348,9 @@ pub proc hash_elements_with_state
         # notice that we don't need to check the d_0 value: entering the else branch means that
         # we have number of elements not divisible by 8, so we will have at least one element to
         # hash here (which turns out to be d_0)
+
+        # TODO(Al): remove this work-around 
+        reversew swapw reversew
 
         exec.permute
         # => [F, E, D]

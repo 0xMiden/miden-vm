@@ -392,7 +392,7 @@ pub proc diff_mod_M
     #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
 
     # 3) Add the two u64-s
-    exec.u64::overflowing_add
+    exec.u64::overflowing_add_le
     #=> [flag, res_hi, res_lo, ..]
 
     # 4) Handle potential overflow in the u64 addition
