@@ -51,7 +51,7 @@ fn test_before_enter_decorator_executed_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -79,7 +79,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -123,7 +123,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -173,7 +173,7 @@ fn test_decorator_execution_order_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -236,7 +236,7 @@ fn test_fast_processor_decorator_execution_vs_standard() {
     // Test fast processor
     let mut host_fast = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     let result_fast = processor.execute_sync(&program, &mut host_fast);
     assert!(result_fast.is_ok(), "Fast execution failed: {:?}", result_fast);
@@ -301,7 +301,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -358,4 +358,30 @@ fn create_test_program_with_inner_decorators(
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)
+}
+// DECORATOR BYPASS SPY TESTS
+// ================================================================================================
+
+#[test]
+fn test_decorator_bypass_in_release_mode() {
+    let program =
+        create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
+    let processor = FastProcessor::new(&[]);
+    let counter = processor.decorator_retrieval_count.clone();
+    let mut host = TestConsistencyHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert_eq!(counter.get(), 0, "decorators should not be retrieved in release mode");
+}
+
+#[test]
+fn test_decorator_bypass_in_debug_mode() {
+    let program =
+        create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
+    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let counter = processor.decorator_retrieval_count.clone();
+    let mut host = TestConsistencyHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
 }
