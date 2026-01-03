@@ -175,7 +175,8 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
+                let err_ctx =
+                    err_ctx!(program, basic_block, host, self.in_debug_mode, op_idx_in_block);
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {
