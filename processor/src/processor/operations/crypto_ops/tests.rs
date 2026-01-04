@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Felt, QuadFelt, Word, ZERO,
+    Felt, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, apply_permutation},
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
+    field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
     stack::MIN_STACK_DEPTH,
 };
@@ -318,7 +319,7 @@ proptest! {
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, 0, 0]
-        let alpha_word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
         processor.memory.write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),
@@ -337,8 +338,8 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
 
         let c0_q = QuadFelt::from(Felt::new(c0));
         let c1_q = QuadFelt::from(Felt::new(c1));
@@ -383,7 +384,7 @@ proptest! {
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly
-        let acc_new_base = acc_new.to_base_elements();
+        let acc_new_base = acc_new.as_basis_coefficients_slice();
         prop_assert_eq!(stack[1], acc_new_base[1], "acc_high at position 14");
         prop_assert_eq!(stack[0], acc_new_base[0], "acc_low at position 15");
     }
@@ -442,7 +443,7 @@ proptest! {
 
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, k0, k1] (k0, k1 are unused but read)
-        let alpha_word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
+        let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
         processor.memory.write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),
@@ -458,13 +459,13 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Compute expected result
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
+        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
 
-        let c0 = QuadFelt::new(Felt::new(c0_0), Felt::new(c0_1));
-        let c1 = QuadFelt::new(Felt::new(c1_0), Felt::new(c1_1));
-        let c2 = QuadFelt::new(Felt::new(c2_0), Felt::new(c2_1));
-        let c3 = QuadFelt::new(Felt::new(c3_0), Felt::new(c3_1));
+        let c0 = QuadFelt::new_complex(Felt::new(c0_0), Felt::new(c0_1));
+        let c1 = QuadFelt::new_complex(Felt::new(c1_0), Felt::new(c1_1));
+        let c2 = QuadFelt::new_complex(Felt::new(c2_0), Felt::new(c2_1));
+        let c3 = QuadFelt::new_complex(Felt::new(c3_0), Felt::new(c3_1));
 
         let coefficients = [c0, c1, c2, c3];
 
@@ -496,7 +497,7 @@ proptest! {
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
         // Check that the accumulator was updated correctly
-        let acc_new_base = acc_new.to_base_elements();
+        let acc_new_base = acc_new.as_basis_coefficients_slice();
         prop_assert_eq!(stack[1], acc_new_base[1], "acc_high at position 14");
         prop_assert_eq!(stack[0], acc_new_base[0], "acc_low at position 15");
     }

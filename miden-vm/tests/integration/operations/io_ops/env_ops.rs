@@ -1,5 +1,6 @@
 use miden_core::{
     FMP_INIT_VALUE, Operation,
+    field::PrimeField64,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
         MastNodeExt,
@@ -49,7 +50,7 @@ fn sdepth() {
 
 #[test]
 fn locaddr() {
-    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+    let fmp_init_value_u64: u64 = FMP_INIT_VALUE.as_canonical_u64();
 
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
@@ -68,7 +69,7 @@ fn locaddr() {
     // offset from 8 rather than 5.
     // locaddr.0 → fmp - (8 - 0) = fmp - 8 → FMP_INIT_VALUE
     // locaddr.4 → fmp - (8 - 4) = fmp - 4 → FMP_INIT_VALUE + 4
-    test.expect_stack(&[FMP_INIT_VALUE_U64 + 4, FMP_INIT_VALUE_U64, 10]);
+    test.expect_stack(&[fmp_init_value_u64 + 4, fmp_init_value_u64, 10]);
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
@@ -118,14 +119,14 @@ fn locaddr() {
 
     let test = build_test!(source, &[10]);
     test.expect_stack(&[
-        FMP_INIT_VALUE_U64 + 8,
-        FMP_INIT_VALUE_U64 + 4,
-        FMP_INIT_VALUE_U64,
-        FMP_INIT_VALUE_U64 + 4,
-        FMP_INIT_VALUE_U64 + 16,
-        FMP_INIT_VALUE_U64 + 12,
-        FMP_INIT_VALUE_U64 + 8,
-        FMP_INIT_VALUE_U64,
+        fmp_init_value_u64 + 8,
+        fmp_init_value_u64 + 4,
+        fmp_init_value_u64,
+        fmp_init_value_u64 + 4,
+        fmp_init_value_u64 + 16,
+        fmp_init_value_u64 + 12,
+        fmp_init_value_u64 + 8,
+        fmp_init_value_u64,
         10,
     ]);
 
@@ -209,10 +210,10 @@ fn build_bar_hash() -> [u64; 4] {
         CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
-        bar_hash[0].as_int(),
-        bar_hash[1].as_int(),
-        bar_hash[2].as_int(),
-        bar_hash[3].as_int(),
+        bar_hash[0].as_canonical_u64(),
+        bar_hash[1].as_canonical_u64(),
+        bar_hash[2].as_canonical_u64(),
+        bar_hash[3].as_canonical_u64(),
     ]
 }
 

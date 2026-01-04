@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_air::trace::{chiplets::hasher::STATE_WIDTH, rows::RowIndex};
+use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH};
 use miden_core::{
     Felt, Word,
     crypto::merkle::MerklePath,

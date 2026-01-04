@@ -23,7 +23,7 @@ pub enum LiteralErrorKind {
     InvalidDigit,
     /// The value overflows `u32::MAX`
     U32Overflow,
-    /// The value overflows `Felt::MODULUS`
+    /// The value overflows `Felt::ORDER_U64`
     FeltOverflow,
     /// The value was expected to be a value < 63
     InvalidBitSize,
@@ -53,7 +53,7 @@ pub enum HexErrorKind {
     /// Valid hex-encoded integers are expected to come in sizes of 8, 16, or 64 digits,
     /// but the input consisted of an invalid number of digits.
     Invalid,
-    /// Occurs when a hex-encoded value overflows `Felt::MODULUS`, the maximum integral value
+    /// Occurs when a hex-encoded value overflows `Felt::ORDER_U64`, the maximum integral value
     Overflow,
     /// Occurs when the hex-encoded value is > 64 digits
     TooLong,

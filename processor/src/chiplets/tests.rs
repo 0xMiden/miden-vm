@@ -15,7 +15,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 
-use crate::{DefaultHost, ExecutionTrace, Kernel, Operation, fast::FastProcessor};
+use crate::{DefaultHost, Kernel, Operation, fast::FastProcessor};
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 
@@ -140,7 +140,7 @@ fn build_trace(
         kernel,
     );
 
-    let trace_len = trace.get_trace_len() - ExecutionTrace::NUM_RAND_ROWS;
+    let trace_len = trace.get_trace_len();
 
     (
         trace

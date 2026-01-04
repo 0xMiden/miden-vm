@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{Felt, RowIndex};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -9,6 +9,7 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::range,
 };
+use tracing::instrument;
 
 use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
@@ -43,9 +44,6 @@ mod split;
 
 #[cfg(test)]
 mod tests;
-
-/// The default size of core trace fragments when generating execution traces.
-pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
 
 /// The size of the stack buffer.
 ///
@@ -341,6 +339,7 @@ impl FastProcessor {
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
     /// context necessary to build the trace.
+    #[instrument(name = "execute_for_trace", skip_all)]
     pub async fn execute_for_trace(
         self,
         program: &Program,
@@ -780,7 +779,7 @@ impl FastProcessor {
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest
             .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, err_ctx))?;
+            .ok_or(ExecutionError::malformed_mast_forest_in_host(node_digest, err_ctx))?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
@@ -904,39 +903,85 @@ impl FastProcessor {
     }
 
     /// Convenience sync wrapper to [Self::execute].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_sync(
         self,
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute(program, host))
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync from within a Tokio runtime. \
+                     Use the async execute() method instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute(program, host))
+            },
+        }
     }
 
     /// Convenience sync wrapper to [Self::execute_for_trace].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute_for_trace()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[instrument(name = "execute_for_trace_sync", skip_all)]
     pub fn execute_for_trace_sync(
         self,
         program: &Program,
         host: &mut impl AsyncHost,
         fragment_size: usize,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute_for_trace(program, host, fragment_size))
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_for_trace_sync from within a Tokio runtime. \
+                     Use the async execute_for_trace() method instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute_for_trace(program, host, fragment_size))
+            },
+        }
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
-    #[cfg(any(test, feature = "testing"))]
+    ///
+    /// This method is only available on non-wasm32 targets for testing. On wasm32, use
+    /// async execution methods directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use async execution
+    /// methods instead in async contexts.
+    #[cfg(all(any(test, feature = "testing"), not(target_arch = "wasm32")))]
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,
         host: &mut impl AsyncHost,
     ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
@@ -945,7 +990,7 @@ impl FastProcessor {
             .extend_map(current_forest.advice_map())
             .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
 
-        rt.block_on(async {
+        let execute_fut = async {
             match self
                 .execute_impl(
                     &mut continuation_stack,
@@ -965,7 +1010,24 @@ impl FastProcessor {
                     },
                 },
             }
-        })
+        };
+
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync_mut from within a Tokio runtime. \
+                     Use async execution methods instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(execute_fut)
+            },
+        }
     }
 }
 

@@ -1,4 +1,4 @@
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{Word, assert_matches};
 use miden_processor::{ContextId, DefaultHost, ExecutionError, Program, fast::FastProcessor};
 use miden_utils_testing::{

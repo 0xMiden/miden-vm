@@ -306,6 +306,8 @@ pub(crate) enum MultiMastForestIteratorItem {
 #[cfg(test)]
 mod tests {
 
+    use miden_utils_testing::rand::rand_value;
+
     use super::*;
     use crate::{
         Operation, Word,
@@ -316,7 +318,7 @@ mod tests {
     };
 
     fn random_digest() -> Word {
-        Word::new([winter_rand_utils::rand_value(); 4])
+        Word::new([rand_value(); 4])
     }
 
     #[test]

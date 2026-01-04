@@ -28,6 +28,7 @@ use core::array;
 
 use miden_core::{
     EventName, Felt, Word, ZERO,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
@@ -59,8 +60,8 @@ impl EventHandler for KeccakPrecompile {
     ///   for verification time
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
-        let ptr = process.get_stack_item(1).as_int();
-        let len_bytes = process.get_stack_item(2).as_int();
+        let ptr = process.get_stack_item(1).as_canonical_u64();
+        let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
         // Read input bytes from memory using the shared helper (u32-packed, LE, zero-padded)
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;

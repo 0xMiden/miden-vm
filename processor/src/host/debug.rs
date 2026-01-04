@@ -6,7 +6,7 @@ use core::{fmt, ops::RangeInclusive};
 
 use miden_core::{DebugOptions, FMP_ADDR, Felt};
 
-use crate::{DebugError, ProcessState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, PrimeField64, ProcessState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -220,10 +220,10 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     ) -> fmt::Result {
         let local_memory_offset = {
             let fmp = process
-                .get_mem_value(process.ctx(), FMP_ADDR.as_int() as u32)
+                .get_mem_value(process.ctx(), FMP_ADDR.as_canonical_u64() as u32)
                 .expect("FMP address is empty");
 
-            fmp.as_int() as u32 - num_locals
+            fmp.as_canonical_u64() as u32 - num_locals
         };
 
         let start = *range.start() as u32;

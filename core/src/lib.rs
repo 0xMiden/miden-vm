@@ -57,7 +57,14 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+
+pub mod field {
+    pub use miden_crypto::field::*;
+
+    pub type QuadFelt = BinomialExtensionField<super::Felt, 2>;
+}
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
@@ -71,8 +78,7 @@ pub mod crypto {
 
     pub mod hash {
         pub use miden_crypto::hash::{
-            Digest, ElementHasher, Hasher,
-            blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
+            blake::{Blake3_256, Blake3Digest},
             poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,
@@ -80,9 +86,7 @@ pub mod crypto {
     }
 
     pub mod random {
-        pub use miden_crypto::rand::{
-            RandomCoin, RandomCoinError, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin,
-        };
+        pub use miden_crypto::rand::{RpoRandomCoin, RpxRandomCoin};
     }
 
     pub mod dsa {
@@ -91,13 +95,6 @@ pub mod crypto {
 }
 
 pub mod mast;
-
-pub use winter_math::{
-    ExtensionOf, FieldElement, StarkField, ToElements,
-    fields::{QuadExtension, f64::BaseElement as Felt},
-    polynom,
-};
-pub type QuadFelt = QuadExtension<Felt>;
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};

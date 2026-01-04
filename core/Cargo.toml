@@ -32,15 +32,12 @@ std = [
     "miden-utils-indexing/std",
     "miden-utils-sync/std",
     "thiserror/std",
-    "winter-math/std",
-    "winter-utils/std",
 ]
 serde = [
     "dep:serde",
     "miden-crypto/serde",
     "miden-debug-types/serde",
     "miden-utils-indexing/serde",
-    "winter-math/serde",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
 testing = ["arbitrary" ]
@@ -63,8 +60,6 @@ proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true, features = ["derive"] }
 thiserror.workspace = true
-winter-math.workspace = true
-winter-utils.workspace = true
 
 [dev-dependencies]
 criterion = { workspace = true }
@@ -72,4 +67,4 @@ insta.workspace = true
 miden-test-serde-macros.workspace = true
 proptest.workspace = true
 serde_json = { workspace = true }
-winter-rand-utils.workspace = true
+miden-utils-testing.workspace = true

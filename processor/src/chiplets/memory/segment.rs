@@ -3,11 +3,11 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::WORD_SIZE;
 
 use super::{Felt, INIT_MEM_VALUE, MemoryError, Word};
-use crate::{ContextId, MemoryAddress};
+use crate::{ContextId, MemoryAddress, PrimeField64};
 
 // MEMORY SEGMENT TRACE
 // ================================================================================================
@@ -73,7 +73,9 @@ impl MemorySegmentTrace {
         let search_clk: u64 = (clk - 1).into();
 
         for (&addr, addr_trace) in self.0.iter() {
-            match addr_trace.binary_search_by(|access| access.clk().as_int().cmp(&search_clk)) {
+            match addr_trace
+                .binary_search_by(|access| access.clk().as_canonical_u64().cmp(&search_clk))
+            {
                 Ok(i) => {
                     let word_addr = addr_trace[i].word();
                     result.extend([

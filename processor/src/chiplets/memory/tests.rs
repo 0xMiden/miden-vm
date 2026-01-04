@@ -1,23 +1,22 @@
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::memory::{
+    chiplets::memory::{
         FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
         IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
         MEMORY_WRITE, TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
 use miden_assembly::SourceSpan;
-use miden_core::{WORD_SIZE, Word, assert_matches};
+use miden_core::{ONE, WORD_SIZE, Word, ZERO, assert_matches, field::Field};
 
 use super::{
-    super::ZERO,
-    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt,
-    FieldElement, Memory, ONE, TraceFragment, V_COL_RANGE, WORD_COL_IDX,
+    CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX, EMPTY_WORD, Felt, Memory,
+    TraceFragment, V_COL_RANGE, WORD_COL_IDX,
     segment::{MemoryAccessType, MemoryOperation},
 };
-use crate::{ContextId, MemoryAddress, MemoryError};
+use crate::{ContextId, MemoryAddress, MemoryError, PrimeField64};
 
 #[test]
 fn mem_init() {
@@ -105,7 +104,7 @@ fn mem_read() {
         4.into(),
         EMPTY_WORD,
     );
-    verify_memory_access(&trace, 3, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 3, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -254,7 +253,7 @@ fn mem_write() {
         5.into(),
         word1234,
     );
-    verify_memory_access(&trace, 5, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 5, memory_access, prev_row);
 }
 
 /// Tests that writing a word to an address that is not aligned with the word boundary results in an
@@ -431,7 +430,7 @@ fn mem_write_read() {
         clk,
         [1_u32, 2, 42, 4].into(),
     );
-    verify_memory_access(&trace, 8, memory_access, prev_row);
+    let _ = verify_memory_access(&trace, 8, memory_access, prev_row);
 }
 
 #[test]
@@ -500,7 +499,7 @@ impl MemoryAccess {
         word_values: Word,
     ) -> Self {
         if let MemoryAccessType::Element { addr_idx_in_word } = access_type {
-            let addr: u32 = addr.try_into().unwrap();
+            let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
             assert_eq!(addr_idx_in_word as u32, addr % WORD_SIZE as u32);
         }
 
@@ -547,7 +546,7 @@ fn build_trace_row(
     } = memory_access;
 
     let (word, idx1, idx0) = {
-        let addr: u32 = addr.try_into().unwrap();
+        let addr: u32 = addr.as_canonical_u64().try_into().unwrap();
         let remainder = addr % WORD_SIZE as u32;
         let word = Felt::from(addr - remainder);
 
@@ -591,7 +590,7 @@ fn build_trace_row(
     let (hi, lo) = super::split_element_u32_into_u16(delta);
     row[D0_COL_IDX] = lo;
     row[D1_COL_IDX] = hi;
-    row[D_INV_COL_IDX] = delta.inv();
+    row[D_INV_COL_IDX] = delta.try_inverse().unwrap_or(ZERO);
 
     if row[WORD_COL_IDX] == prev_row[WORD_COL_IDX] && row[CTX_COL_IDX] == prev_row[CTX_COL_IDX] {
         row[FLAG_SAME_CONTEXT_AND_WORD] = ONE;

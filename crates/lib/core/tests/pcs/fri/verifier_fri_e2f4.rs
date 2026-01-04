@@ -3,7 +3,7 @@ use core::{marker::PhantomData, mem};
 use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
 use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
 use miden_utils_testing::{
-    MerkleTreeVC, StarkField,
+    MerkleTreeVC, PrimeField64,
     crypto::{MerklePath, NodeIndex, PartialMerkleTree, Rpo256 as MidenHasher},
     group_slice_elements,
     math::fft,
@@ -90,7 +90,7 @@ pub fn fri_prove_verify_fold4_ext2(trace_length_e: usize) -> Result<FriResult, V
         .layer_commitments()
         .to_vec()
         .iter()
-        .flat_map(|digest| digest.as_elements().iter().map(|e| e.as_int()))
+        .flat_map(|digest| digest.as_elements().iter().map(|e| e.as_canonical_u64()))
         .collect();
 
     let remainder_poly: Vec<QuadFelt> =
@@ -98,7 +98,7 @@ pub fn fri_prove_verify_fold4_ext2(trace_length_e: usize) -> Result<FriResult, V
     let remainder: Vec<u64> = QuadFelt::slice_as_base_elements(&remainder_poly[..])
         .to_owned()
         .iter()
-        .map(|a| a.as_int())
+        .map(|a| a.as_canonical_u64())
         .collect();
 
     match result {
@@ -128,7 +128,7 @@ pub fn build_prover_channel(
 pub fn build_evaluations(trace_length: usize, lde_blowup: usize) -> Vec<QuadFelt> {
     let mut p = (0..trace_length as u32)
         .map(|i| (i, i))
-        .map(|(i, j)| QuadFelt::new(i.into(), j.into()))
+        .map(|(i, j)| QuadFelt::new_complex(i.into(), j.into()))
         .collect::<Vec<_>>();
     let domain_size = trace_length * lde_blowup;
     p.resize(domain_size, QuadFelt::ZERO);
@@ -318,8 +318,12 @@ fn iterate_query_fold_4_quad_ext(
     let arr = vec![evaluation];
     let a = QuadFelt::slice_as_base_elements(&arr);
 
-    let position_evaluation =
-        vec![a[0].as_int(), a[1].as_int(), position as u64, init_exp.as_int()];
+    let position_evaluation = vec![
+        a[0].as_canonical_u64(),
+        a[1].as_canonical_u64(),
+        position as u64,
+        init_exp.as_canonical_u64(),
+    ];
 
     let mut alphas = vec![];
     for depth in 0..number_of_layers {
@@ -342,10 +346,10 @@ fn iterate_query_fold_4_quad_ext(
             .1;
 
         let query_values = [
-            QuadFelt::new(query_values[0], query_values[1]),
-            QuadFelt::new(query_values[2], query_values[3]),
-            QuadFelt::new(query_values[4], query_values[5]),
-            QuadFelt::new(query_values[6], query_values[7]),
+            QuadFelt::new_complex(query_values[0], query_values[1]),
+            QuadFelt::new_complex(query_values[2], query_values[3]),
+            QuadFelt::new_complex(query_values[4], query_values[5]),
+            QuadFelt::new_complex(query_values[6], query_values[7]),
         ];
 
         let query_value = query_values[cur_pos / target_domain_size];
@@ -382,8 +386,8 @@ fn iterate_query_fold_4_quad_ext(
 
         let arr = vec![layer_alphas[depth]];
         let a = QuadFelt::slice_as_base_elements(&arr);
-        alphas.push(a[0].as_int());
-        alphas.push(a[1].as_int());
+        alphas.push(a[0].as_canonical_u64());
+        alphas.push(a[1].as_canonical_u64());
         alphas.push(0);
         alphas.push(0);
 
@@ -458,7 +462,7 @@ impl UnBatch<QuadFelt, MidenHasher> for MidenFriVerifierChannel<QuadFelt, MidenH
 
 fn fri_2<E, B>(f_x: E, f_minus_x: E, x_star: E, alpha: E) -> E
 where
-    B: StarkField,
+    B: PrimeField64,
     E: FieldElement<BaseField = B>,
 {
     (f_x + f_minus_x + ((f_x - f_minus_x) * alpha / x_star)) / E::ONE.double()
