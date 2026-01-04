@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{WORD_SIZE, Word, ZERO};
+use miden_crypto::{
+    WORD_SIZE, Word, ZERO,
+    field::{PrimeField64, QuotientMap},
+};
 
 use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
 use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
@@ -32,7 +35,7 @@ impl StackOutputs {
     pub fn new(mut stack: Vec<Felt>) -> Result<Self, OutputError> {
         // validate stack length
         if stack.len() > MIN_STACK_DEPTH {
-            return Err(OutputError::OutputSizeTooBig(stack.len()));
+            return Err(OutputError::OutputStackTooBig(MIN_STACK_DEPTH, stack.len()));
         }
         stack.resize(MIN_STACK_DEPTH, ZERO);
 
@@ -52,9 +55,8 @@ impl StackOutputs {
         // Validate stack elements
         let stack = iter
             .into_iter()
-            .map(Felt::try_from)
-            .collect::<Result<Vec<Felt>, _>>()
-            .map_err(OutputError::InvalidStackElement)?;
+            .map(|v| Felt::from_canonical_checked(v).ok_or(OutputError::InvalidStackElement(v)))
+            .collect::<Result<Vec<Felt>, _>>()?;
 
         Self::new(stack)
     }
@@ -141,7 +143,7 @@ impl StackOutputs {
 
     /// Converts the [`StackOutputs`] into the vector of `u64` values.
     pub fn as_int_vec(&self) -> Vec<u64> {
-        self.elements.iter().map(|e| (*e).as_int()).collect()
+        self.elements.iter().map(|e| (*e).as_canonical_u64()).collect()
     }
 }
 

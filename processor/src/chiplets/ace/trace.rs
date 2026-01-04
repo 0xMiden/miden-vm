@@ -1,15 +1,18 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::ace::{
+    chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
         READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
-use miden_core::{Felt, FieldElement, QuadFelt, Word};
+use miden_core::{
+    Felt, Word,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+};
 
 use crate::{
     ContextId, ExecutionError,
@@ -98,12 +101,12 @@ impl CircuitEvaluation {
     /// adds wires with values `v_0 = QuadFelt(v_00, v_01)` and `v_1 = QuadFelt(v_10, v_11)`.
     pub fn do_read(&mut self, ptr: Felt, word: Word) -> Result<(), ExecutionError> {
         // Add first variable as QuadFelt to wire bus
-        let v_0 = QuadFelt::new(word[0], word[1]);
+        let v_0 = QuadFelt::new_complex(word[0], word[1]);
         let id_0 = self.wire_bus.insert(v_0);
         self.col_wire_out.push(id_0, v_0);
 
         // Add second variable as QuadFelt to wire bus
-        let v_1 = QuadFelt::new(word[2], word[3]);
+        let v_1 = QuadFelt::new_complex(word[2], word[3]);
         let id_1 = self.wire_bus.insert(v_1);
         self.col_wire_left.push(id_1, v_1);
 
@@ -275,9 +278,9 @@ impl WireColumn {
     /// Pushes the wire `(id, v)` to the columns.
     fn push(&mut self, id: Felt, v: QuadFelt) {
         self.id.push(id);
-        let [v_0, v_1] = v.to_base_elements();
-        self.v_0.push(v_0);
-        self.v_1.push(v_1);
+        let v: &[Felt] = v.as_basis_coefficients_slice();
+        self.v_0.push(v[0]);
+        self.v_1.push(v[1]);
     }
 }
 

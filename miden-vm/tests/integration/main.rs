@@ -7,6 +7,7 @@ mod cli;
 mod exec;
 mod flow_control;
 mod operations;
+mod prove_verify;
 
 // TESTS
 // ================================================================================================

@@ -19,6 +19,7 @@ use super::{
     MerklePath, RETURN_HASH, RETURN_STATE, Selectors, TRACE_WIDTH, TraceFragment,
     init_state_from_words,
 };
+use crate::PrimeField64;
 
 // LINEAR HASH TESTS
 // ================================================================================================
@@ -96,11 +97,11 @@ fn hasher_build_merkle_root() {
     let mut hasher = Hasher::default();
     let path0 = tree.get_path(NodeIndex::new(1, 0).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[0], &path0, ZERO);
+    let _ = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
     let path1 = tree.get_path(NodeIndex::new(1, 1).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[1], &path1, ONE);
+    let _ = hasher.build_merkle_root(leaves[1], &path1, ONE);
 
     // build the trace
     let trace = build_trace(hasher, 16);
@@ -124,7 +125,7 @@ fn hasher_build_merkle_root() {
     // initialize the hasher and perform one Merkle branch verifications
     let mut hasher = Hasher::default();
     let path = tree.get_path(NodeIndex::new(3, 5).unwrap()).unwrap();
-    hasher.build_merkle_root(leaves[5], &path, Felt::new(5));
+    let _ = hasher.build_merkle_root(leaves[5], &path, Felt::new(5));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 24);
@@ -137,19 +138,19 @@ fn hasher_build_merkle_root() {
 
     let path0 = tree.get_path(NodeIndex::new(3, 0).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[0], &path0, ZERO);
+    let _ = hasher.build_merkle_root(leaves[0], &path0, ZERO);
 
     let path3 = tree.get_path(NodeIndex::new(3, 3).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
+    let _ = hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
 
     let path7 = tree.get_path(NodeIndex::new(3, 7).unwrap()).unwrap();
 
-    hasher.build_merkle_root(leaves[7], &path7, Felt::new(7));
+    let _ = hasher.build_merkle_root(leaves[7], &path7, Felt::new(7));
 
     // path3 again
 
-    hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
+    let _ = hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
 
     // build and check the trace for validity
     let trace = build_trace(hasher, 96);
@@ -321,7 +322,7 @@ fn hash_memoization_control_blocks() {
     // hash.
     assert_eq!(final_state, expected_hash);
 
-    let start_row = addr.as_int() as usize - 1;
+    let start_row = addr.as_canonical_u64() as usize - 1;
     let end_row = hasher.trace_len() - 1;
 
     let h1: [Felt; DIGEST_LEN] = t_branch
@@ -347,7 +348,7 @@ fn hash_memoization_control_blocks() {
     // make sure the hash of the first and second split blocks is the same.
     assert_eq!(first_block_final_state, final_state);
 
-    let copied_start_row = addr.as_int() as usize - 1;
+    let copied_start_row = addr.as_canonical_u64() as usize - 1;
     let copied_end_row = hasher.trace_len() - 1;
 
     let trace = build_trace(hasher, copied_end_row + 1);
@@ -515,7 +516,7 @@ fn hash_memoization_basic_blocks_check(
     let expected_hash = basic_block_1.digest();
     assert_eq!(final_state, expected_hash);
 
-    let start_row = addr.as_int() as usize - 1;
+    let start_row = addr.as_canonical_u64() as usize - 1;
     let end_row = hasher.trace_len() - 1;
 
     let basic_block_2_val = if let MastNode::Block(basic_block) = basic_block_2.clone() {
@@ -538,7 +539,7 @@ fn hash_memoization_basic_blocks_check(
     // make sure the hash of the first and second basic blocks is the same.
     assert_eq!(first_basic_block_final_state, final_state);
 
-    let copied_start_row = addr.as_int() as usize - 1;
+    let copied_start_row = addr.as_canonical_u64() as usize - 1;
     let copied_end_row = hasher.trace_len() - 1;
 
     let trace = build_trace(hasher, copied_end_row + 1);

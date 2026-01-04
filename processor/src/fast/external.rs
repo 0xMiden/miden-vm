@@ -1,11 +1,12 @@
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
 use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 
 use crate::{
     AsyncHost, ExecutionError,
     continuation_stack::ContinuationStack,
-    fast::{FastProcessor, Tracer},
+    fast::{BreakReason, FastProcessor, Tracer},
 };
 
 impl FastProcessor {
@@ -18,13 +19,16 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(external_node_id, current_forest, host)?;
 
         let external_node = current_forest[external_node_id].unwrap_external();
         let (resolved_node_id, new_mast_forest) =
-            self.resolve_external_node(external_node, host).await?;
+            match self.resolve_external_node(external_node, host).await {
+                Ok(result) => result,
+                Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+            };
 
         tracer.record_mast_forest_resolution(resolved_node_id, &new_mast_forest);
 
@@ -41,7 +45,7 @@ impl FastProcessor {
         // Update the current forest to the new MAST forest.
         *current_forest = new_mast_forest;
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but

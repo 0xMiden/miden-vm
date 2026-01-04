@@ -3,16 +3,16 @@
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{
-    EventId, EventName, Felt, QuadFelt, Word,
-    mast::{DecoratorId, MastForest, MastNodeErrorContext, MastNodeId},
+    EventId, EventName, Felt, Word,
+    field::QuadFelt,
+    mast::{MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,
     utils::to_hex,
 };
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
-use winter_prover::ProverError;
 
 use crate::{
     AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
@@ -40,8 +40,6 @@ pub enum ExecutionError {
     CircularExternalNode(Word),
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
-    #[error("decorator id {decorator_id} does not exist in MAST forest")]
-    DecoratorNotFoundInForest { decorator_id: DecoratorId },
     #[error("debug handler error at clock cycle {clk}: {err}")]
     DebugHandlerError {
         clk: RowIndex,
@@ -117,11 +115,13 @@ pub enum ExecutionError {
         err: Option<AssertError>,
     },
     #[error("failed to execute the program for internal reason: {0}")]
-    FailedToExecuteProgram(&'static str),
+    Internal(&'static str),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
+    #[error("FRI domain size was 0")]
+    InvalidFriDomainGenerator,
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
@@ -141,15 +141,6 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         clk: RowIndex,
-    },
-    #[error("malformed signature key: {key_type}")]
-    #[diagnostic(help("the secret key associated with the provided public key is malformed"))]
-    MalformedSignatureKey {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        key_type: &'static str,
     },
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
@@ -222,33 +213,16 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         value: Felt,
     },
-    #[error("operation expected u32 values, but got values: {values:?} (error code: {err_code})")]
+    #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         values: Vec<Felt>,
-        err_code: Felt,
-    },
-    #[error(
-        "Operand stack input is {input} but it is expected to fit in a u32 at clock cycle {clk}"
-    )]
-    #[diagnostic()]
-    NotU32StackValue {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-        input: u64,
     },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
-    #[error("a program has already been executed in this process")]
-    ProgramAlreadyExecuted,
-    #[error("proof generation failed")]
-    ProverError(#[source] ProverError),
     #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
     SmtNodeNotFound {
         #[label]
@@ -302,6 +276,8 @@ pub enum ExecutionError {
         path_len: usize,
         depth: Felt,
     },
+    #[error("failed to serialize proof: {0}")]
+    ProofSerializationError(String),
 }
 
 impl ExecutionError {
@@ -317,11 +293,6 @@ impl ExecutionError {
     pub fn divide_by_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::DivideByZero { clk, label, source_file }
-    }
-
-    pub fn input_not_u32(clk: RowIndex, input: u64, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32StackValue { clk, input, label, source_file }
     }
 
     pub fn dynamic_node_not_found(digest: Word, err_ctx: &impl ErrorContext) -> Self {
@@ -376,14 +347,9 @@ impl ExecutionError {
         Self::LogArgumentZero { label, source_file, clk }
     }
 
-    pub fn malfored_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
+    pub fn malformed_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::MalformedMastForestInHost { label, source_file, root_digest }
-    }
-
-    pub fn malformed_signature_key(key_type: &'static str, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::MalformedSignatureKey { label, source_file, key_type }
     }
 
     pub fn merkle_path_verification_failed(
@@ -427,19 +393,14 @@ impl ExecutionError {
         Self::NotBinaryValueLoop { label, source_file, value }
     }
 
-    pub fn not_u32_value(value: Felt, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_value(value: Felt, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values {
-            label,
-            source_file,
-            values: vec![value],
-            err_code,
-        }
+        Self::NotU32Values { label, source_file, values: vec![value] }
     }
 
-    pub fn not_u32_values(values: Vec<Felt>, err_code: Felt, err_ctx: &impl ErrorContext) -> Self {
+    pub fn not_u32_values(values: Vec<Felt>, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values { label, source_file, values, err_code }
+        Self::NotU32Values { label, source_file, values }
     }
 
     pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {
@@ -563,35 +524,32 @@ pub struct ErrorContextImpl {
 }
 
 impl ErrorContextImpl {
-    pub fn new(
-        mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
-        host: &impl BaseHost,
-    ) -> Self {
+    pub fn new(mast_forest: &MastForest, node_id: MastNodeId, host: &impl BaseHost) -> Self {
         let (label, source_file) =
-            Self::precalc_label_and_source_file(None, mast_forest, node, host);
+            Self::precalc_label_and_source_file(None, mast_forest, node_id, host);
         Self { label, source_file }
     }
 
     pub fn new_with_op_idx(
         mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
+        node_id: MastNodeId,
         host: &impl BaseHost,
         op_idx: usize,
     ) -> Self {
         let op_idx = op_idx.into();
         let (label, source_file) =
-            Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
+            Self::precalc_label_and_source_file(op_idx, mast_forest, node_id, host);
         Self { label, source_file }
     }
 
     fn precalc_label_and_source_file(
         op_idx: Option<usize>,
         mast_forest: &MastForest,
-        node: &impl MastNodeErrorContext,
+        node_id: MastNodeId,
         host: &impl BaseHost,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        node.get_assembly_op(mast_forest, op_idx)
+        mast_forest
+            .get_assembly_op(node_id, op_idx)
             .and_then(|assembly_op| assembly_op.location())
             .map_or_else(
                 || (SourceSpan::UNKNOWN, None),

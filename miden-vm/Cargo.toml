@@ -52,7 +52,6 @@ path = "tests/integration/main.rs"
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
-metal = ["miden-prover/metal", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -94,6 +93,7 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
+bincode = { version = "1.3" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
 miden-utils-testing.workspace = true
@@ -101,6 +101,5 @@ num-bigint = { version = "0.4" }
 predicates = { version = "3.1" }
 pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-winter-fri.workspace = true
 rand_chacha = { version = "0.9" }
 walkdir = { version = "2.5" }

@@ -5,28 +5,23 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::vec;
+use alloc::vec::Vec;
 
-use miden_air::{HashFunction, ProcessorAir, ProvingOptions, PublicInputs};
-use miden_core::crypto::{
-    hash::{Blake3_192, Blake3_256, Poseidon2, Rpo256, Rpx256},
-    random::{RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
-};
-use winter_verifier::{crypto::MerkleTree, verify as verify_proof};
+use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
+use miden_crypto::stark;
 
-// EXPORTS
+// RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
         Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
         precompile::{
-            PrecompileError, PrecompileTranscriptDigest, PrecompileVerificationError,
+            PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
             PrecompileVerifierRegistry,
         },
     };
-    pub use winter_verifier::{AcceptableOptions, VerifierError};
     pub mod math {
-        pub use miden_core::{Felt, FieldElement, StarkField};
+        pub use miden_core::Felt;
     }
     pub use miden_air::ExecutionProof;
 }
@@ -51,18 +46,9 @@ pub use exports::*;
 /// `stack_outputs` slice, and the order of the rest of the output elements will also match the
 /// order on the stack. This is the reverse of the order of the `stack_inputs` slice.
 ///
-/// The verifier accepts proofs generated using a parameter set defined in [ProvingOptions].
-/// Specifically, parameter sets targeting the following are accepted:
-/// - 96-bit security level, non-recursive context (BLAKE3 hash function).
-/// - 96-bit security level, recursive context (BLAKE3 hash function).
-/// - 128-bit security level, non-recursive context (RPO hash function).
-/// - 128-bit security level, recursive context (RPO hash function).
-///
 /// # Errors
 /// Returns an error if:
 /// - The provided proof does not prove a correct execution of the program.
-/// - The protocol parameters used to generate the proof are not in the set of acceptable
-///   parameters.
 /// - The proof contains one or more precompile requests. When precompile requests are present, use
 ///   [`verify_with_precompiles`] instead with an appropriate [`PrecompileVerifierRegistry`] to
 ///   verify the precompile computations.
@@ -104,70 +90,90 @@ pub fn verify_with_precompiles(
     proof: ExecutionProof,
     precompile_verifiers: &PrecompileVerifierRegistry,
 ) -> Result<(u32, PrecompileTranscriptDigest), VerificationError> {
-    // get security level of the proof
     let security_level = proof.security_level();
-    let program_hash = *program_info.program_hash();
 
-    let (hash_fn, proof, precompile_requests) = proof.into_parts();
+    let (hash_fn, proof_bytes, precompile_requests) = proof.into_parts();
 
-    // recompute the precompile transcript by verifying all precompile requests and recording the
+    // Recompute the precompile transcript by verifying all precompile requests and recording the
     // commitments.
-    // if no verifiers were provided (e.g. when this function was called from `verify()`),
+    // If no verifiers were provided (e.g. when this function was called from `verify()`),
     // but the proof contained requests anyway, returns a `NoVerifierFound` error.
     let recomputed_transcript = precompile_verifiers
         .requests_transcript(&precompile_requests)
         .map_err(VerificationError::PrecompileVerificationError)?;
+    let pc_transcript_state = recomputed_transcript.state();
 
-    // build public inputs, explicitly passing the recomputed precompile transcript state
-    let pub_inputs =
-        PublicInputs::new(program_info, stack_inputs, stack_outputs, recomputed_transcript.state());
+    // Verify the STARK proof with the recomputed transcript state in public inputs
+    verify_stark(
+        program_info,
+        stack_inputs,
+        stack_outputs,
+        pc_transcript_state,
+        hash_fn,
+        proof_bytes,
+    )?;
 
-    match hash_fn {
-        HashFunction::Blake3_192 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_96_BITS]);
-            verify_proof::<ProcessorAir, Blake3_192, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Blake3_256 => {
-            let opts = AcceptableOptions::OptionSet(vec![ProvingOptions::REGULAR_128_BITS]);
-            verify_proof::<ProcessorAir, Blake3_256, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Rpo256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpo256, RpoRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Rpx256 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::RECURSIVE_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Rpx256, RpxRandomCoin, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-        HashFunction::Poseidon2 => {
-            let opts = AcceptableOptions::OptionSet(vec![
-                ProvingOptions::RECURSIVE_96_BITS,
-                ProvingOptions::REGULAR_128_BITS,
-            ]);
-            verify_proof::<ProcessorAir, Poseidon2, WinterRandomCoin<_>, MerkleTree<_>>(
-                proof, pub_inputs, &opts,
-            )
-        },
-    }
-    .map_err(|source| VerificationError::ProgramVerificationError(program_hash, source))?;
-
-    // finalize transcript to return the digest
+    // Finalize transcript to return the digest
     let digest = recomputed_transcript.finalize();
     Ok((security_level, digest))
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+fn verify_stark(
+    program_info: ProgramInfo,
+    stack_inputs: StackInputs,
+    stack_outputs: StackOutputs,
+    pc_transcript_state: PrecompileTranscriptState,
+    hash_fn: HashFunction,
+    proof_bytes: Vec<u8>,
+) -> Result<(), VerificationError> {
+    let program_hash = *program_info.program_hash();
+    let pub_inputs =
+        PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
+    let public_values = pub_inputs.to_elements();
+    let air = ProcessorAir::new();
+
+    match hash_fn {
+        HashFunction::Blake3_256 => {
+            let config = config::create_blake3_256_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            stark::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Rpo256 => {
+            let config = config::create_rpo_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            stark::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Rpx256 => {
+            let config = config::create_rpx_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            stark::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Poseidon2 => {
+            let config = config::create_poseidon2_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            stark::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+        HashFunction::Keccak => {
+            let config = config::create_keccak_config();
+            let proof = bincode::deserialize(&proof_bytes)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
+            stark::verify(&config, &air, &proof, &public_values)
+                .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
+        },
+    }?;
+
+    Ok(())
 }
 
 // ERRORS
@@ -177,11 +183,7 @@ pub fn verify_with_precompiles(
 #[derive(Debug, thiserror::Error)]
 pub enum VerificationError {
     #[error("failed to verify proof for program with hash {0}")]
-    ProgramVerificationError(Word, #[source] VerifierError),
-    #[error("the input {0} is not a valid field element")]
-    InputNotFieldElement(u64),
-    #[error("the output {0} is not a valid field element")]
-    OutputNotFieldElement(u64),
+    ProgramVerificationError(Word),
     #[error("failed to verify precompile calls")]
     PrecompileVerificationError(#[source] PrecompileVerificationError),
 }

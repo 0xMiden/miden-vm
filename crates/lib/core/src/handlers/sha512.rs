@@ -10,13 +10,15 @@ use core::array;
 
 use miden_core::{
     EventName, Felt, Word, ZERO,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::rpo::Rpo256;
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
 use sha2::{Digest, Sha512};
 
-use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
 /// Event name for the SHA512 hash_bytes operation.
 pub const SHA512_HASH_BYTES_EVENT_NAME: EventName =
@@ -35,8 +37,8 @@ impl EventHandler for Sha512Precompile {
     /// - **Memory**: bytes packed into u32 field elements starting at `ptr`
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
-        let ptr = process.get_stack_item(1).as_int();
-        let len_bytes = process.get_stack_item(2).as_int();
+        let ptr = process.get_stack_item(1).as_canonical_u64();
+        let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
         // Read input bytes (u32-packed) from memory.
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;
@@ -104,7 +106,7 @@ impl Sha512Preimage {
     }
 
     pub fn as_felts(&self) -> Vec<Felt> {
-        bytes_to_packed_u32_felts(self.as_ref())
+        bytes_to_packed_u32_elements(self.as_ref())
     }
 
     pub fn input_commitment(&self) -> Word {

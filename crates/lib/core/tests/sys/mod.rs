@@ -107,8 +107,8 @@ fn log_precompile_request_procedure() {
     host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
         .expect("failed to register dummy handler");
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) = miden_utils_testing::prove(
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
+    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
         &program,
         stack_inputs.clone(),
         advice_inputs,

@@ -4,6 +4,7 @@ use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::MerkleStore,
     errors::InputError,
+    field::QuotientMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -40,7 +41,7 @@ impl AdviceInputs {
     {
         let stack = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(|v| Felt::from_canonical_checked(v).ok_or(InputError::InvalidStackElement(v)))
             .collect::<Result<Vec<_>, _>>()?;
 
         self.stack.extend(stack.iter());
@@ -105,7 +106,7 @@ impl Deserializable for AdviceInputs {
 
 #[cfg(test)]
 mod tests {
-    use winter_utils::{Deserializable, Serializable};
+    use miden_core::utils::{Deserializable, Serializable};
 
     use crate::AdviceInputs;
 

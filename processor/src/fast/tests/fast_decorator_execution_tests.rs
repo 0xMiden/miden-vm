@@ -1,14 +1,11 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Decorator, Kernel, Operation,
+    Decorator, Operation,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
 };
 
-use crate::{
-    AdviceInputs, ExecutionOptions, Program, StackInputs, fast::FastProcessor,
-    test_utils::test_consistency_host::TestConsistencyHost,
-};
+use crate::{Program, fast::FastProcessor, test_utils::test_consistency_host::TestConsistencyHost};
 
 // Test helper to create a basic block with decorators for fast processor
 fn create_test_program(
@@ -211,7 +208,7 @@ fn test_decorator_execution_order_fast() {
 }
 
 #[test]
-fn test_fast_processor_decorator_execution_vs_standard() {
+fn test_processor_decorator_execution() {
     let before_enter_decorator = Decorator::Trace(1);
     let after_exit_decorator = Decorator::Trace(2);
     let operations = [Operation::Noop];
@@ -219,60 +216,21 @@ fn test_fast_processor_decorator_execution_vs_standard() {
     let program =
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
-    // Test standard processor
-    let mut host_standard = TestConsistencyHost::new();
-    let stack_inputs_standard = StackInputs::try_from_ints([1].iter().copied()).unwrap();
-    let mut process = crate::Process::new(
-        Kernel::default(),
-        stack_inputs_standard,
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(),
-    );
-
-    // Test standard processor
-    let result_standard = process.execute(&program, &mut host_standard);
-    assert!(result_standard.is_ok(), "Standard execution failed: {:?}", result_standard);
-
-    // Test fast processor
-    let mut host_fast = TestConsistencyHost::new();
+    let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
     let processor = FastProcessor::new(&stack_slice);
 
-    let result_fast = processor.execute_sync(&program, &mut host_fast);
-    assert!(result_fast.is_ok(), "Fast execution failed: {:?}", result_fast);
+    let execution_result = processor.execute_sync(&program, &mut host);
+    assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
 
-    // Compare decorator execution between processors
-    assert_eq!(
-        host_standard.get_trace_count(1),
-        host_fast.get_trace_count(1),
-        "Both processors should execute before_enter decorator (trace 1) the same number of times"
-    );
-    assert_eq!(
-        host_standard.get_trace_count(2),
-        host_fast.get_trace_count(2),
-        "Both processors should execute after_exit decorator (trace 2) the same number of times"
+    // Check decorator execution
+    insta::assert_debug_snapshot!(
+        "trace_count",
+        (host.get_trace_count(1), host.get_trace_count(2))
     );
 
-    // Compare execution order
-    let standard_order = host_standard.get_execution_order();
-    let fast_order = host_fast.get_execution_order();
-    assert_eq!(
-        standard_order.len(),
-        fast_order.len(),
-        "Both processors should have the same number of trace events"
-    );
-
-    for (i, (standard_event, fast_event)) in
-        standard_order.iter().zip(fast_order.iter()).enumerate()
-    {
-        assert_eq!(
-            standard_event.0, fast_event.0,
-            "Trace event {} should have the same trace ID in both processors",
-            i
-        );
-        // Note: We don't compare clock cycles as they may differ between processors
-        // due to different internal execution strategies
-    }
+    // Check execution order
+    insta::assert_debug_snapshot!("execution_order", host.get_execution_order());
 }
 
 #[test]
