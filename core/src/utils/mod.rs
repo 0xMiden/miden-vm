@@ -4,23 +4,28 @@ use core::{
     ops::{Bound, Range},
 };
 
+mod col_matrix;
+pub use col_matrix::ColMatrix;
 // RE-EXPORTS
 // ================================================================================================
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     hash::blake::{Blake3_256, Blake3Digest},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-        uninit_vector,
+        flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector,
     },
 };
-#[cfg(feature = "std")]
-pub use winter_utils::ReadAdapter;
-pub use winter_utils::group_slice_elements;
+pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
-use crate::{Felt, Word};
+use crate::{
+    Felt, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 
 pub mod math {
-    pub use winter_math::batch_inversion;
+    pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
 }
 
 // TO ELEMENTS
@@ -32,13 +37,13 @@ pub trait ToElements {
 
 impl<const N: usize> ToElements for [u64; N] {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
 impl ToElements for Vec<u64> {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
@@ -69,10 +74,10 @@ impl IntoBytes<32> for [Felt; 4] {
     fn into_bytes(self) -> [u8; 32] {
         let mut result = [0; 32];
 
-        result[..8].copy_from_slice(&self[0].as_int().to_le_bytes());
-        result[8..16].copy_from_slice(&self[1].as_int().to_le_bytes());
-        result[16..24].copy_from_slice(&self[2].as_int().to_le_bytes());
-        result[24..].copy_from_slice(&self[3].as_int().to_le_bytes());
+        result[..8].copy_from_slice(&self[0].as_canonical_u64().to_le_bytes());
+        result[8..16].copy_from_slice(&self[1].as_canonical_u64().to_le_bytes());
+        result[16..24].copy_from_slice(&self[2].as_canonical_u64().to_le_bytes());
+        result[24..].copy_from_slice(&self[3].as_canonical_u64().to_le_bytes());
 
         result
     }
@@ -207,16 +212,14 @@ pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
     elements
         .iter()
         .flat_map(|felt| {
-            let value = felt.as_int() as u32;
+            let value = felt.as_canonical_u64() as u32;
             value.to_le_bytes()
         })
         .collect()
 }
 
-// FORMATTING
+// TESTS
 // ================================================================================================
-
-pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
 #[cfg(test)]
 mod tests {

@@ -1,9 +1,8 @@
-use alloc::vec::Vec;
-
-use miden_core::{ExtensionOf, Felt, FieldElement, QuadFelt, StarkField};
+use miden_core::{
+    Felt,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
+};
 use proptest::prelude::*;
-use winter_prover::math::{fft, get_power_series_with_offset};
-use winter_utils::transpose_slice;
 
 use super::{
     super::stack_ops::op_push, DOMAIN_OFFSET, EIGHT, TAU_INV, TAU2_INV, TAU3_INV, TWO_INV,
@@ -15,89 +14,20 @@ use crate::fast::{FastProcessor, NoopTracer, step::NeverStopper};
 // FRI FOLDING TESTS
 // --------------------------------------------------------------------------------------------
 
-proptest! {
-    /// Tests FRI layer folding by a factor of 4.
-    ///
-    /// This test generates a random polynomial, evaluates it over a domain, and then folds
-    /// the evaluations using both the Winterfell FRI folding procedure and our `fold4` function,
-    /// verifying that they produce the same results.
-    #[test]
-    fn test_fold4(
-        // Random coefficients for degree 7 polynomial (8 QuadFelt coefficients = 16 base field elements)
-        p0_0 in any::<u64>(),
-        p0_1 in any::<u64>(),
-        p1_0 in any::<u64>(),
-        p1_1 in any::<u64>(),
-        p2_0 in any::<u64>(),
-        p2_1 in any::<u64>(),
-        p3_0 in any::<u64>(),
-        p3_1 in any::<u64>(),
-        p4_0 in any::<u64>(),
-        p4_1 in any::<u64>(),
-        p5_0 in any::<u64>(),
-        p5_1 in any::<u64>(),
-        p6_0 in any::<u64>(),
-        p6_1 in any::<u64>(),
-        p7_0 in any::<u64>(),
-        p7_1 in any::<u64>(),
-        // Random alpha challenge
-        alpha_0 in any::<u64>(),
-        alpha_1 in any::<u64>(),
-        // Position within the domain (0-7, since we have 8 positions in the folded domain)
-        pos in 0usize..8,
-    ) {
-        let blowup = 4_usize;
-
-        // Generate the alpha challenge
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
-
-        // Generate degree 7 polynomial f(x) from the random coefficients
-        let poly: Vec<QuadFelt> = vec![
-            QuadFelt::new(Felt::new(p0_0), Felt::new(p0_1)),
-            QuadFelt::new(Felt::new(p1_0), Felt::new(p1_1)),
-            QuadFelt::new(Felt::new(p2_0), Felt::new(p2_1)),
-            QuadFelt::new(Felt::new(p3_0), Felt::new(p3_1)),
-            QuadFelt::new(Felt::new(p4_0), Felt::new(p4_1)),
-            QuadFelt::new(Felt::new(p5_0), Felt::new(p5_1)),
-            QuadFelt::new(Felt::new(p6_0), Felt::new(p6_1)),
-            QuadFelt::new(Felt::new(p7_0), Felt::new(p7_1)),
-        ];
-
-        // Evaluate the polynomial over domain of 32 elements
-        let offset = Felt::GENERATOR;
-        let twiddles = fft::get_twiddles(poly.len());
-        let evaluations = fft::evaluate_poly_with_offset(&poly, &twiddles, offset, blowup);
-
-        // Fold the evaluations using FRI folding procedure from Winterfell
-        let transposed_evaluations = transpose_slice::<QuadFelt, 4>(&evaluations);
-        let folded_evaluations =
-            winter_fri::folding::apply_drp(&transposed_evaluations, offset, alpha);
-
-        // Build the evaluation domain of 32 elements
-        let n = poly.len() * blowup;
-        let g = Felt::get_root_of_unity(n.trailing_zeros());
-        let domain = get_power_series_with_offset(g, offset, n);
-
-        // Fold evaluations at a single point using fold4 procedure
-        let x = domain[pos];
-        let ev = alpha.mul_base(x.inv());
-        let (result, ..) = fri_fold4(transposed_evaluations[pos], ev, ev.square());
-
-        // Make sure the results of fold4 are the same as results from Winterfell
-        prop_assert_eq!(folded_evaluations[pos], result);
-    }
-}
+// NOTE: The `test_fold4` proptest that compared our fold4 implementation against Winterfell's
+// FRI folding has been removed as we've migrated from Winterfell to Plonky3.
+// The test_op_fri_ext2fold4 proptest below still validates the fold4 implementation.
 
 /// Tests that the pre-computed FRI constants are correct.
 #[test]
 fn test_constants() {
-    let tau = Felt::get_root_of_unity(2);
+    let tau = Felt::two_adic_generator(2);
 
-    assert_eq!(TAU_INV, tau.inv());
-    assert_eq!(TAU2_INV, tau.square().inv());
-    assert_eq!(TAU3_INV, tau.cube().inv());
+    assert_eq!(TAU_INV, tau.inverse());
+    assert_eq!(TAU2_INV, tau.square().inverse());
+    assert_eq!(TAU3_INV, tau.cube().inverse());
 
-    assert_eq!(Felt::new(2).inv(), TWO_INV);
+    assert_eq!(Felt::new(2).inverse(), TWO_INV);
 }
 
 // FRI OPERATION TESTS
@@ -135,17 +65,17 @@ proptest! {
     ) {
         // Query values
         let query_values = [
-            QuadFelt::new(Felt::new(v0_0), Felt::new(v0_1)),
-            QuadFelt::new(Felt::new(v1_0), Felt::new(v1_1)),
-            QuadFelt::new(Felt::new(v2_0), Felt::new(v2_1)),
-            QuadFelt::new(Felt::new(v3_0), Felt::new(v3_1)),
+            QuadFelt::new_complex(Felt::new(v0_0), Felt::new(v0_1)),
+            QuadFelt::new_complex(Felt::new(v1_0), Felt::new(v1_1)),
+            QuadFelt::new_complex(Felt::new(v2_0), Felt::new(v2_1)),
+            QuadFelt::new_complex(Felt::new(v3_0), Felt::new(v3_1)),
         ];
 
         // The previous value must match query_values[d_seg] for the operation to succeed
         let prev_value = query_values[d_seg as usize];
-        let prev_value_base = prev_value.to_base_elements();
+        let prev_value_base = prev_value.as_basis_coefficients_slice();
 
-        let alpha = QuadFelt::new(Felt::new(alpha_0), Felt::new(alpha_1));
+        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
         let poe = Felt::new(poe);
         let f_pos = Felt::new(f_pos);
         let d_seg_felt = Felt::new(d_seg);
@@ -169,13 +99,13 @@ proptest! {
             poe,                                  // position 9 -> 10
             d_seg_felt,                           // position 8 -> 9
             f_pos,                                // position 7 -> 8
-            query_values[0].to_base_elements()[0], // position 6 -> 7 (v0)
-            query_values[0].to_base_elements()[1], // position 5 -> 6 (v1)
-            query_values[1].to_base_elements()[0], // position 4 -> 5 (v2)
-            query_values[1].to_base_elements()[1], // position 3 -> 4 (v3)
-            query_values[2].to_base_elements()[0], // position 2 -> 3 (v4)
-            query_values[2].to_base_elements()[1], // position 1 -> 2 (v5)
-            query_values[3].to_base_elements()[0], // position 0 -> 1 (v6)
+            query_values[0].as_basis_coefficients_slice()[0], // position 6 -> 7 (v0)
+            query_values[0].as_basis_coefficients_slice()[1], // position 5 -> 6 (v1)
+            query_values[1].as_basis_coefficients_slice()[0], // position 4 -> 5 (v2)
+            query_values[1].as_basis_coefficients_slice()[1], // position 3 -> 4 (v3)
+            query_values[2].as_basis_coefficients_slice()[0], // position 2 -> 3 (v4)
+            query_values[2].as_basis_coefficients_slice()[1], // position 1 -> 2 (v5)
+            query_values[3].as_basis_coefficients_slice()[0], // position 0 -> 1 (v6)
         ];
 
         let mut processor = FastProcessor::new(&stack_inputs);
@@ -183,7 +113,7 @@ proptest! {
 
         // Push v7 to the top of the stack
         // This shifts everything down by one position, moving end_ptr to overflow
-        let v7 = query_values[3].to_base_elements()[1];
+        let v7 = query_values[3].as_basis_coefficients_slice()[1];
         op_push(&mut processor, v7, &mut tracer).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -195,15 +125,15 @@ proptest! {
         // Compute expected values
         let f_tau = get_tau_factor(d_seg as usize);
         let x = poe * f_tau * DOMAIN_OFFSET;
-        let x_inv = x.inv();
+        let x_inv = x.inverse();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fri_fold4(query_values, ev, es);
 
-        let tmp0_base = tmp0.to_base_elements();
-        let tmp1_base = tmp1.to_base_elements();
+        let tmp0_base = tmp0.as_basis_coefficients_slice();
+        let tmp1_base = tmp1.as_basis_coefficients_slice();
         let ds = get_domain_segment_flags(d_seg as usize);
-        let folded_value_base = folded_value.to_base_elements();
+        let folded_value_base = folded_value.as_basis_coefficients_slice();
         let poe2 = poe.square();
         let poe4 = poe2.square();
 

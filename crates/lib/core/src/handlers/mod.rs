@@ -1,4 +1,4 @@
-use miden_core::{Felt, WORD_SIZE};
+use miden_core::{Felt, WORD_SIZE, field::PrimeField64};
 use miden_processor::ProcessState;
 
 pub mod aead_decrypt;
@@ -146,7 +146,7 @@ pub(crate) fn read_memory_packed_u32(
             .get_mem_value(ctx, address)
             .ok_or(MemoryReadError::MemoryAccessFailed { address })?;
 
-        let value = felt.as_int();
+        let value = felt.as_canonical_u64();
         // Unpack field elements to bytes (little-endian)
         let packed: u32 =
             value.try_into().map_err(|_| MemoryReadError::InvalidValue { value, address })?;

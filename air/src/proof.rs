@@ -1,13 +1,13 @@
 use alloc::{string::ToString, vec::Vec};
 
 use miden_core::{
-    crypto::hash::{Blake3_192, Blake3_256, Hasher, Poseidon2, Rpo256, Rpx256},
+    crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
-use winter_air::proof::Proof;
+use serde::{Deserialize, Serialize};
 
 // EXECUTION PROOF
 // ================================================================================================
@@ -16,9 +16,9 @@ use winter_air::proof::Proof;
 ///
 /// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
 /// proof. However, the proof does not contain public inputs needed to verify the proof.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutionProof {
-    pub proof: Proof,
+    pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
     pub pc_requests: Vec<PrecompileRequest>,
 }
@@ -27,10 +27,10 @@ impl ExecutionProof {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new instance of [ExecutionProof] from the specified STARK proof and hash
-    /// function, and a list of all deferred [PrecompileRequest]s.
+    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash
+    /// function, and list of all deferred [PrecompileRequest]s.
     pub const fn new(
-        proof: Proof,
+        proof: Vec<u8>,
         hash_fn: HashFunction,
         pc_requests: Vec<PrecompileRequest>,
     ) -> Self {
@@ -41,7 +41,7 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the underlying STARK proof.
-    pub const fn stark_proof(&self) -> &Proof {
+    pub fn stark_proof(&self) -> &[u8] {
         &self.proof
     }
 
@@ -56,15 +56,14 @@ impl ExecutionProof {
     }
 
     /// Returns conjectured security level of this proof in bits.
+    ///
+    /// Currently returns a hardcoded 96 bits. Once the security estimator is implemented
+    /// in Plonky3, this should calculate the actual conjectured security level based on:
+    /// - Proof parameters (FRI folding factor, number of queries, etc.)
+    /// - Hash function collision resistance
+    /// - Field size and extension degree
     pub fn security_level(&self) -> u32 {
-        let conjectured_security = match self.hash_fn {
-            HashFunction::Blake3_192 => self.proof.conjectured_security::<Blake3_192>(),
-            HashFunction::Blake3_256 => self.proof.conjectured_security::<Blake3_256>(),
-            HashFunction::Rpo256 => self.proof.conjectured_security::<Rpo256>(),
-            HashFunction::Rpx256 => self.proof.conjectured_security::<Rpx256>(),
-            HashFunction::Poseidon2 => self.proof.conjectured_security::<Poseidon2>(),
-        };
-        conjectured_security.bits()
+        96
     }
 
     // SERIALIZATION / DESERIALIZATION
@@ -78,6 +77,8 @@ impl ExecutionProof {
     }
 
     /// Reads the source bytes, parsing a new proof instance.
+    ///
+    /// The serialization layout matches the [`Serializable`] implementation of [`ExecutionProof`].
     pub fn from_bytes(source: &[u8]) -> Result<Self, DeserializationError> {
         let mut reader = SliceReader::new(source);
         Self::read_from(&mut reader)
@@ -87,7 +88,7 @@ impl ExecutionProof {
     // --------------------------------------------------------------------------------------------
 
     /// Returns components of this execution proof.
-    pub fn into_parts(self) -> (HashFunction, Proof, Vec<PrecompileRequest>) {
+    pub fn into_parts(self) -> (HashFunction, Vec<u8>, Vec<PrecompileRequest>) {
         (self.hash_fn, self.proof, self.pc_requests)
     }
 }
@@ -96,11 +97,9 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum HashFunction {
-    /// BLAKE3 hash function with 192-bit output.
-    Blake3_192 = 0x00,
     /// BLAKE3 hash function with 256-bit output.
     Blake3_256 = 0x01,
     /// RPO hash function with 256-bit output.
@@ -109,17 +108,19 @@ pub enum HashFunction {
     Rpx256 = 0x03,
     /// Poseidon2 hash function with 256-bit output.
     Poseidon2 = 0x04,
+    /// Keccak hash function with 256-bit output.
+    Keccak = 0x05,
 }
 
 impl HashFunction {
     /// Returns the collision resistance level (in bits) of this hash function.
     pub const fn collision_resistance(&self) -> u32 {
         match self {
-            HashFunction::Blake3_192 => Blake3_192::COLLISION_RESISTANCE,
             HashFunction::Blake3_256 => Blake3_256::COLLISION_RESISTANCE,
             HashFunction::Rpo256 => Rpo256::COLLISION_RESISTANCE,
             HashFunction::Rpx256 => Rpx256::COLLISION_RESISTANCE,
             HashFunction::Poseidon2 => Poseidon2::COLLISION_RESISTANCE,
+            HashFunction::Keccak => 128,
         }
     }
 }
@@ -129,11 +130,11 @@ impl TryFrom<u8> for HashFunction {
 
     fn try_from(repr: u8) -> Result<Self, Self::Error> {
         match repr {
-            0x00 => Ok(Self::Blake3_192),
             0x01 => Ok(Self::Blake3_256),
             0x02 => Ok(Self::Rpo256),
             0x03 => Ok(Self::Rpx256),
             0x04 => Ok(Self::Poseidon2),
+            0x05 => Ok(Self::Keccak),
             _ => Err(DeserializationError::InvalidValue(format!(
                 "the hash function representation {repr} is not valid!"
             ))),
@@ -146,11 +147,11 @@ impl TryFrom<&str> for HashFunction {
 
     fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
         match hash_fn_str {
-            "blake3-192" => Ok(Self::Blake3_192),
             "blake3-256" => Ok(Self::Blake3_256),
             "rpo" => Ok(Self::Rpo256),
             "rpx" => Ok(Self::Rpx256),
             "poseidon2" => Ok(Self::Poseidon2),
+            "keccak" => Ok(Self::Keccak),
             _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
                 hash_function: hash_fn_str.to_string(),
             }),
@@ -183,27 +184,10 @@ impl Serializable for ExecutionProof {
 
 impl Deserializable for ExecutionProof {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let proof = Proof::read_from(source)?;
+        let proof = Vec::<u8>::read_from(source)?;
         let hash_fn = HashFunction::read_from(source)?;
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests })
-    }
-}
-
-// TESTING UTILS
-// ================================================================================================
-
-#[cfg(any(test, feature = "testing"))]
-impl ExecutionProof {
-    /// Creates a dummy `ExecutionProof` for testing purposes only.
-    ///
-    /// Uses a dummy `Proof` and the default `HashFunction`.
-    pub fn new_dummy() -> Self {
-        ExecutionProof {
-            proof: Proof::new_dummy(),
-            hash_fn: HashFunction::Blake3_192,
-            pc_requests: Vec::new(),
-        }
     }
 }

@@ -1,55 +1,42 @@
 #![no_std]
 
-#[cfg_attr(all(feature = "metal", target_arch = "aarch64", target_os = "macos"), macro_use)]
 extern crate alloc;
 
 #[cfg(feature = "std")]
 extern crate std;
 
-use core::marker::PhantomData;
+use alloc::string::ToString;
 
-use miden_air::{AuxRandElements, PartitionOptions, ProcessorAir, PublicInputs};
-#[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-use miden_gpu::HashFn;
-use miden_processor::{
-    ExecutionTrace, Program,
-    crypto::{
-        Blake3_192, Blake3_256, ElementHasher, Poseidon2, RandomCoin, Rpo256, RpoRandomCoin,
-        Rpx256, RpxRandomCoin, WinterRandomCoin,
-    },
-    fast::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, FastProcessor},
-    math::{Felt, FieldElement},
-    parallel::build_trace,
-};
+use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
 use tracing::instrument;
-use winter_maybe_async::{maybe_async, maybe_await};
-use winter_prover::{
-    CompositionPoly, CompositionPolyTrace, ConstraintCompositionCoefficients,
-    DefaultConstraintCommitment, DefaultConstraintEvaluator, DefaultTraceLde,
-    ProofOptions as WinterProofOptions, Prover, StarkDomain, TraceInfo, TracePolyTable,
-    matrix::ColMatrix,
-};
-#[cfg(feature = "std")]
-use {std::time::Instant, winter_prover::Trace};
-mod gpu;
+
+// Trace conversion utilities
+mod trace_adapter;
 
 // EXPORTS
 // ================================================================================================
 
 pub use miden_air::{
-    DeserializationError, ExecutionProof, FieldExtension, HashFunction, ProvingOptions,
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, DeserializationError, ExecutionProof, HashFunction,
+    ProcessorAir, ProvingOptions, config,
+};
+pub use miden_crypto::{
+    stark,
+    stark::{Commitments, OpenedValues, Proof},
 };
 pub use miden_processor::{
-    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, PrecompileRequest, StackInputs,
-    StackOutputs, SyncHost, Word, crypto, math, utils,
+    AdviceInputs, AsyncHost, BaseHost, ExecutionError, InputError, StackInputs, StackOutputs,
+    SyncHost, Word, crypto, math, utils,
 };
-pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
+pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
 
 // PROVER
 // ================================================================================================
 
 /// Executes and proves the specified `program` and returns the result together with a STARK-based
 /// proof of the program's execution.
+///
+/// This is an async function that works on all platforms including wasm32.
 ///
 /// - `stack_inputs` specifies the initial state of the stack for the VM.
 /// - `host` specifies the host environment which contain non-deterministic (secret) inputs for the
@@ -59,8 +46,7 @@ pub use winter_prover::{Proof, crypto::MerkleTree as MerkleTreeVC};
 /// # Errors
 /// Returns an error if program execution or STARK proof generation fails for any reason.
 #[instrument("prove_program", skip_all)]
-#[maybe_async]
-pub fn prove(
+pub async fn prove(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -68,8 +54,6 @@ pub fn prove(
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
-    #[cfg(feature = "std")]
-    let now = Instant::now();
 
     // Reverse stack inputs since FastProcessor expects them in reverse order
     // (first element = bottom of stack, last element = top)
@@ -81,224 +65,114 @@ pub fn prove(
         FastProcessor::new_with_advice_inputs(&stack_inputs_reversed, advice_inputs)
     };
 
-    let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)?;
+    let (execution_output, trace_generation_context) = processor
+        .execute_for_trace(program, host, options.execution_options().core_trace_fragment_size())
+        .await?;
 
-    let mut trace = build_trace(
+    let trace = build_trace(
         execution_output,
         trace_generation_context,
         program.hash(),
         program.kernel().clone(),
     );
 
-    #[cfg(feature = "std")]
     tracing::event!(
         tracing::Level::INFO,
-        "Generated execution trace of {} columns and {} steps ({}% padded) in {} ms",
-        trace.info().main_trace_width(),
+        "Generated execution trace of {} columns and {} steps (padded from {})",
+        miden_air::trace::TRACE_WIDTH,
         trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().padding_percentage(),
-        now.elapsed().as_millis()
+        trace.trace_len_summary().main_trace_len()
     );
 
     let stack_outputs = trace.stack_outputs().clone();
+    let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
 
-    // extract precompile requests from the trace to include in the proof
-    let pc_requests = trace.take_precompile_requests();
+    // Convert trace to row-major format
+    let trace_matrix = {
+        let _span = tracing::info_span!("execution_trace_to_row_major").entered();
+        execution_trace_to_row_major(&trace)
+    };
 
-    // generate STARK proof
-    let proof = match hash_fn {
-        HashFunction::Blake3_192 => {
-            let prover = ExecutionProver::<Blake3_192, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
-        },
+    // Build public values
+    let public_values = trace.to_public_values();
+
+    // Create AIR with aux trace builders
+    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+
+    // Generate STARK proof using unified miden-prover
+    let proof_bytes = match hash_fn {
         HashFunction::Blake3_256 => {
-            let prover = ExecutionProver::<Blake3_256, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
+            let config = miden_air::config::create_blake3_256_config();
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
+            serialize_proof(&proof)?
+        },
+        HashFunction::Keccak => {
+            let config = miden_air::config::create_keccak_config();
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
+            serialize_proof(&proof)?
         },
         HashFunction::Rpo256 => {
-            let prover = ExecutionProver::<Rpo256, RpoRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-            let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpo256);
-            maybe_await!(prover.prove(trace))
-        },
-        HashFunction::Rpx256 => {
-            let prover = ExecutionProver::<Rpx256, RpxRandomCoin>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            #[cfg(all(feature = "metal", target_arch = "aarch64", target_os = "macos"))]
-            let prover = gpu::metal::MetalExecutionProver::new(prover, HashFn::Rpx256);
-            maybe_await!(prover.prove(trace))
+            let config = miden_air::config::create_rpo_config();
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
+            serialize_proof(&proof)?
         },
         HashFunction::Poseidon2 => {
-            let prover = ExecutionProver::<Poseidon2, WinterRandomCoin<_>>::new(
-                options,
-                stack_inputs,
-                stack_outputs.clone(),
-            );
-            maybe_await!(prover.prove(trace))
+            let config = miden_air::config::create_poseidon2_config();
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
+            serialize_proof(&proof)?
         },
-    }
-    .map_err(ExecutionError::ProverError)?;
+        HashFunction::Rpx256 => {
+            let config = miden_air::config::create_rpx_config();
+            let proof = stark::prove(&config, &air, &trace_matrix, &public_values);
+            serialize_proof(&proof)?
+        },
+    };
 
-    let proof = ExecutionProof::new(proof, hash_fn, pc_requests);
+    let proof = miden_air::ExecutionProof::new(proof_bytes, hash_fn, precompile_requests);
 
     Ok((stack_outputs, proof))
 }
 
-// PROVER
+/// Synchronous wrapper for the async `prove()` function.
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the
+/// async `prove()` method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use the async `prove()`
+/// method instead in async contexts.
+#[cfg(not(target_arch = "wasm32"))]
+#[instrument("prove_program_sync", skip_all)]
+pub fn prove_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl AsyncHost,
+    options: ProvingOptions,
+) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(_handle) => {
+            // We're already inside a Tokio runtime - this is not supported
+            // because we cannot safely create a nested runtime or move the
+            // non-Send host reference to another thread
+            panic!(
+                "Cannot call prove_sync from within a Tokio runtime. \
+                 Use the async prove() method instead."
+            )
+        },
+        Err(_) => {
+            // No runtime exists - create one and use it
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
+        },
+    }
+}
+
+// HELPER FUNCTIONS
 // ================================================================================================
 
-struct ExecutionProver<H, R>
-where
-    H: ElementHasher<BaseField = Felt>,
-    R: RandomCoin<BaseField = Felt, Hasher = H>,
-{
-    random_coin: PhantomData<R>,
-    options: WinterProofOptions,
-    stack_inputs: StackInputs,
-    stack_outputs: StackOutputs,
-}
-
-impl<H, R> ExecutionProver<H, R>
-where
-    H: ElementHasher<BaseField = Felt>,
-    R: RandomCoin<BaseField = Felt, Hasher = H>,
-{
-    pub fn new(
-        options: ProvingOptions,
-        stack_inputs: StackInputs,
-        stack_outputs: StackOutputs,
-    ) -> Self {
-        Self {
-            random_coin: PhantomData,
-            options: options.into(),
-            stack_inputs,
-            stack_outputs,
-        }
-    }
-
-    // HELPER FUNCTIONS
-    // --------------------------------------------------------------------------------------------
-
-    /// Validates the stack inputs against the provided execution trace and returns true if valid.
-    fn are_inputs_valid(&self, trace: &ExecutionTrace) -> bool {
-        self.stack_inputs
-            .iter()
-            .zip(trace.init_stack_state().iter())
-            .all(|(l, r)| l == r)
-    }
-
-    /// Validates the stack outputs against the provided execution trace and returns true if valid.
-    fn are_outputs_valid(&self, trace: &ExecutionTrace) -> bool {
-        self.stack_outputs
-            .iter()
-            .zip(trace.last_stack_state().iter())
-            .all(|(l, r)| l == r)
-    }
-}
-
-impl<H, R> Prover for ExecutionProver<H, R>
-where
-    H: ElementHasher<BaseField = Felt> + Sync,
-    R: RandomCoin<BaseField = Felt, Hasher = H> + Send,
-{
-    type BaseField = Felt;
-    type Air = ProcessorAir;
-    type Trace = ExecutionTrace;
-    type HashFn = H;
-    type VC = MerkleTreeVC<Self::HashFn>;
-    type RandomCoin = R;
-    type TraceLde<E: FieldElement<BaseField = Felt>> = DefaultTraceLde<E, H, Self::VC>;
-    type ConstraintEvaluator<'a, E: FieldElement<BaseField = Felt>> =
-        DefaultConstraintEvaluator<'a, ProcessorAir, E>;
-    type ConstraintCommitment<E: FieldElement<BaseField = Felt>> =
-        DefaultConstraintCommitment<E, H, Self::VC>;
-
-    fn options(&self) -> &WinterProofOptions {
-        &self.options
-    }
-
-    fn get_pub_inputs(&self, trace: &ExecutionTrace) -> PublicInputs {
-        // ensure inputs and outputs are consistent with the execution trace.
-        debug_assert!(
-            self.are_inputs_valid(trace),
-            "provided inputs do not match the execution trace"
-        );
-        debug_assert!(
-            self.are_outputs_valid(trace),
-            "provided outputs do not match the execution trace"
-        );
-
-        let program_info = trace.program_info().clone();
-        let final_pc_transcript = trace.final_precompile_transcript();
-        PublicInputs::new(
-            program_info,
-            self.stack_inputs.clone(),
-            self.stack_outputs.clone(),
-            final_pc_transcript.state(),
-        )
-    }
-
-    #[maybe_async]
-    fn new_trace_lde<E: FieldElement<BaseField = Felt>>(
-        &self,
-        trace_info: &TraceInfo,
-        main_trace: &ColMatrix<Felt>,
-        domain: &StarkDomain<Felt>,
-        partition_options: PartitionOptions,
-    ) -> (Self::TraceLde<E>, TracePolyTable<E>) {
-        DefaultTraceLde::new(trace_info, main_trace, domain, partition_options)
-    }
-
-    #[maybe_async]
-    fn new_evaluator<'a, E: FieldElement<BaseField = Felt>>(
-        &self,
-        air: &'a ProcessorAir,
-        aux_rand_elements: Option<AuxRandElements<E>>,
-        composition_coefficients: ConstraintCompositionCoefficients<E>,
-    ) -> Self::ConstraintEvaluator<'a, E> {
-        DefaultConstraintEvaluator::new(air, aux_rand_elements, composition_coefficients)
-    }
-
-    #[instrument(skip_all)]
-    #[maybe_async]
-    fn build_aux_trace<E: FieldElement<BaseField = Self::BaseField>>(
-        &self,
-        trace: &Self::Trace,
-        aux_rand_elements: &AuxRandElements<E>,
-    ) -> ColMatrix<E> {
-        trace.build_aux_trace(aux_rand_elements.rand_elements()).unwrap()
-    }
-
-    #[maybe_async]
-    fn build_constraint_commitment<E: FieldElement<BaseField = Felt>>(
-        &self,
-        composition_poly_trace: CompositionPolyTrace<E>,
-        num_constraint_composition_columns: usize,
-        domain: &StarkDomain<Self::BaseField>,
-        partition_options: PartitionOptions,
-    ) -> (Self::ConstraintCommitment<E>, CompositionPoly<E>) {
-        DefaultConstraintCommitment::new(
-            composition_poly_trace,
-            num_constraint_composition_columns,
-            domain,
-            partition_options,
-        )
-    }
+/// Serializes a proof to bytes, converting serialization errors to ExecutionError.
+fn serialize_proof<T: serde::Serialize>(proof: &T) -> Result<alloc::vec::Vec<u8>, ExecutionError> {
+    bincode::serialize(proof).map_err(|e| ExecutionError::ProofSerializationError(e.to_string()))
 }

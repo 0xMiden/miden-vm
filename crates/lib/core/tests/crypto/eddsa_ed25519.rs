@@ -9,7 +9,8 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    EventName, Felt, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileVerifier},
     utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
 };
@@ -139,7 +140,7 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         assert_eq!(precompile_commitment, verifier_commitment);
 
         let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid));
+        assert_eq!(result, Felt::from_bool(expected_valid));
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
@@ -282,8 +283,10 @@ fn generate_valid_data() -> EddsaTestData {
     let pk = secret_key.public_key();
     let message = Word::new([1, 2, 3, 4].map(Felt::new));
     let sig = secret_key.sign(message);
-    let message_bytes: Vec<_> =
-        message.into_iter().flat_map(|felt| felt.as_int().to_le_bytes()).collect();
+    let message_bytes: Vec<_> = message
+        .into_iter()
+        .flat_map(|felt| felt.as_canonical_u64().to_le_bytes())
+        .collect();
 
     EddsaTestData {
         pk,

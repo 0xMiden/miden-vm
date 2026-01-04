@@ -41,18 +41,6 @@ make exec-single
 
 Internally, Miden VM uses [rayon](https://github.com/rayon-rs/rayon) for parallel computations. To control the number of threads used to generate a STARK proof, you can use `RAYON_NUM_THREADS` environment variable.
 
-### GPU acceleration
-
-Miden VM proof generation can be accelerated via GPUs. Currently, GPU acceleration is enabled only on Apple Silicon hardware (via [Metal](<https://en.wikipedia.org/wiki/Metal_(API)>)). To compile Miden VM with Metal acceleration enabled, you can run the following command:
-
-```shell
-make exec-metal
-```
-
-Similar to `make exec` command, this will place the resulting `miden-vm` executable into the `./target/optimized` directory.
-
-Currently, GPU acceleration is applicable only to recursive proofs which can be generated using the `-r` flag.
-
 ### SIMD acceleration
 
 Miden VM execution and proof generation can be accelerated via vectorized instructions. Currently, SIMD acceleration can be enabled on platforms supporting [SVE](<https://en.wikipedia.org/wiki/AArch64#Scalable_Vector_Extension_(SVE)>) and [AVX2](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions#Advanced_Vector_Extensions_2) instructions.
@@ -71,7 +59,7 @@ make exec-sve
 
 This will place the resulting `miden-vm` executable into the `./target/optimized` directory.
 
-Similar to Metal acceleration, SVE/AVX2 acceleration is currently applicable only to recursive proofs which can be generated using the `-r` flag.
+SVE/AVX2 acceleration is currently applicable only to recursive proofs which can be generated using the `-r` flag.
 
 ### Running Miden VM
 

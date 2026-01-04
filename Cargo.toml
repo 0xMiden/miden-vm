@@ -63,7 +63,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.19", default-features = false }
+miden-crypto = { version = "0.20", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -86,15 +86,24 @@ proptest-derive = { version = "0.7", default-features = false }
 serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde-untagged = {version = "0.1" }
-sha2 = { version = "0.10", default-features = false }
 smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
 thiserror = { version = "2.0", default-features = false }
 tokio = { version = "1.48", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-winter-air = { version = "0.13", default-features = false }
-winter-fri = "0.13"
-winter-math = { version = "0.13", default-features = false }
-winter-prover = { version = "0.13", default-features = false }
-winter-rand-utils = "0.13"
-winter-utils = { version = "0.13", default-features = false }
-winter-verifier = { version = "0.13", default-features = false }
+rand = { version = "0.9", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+
+# Upstream Plonky3 dependencies
+p3-blake3        = { version = "0.4", default-features = false }
+p3-commit        = { version = "0.4", default-features = false }
+p3-dft           = { version = "0.4", default-features = false }
+p3-keccak        = { version = "0.4", default-features = false }
+p3-matrix        = { version = "0.4", default-features = false }
+p3-merkle-tree   = { version = "0.4", default-features = false }
+
+# Miden-specific Plonky3 crates
+p3-miden-fri     = { version = "0.4", default-features = false }
+
+# WASM support
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
+

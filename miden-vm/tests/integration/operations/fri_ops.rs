@@ -1,5 +1,6 @@
+use miden_core::field::PrimeCharacteristicRing;
 use miden_utils_testing::{
-    Felt, FieldElement, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
+    Felt, PrimeField64, TRUNCATE_STACK_PROC, build_test, push_inputs, rand::rand_array,
 };
 
 // FRI_EXT2FOLD4
@@ -8,7 +9,10 @@ use miden_utils_testing::{
 #[test]
 fn fri_ext2fold4() {
     // create a set of random inputs
-    let mut inputs = rand_array::<Felt, 17>().iter().map(|v| v.as_int()).collect::<Vec<_>>();
+    let mut inputs = rand_array::<Felt, 17>()
+        .iter()
+        .map(|v| v.as_canonical_u64())
+        .collect::<Vec<_>>();
     inputs[7] = 2; // domain segment must be < 4
 
     // when domain segment is 2, the 3rd query value and the previous value must be the same
@@ -41,7 +45,7 @@ fn fri_ext2fold4() {
     let stack_state = test.get_last_stack_state();
     assert_eq!(stack_state[8], Felt::new(poe).square());
     assert_eq!(stack_state[10], Felt::new(layer_ptr + 8));
-    assert_eq!(stack_state[11], Felt::new(poe).exp(4));
+    assert_eq!(stack_state[11], Felt::new(poe).exp_u64(4));
     assert_eq!(stack_state[12], Felt::new(f_pos));
     assert_eq!(stack_state[15], Felt::new(end_ptr));
 

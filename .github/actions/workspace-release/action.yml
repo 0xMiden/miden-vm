@@ -59,13 +59,20 @@ runs:
         chmod +x scripts/check-msrv.sh
         ./scripts/check-msrv.sh
 
-    # Package vs real publish
-    - name: Verify workspace packages
+    # Clean packaging directory to avoid stale/corrupted tmp-registry state
+    - name: Clean packaging directory
+      shell: bash
+      run: |
+        echo "Cleaning target/package directory to ensure fresh state"
+        rm -rf target/package
+
+    # Dry-run vs real publish
+    - name: Dry-run workspace publish
       if: ${{ inputs.mode == 'dry-run' }}
       shell: bash
       run: |
-        echo "Verifying workspace crates can be packaged"
-        cargo package --workspace --no-verify
+        echo "Running cargo publish --workspace --dry-run"
+        cargo publish --workspace --dry-run
 
     - name: Publish workspace crates
       if: ${{ inputs.mode == 'publish' }}

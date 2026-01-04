@@ -1,11 +1,14 @@
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
+    decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
-use miden_core::{ONE, OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN};
+use miden_core::{
+    OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN,
+    field::{ExtensionField, PrimeCharacteristicRing},
+};
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace};
-use crate::debug::BusDebugger;
+use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
+use crate::{PrimeField64, debug::BusDebugger};
 
 // OP GROUP TABLE COLUMN
 // ================================================================================================
@@ -15,7 +18,7 @@ use crate::debug::BusDebugger;
 #[derive(Default)]
 pub struct OpGroupTableColumnBuilder {}
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for OpGroupTableColumnBuilder {
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
@@ -42,7 +45,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for OpGroupTableColu
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(i);
-        let op_code = op_code_felt.as_int() as u8;
+        let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_SPAN | OPCODE_RESPAN => {
@@ -57,7 +60,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for OpGroupTableColu
 // ================================================================================================
 
 /// Computes the multiplicand representing the inclusion of a new row to the op group table.
-fn get_op_group_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt>>(
+fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
     alphas: &[E],
@@ -70,31 +73,28 @@ fn get_op_group_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt>>(
         let h = main_trace.decoder_hasher_state(i);
         (1..8_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
-                + alphas[1].mul_base(block_id)
-                + alphas[2].mul_base(group_count - Felt::from(k))
-                + alphas[3].mul_base(h[k as usize]))
+                + alphas[1] * block_id
+                + alphas[2] * (group_count - Felt::from(k))
+                + alphas[3] * (h[k as usize]))
         })
     } else if op_batch_flag == OP_BATCH_4_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
         (1..4_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
-                + alphas[1].mul_base(block_id)
-                + alphas[2].mul_base(group_count - Felt::from(k))
-                + alphas[3].mul_base(h[k as usize]))
+                + alphas[1] * block_id
+                + alphas[2] * (group_count - Felt::from(k))
+                + alphas[3] * (h[k as usize]))
         })
     } else if op_batch_flag == OP_BATCH_2_GROUPS {
         let h = main_trace.decoder_hasher_state_first_half(i);
-        alphas[0]
-            + alphas[1].mul_base(block_id)
-            + alphas[2].mul_base(group_count - ONE)
-            + alphas[3].mul_base(h[1])
+        alphas[0] + alphas[1] * block_id + alphas[2] * (group_count - ONE) + alphas[3] * h[1]
     } else {
         E::ONE
     }
 }
 
 /// Computes the multiplicand representing the removal of a row from the op group table.
-fn get_op_group_table_removal_multiplicand<E: FieldElement<BaseField = Felt>>(
+fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
     alphas: &[E],
@@ -110,12 +110,9 @@ fn get_op_group_table_removal_multiplicand<E: FieldElement<BaseField = Felt>>(
             let h0 = main_trace.decoder_hasher_state_first_half(i + 1)[0];
 
             let op_prime = main_trace.get_op_code(i + 1);
-            h0.mul_small(1 << 7) + op_prime
+            h0 * Felt::from_u16(1 << 7) + op_prime
         }
     };
 
-    alphas[0]
-        + alphas[1].mul_base(block_id)
-        + alphas[2].mul_base(group_count)
-        + alphas[3].mul_base(group_value)
+    alphas[0] + alphas[1] * block_id + alphas[2] * group_count + alphas[3] * group_value
 }

@@ -6,7 +6,7 @@ use miden_air::trace::chiplets::bitwise::{
 };
 
 use super::{ExecutionError, Felt, TraceFragment};
-use crate::ErrorContext;
+use crate::{ErrorContext, PrimeField64};
 
 #[cfg(test)]
 mod tests;
@@ -90,8 +90,8 @@ impl Bitwise {
         b: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<Felt, ExecutionError> {
-        let a = assert_u32(a, err_ctx)?.as_int();
-        let b = assert_u32(b, err_ctx)?.as_int();
+        let a = assert_u32(a, err_ctx)?.as_canonical_u64();
+        let b = assert_u32(b, err_ctx)?.as_canonical_u64();
         let mut result = 0u64;
 
         // append 8 rows to the trace, each row computing bitwise AND in 4 bit limbs starting with
@@ -130,8 +130,8 @@ impl Bitwise {
         b: Felt,
         err_ctx: &impl ErrorContext,
     ) -> Result<Felt, ExecutionError> {
-        let a = assert_u32(a, err_ctx)?.as_int();
-        let b = assert_u32(b, err_ctx)?.as_int();
+        let a = assert_u32(a, err_ctx)?.as_canonical_u64();
+        let b = assert_u32(b, err_ctx)?.as_canonical_u64();
         let mut result = 0u64;
 
         // append 8 rows to the trace, each row computing bitwise XOR in 4 bit limbs starting with
@@ -213,7 +213,7 @@ impl Default for Bitwise {
 // --------------------------------------------------------------------------------------------
 
 pub fn assert_u32(value: Felt, err_ctx: &impl ErrorContext) -> Result<Felt, ExecutionError> {
-    let val_u64 = value.as_int();
+    let val_u64 = value.as_canonical_u64();
     if val_u64 > u32::MAX.into() {
         Err(ExecutionError::not_u32_value(value, err_ctx))
     } else {

@@ -33,7 +33,8 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    EventName,
+    EventName, Felt,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -83,9 +84,9 @@ impl EventHandler for EcdsaPrecompile {
     ///   (pk || digest || sig) for verification time
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr_pk, ptr_digest, ptr_sig, ...]
-        let ptr_pk = process.get_stack_item(1).as_int();
-        let ptr_digest = process.get_stack_item(2).as_int();
-        let ptr_sig = process.get_stack_item(3).as_int();
+        let ptr_pk = process.get_stack_item(1).as_canonical_u64();
+        let ptr_digest = process.get_stack_item(2).as_canonical_u64();
+        let ptr_sig = process.get_stack_item(3).as_canonical_u64();
 
         let pk = {
             let data_type = DataType::PublicKey;
@@ -112,7 +113,7 @@ impl EventHandler for EcdsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([Felt::from_bool(result)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -200,7 +201,7 @@ impl EcdsaRequest {
     /// the commitment generated during execution.
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
         // Compute tag: [event_id, result, 0, 0]
-        let result = self.result().into();
+        let result = Felt::from_bool(self.result());
         let tag = [ECDSA_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         // Convert serialized bytes to field elements and hash

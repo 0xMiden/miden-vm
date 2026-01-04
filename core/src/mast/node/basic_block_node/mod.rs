@@ -1,10 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
-use miden_crypto::{
-    Felt, Word, ZERO,
-    hash::{Digest, blake::Blake3_256},
-};
+use miden_crypto::{Felt, Word, ZERO, hash::blake::Blake3_256};
 use miden_formatting::prettier::PrettyPrint;
 
 use crate::{

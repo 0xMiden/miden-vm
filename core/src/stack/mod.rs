@@ -1,3 +1,5 @@
+use miden_crypto::field::PrimeField64;
+
 use super::{
     Felt,
     errors::{InputError, OutputError},
@@ -32,7 +34,7 @@ pub const MIN_STACK_DEPTH: usize = 16;
 fn get_num_stack_values(values: &[Felt; MIN_STACK_DEPTH]) -> u8 {
     let mut num_trailing_zeros = 0;
     for v in values.iter().rev() {
-        if v.as_int() == 0 {
+        if v.as_canonical_u64() == 0 {
             num_trailing_zeros += 1;
         } else {
             break;

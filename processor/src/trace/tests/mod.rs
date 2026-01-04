@@ -6,10 +6,7 @@ use miden_core::{
 };
 use miden_utils_testing::rand::rand_array;
 
-use super::{
-    super::chiplets::init_state_from_words, ExecutionTrace, Felt, FieldElement, NUM_RAND_ROWS,
-    Trace,
-};
+use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt};
 use crate::{AdviceInputs, DefaultHost, StackInputs, fast::FastProcessor, parallel::build_trace};
 
 mod chiplets;

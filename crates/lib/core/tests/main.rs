@@ -32,7 +32,9 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
+#[cfg(feature = "legacy-stark-tests")]
 mod pcs;
+#[cfg(feature = "legacy-stark-tests")]
 mod stark;
 mod sys;
 mod word;

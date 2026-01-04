@@ -21,7 +21,7 @@ doctest = false
 default = ["std", "serde"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
 std = ["miden-assembly-syntax/std", "miden-core/std", "serde/std", "thiserror/std"]
-serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde"]
+serde = ["dep:serde", "miden-assembly-syntax/serde", "miden-core/serde"]
 
 [dependencies]
 # Miden dependencies
@@ -33,7 +33,6 @@ derive_more.workspace = true
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-serde-untagged = { workspace = true, optional = true }
 thiserror.workspace = true
 
 [dev-dependencies]
