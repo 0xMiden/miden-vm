@@ -58,7 +58,7 @@ miden-core-lib = { path = "./crates/lib/core", version = "0.21", default-feature
 miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.21", default-features = false }
 miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.21", default-features = false }
 miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.21", default-features = false }
-miden-utils-sync = { path = "./crates/utils-sync", version = "0.21", default-features = false }
+miden-utils-sync = { path = "./crates/utils-sync", version = "0.21" }
 miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-utils" }
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
