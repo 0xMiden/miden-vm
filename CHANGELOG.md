@@ -17,6 +17,7 @@
 - [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
+- Added validation of `core_trace_fragment_size` in `ExecutionOptions` ([#2528](https://github.com/0xMiden/miden-vm/pull/2528)).
 
 ## 0.20.1 (2025-12-14)
 

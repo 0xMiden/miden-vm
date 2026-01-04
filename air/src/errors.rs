@@ -17,4 +17,8 @@ pub enum ExecutionOptionsError {
         "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
     )]
     InvalidHashFunction { hash_function: String },
+    #[error("core trace fragment size must be greater than 0")]
+    CoreTraceFragmentSizeTooSmall,
+    #[error("core trace fragment size {0} must be a power of two")]
+    CoreTraceFragmentSizeNotPowerOfTwo(usize),
 }
