@@ -140,12 +140,36 @@ impl OpToDecoratorIds {
     /// - Last value in `node_indptr_for_op_idx` must be <= `op_indptr_for_dec_ids.len() - 1`
     /// - Both `op_indptr_for_dec_ids` and `node_indptr_for_op_idx` must be strictly monotonic (each
     ///   successive value must be >= the previous one)
-    #[cfg(test)]
-    pub fn from_components(
+    pub(crate) fn from_components(
         decorator_ids: Vec<DecoratorId>,
         op_indptr_for_dec_ids: Vec<usize>,
         node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
     ) -> Result<Self, DecoratorIndexError> {
+        // Empty structures are valid (no nodes, no decorators)
+        if decorator_ids.is_empty()
+            && op_indptr_for_dec_ids.is_empty()
+            && node_indptr_for_op_idx.is_empty()
+        {
+            return Ok(Self {
+                decorator_ids,
+                op_indptr_for_dec_ids,
+                node_indptr_for_op_idx,
+            });
+        }
+
+        // Nodes but no decorators: empty decorator_ids/op_indptr, node_indptr with all zeros
+        if decorator_ids.is_empty() && op_indptr_for_dec_ids.is_empty() {
+            if node_indptr_for_op_idx.iter().all(|&ptr| ptr == 0) {
+                return Ok(Self {
+                    decorator_ids,
+                    op_indptr_for_dec_ids,
+                    node_indptr_for_op_idx,
+                });
+            } else {
+                return Err(DecoratorIndexError::InternalStructure);
+            }
+        }
+
         // Validate the structure
         if op_indptr_for_dec_ids.is_empty() {
             return Err(DecoratorIndexError::InternalStructure);
@@ -729,9 +753,9 @@ mod tests {
 
     #[test]
     fn test_from_components_invalid_structure() {
-        // Test with empty operation pointers
+        // Empty structures are now valid
         let result = OpToDecoratorIds::from_components(vec![], vec![], IndexVec::new());
-        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
+        assert!(result.is_ok());
 
         // Test with operation pointer exceeding decorator indices
         let result = OpToDecoratorIds::from_components(

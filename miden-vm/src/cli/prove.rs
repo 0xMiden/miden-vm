@@ -62,6 +62,10 @@ pub struct ProveCmd {
     /// Disable debug instructions (release mode)
     #[arg(long = "release")]
     release: bool,
+
+    /// Strip decorators from the program before proving
+    #[arg(long = "strip-decorators")]
+    strip_decorators: bool,
 }
 
 impl ProveCmd {
@@ -108,6 +112,13 @@ impl ProveCmd {
                 (program, host.with_source_manager(source_manager))
             },
             _ => return Err(Report::msg("The provided file must have a .masm or .masp extension")),
+        };
+
+        // Strip decorators if requested
+        let program = if self.strip_decorators {
+            program.with_decorators_stripped()
+        } else {
+            program
         };
 
         let program_hash: [u8; 32] = program.hash().into();

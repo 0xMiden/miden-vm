@@ -258,6 +258,9 @@ pub struct Process {
     pub enable_tracing: bool,
     /// Precompile transcript state (sponge capacity) used by `log_precompile`.
     pub pc_transcript_state: PrecompileTranscriptState,
+    /// Tracks decorator retrieval calls for testing.
+    #[cfg(test)]
+    pub decorator_retrieval_count: core::cell::Cell<usize>,
 }
 
 impl Process {
@@ -305,8 +308,20 @@ impl Process {
             max_cycles: execution_options.max_cycles(),
             enable_tracing: execution_options.enable_tracing(),
             pc_transcript_state: PrecompileTranscriptState::default(),
+            #[cfg(test)]
+            decorator_retrieval_count: core::cell::Cell::new(0),
         }
     }
+
+    #[cfg(test)]
+    #[inline(always)]
+    fn record_decorator_retrieval(&self) {
+        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
+    }
+
+    #[cfg(not(test))]
+    #[inline(always)]
+    fn record_decorator_retrieval(&self) {}
 
     // PROGRAM EXECUTOR
     // --------------------------------------------------------------------------------------------
@@ -343,8 +358,11 @@ impl Process {
             .get_node_by_id(node_id)
             .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
 
-        for &decorator_id in node.before_enter(program) {
-            self.execute_decorator(&program[decorator_id], host)?;
+        if self.decoder.in_debug_mode() {
+            self.record_decorator_retrieval();
+            for &decorator_id in node.before_enter(program) {
+                self.execute_decorator(&program[decorator_id], host)?;
+            }
         }
 
         match node {
@@ -353,14 +371,14 @@ impl Process {
             MastNode::Split(node) => self.execute_split_node(node, program, host)?,
             MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
             MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 add_error_ctx_to_external_error(
                     self.execute_call_node(node, program, host),
                     err_ctx,
                 )?
             },
             MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 add_error_ctx_to_external_error(
                     self.execute_dyn_node(node, program, host),
                     err_ctx,
@@ -373,8 +391,11 @@ impl Process {
             },
         }
 
-        for &decorator_id in node.after_exit(program) {
-            self.execute_decorator(&program[decorator_id], host)?;
+        if self.decoder.in_debug_mode() {
+            self.record_decorator_retrieval();
+            for &decorator_id in node.after_exit(program) {
+                self.execute_decorator(&program[decorator_id], host)?;
+            }
         }
 
         Ok(())
@@ -414,7 +435,7 @@ impl Process {
         } else if condition == ZERO {
             self.execute_mast_node(node.on_false(), program, host)?;
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
             return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
         }
 
@@ -447,7 +468,7 @@ impl Process {
             }
 
             if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host);
+                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
                 return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
             }
 
@@ -458,7 +479,7 @@ impl Process {
             // already dropped when we started the LOOP block
             self.end_loop_node(node, false, program, host)
         } else {
-            let err_ctx = err_ctx!(program, node, host);
+            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
             Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
         }
     }
@@ -476,10 +497,10 @@ impl Process {
             let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
                 ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
             })?;
-            let err_ctx = err_ctx!(program, call_node, host);
+            let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
             self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
         }
-        let err_ctx = err_ctx!(program, call_node, host);
+        let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
 
         self.start_call_node(call_node, program, host, &err_ctx)?;
         self.execute_mast_node(call_node.callee(), program, host)?;
@@ -497,7 +518,7 @@ impl Process {
         program: &MastForest,
         host: &mut impl SyncHost,
     ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host);
+        let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
 
         let callee_hash = if node.is_dyncall() {
             self.start_dyncall_node(node, &err_ctx)?
@@ -574,14 +595,16 @@ impl Process {
 
         self.end_basic_block_node(basic_block, program, host)?;
 
-        // execute any decorators which have not been executed during span ops execution; this
-        // can happen for decorators appearing after all operations in a block. these decorators
+        // Execute any decorators which have not been executed during span ops execution; this
+        // can happen for decorators appearing after all operations in a block. These decorators
         // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
         // the last clock cycle of the BASIC BLOCK ops.
-        // For the linked case, check for decorators at an operation index beyond the last operation
-        let num_ops = basic_block.num_operations() as usize;
-        for decorator in program.decorators_for_op(node_id, num_ops) {
-            self.execute_decorator(decorator, host)?;
+        if self.decoder.in_debug_mode() {
+            let num_ops = basic_block.num_operations() as usize;
+            self.record_decorator_retrieval();
+            for decorator in program.decorators_for_op(node_id, num_ops) {
+                self.execute_decorator(decorator, host)?;
+            }
         }
 
         Ok(())
@@ -619,14 +642,17 @@ impl Process {
 
         // execute operations in the batch one by one
         for (i, &op) in batch.ops().iter().enumerate() {
-            // Use the forest's decorator storage to get decorators for this operation
-            let current_op_idx = i + op_offset;
-            for decorator in program.decorators_for_op(node_id, current_op_idx) {
-                self.execute_decorator(decorator, host)?;
+            if self.decoder.in_debug_mode() {
+                let current_op_idx = i + op_offset;
+                self.record_decorator_retrieval();
+                for decorator in program.decorators_for_op(node_id, current_op_idx) {
+                    self.execute_decorator(decorator, host)?;
+                }
             }
 
             // decode and execute the operation
-            let err_ctx = err_ctx!(program, basic_block, host, i + op_offset);
+            let err_ctx =
+                err_ctx!(program, basic_block, host, self.decoder.in_debug_mode(), i + op_offset);
             self.decoder.execute_user_op(op, op_idx);
             self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
 

@@ -107,14 +107,18 @@ impl FastProcessor {
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk(tracer);
 
-        // execute any decorators which have not been executed during span ops execution; this can
-        // happen for decorators appearing after all operations in a block. these decorators are
+        // Execute any decorators which have not been executed during span ops execution; this can
+        // happen for decorators appearing after all operations in a block. These decorators are
         // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the
         // last clock cycle of the BASIC BLOCK ops.
-        // For the linked case, check for decorators at an operation index beyond the last operation
-        let num_ops = basic_block_node.num_operations() as usize;
-        for decorator in current_forest.decorators_for_op(node_id, num_ops) {
-            self.execute_decorator(decorator, host)?;
+        if self.in_debug_mode {
+            #[cfg(test)]
+            self.record_decorator_retrieval();
+
+            let num_ops = basic_block_node.num_operations() as usize;
+            for decorator in current_forest.decorators_for_op(node_id, num_ops) {
+                self.execute_decorator(decorator, host)?;
+            }
         }
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
@@ -138,16 +142,22 @@ impl FastProcessor {
         let mut group_idx = 0;
         let mut next_group_idx = 1;
 
+        // Get the node ID once since it doesn't change within the loop
+        let node_id = basic_block
+            .linked_id()
+            .expect("basic block node should be linked when executing operations");
+
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate() {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-            // Use the forest's decorator storage to get decorators for this operation
-            let node_id = basic_block
-                .linked_id()
-                .expect("basic block node should be linked when executing operations");
-            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
-                self.execute_decorator(decorator, host)?;
+            if self.in_debug_mode {
+                #[cfg(test)]
+                self.record_decorator_retrieval();
+
+                for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
+                    self.execute_decorator(decorator, host)?;
+                }
             }
 
             // if in trace mode, check if we need to record a trace state before executing the
@@ -165,7 +175,8 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(program, basic_block, host, op_idx_in_block);
+                let err_ctx =
+                    err_ctx!(program, basic_block, host, self.in_debug_mode, op_idx_in_block);
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {

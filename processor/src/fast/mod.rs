@@ -1,4 +1,8 @@
+#[cfg(test)]
+use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(test)]
+use core::cell::Cell;
 use core::cmp::min;
 
 use memory::Memory;
@@ -124,6 +128,10 @@ pub struct FastProcessor {
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
     /// sponge).
     pc_transcript: PrecompileTranscript,
+
+    /// Tracks decorator retrieval calls for testing.
+    #[cfg(test)]
+    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
@@ -189,11 +197,19 @@ impl FastProcessor {
             ace: Ace::default(),
             in_debug_mode,
             pc_transcript: PrecompileTranscript::new(),
+            #[cfg(test)]
+            decorator_retrieval_count: Rc::new(Cell::new(0)),
         }
     }
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    #[cfg(test)]
+    #[inline(always)]
+    fn record_decorator_retrieval(&self) {
+        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -506,6 +522,13 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        if !self.in_debug_mode {
+            return Ok(());
+        }
+
+        #[cfg(test)]
+        self.record_decorator_retrieval();
+
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
@@ -524,6 +547,13 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(), ExecutionError> {
+        if !self.in_debug_mode {
+            return Ok(());
+        }
+
+        #[cfg(test)]
+        self.record_decorator_retrieval();
+
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");

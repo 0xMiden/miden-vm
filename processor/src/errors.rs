@@ -520,11 +520,17 @@ pub enum AceError {
 #[cfg(not(feature = "no_err_ctx"))]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr) => {
-        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host)
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {
+        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host, $in_debug_mode)
     };
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {
-        $crate::errors::ErrorContextImpl::new_with_op_idx($mast_forest, $node, $host, $op_idx)
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {
+        $crate::errors::ErrorContextImpl::new_with_op_idx(
+            $mast_forest,
+            $node,
+            $host,
+            $in_debug_mode,
+            $op_idx,
+        )
     };
 }
 
@@ -541,8 +547,8 @@ macro_rules! err_ctx {
 #[cfg(feature = "no_err_ctx")]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr) => {{ () }};
-    ($mast_forest:expr, $node:expr, $host:expr, $op_idx:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {{ () }};
 }
 
 /// Trait defining the interface for error context providers.
@@ -567,9 +573,10 @@ impl ErrorContextImpl {
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Self {
         let (label, source_file) =
-            Self::precalc_label_and_source_file(None, mast_forest, node, host);
+            Self::precalc_label_and_source_file(None, mast_forest, node, host, in_debug_mode);
         Self { label, source_file }
     }
 
@@ -577,11 +584,12 @@ impl ErrorContextImpl {
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
+        in_debug_mode: bool,
         op_idx: usize,
     ) -> Self {
         let op_idx = op_idx.into();
         let (label, source_file) =
-            Self::precalc_label_and_source_file(op_idx, mast_forest, node, host);
+            Self::precalc_label_and_source_file(op_idx, mast_forest, node, host, in_debug_mode);
         Self { label, source_file }
     }
 
@@ -590,7 +598,15 @@ impl ErrorContextImpl {
         mast_forest: &MastForest,
         node: &impl MastNodeErrorContext,
         host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
+        // When not in debug mode, skip the expensive decorator traversal entirely.
+        // Decorators (including AsmOp decorators used for error context) should only
+        // be accessed when debugging is enabled.
+        if !in_debug_mode {
+            return (SourceSpan::UNKNOWN, None);
+        }
+
         node.get_assembly_op(mast_forest, op_idx)
             .and_then(|assembly_op| assembly_op.location())
             .map_or_else(
