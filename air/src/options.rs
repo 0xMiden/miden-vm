@@ -110,6 +110,12 @@ impl ExecutionOptions {
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
     /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - `max_cycles` is outside the valid range
+    /// - `expected_cycles` exceeds `max_cycles`
+    /// - `core_trace_fragment_size` is zero or not a power of two
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
