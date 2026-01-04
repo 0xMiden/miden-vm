@@ -277,19 +277,17 @@ mod tests {
 
     #[test]
     fn with_core_trace_fragment_size_validates() {
-        let opts = ExecutionOptions::default();
-
         // Valid size should succeed
-        let result = opts.clone().with_core_trace_fragment_size(2048);
+        let result = ExecutionOptions::default().with_core_trace_fragment_size(2048);
         assert!(result.is_ok());
         assert_eq!(result.unwrap().core_trace_fragment_size(), 2048);
 
         // Zero should fail
-        let result = opts.clone().with_core_trace_fragment_size(0);
+        let result = ExecutionOptions::default().with_core_trace_fragment_size(0);
         assert!(matches!(result, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
 
         // Non-power-of-two should fail
-        let result = opts.with_core_trace_fragment_size(100);
+        let result = ExecutionOptions::default().with_core_trace_fragment_size(100);
         assert!(matches!(
             result,
             Err(ExecutionOptionsError::CoreTraceFragmentSizeNotPowerOfTwo(100))
