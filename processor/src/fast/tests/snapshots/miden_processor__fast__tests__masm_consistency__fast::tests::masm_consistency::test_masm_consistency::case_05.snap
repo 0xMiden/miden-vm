@@ -1,0 +1,24 @@
+---
+source: processor/src/fast/tests/masm_consistency.rs
+expression: fast_stack_outputs
+---
+StackOutputs {
+    elements: [
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        2147483649,
+        2147483648,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+        16,
+    ],
+}

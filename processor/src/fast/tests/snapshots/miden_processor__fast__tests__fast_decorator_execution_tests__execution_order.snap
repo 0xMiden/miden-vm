@@ -1,0 +1,14 @@
+---
+source: processor/src/fast/tests/fast_decorator_execution_tests.rs
+expression: host.get_execution_order()
+---
+[
+    (
+        1,
+        0,
+    ),
+    (
+        2,
+        3,
+    ),
+]

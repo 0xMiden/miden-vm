@@ -1,7 +1,9 @@
 use proptest::prelude::*;
 
 // Import strategy functions from arbitrary.rs
-pub(super) use super::arbitrary::op_non_control_sequence_strategy;
+pub(super) use super::arbitrary::{
+    BasicBlockNodeParams, MastForestParams, op_non_control_sequence_strategy,
+};
 use super::*;
 use crate::{
     Decorator, Felt, ONE, Word,
@@ -488,8 +490,9 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .add_to_forest(&mut forest)
         .unwrap();
 
-    let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
+    // decorators
+    let all_decorators = forest.all_decorators(node_id);
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
     assert_eq!(all_decorators.len(), 3);
@@ -580,8 +583,8 @@ fn test_decorator_positions() {
 
     let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-    // Test that MastNodeErrorContext::decorators returns all decorators
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // Test that MastForest::decorator_links_for_node returns all decorators using the helper method
+    let all_decorators = forest.all_decorators(node_id);
     assert_eq!(all_decorators.len(), 5);
 
     // Verify the order and positions:
@@ -798,4 +801,55 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
         fingerprint1, fingerprint2,
         "Fingerprints should be different when digests differ"
     );
+}
+
+// PROPTERY TESTS WITH ARBITRARY
+// ================================================================================================
+
+proptest! {
+    /// Property test: All randomly generated BasicBlockNodes should pass validation
+    #[test]
+    fn prop_validate_arbitrary_basic_block(
+        // Generate BasicBlockNode with custom parameters to increase test coverage
+        block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
+            max_ops_len: 72,  // Allow larger blocks for more complex batching
+            max_pairs: 5,     // Allow more decorators
+            max_decorator_id_u32: 10,
+        })
+    ) {
+        // All BasicBlockNodes created through the official constructor should pass validation
+        // This property test ensures our validation correctly handles all edge cases
+        // that the official BasicBlockNode::new() function produces
+        prop_assert!(
+            block.validate_batch_invariants().is_ok(),
+            "BasicBlockNode validation failed: {:?}",
+            block.validate_batch_invariants().err()
+        );
+    }
+
+    /// Property test: All randomly generated MastForests should pass validation
+    #[test]
+    fn prop_validate_arbitrary_mast_forest(
+        // Generate MastForest with BasicBlockNodes that should all be valid
+        forest in any_with::<MastForest>(MastForestParams {
+            decorators: 5,
+            blocks: 1..=5,     // Test with multiple blocks
+            max_joins: 2,
+            max_splits: 2,
+            max_loops: 1,
+            max_calls: 2,
+            max_syscalls: 0,   // Avoid syscalls that require kernel setup
+            max_externals: 0,  // Avoid externals with random digests
+            max_dyns: 0,       // Avoid dyn nodes that leave junk on stack
+        })
+    ) {
+        // All MastForests generated through the official Arbitrary implementation
+        // should pass validation since they use BasicBlockNode::new() which enforces
+        // the same invariants we're checking
+        prop_assert!(
+            forest.validate().is_ok(),
+            "MastForest validation failed: {:?}",
+            forest.validate().err()
+        );
+    }
 }

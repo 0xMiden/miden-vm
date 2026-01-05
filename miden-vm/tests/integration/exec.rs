@@ -19,10 +19,10 @@ fn advice_map_loaded_before_execution() {
     let program_without_advice_map: Program =
         Assembler::default().assemble_program(source).unwrap();
 
-    // Test `miden_processor::execute` fails if no advice map provided with the program
+    // Test `miden_processor::execute_sync` fails if no advice map provided with the program
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    match miden_processor::execute(
+    match miden_processor::execute_sync(
         &program_without_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -41,7 +41,7 @@ fn advice_map_loaded_before_execution() {
         },
     }
 
-    // Test `miden_processor::execute` works if advice map provided with the program
+    // Test `miden_processor::execute_sync` works if advice map provided with the program
     let mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
@@ -53,7 +53,7 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program_with_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),

@@ -1,10 +1,7 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{chiplets::ace::ACE_INIT_LABEL, main_trace::MainTrace},
-};
-use miden_core::{Felt, FieldElement, ONE};
+use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
+use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -15,7 +12,7 @@ use crate::{
 // ==============================================================================================
 
 /// Builds requests made to the arithmetic circuit evaluation chiplet.
-pub fn build_ace_chiplet_requests<E: FieldElement<BaseField = Felt>>(
+pub fn build_ace_chiplet_requests<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -56,7 +53,7 @@ pub fn build_ace_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let start_selector = main_trace.chiplet_ace_start_selector(row);
     if start_selector == ONE {
@@ -103,7 +100,7 @@ pub struct AceMessage {
 
 impl<E> BusMessage<E> for AceMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]

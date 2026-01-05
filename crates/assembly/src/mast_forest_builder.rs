@@ -705,7 +705,7 @@ impl MastForestBuilder {
             .advice_map_mut()
             .merge(other)
             .map_err(|((key, prev_values), new_values)| LinkerError::AdviceMapKeyAlreadyPresent {
-                key: key.into(),
+                key,
                 prev_values: prev_values.to_vec(),
                 new_values: new_values.to_vec(),
             })

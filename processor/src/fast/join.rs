@@ -1,11 +1,12 @@
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
 use miden_core::mast::{JoinNode, MastForest, MastNodeId};
 
 use crate::{
-    AsyncHost, ExecutionError,
-    continuation_stack::ContinuationStack,
-    fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
+    AsyncHost,
+    continuation_stack::{Continuation, ContinuationStack},
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
 };
 
 impl FastProcessor {
@@ -19,7 +20,8 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::Start(node_id),
@@ -36,9 +38,7 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the JOIN operation added
         // to the trace.
-        self.increment_clk(tracer);
-
-        Ok(())
+        self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
     }
 
     /// Executes the finish phase of a Join node.
@@ -50,7 +50,8 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         host: &mut impl AsyncHost,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
             NodeExecutionState::End(node_id),
@@ -60,7 +61,9 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the END operation added
         // to the trace.
-        self.increment_clk(tracer);
+        self.increment_clk(tracer, stopper).map_break(|_| {
+            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(node_id)))
+        })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }

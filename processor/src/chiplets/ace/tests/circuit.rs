@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, QuadFelt};
+use miden_core::{Felt, field::QuadFelt};
 
 use super::*;
 

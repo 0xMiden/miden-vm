@@ -1,4 +1,15 @@
-//! TODO: add docs
+//! Hasher chiplet trace constants and types.
+//!
+//! This module defines the structure of the hasher chiplet's execution trace, including:
+//! - Trace selectors that determine which hash operation is being performed
+//! - State layout for the RPO permutation (12 field elements: 4 capacity + 8 rate)
+//! - Column ranges and indices for accessing trace data
+//!
+//! The hasher chiplet supports several operations:
+//! - Linear hashing (absorbing arbitrary-length inputs)
+//! - 2-to-1 hashing (Merkle tree node computation)
+//! - Merkle path verification
+//! - Merkle root updates (for authenticated data structure modifications)
 
 use core::ops::Range;
 

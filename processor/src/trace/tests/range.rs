@@ -1,10 +1,10 @@
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, chiplets::hasher::HASH_CYCLE_LEN, range::B_RANGE_COL_IDX,
 };
-use miden_core::{ExtensionOf, Operation};
+use miden_core::{Operation, field::Field};
 use miden_utils_testing::rand::rand_array;
 
-use super::{Felt, FieldElement, NUM_RAND_ROWS, ONE, Trace, ZERO, build_trace_from_ops};
+use super::{Felt, ONE, ZERO, build_trace_from_ops};
 
 /// This test checks that range check lookups from stack operations are balanced by the range checks
 /// processed in the Range Checker.
@@ -33,7 +33,7 @@ fn b_range_trace_stack() {
     // at cycle 1. (The trace begins by executing `span`). It must be subtracted out of `b_range`.
     // The range-checked values are 0, 256, 0, 0, so the values to subtract are 3/(alpha + 0) and
     // 1/(alpha + 256).
-    let lookups = alpha.inv().mul_base(Felt::new(3)) + (alpha + Felt::new(256)).inv();
+    let lookups = alpha.inverse() * Felt::new(3) + (alpha + Felt::new(256)).inverse();
     let mut expected = b_range[1] - lookups;
     assert_eq!(expected, b_range[2]);
 
@@ -44,24 +44,24 @@ fn b_range_trace_stack() {
     // values.) An extra row is added to pad the u16::MAX value.
     let len_16bit = 44 + 1;
     // The start of the values in the range checker table.
-    let values_start = trace.length() - len_16bit - NUM_RAND_ROWS;
+    let values_start = trace.length() - len_16bit;
 
     // After the padded rows, the first value will be unchanged.
     assert_eq!(expected, b_range[values_start]);
     // We include 3 lookups of 0.
-    expected += alpha.inv().mul_base(Felt::new(3));
+    expected += alpha.inverse() * Felt::new(3);
     assert_eq!(expected, b_range[values_start + 1]);
     // Then we have 3 bridge rows between 0 and 255 where the value does not change
     assert_eq!(expected, b_range[values_start + 2]);
     assert_eq!(expected, b_range[values_start + 3]);
     assert_eq!(expected, b_range[values_start + 4]);
     // Then we include 1 lookup of 256, so it should be multiplied by alpha + 256.
-    expected += (alpha + Felt::new(256)).inv();
+    expected += (alpha + Felt::new(256)).inverse();
     assert_eq!(expected, b_range[values_start + 5]);
 
     // --- Check the last value of the b_range column is zero --------------------------------------
 
-    let last_row = b_range.len() - NUM_RAND_ROWS - 1;
+    let last_row = b_range.len() - 1;
     assert_eq!(ZERO, b_range[last_row]);
 }
 
@@ -98,7 +98,7 @@ fn b_range_trace_mem() {
     // 3  ..., 65535. (0 and 4 are both range-checked. 65535 is the max, and the rest are "bridge"
     // values.) An extra row is added to pad the u16::MAX value.
     let len_16bit = 40 + 1;
-    let values_start = trace.length() - len_16bit - NUM_RAND_ROWS;
+    let values_start = trace.length() - len_16bit;
 
     // The value should start at ZERO and be unchanged until the memory processor section begins.
     let mut expected = ZERO;
@@ -116,10 +116,10 @@ fn b_range_trace_mem() {
     let (d0_load, d1_load) = (Felt::new(5), ZERO);
 
     // Include the lookups from the `MStoreW` operation at the next row.
-    expected -= (alpha + d0_store).inv() + (alpha + d1_store).inv();
+    expected -= (alpha + d0_store).inverse() + (alpha + d1_store).inverse();
     assert_eq!(expected, b_range[memory_start + 1]);
     // Include the lookup from the `MLoadW` operation at the next row.
-    expected -= (alpha + d0_load).inv() + (alpha + d1_load).inv();
+    expected -= (alpha + d0_load).inverse() + (alpha + d1_load).inverse();
     assert_eq!(expected, b_range[memory_start + 2]);
 
     // The value should be unchanged until the range checker's lookups are included.
@@ -130,23 +130,23 @@ fn b_range_trace_mem() {
     // --- Check the range checker's lookups. -----------------------------------------------------
 
     // We include 2 lookups of ZERO in the next row.
-    expected += alpha.inv().mul_base(Felt::new(2));
+    expected += alpha.inverse() * Felt::new(2);
     assert_eq!(expected, b_range[values_start + 1]);
 
     // We include 1 lookup of ONE in the next row.
-    expected += (alpha + d0_store).inv();
+    expected += (alpha + d0_store).inverse();
     assert_eq!(expected, b_range[values_start + 2]);
 
     // We have one bridge row between 1 and 5 where the value does not change.
     assert_eq!(expected, b_range[values_start + 3]);
 
     // We include 1 lookup of 5 in the next row.
-    expected += (alpha + d0_load).inv();
+    expected += (alpha + d0_load).inverse();
     assert_eq!(expected, b_range[values_start + 4]);
 
     // --- The value should now be ZERO for the rest of the trace. ---------------------------------
     assert_eq!(expected, ZERO);
-    for i in (values_start + 4)..(b_range.len() - NUM_RAND_ROWS) {
+    for i in (values_start + 4)..(b_range.len()) {
         assert_eq!(ZERO, b_range[i]);
     }
 }

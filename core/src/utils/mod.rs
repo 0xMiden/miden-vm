@@ -4,23 +4,28 @@ use core::{
     ops::{Bound, Range},
 };
 
+mod col_matrix;
+pub use col_matrix::ColMatrix;
 // RE-EXPORTS
 // ================================================================================================
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     hash::blake::{Blake3_256, Blake3Digest},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-        uninit_vector,
+        flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector,
     },
 };
-#[cfg(feature = "std")]
-pub use winter_utils::ReadAdapter;
-pub use winter_utils::group_slice_elements;
+pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
-use crate::{Felt, Word};
+use crate::{
+    Felt, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 
 pub mod math {
-    pub use winter_math::batch_inversion;
+    pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
 }
 
 // TO ELEMENTS
@@ -32,13 +37,13 @@ pub trait ToElements {
 
 impl<const N: usize> ToElements for [u64; N] {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
 impl ToElements for Vec<u64> {
     fn to_elements(&self) -> Vec<Felt> {
-        self.iter().map(|&v| Felt::new(v)).collect()
+        self.iter().map(|&v| Felt::from_u64(v)).collect()
     }
 }
 
@@ -69,10 +74,10 @@ impl IntoBytes<32> for [Felt; 4] {
     fn into_bytes(self) -> [u8; 32] {
         let mut result = [0; 32];
 
-        result[..8].copy_from_slice(&self[0].as_int().to_le_bytes());
-        result[8..16].copy_from_slice(&self[1].as_int().to_le_bytes());
-        result[16..24].copy_from_slice(&self[2].as_int().to_le_bytes());
-        result[24..].copy_from_slice(&self[3].as_int().to_le_bytes());
+        result[..8].copy_from_slice(&self[0].as_canonical_u64().to_le_bytes());
+        result[8..16].copy_from_slice(&self[1].as_canonical_u64().to_le_bytes());
+        result[16..24].copy_from_slice(&self[2].as_canonical_u64().to_le_bytes());
+        result[24..].copy_from_slice(&self[3].as_canonical_u64().to_le_bytes());
 
         result
     }
@@ -143,7 +148,97 @@ fn debug_assert_is_checked() {
     debug_assert!(false);
 }
 
-// FORMATTING
+// BYTE CONVERSIONS
 // ================================================================================================
 
-pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+/// Number of bytes packed into each u32 field element.
+///
+/// Used for converting between byte arrays and u32-packed field elements in memory.
+const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
+
+/// Converts bytes to field elements using u32 packing in little-endian format.
+///
+/// Each field element contains a u32 value representing up to 4 bytes. If the byte length
+/// is not a multiple of 4, the final field element is zero-padded.
+///
+/// This is commonly used by precompile handlers (Keccak256, ECDSA) to convert byte data
+/// into field element commitments.
+///
+/// # Arguments
+/// - `bytes`: The byte slice to convert
+///
+/// # Returns
+/// A vector of field elements, each containing 4 bytes packed in little-endian order.
+///
+/// # Examples
+/// ```
+/// # use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
+/// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+/// let felts = bytes_to_packed_u32_elements(&bytes);
+/// assert_eq!(felts, vec![Felt::from(0x04030201_u32), Felt::from(0x00000005_u32)]);
+/// ```
+pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
+    bytes
+        .chunks(BYTES_PER_U32)
+        .map(|chunk| {
+            // Pack up to 4 bytes into a u32 in little-endian format
+            let mut packed = [0u8; BYTES_PER_U32];
+            packed[..chunk.len()].copy_from_slice(chunk);
+            Felt::from(u32::from_le_bytes(packed))
+        })
+        .collect()
+}
+
+/// Converts u32-packed field elements back to bytes in little-endian format.
+///
+/// This is the inverse of [`bytes_to_packed_u32_elements`]. Each field element is expected
+/// to contain a u32 value, which is unpacked into 4 bytes.
+///
+/// # Arguments
+/// - `elements`: The field elements to convert
+///
+/// # Returns
+/// A vector of bytes representing the unpacked data.
+///
+/// # Examples
+/// ```
+/// # use miden_core::{Felt, utils::{bytes_to_packed_u32_elements, packed_u32_elements_to_bytes}};
+/// let original = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+/// let elements = bytes_to_packed_u32_elements(&original);
+/// let bytes = packed_u32_elements_to_bytes(&elements);
+/// assert_eq!(bytes, original);
+/// ```
+pub fn packed_u32_elements_to_bytes(elements: &[Felt]) -> Vec<u8> {
+    elements
+        .iter()
+        .flat_map(|felt| {
+            let value = felt.as_canonical_u64() as u32;
+            value.to_le_bytes()
+        })
+        .collect()
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn proptest_packed_u32_elements_roundtrip(values in prop::collection::vec(any::<u32>(), 0..100)) {
+            // Convert u32 values to Felts
+            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from(v)).collect();
+
+            // Roundtrip: Felts -> bytes -> Felts
+            let bytes = packed_u32_elements_to_bytes(&felts);
+            let roundtrip_felts = bytes_to_packed_u32_elements(&bytes);
+
+            // Should be equal
+            prop_assert_eq!(felts, roundtrip_felts);
+        }
+    }
+}

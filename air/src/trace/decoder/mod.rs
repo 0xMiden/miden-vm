@@ -19,7 +19,8 @@ pub const NUM_OP_BITS: usize = Operation::OP_BITS;
 /// Location of operation bits columns in the decoder trace.
 pub const OP_BITS_RANGE: Range<usize> = range(OP_BITS_OFFSET, NUM_OP_BITS);
 
-// TODO: probably rename "hasher state" to something like "shared columns".
+// Note: "hasher state" columns are shared between decoding operations and holding
+// the hasher state during MAST node hashing.
 
 /// Index at which hasher state columns start in the decoder trace.
 pub const HASHER_STATE_OFFSET: usize = OP_BITS_RANGE.end;

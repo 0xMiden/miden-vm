@@ -5,7 +5,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::EventName;
+use miden_core::{EventName, field::PrimeField64};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
@@ -34,8 +34,8 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 /// Returns an error if the divisor is ZERO.
 pub fn handle_u64_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let divisor = {
-        let divisor_hi = process.get_stack_item(1).as_int();
-        let divisor_lo = process.get_stack_item(2).as_int();
+        let divisor_hi = process.get_stack_item(1).as_canonical_u64();
+        let divisor_lo = process.get_stack_item(2).as_canonical_u64();
 
         // Ensure the divisor is a pair of u32 values
         if divisor_hi > u32::MAX.into() {
@@ -63,8 +63,8 @@ pub fn handle_u64_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, Eve
     };
 
     let dividend = {
-        let dividend_hi = process.get_stack_item(3).as_int();
-        let dividend_lo = process.get_stack_item(4).as_int();
+        let dividend_hi = process.get_stack_item(3).as_canonical_u64();
+        let dividend_lo = process.get_stack_item(4).as_canonical_u64();
 
         // Ensure the dividend is a pair of u32 values
         if dividend_hi > u32::MAX.into() {

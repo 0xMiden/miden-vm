@@ -757,27 +757,10 @@ fn compute_line_starts(text: &str, text_offset: Option<u32>) -> Vec<ByteIndex> {
     let text_offset = text_offset.unwrap_or(0);
     initial_line_offset
         .into_iter()
-        .chain(memchr::memchr_iter(b'\n', bytes).filter_map(|mut offset| {
-            // Determine if the newline has any preceding escapes
-            let mut preceding_escapes = 0;
-            let line_start = offset + 1;
-            while let Some(prev_offset) = offset.checked_sub(1) {
-                if bytes[prev_offset] == b'\\' {
-                    offset = prev_offset;
-                    preceding_escapes += 1;
-                    continue;
-                }
-                break;
-            }
-
-            // If the newline is escaped, do not count it as a new line
-            let is_escaped = preceding_escapes > 0 && preceding_escapes % 2 != 0;
-            if is_escaped {
-                None
-            } else {
-                Some(ByteIndex(text_offset + line_start as u32))
-            }
-        }))
+        .chain(
+            memchr::memchr_iter(b'\n', bytes)
+                .map(|offset| ByteIndex(text_offset + (offset + 1) as u32)),
+        )
         .collect()
 }
 
@@ -1301,6 +1284,105 @@ end
                 .byte_slice(content.line_range(content.last_line_index()).expect("invalid line"))
                 .expect("invalid byte range"),
             "".as_bytes()
+        );
+    }
+
+    /// Test that backslash-before-newline is NOT treated as a line continuation.
+    #[test]
+    fn source_content_line_starts_with_trailing_backslash() {
+        const CONTENT: &str =
+            "//! Build with:\n//!   cargo build \\\n//!     --release\nfn main() {}\n";
+
+        let content = SourceContent::new("rust", "example.rs", CONTENT);
+
+        // Should have 5 lines (4 lines of content + 1 empty line after final newline)
+        // Line 0: "//! Build with:\n"
+        // Line 1: "//!   cargo build \\\n"
+        // Line 2: "//!     --release\n"
+        // Line 3: "fn main() {}\n"
+        // Line 4: "" (empty line after final newline)
+        assert_eq!(content.line_count(), 5);
+
+        // Verify each line's content
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(0)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "//! Build with:\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(1)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "//!   cargo build \\\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(2)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "//!     --release\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(3)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "fn main() {}\n".as_bytes()
+        );
+
+        // Verify line_column_to_offset works for all lines, including those after
+        // backslash-ended lines.
+        let offset_line0 = content.line_column_to_offset(LineIndex(0), ColumnIndex(0));
+        let offset_line1 = content.line_column_to_offset(LineIndex(1), ColumnIndex(0));
+        let offset_line2 = content.line_column_to_offset(LineIndex(2), ColumnIndex(0));
+        let offset_line3 = content.line_column_to_offset(LineIndex(3), ColumnIndex(0));
+
+        assert!(offset_line0.is_some(), "line 0 should be accessible");
+        assert!(offset_line1.is_some(), "line 1 should be accessible");
+        assert!(offset_line2.is_some(), "line 2 should be accessible");
+        assert!(offset_line3.is_some(), "line 3 should be accessible");
+
+        // Verify the offsets are at the expected byte positions
+        assert_eq!(offset_line0.unwrap().to_u32(), 0);
+        assert_eq!(offset_line1.unwrap().to_u32(), 16); // After "//! Build with:\n"
+        assert_eq!(offset_line2.unwrap().to_u32(), 36); // After "//!   cargo build \\\n"
+        assert_eq!(offset_line3.unwrap().to_u32(), 54); // After "//!     --release\n"
+    }
+
+    /// Test with multiple consecutive backslash-ended lines
+    #[test]
+    fn source_content_line_starts_multiple_trailing_backslashes() {
+        // Multiple lines ending with backslashes
+        const CONTENT: &str = "line1 \\\nline2 \\\nline3 \\\nline4\n";
+
+        let content = SourceContent::new("text", "test.txt", CONTENT);
+
+        // Should have 5 lines (4 lines of content + 1 empty line after final newline)
+        assert_eq!(content.line_count(), 5);
+
+        // Verify each line is correctly separated
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(0)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "line1 \\\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(1)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "line2 \\\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(2)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "line3 \\\n".as_bytes()
+        );
+        assert_eq!(
+            content
+                .byte_slice(content.line_range(LineIndex(3)).expect("invalid line"))
+                .expect("invalid byte range"),
+            "line4\n".as_bytes()
         );
     }
 }

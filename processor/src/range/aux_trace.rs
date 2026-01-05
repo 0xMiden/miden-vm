@@ -1,22 +1,20 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        main_trace::MainTrace,
-        range::{M_COL_IDX, V_COL_IDX},
-    },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    range::{M_COL_IDX, V_COL_IDX},
 };
-use miden_core::ZERO;
+use miden_core::{ZERO, field::ExtensionField};
 
-use super::{Felt, FieldElement, NUM_RAND_ROWS, uninit_vector};
+use super::{Felt, uninit_vector};
+use crate::PrimeField64;
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================
 
 /// Describes how to construct the execution trace of columns related to the range checker in the
 /// auxiliary segment of the trace. These are used in multiset checks.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder {
     /// A list of the unique values for which range checks are performed.
     lookup_values: Vec<u16>,
@@ -50,7 +48,7 @@ impl AuxTraceBuilder {
     /// column:
     /// - `b_range`: ensures that the range checks performed by the Range Checker match those
     ///   requested by the Stack and Memory processors.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -61,7 +59,7 @@ impl AuxTraceBuilder {
 
     /// Builds the execution trace of the range check `b_range` column which ensure that the range
     /// check lookups performed by user operations match those executed by the Range Checker.
-    fn build_aux_col_b_range<E: FieldElement<BaseField = Felt>>(
+    fn build_aux_col_b_range<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -111,20 +109,25 @@ impl AuxTraceBuilder {
         // after the padded section of the range checker table, include the lookup value specified
         // by the range checker into the running sum at each step, and remove lookups from user ops
         // at any step where user ops were executed.
+        //
+        // Note: we take `num_rows - 1` because the loop writes to `b_range[row_idx + 1]`, so we
+        // need to stop one row early to avoid writing past the end of the array.
         for (row_idx, (multiplicity, lookup)) in main_trace
             .get_column(M_COL_IDX)
             .iter()
             .zip(main_trace.get_column(V_COL_IDX).iter())
             .enumerate()
-            .take(main_trace.num_rows() - NUM_RAND_ROWS)
+            .take(main_trace.num_rows() - 1)
             .skip(self.values_start)
         {
             b_range_idx = row_idx + 1;
 
             if *multiplicity != ZERO {
                 // add the value in the range checker: multiplicity / (alpha + lookup)
-                let value = divisors.get(&(lookup.as_int() as u16)).expect("invalid lookup value");
-                b_range[b_range_idx] = b_range[row_idx] + value.mul_base(*multiplicity);
+                let value = divisors
+                    .get(&(lookup.as_canonical_u64() as u16))
+                    .expect("invalid lookup value");
+                b_range[b_range_idx] = b_range[row_idx] + *value * *multiplicity;
             } else {
                 b_range[b_range_idx] = b_range[row_idx];
             }
@@ -153,10 +156,7 @@ impl AuxTraceBuilder {
 /// Runs batch inversion on all range check lookup values and returns a map which maps each value
 /// to the divisor used for including it in the LogUp lookup. In other words, the map contains
 /// mappings of x to 1/(alpha + x).
-fn get_divisors<E: FieldElement<BaseField = Felt>>(
-    lookup_values: &[u16],
-    alpha: E,
-) -> BTreeMap<u16, E> {
+fn get_divisors<E: ExtensionField<Felt>>(lookup_values: &[u16], alpha: E) -> BTreeMap<u16, E> {
     // run batch inversion on the lookup values
     let mut values = unsafe { uninit_vector(lookup_values.len()) };
     let mut inv_values = unsafe { uninit_vector(lookup_values.len()) };
@@ -165,12 +165,12 @@ fn get_divisors<E: FieldElement<BaseField = Felt>>(
     let mut acc = E::ONE;
     for (i, (value, inv_value)) in values.iter_mut().zip(inv_values.iter_mut()).enumerate() {
         *inv_value = acc;
-        *value = alpha + E::from(lookup_values[i]);
+        *value = alpha + E::from_u16(lookup_values[i]);
         acc *= *value;
     }
 
     // invert the accumulated product
-    acc = acc.inv();
+    acc = acc.inverse();
 
     // multiply the accumulated product by the original values to compute the inverses, then
     // build a map of inverses for the lookup values

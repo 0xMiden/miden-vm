@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_air::trace::{chiplets::hasher::STATE_WIDTH, rows::RowIndex};
+use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH};
 use miden_core::{
     Felt, Word,
     crypto::merkle::MerklePath,
@@ -25,7 +25,7 @@ pub trait Tracer {
         &mut self,
         processor: &FastProcessor,
         execution_state: NodeExecutionState,
-        continuation_stack: &mut ContinuationStack,
+        continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     );
 
@@ -174,7 +174,7 @@ impl Tracer for NoopTracer {
         &mut self,
         _processor: &FastProcessor,
         _execution_state: NodeExecutionState,
-        _continuation_stack: &mut ContinuationStack,
+        _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
     ) {
         // do nothing

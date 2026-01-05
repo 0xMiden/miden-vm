@@ -1,19 +1,19 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        chiplets::{
-            ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
-            memory::{
-                MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ_ELEMENT_LABEL,
-                MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL, MEMORY_WRITE_WORD_LABEL,
-            },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::{
+        ace::{ACE_INSTRUCTION_ID1_OFFSET, ACE_INSTRUCTION_ID2_OFFSET},
+        memory::{
+            MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ_ELEMENT_LABEL,
+            MEMORY_READ_WORD_LABEL, MEMORY_WRITE_ELEMENT_LABEL, MEMORY_WRITE_WORD_LABEL,
         },
-        main_trace::MainTrace,
     },
 };
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE, Felt, FieldElement, ONE, OPCODE_DYNCALL, ZERO};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing},
+};
 
 use crate::{
     chiplets::aux_trace::build_value,
@@ -29,7 +29,7 @@ const FOUR: Felt = Felt::new(4);
 // ================================================================================================
 
 /// Builds ACE chiplet read requests as part of the `READ` section made to the memory chiplet.
-pub fn build_ace_memory_read_word_request<E: FieldElement<BaseField = Felt>>(
+pub fn build_ace_memory_read_word_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -64,7 +64,7 @@ pub fn build_ace_memory_read_word_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds ACE chiplet read requests as part of the `EVAL` section made to the memory chiplet.
-pub fn build_ace_memory_read_element_request<E: FieldElement<BaseField = Felt>>(
+pub fn build_ace_memory_read_element_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -98,7 +98,7 @@ pub fn build_ace_memory_read_element_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `DYN` and `DYNCALL` read request made to the memory chiplet for the callee hash.
-pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_code_felt: Felt,
     alphas: &[E],
@@ -130,7 +130,7 @@ pub(super) fn build_dyn_dyncall_callee_hash_read_request<E: FieldElement<BaseFie
 /// context.
 ///
 /// Currently, this is done with `CALL` and `DYNCALL`.
-pub(super) fn build_fmp_initialization_write_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_fmp_initialization_write_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -156,7 +156,7 @@ pub(super) fn build_fmp_initialization_write_request<E: FieldElement<BaseField =
 }
 
 /// Builds `MLOADW` and `MSTOREW` requests made to the memory chiplet.
-pub(super) fn build_mem_mloadw_mstorew_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
     alphas: &[E],
@@ -197,7 +197,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: FieldElement<BaseField = Felt>
 }
 
 /// Builds `MLOAD` and `MSTORE` requests made to the memory chiplet.
-pub(super) fn build_mem_mload_mstore_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mem_mload_mstore_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     op_label: u8,
     alphas: &[E],
@@ -229,7 +229,7 @@ pub(super) fn build_mem_mload_mstore_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MSTREAM` requests made to the memory chiplet.
-pub(super) fn build_mstream_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -279,7 +279,7 @@ pub(super) fn build_mstream_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `PIPE` requests made to the memory chiplet.
-pub(super) fn build_pipe_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -329,7 +329,7 @@ pub(super) fn build_pipe_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HORNERBASE` requests made to the memory chiplet.
-pub(super) fn build_hornerbase_eval_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -370,7 +370,7 @@ pub(super) fn build_hornerbase_eval_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HORNEREXT` requests made to the memory chiplet.
-pub(super) fn build_hornerext_eval_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hornerext_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -416,7 +416,7 @@ pub(super) fn build_memory_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let access_type = main_trace.chiplet_selector_4(row);
     let op_label = {
@@ -430,7 +430,7 @@ where
         let idx0 = main_trace.chiplet_memory_idx0(row);
         let idx1 = main_trace.chiplet_memory_idx1(row);
 
-        word + idx1.mul_small(2) + idx0
+        word + idx1.double() + idx0
     };
 
     if access_type == MEMORY_ACCESS_ELEMENT {
@@ -517,7 +517,7 @@ pub struct MemoryWordMessage {
 
 impl<E> BusMessage<E> for MemoryWordMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]
@@ -561,7 +561,7 @@ pub struct MemoryElementMessage {
 
 impl<E> BusMessage<E> for MemoryElementMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         alphas[0]

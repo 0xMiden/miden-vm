@@ -1,11 +1,13 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, WORD_SIZE, Word};
+use miden_crypto::{
+    Felt, WORD_SIZE, Word,
+    field::PrimeCharacteristicRing,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-use winter_math::FieldElement;
-use winter_utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 use super::Kernel;
 use crate::{
@@ -26,7 +28,7 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct Program {
     mast_forest: Arc<MastForest>,
@@ -138,7 +140,7 @@ impl Program {
         // NOTE: We're protecting against unwinds here due to i/o errors that will get turned into
         // panics if writing to the underlying file fails. This is because ByteWriter does not have
         // fallible APIs, thus WriteAdapter has to panic if writes fail. This could be fixed, but
-        // that has to happen upstream in winterfell
+        // that has to happen upstream in miden-crypto
         std::panic::catch_unwind(|| match std::fs::File::create(path) {
             Ok(ref mut file) => {
                 self.write_into(file);

@@ -12,7 +12,6 @@ use miden_core::{
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
-use winter_prover::Trace;
 
 use super::*;
 use crate::{DefaultHost, HostLibrary, fast::FastProcessor};
@@ -320,9 +319,9 @@ fn test_trace_generation_at_fragment_boundaries(
     // Ensure that the trace generated from multiple fragments is identical to the one generated
     // from a single fragment.
     for (col_idx, (col_from_fragments, col_from_single_fragment)) in trace_from_fragments
-        .main_segment()
+        .main_trace()
         .columns()
-        .zip(trace_from_single_fragment.main_segment().columns())
+        .zip(trace_from_single_fragment.main_trace().columns())
         .enumerate()
     {
         if col_from_fragments != col_from_single_fragment {
@@ -343,7 +342,7 @@ fn test_trace_generation_at_fragment_boundaries(
             }
             // If we reach here, the columns have different lengths
             panic!(
-                "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}): different lengths (slow={}, parallel={})",
+                "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}): different lengths (fragments={}, single={})",
                 col_idx,
                 get_column_name(col_idx),
                 col_from_fragments.len(),

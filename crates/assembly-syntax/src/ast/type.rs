@@ -417,7 +417,7 @@ impl PartialEq for PointerType {
 impl core::hash::Hash for PointerType {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         self.pointee.hash(state);
-        self.addrspace.hash(state);
+        self.address_space().hash(state);
     }
 }
 
@@ -730,7 +730,10 @@ impl Eq for TypeAlias {}
 
 impl PartialEq for TypeAlias {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.docs == other.docs && self.ty == other.ty
+        self.visibility == other.visibility
+            && self.name == other.name
+            && self.docs == other.docs
+            && self.ty == other.ty
     }
 }
 
@@ -902,7 +905,8 @@ impl Eq for EnumType {}
 
 impl PartialEq for EnumType {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name
+        self.visibility == other.visibility
+            && self.name == other.name
             && self.docs == other.docs
             && self.ty == other.ty
             && self.variants == other.variants
