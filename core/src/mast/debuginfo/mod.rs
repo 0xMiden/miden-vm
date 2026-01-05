@@ -132,6 +132,7 @@ impl DebugInfo {
             op_decorator_storage,
             node_decorator_storage: NodeToDecoratorIds::new(),
             error_codes: BTreeMap::new(),
+            procedure_names: BTreeMap::new(),
         }
     }
 
