@@ -665,8 +665,8 @@ impl MastForest {
     /// Inserts a procedure name for the given MAST root digest.
     pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
         assert!(
-            self.nodes.iter().any(|node| node.digest() == digest),
-            "attempted to insert procedure name for digest not in forest"
+            self.find_procedure_root(digest).is_some(),
+            "attempted to insert procedure name for digest that is not a procedure root"
         );
         self.debug_info.insert_procedure_name(digest, name);
     }

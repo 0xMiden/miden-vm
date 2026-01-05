@@ -51,7 +51,7 @@ use alloc::{
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
 use string_table::StringTable;
 
-use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeExt, MastNodeId};
+use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
 use crate::{
     AdviceMap,
     mast::{MastForestContributor, MastNodeBuilder},
@@ -318,11 +318,11 @@ impl Deserializable for MastForest {
 
         mast_forest.debug_info.clear_procedure_names();
 
-        // Validate that all procedure name digests correspond to nodes in the forest
+        // Validate that all procedure name digests correspond to procedure roots in the forest
         for digest in procedure_names.keys() {
-            if !mast_forest.nodes.iter().any(|node| node.digest() == *digest) {
+            if mast_forest.find_procedure_root(*digest).is_none() {
                 return Err(DeserializationError::InvalidValue(format!(
-                    "procedure name references digest not found in forest: {:?}",
+                    "procedure name references digest that is not a procedure root: {:?}",
                     digest
                 )));
             }

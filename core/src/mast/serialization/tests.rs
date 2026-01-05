@@ -629,23 +629,24 @@ fn mast_forest_serialize_deserialize_multiple_procedure_names() {
 
     forest.make_root(block1_id);
     forest.make_root(block2_id);
+    forest.make_root(block3_id);
 
     let digest1 = forest[block1_id].digest();
     let digest2 = forest[block2_id].digest();
     let digest3 = forest[block3_id].digest();
 
-    forest.insert_procedure_name(digest1, "exported_add".into());
-    forest.insert_procedure_name(digest2, "exported_mul".into());
-    forest.insert_procedure_name(digest3, "internal_sub".into());
+    forest.insert_procedure_name(digest1, "proc_add".into());
+    forest.insert_procedure_name(digest2, "proc_mul".into());
+    forest.insert_procedure_name(digest3, "proc_sub".into());
 
     assert_eq!(forest.debug_info.num_procedure_names(), 3);
 
     let serialized = forest.to_bytes();
     let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
 
-    assert_eq!(deserialized.procedure_name(&digest1), Some("exported_add"));
-    assert_eq!(deserialized.procedure_name(&digest2), Some("exported_mul"));
-    assert_eq!(deserialized.procedure_name(&digest3), Some("internal_sub"));
+    assert_eq!(deserialized.procedure_name(&digest1), Some("proc_add"));
+    assert_eq!(deserialized.procedure_name(&digest2), Some("proc_mul"));
+    assert_eq!(deserialized.procedure_name(&digest3), Some("proc_sub"));
     assert_eq!(deserialized.debug_info.num_procedure_names(), 3);
 
     assert_eq!(forest, deserialized);
