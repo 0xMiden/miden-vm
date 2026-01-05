@@ -610,7 +610,27 @@ impl MastForest {
                     std::collections::HashMap::new();
 
                 // First pass: collect all AsmOp decorators and find their minimum op_idx
+                // For Block nodes, we need to distinguish between operation-indexed decorators
+                // and before_enter/after_exit decorators
+                let num_ops_opt = match node {
+                    MastNode::Block(block_node) => Some(block_node.num_operations() as usize),
+                    _ => None,
+                };
+                
                 for (op_idx, decorator_id) in decorator_links {
+                    // For Block nodes with target_op_idx, skip before_enter (index 0) and after_exit
+                    // (index num_ops) decorators unless target_op_idx matches them exactly
+                    if let Some(num_ops) = num_ops_opt {
+                        // Skip before_enter decorators (index 0) unless target_op_idx is 0
+                        if op_idx == 0 && target_op_idx != 0 {
+                            continue;
+                        }
+                        // Skip after_exit decorators (index num_ops) unless target_op_idx is num_ops
+                        if op_idx == num_ops && target_op_idx != num_ops {
+                            continue;
+                        }
+                    }
+                    
                     if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
                     {
                         let num_cycles = assembly_op.num_cycles() as usize;
