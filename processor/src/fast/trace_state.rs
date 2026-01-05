@@ -992,13 +992,22 @@ pub enum HasherOp {
 ///
 /// The hasher requests are recorded during fast processor execution and then replayed during hasher
 /// chiplet trace generation.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
     /// Deduplication map for basic block operation batches.
     /// Maps from basic block digest to its operation batches, avoiding duplication when the same
     /// basic block is entered multiple times.
     op_batches_map: BTreeMap<Word, Vec<OpBatch>>,
+}
+
+impl core::fmt::Debug for HasherRequestReplay {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HasherRequestReplay")
+            .field("hasher_ops", &self.hasher_ops)
+            // Exclude op_batches_map from Debug output to maintain snapshot compatibility
+            .finish()
+    }
 }
 
 impl HasherRequestReplay {
