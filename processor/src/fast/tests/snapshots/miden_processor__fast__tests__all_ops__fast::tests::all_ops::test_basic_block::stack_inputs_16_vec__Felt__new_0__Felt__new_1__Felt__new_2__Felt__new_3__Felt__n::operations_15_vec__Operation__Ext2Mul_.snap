@@ -1,25 +1,24 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
-assertion_line: 133
 expression: fast_stack_outputs
 ---
 Ok(
     StackOutputs {
         elements: [
+            14,
+            13,
+            310,
+            1319,
+            10,
+            9,
+            8,
             7,
             6,
-            58,
-            269,
+            5,
+            4,
             3,
             2,
             1,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
             0,
             0,
         ],
