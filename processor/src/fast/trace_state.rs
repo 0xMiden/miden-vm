@@ -1,5 +1,5 @@
 use alloc::{
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
     sync::Arc,
     vec::Vec,
 };
@@ -1029,12 +1029,16 @@ impl HasherRequestReplay {
         // If the digest already exists, we verify that the op_batches match (they should, since
         // the digest is computed from the op_batches)
         match self.op_batches_map.entry(expected_hash) {
-            alloc::collections::btree_map::Entry::Vacant(entry) => {
+            Entry::Vacant(entry) => {
                 entry.insert(op_batches);
             },
-            alloc::collections::btree_map::Entry::Occupied(_) => {
+            Entry::Occupied(entry) => {
                 // Digest already exists, skip storing (deduplication)
-                // The existing op_batches should match, but we don't verify to avoid overhead
+                debug_assert_eq!(
+                    entry.get(),
+                    &op_batches,
+                    "Same digest should always map to same op_batches"
+                );
             },
         }
         // Store only the digest in the operation record
@@ -1067,15 +1071,6 @@ impl HasherRequestReplay {
     ) {
         self.hasher_ops
             .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
-    }
-}
-
-impl IntoIterator for HasherRequestReplay {
-    type Item = HasherOp;
-    type IntoIter = <VecDeque<HasherOp> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.hasher_ops.into_iter()
     }
 }
 
@@ -1210,4 +1205,45 @@ pub enum NodeExecutionState {
     /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
     /// This is used when completing execution of a control flow construct.
     End(MastNodeId),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use miden_core::{
+        Operation,
+        mast::{BasicBlockNodeBuilder, MastForest},
+    };
+
+    #[test]
+    fn test_hasher_request_replay_deduplicates_basic_blocks() {
+        let mut replay = HasherRequestReplay::default();
+        let digest: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)];
+
+        // Create a simple basic block with one operation to get op_batches
+        let mut forest = MastForest::new();
+        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        let op_batches = forest[block_id].op_batches().to_vec();
+
+        // Record the same digest three times
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+
+        // Verify that the map has only one entry (deduplication worked)
+        assert_eq!(replay.op_batches_map().len(), 1);
+
+        // Verify that hasher_ops has three entries (one for each record call)
+        let (hasher_ops, _) = replay.into_parts();
+        assert_eq!(hasher_ops.len(), 3);
+
+        // Verify all three entries are HashBasicBlock with the same digest
+        let mut iter = hasher_ops.into_iter();
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(iter.next().is_none());
+    }
 }
