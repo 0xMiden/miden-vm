@@ -5,7 +5,10 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
 };
 
-use crate::{Program, fast::FastProcessor, test_utils::test_consistency_host::TestConsistencyHost};
+use crate::{
+    AdviceInputs, Program, fast::FastProcessor,
+    test_utils::test_consistency_host::TestConsistencyHost,
+};
 
 // Test helper to create a basic block with decorators for fast processor
 fn create_test_program(
@@ -48,7 +51,7 @@ fn test_before_enter_decorator_executed_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -76,7 +79,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -120,7 +123,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -170,7 +173,7 @@ fn test_decorator_execution_order_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -218,7 +221,7 @@ fn test_processor_decorator_execution() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     let execution_result = processor.execute_sync(&program, &mut host);
     assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
@@ -259,7 +262,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
 
     let mut host = TestConsistencyHost::new();
     let stack_slice = Vec::new();
-    let processor = FastProcessor::new(&stack_slice);
+    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -316,4 +319,30 @@ fn create_test_program_with_inner_decorators(
     mast_forest.make_root(basic_block_id);
 
     Program::new(mast_forest.into(), basic_block_id)
+}
+// DECORATOR BYPASS SPY TESTS
+// ================================================================================================
+
+#[test]
+fn test_decorator_bypass_in_release_mode() {
+    let program =
+        create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
+    let processor = FastProcessor::new(&[]);
+    let counter = processor.decorator_retrieval_count.clone();
+    let mut host = TestConsistencyHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert_eq!(counter.get(), 0, "decorators should not be retrieved in release mode");
+}
+
+#[test]
+fn test_decorator_bypass_in_debug_mode() {
+    let program =
+        create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
+    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let counter = processor.decorator_retrieval_count.clone();
+    let mut host = TestConsistencyHost::new();
+
+    processor.execute_sync(&program, &mut host).unwrap();
+    assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
 }

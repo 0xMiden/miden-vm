@@ -19,6 +19,9 @@
 - [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
 - Added validation of `core_trace_fragment_size` in `ExecutionOptions` ([#2528](https://github.com/0xMiden/miden-vm/pull/2528)).
 
+## 0.20.2 (TBD)
+- Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
+
 ## 0.20.1 (2025-12-14)
 
 - Fix issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
