@@ -101,11 +101,11 @@ pub fn prove(
         now.elapsed().as_millis()
     );
 
-    let stack_outputs = *trace.stack_outputs();
+    let stack_outputs = trace.stack_outputs().clone();
     let hash_fn = options.hash_fn();
 
     // extract precompile requests from the trace to include in the proof
-    let pc_requests = trace.take_precompile_requests();
+    let pc_requests = trace.precompile_requests().to_vec();
 
     // generate STARK proof
     let proof = match hash_fn {
