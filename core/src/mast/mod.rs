@@ -609,39 +609,43 @@ impl MastForest {
                 let mut asmop_ranges: std::collections::HashMap<DecoratorId, (usize, usize)> =
                     std::collections::HashMap::new();
 
-                // First pass: collect all AsmOp decorators and find their minimum op_idx
-                // For Block nodes, we need to distinguish between operation-indexed decorators
-                // and before_enter/after_exit decorators
-                let num_ops_opt = match node {
-                    MastNode::Block(block_node) => Some(block_node.num_operations() as usize),
-                    _ => None,
-                };
-                
-                for (op_idx, decorator_id) in decorator_links {
-                    // For Block nodes with target_op_idx, skip before_enter (index 0) and after_exit
-                    // (index num_ops) decorators unless target_op_idx matches them exactly
-                    if let Some(num_ops) = num_ops_opt {
-                        // Skip before_enter decorators (index 0) unless target_op_idx is 0
-                        if op_idx == 0 && target_op_idx != 0 {
-                            continue;
+                // For Block nodes with target_op_idx, we should only consider operation-indexed
+                // decorators (not before_enter/after_exit) for operation-specific lookups
+                match node {
+                    MastNode::Block(_) => {
+                        // For Block nodes, use only operation-indexed decorators
+                        let op_iter = self
+                            .decorator_links_for_node(node_id)
+                            .expect("Block node must have some valid set of decorator links");
+
+                        for (op_idx, decorator_id) in op_iter {
+                            if let Some(Decorator::AsmOp(assembly_op)) =
+                                self.decorator_by_id(decorator_id)
+                            {
+                                let num_cycles = assembly_op.num_cycles() as usize;
+                                asmop_ranges
+                                    .entry(decorator_id)
+                                    .and_modify(|(min_idx, cycles)| {
+                                        *min_idx = (*min_idx).min(op_idx);
+                                        *cycles = num_cycles; // num_cycles should be the same for same decorator_id
+                                    })
+                                    .or_insert((op_idx, num_cycles));
+                            }
                         }
-                        // Skip after_exit decorators (index num_ops) unless target_op_idx is num_ops
-                        if op_idx == num_ops && target_op_idx != num_ops {
-                            continue;
+                    },
+                    _ => {
+                        // For non-Block nodes, before_enter is at index 0, after_exit is at index 1
+                        // These are not operation ranges, so we check exact matches
+                        for (op_idx, decorator_id) in decorator_links {
+                            if op_idx == target_op_idx {
+                                if let Some(Decorator::AsmOp(assembly_op)) =
+                                    self.decorator_by_id(decorator_id)
+                                {
+                                    return Some(assembly_op);
+                                }
+                            }
                         }
-                    }
-                    
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
-                    {
-                        let num_cycles = assembly_op.num_cycles() as usize;
-                        asmop_ranges
-                            .entry(decorator_id)
-                            .and_modify(|(min_idx, cycles)| {
-                                *min_idx = (*min_idx).min(op_idx);
-                                *cycles = num_cycles; // num_cycles should be the same for same decorator_id
-                            })
-                            .or_insert((op_idx, num_cycles));
-                    }
+                    },
                 }
 
                 // Second pass: check if target_op_idx falls within any AsmOp's range
