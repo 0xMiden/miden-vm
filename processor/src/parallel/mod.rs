@@ -2,7 +2,7 @@ use alloc::{boxed::Box, vec::Vec};
 
 use itertools::Itertools;
 use miden_air::{
-    Felt, RowIndex,
+    Felt,
     trace::{
         CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, FN_HASH_RANGE,
         MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
@@ -12,7 +12,7 @@ use miden_air::{
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
-        main_trace::MainTrace,
+        MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
@@ -23,7 +23,7 @@ use rayon::prelude::*;
 use winter_prover::{crypto::RandomCoin, math::batch_inversion};
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, TraceLenSummary,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, RowIndex, TraceLenSummary,
     chiplets::Chiplets,
     crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
@@ -139,7 +139,7 @@ pub fn build_trace(
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw();
         }
     }
 
