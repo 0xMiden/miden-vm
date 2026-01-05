@@ -9,13 +9,17 @@ pub use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use miden_processor::execute_sync;
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, AsyncHost, BaseHost, DefaultHost, ExecutionError, ExecutionTrace,
     Kernel, Operation, Program, ProgramInfo, StackInputs, SyncHost, ZERO, crypto, execute, utils,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use miden_prover::prove_sync;
 pub use miden_prover::{
-    ExecutionProof, FieldExtension, HashFunction, InputError, Proof, ProvingOptions, StackOutputs,
-    Word, math, prove,
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionProof, HashFunction, InputError, Proof,
+    ProvingOptions, StackOutputs, Word, math, prove,
 };
 pub use miden_verifier::VerificationError;
 

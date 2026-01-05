@@ -2,27 +2,31 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-use miden_air::trace::{
-    AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, DECODER_TRACE_OFFSET, PADDED_TRACE_WIDTH,
-    STACK_TRACE_OFFSET,
-    decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
-    main_trace::MainTrace,
+#[cfg(feature = "std")]
+use miden_air::trace::PADDED_TRACE_WIDTH;
+use miden_air::{
+    PublicInputs,
+    trace::{
+        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
+    },
 };
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
+    utils::ColMatrix,
 };
-use winter_prover::{EvaluationFrame, Trace, TraceInfo, crypto::RandomCoin};
+use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
-    AdviceProvider, ColMatrix, Felt, FieldElement,
-    chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder, crypto::RpoRandomCoin,
+    AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::fast::ExecutionOutput;
+use crate::{fast::ExecutionOutput, row_major_adapter};
 
 mod utils;
 pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
@@ -30,16 +34,10 @@ pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummar
 #[cfg(test)]
 mod tests;
 
-// CONSTANTS
-// ================================================================================================
-
-/// Number of rows at the end of an execution trace which are injected with random values.
-pub const NUM_RAND_ROWS: usize = 1;
-
 // VM EXECUTION TRACE
 // ================================================================================================
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilders {
     pub(crate) decoder: DecoderAuxTraceBuilder,
     pub(crate) stack: StackAuxTraceBuilder,
@@ -57,7 +55,6 @@ pub struct AuxTraceBuilders {
 #[derive(Debug)]
 pub struct ExecutionTrace {
     meta: Vec<u8>,
-    trace_info: TraceInfo,
     main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
@@ -68,12 +65,6 @@ pub struct ExecutionTrace {
 }
 
 impl ExecutionTrace {
-    // CONSTANTS
-    // --------------------------------------------------------------------------------------------
-
-    /// Number of rows at the end of an execution trace which are injected with random values.
-    pub const NUM_RAND_ROWS: usize = NUM_RAND_ROWS;
-
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
@@ -86,17 +77,9 @@ impl ExecutionTrace {
         trace_len_summary: TraceLenSummary,
     ) -> Self {
         let program_info = ProgramInfo::new(program_hash, kernel);
-        let trace_info = TraceInfo::new_multi_segment(
-            PADDED_TRACE_WIDTH,
-            AUX_TRACE_WIDTH,
-            AUX_TRACE_RAND_ELEMENTS,
-            main_trace.num_rows(),
-            vec![],
-        );
 
         Self {
             meta: Vec::new(),
-            trace_info,
             aux_trace_builders,
             main_trace,
             program_info,
@@ -123,6 +106,32 @@ impl ExecutionTrace {
     /// Returns outputs of the program execution which resulted in this execution trace.
     pub fn stack_outputs(&self) -> &StackOutputs {
         &self.stack_outputs
+    }
+
+    /// Returns the public values for this execution trace.
+    pub fn to_public_values(&self) -> Vec<Felt> {
+        let public_inputs = PublicInputs::new(
+            self.program_info.clone(),
+            self.init_stack_state(),
+            self.stack_outputs.clone(),
+            self.final_pc_transcript.state(),
+        );
+        public_inputs.to_elements()
+    }
+
+    /// Returns a clone of the auxiliary trace builders.
+    pub fn aux_trace_builders(&self) -> AuxTraceBuilders {
+        self.aux_trace_builders.clone()
+    }
+
+    /// Returns a reference to the main trace.
+    pub fn main_trace(&self) -> &MainTrace {
+        &self.main_trace
+    }
+
+    /// Returns a mutable reference to the main trace.
+    pub fn main_trace_mut(&mut self) -> &mut MainTrace {
+        &mut self.main_trace
     }
 
     /// Returns the precompile requests generated during program execution.
@@ -177,6 +186,11 @@ impl ExecutionTrace {
         self.main_trace.num_rows()
     }
 
+    /// Returns the length of the trace (number of rows in the main trace).
+    pub fn length(&self) -> usize {
+        self.get_trace_len()
+    }
+
     /// Returns a summary of the lengths of main, range and chiplet traces.
     pub fn trace_len_summary(&self) -> &TraceLenSummary {
         &self.trace_len_summary
@@ -202,7 +216,7 @@ impl ExecutionTrace {
 
     /// Returns the index of the last row in the trace.
     fn last_step(&self) -> usize {
-        self.length() - NUM_RAND_ROWS - 1
+        self.length() - 1
     }
 
     // TEST HELPERS
@@ -228,43 +242,10 @@ impl ExecutionTrace {
 
     pub fn build_aux_trace<E>(&self, rand_elements: &[E]) -> Option<ColMatrix<E>>
     where
-        E: FieldElement<BaseField = Felt>,
+        E: ExtensionField<Felt>,
     {
-        // add decoder's running product columns
-        let decoder_aux_columns = self
-            .aux_trace_builders
-            .decoder
-            .build_aux_columns(&self.main_trace, rand_elements);
-
-        // add stack's running product columns
-        let stack_aux_columns =
-            self.aux_trace_builders.stack.build_aux_columns(&self.main_trace, rand_elements);
-
-        // add the range checker's running product columns
-        let range_aux_columns =
-            self.aux_trace_builders.range.build_aux_columns(&self.main_trace, rand_elements);
-
-        // add the running product columns for the chiplets
-        let chiplets = self
-            .aux_trace_builders
-            .chiplets
-            .build_aux_columns(&self.main_trace, rand_elements);
-
-        // combine all auxiliary columns into a single vector
-        let mut aux_columns = decoder_aux_columns
-            .into_iter()
-            .chain(stack_aux_columns)
-            .chain(range_aux_columns)
-            .chain(chiplets)
-            .collect::<Vec<_>>();
-
-        // inject random values into the last rows of the trace
-        let mut rng = RpoRandomCoin::new(*self.program_hash());
-        for i in self.length() - NUM_RAND_ROWS..self.length() {
-            for column in aux_columns.iter_mut() {
-                column[i] = rng.draw().expect("failed to draw a random value");
-            }
-        }
+        let aux_columns =
+            self.aux_trace_builders.build_aux_columns(&self.main_trace, rand_elements);
 
         Some(ColMatrix::new(aux_columns))
     }
@@ -273,24 +254,62 @@ impl ExecutionTrace {
 // TRACE TRAIT IMPLEMENTATION
 // ================================================================================================
 
-impl Trace for ExecutionTrace {
-    type BaseField = Felt;
+// AUX TRACE BUILDERS
+// ================================================================================================
 
-    fn length(&self) -> usize {
-        self.main_trace.num_rows()
+impl AuxTraceBuilders {
+    /// Builds auxiliary columns for all trace segments given the main trace and challenges.
+    ///
+    /// This is the internal column-major version used by the processor.
+    pub fn build_aux_columns<E>(&self, main_trace: &MainTrace, challenges: &[E]) -> Vec<Vec<E>>
+    where
+        E: ExtensionField<Felt>,
+    {
+        let decoder_cols = self.decoder.build_aux_columns(main_trace, challenges);
+        let stack_cols = self.stack.build_aux_columns(main_trace, challenges);
+        let range_cols = self.range.build_aux_columns(main_trace, challenges);
+        let chiplets_cols = self.chiplets.build_aux_columns(main_trace, challenges);
+
+        decoder_cols
+            .into_iter()
+            .chain(stack_cols)
+            .chain(range_cols)
+            .chain(chiplets_cols)
+            .collect()
     }
+}
 
-    fn main_segment(&self) -> &ColMatrix<Felt> {
-        &self.main_trace
-    }
+// PLONKY3 AUX TRACE BUILDER ADAPTER
+// ================================================================================================
+//
+// The `AuxTraceBuilder` trait is defined in `miden-air` to avoid a circular dependency:
+// `miden-prover-p3` needs aux trace building logic from `miden-processor`, but `miden-processor`
+// already depends on `miden-air`. By defining the trait in `miden-air` and implementing it here,
+// `miden-prover-p3` can depend on both crates and use the trait without creating a cycle.
+//
+// Additionally, Plonky3 uses row-major matrices while our existing aux trace building logic uses
+// column-major format. This impl adapts between the two by converting the main trace from
+// row-major to column-major, delegating to the existing logic, and converting the result back.
 
-    fn read_main_frame(&self, row_idx: usize, frame: &mut EvaluationFrame<Felt>) {
-        let next_row_idx = (row_idx + 1) % self.length();
-        self.main_trace.read_row_into(row_idx, frame.current_mut());
-        self.main_trace.read_row_into(next_row_idx, frame.next_mut());
-    }
+impl<EF: ExtensionField<Felt>> AuxTraceBuilder<EF> for AuxTraceBuilders {
+    /// Builds auxiliary trace columns from a row-major main trace.
+    ///
+    /// This adapts the column-major `build_aux_columns` method to work with Plonky3's
+    /// row-major format by converting the input and output accordingly.
+    fn build_aux_columns(
+        &self,
+        main_trace: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> RowMajorMatrix<Felt> {
+        let _span = tracing::info_span!("build_aux_columns_wrapper").entered();
 
-    fn info(&self) -> &TraceInfo {
-        &self.trace_info
+        // Convert row-major to column-major MainTrace
+        let main_trace_col_major = row_major_adapter::row_major_to_main_trace(main_trace);
+
+        // Build auxiliary columns using column-major logic
+        let aux_columns = self.build_aux_columns(&main_trace_col_major, challenges);
+
+        // Convert column-major aux columns back to row-major
+        row_major_adapter::aux_columns_to_row_major(aux_columns, main_trace.height())
     }
 }

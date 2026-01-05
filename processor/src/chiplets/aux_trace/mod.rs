@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::main_trace::MainTrace;
-use miden_core::{Kernel, precompile::PrecompileTranscriptState};
+use miden_air::trace::MainTrace;
+use miden_core::{Kernel, field::ExtensionField, precompile::PrecompileTranscriptState};
 use wiring_bus::WiringBusBuilder;
 
-use super::{super::trace::AuxColumnBuilder, Felt, FieldElement, ace::AceHints};
+use super::{super::trace::AuxColumnBuilder, Felt, ace::AceHints};
 
 mod bus;
 pub use bus::{
@@ -17,7 +17,7 @@ pub use virtual_table::ChipletsVTableColBuilder;
 mod wiring_bus;
 
 /// Constructs the execution trace for chiplets-related auxiliary columns (used in multiset checks).
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AuxTraceBuilder {
     kernel: Kernel,
     ace_hints: AceHints,
@@ -53,7 +53,7 @@ impl AuxTraceBuilder {
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.
     /// 3. A column used as a bus to wire the gates of the ACE chiplet.
-    pub fn build_aux_columns<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_columns<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         rand_elements: &[E],
@@ -84,12 +84,12 @@ impl AuxTraceBuilder {
 #[inline(always)]
 fn build_value<E, const N: usize>(alphas: &[E], elements: [Felt; N]) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     debug_assert_eq!(alphas.len(), elements.len());
-    let mut value = alphas[0].mul_base(elements[0]);
+    let mut value = alphas[0] * elements[0];
     for i in 1..N {
-        value += alphas[i].mul_base(elements[i]);
+        value += alphas[i] * elements[i];
     }
     value
 }

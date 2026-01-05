@@ -4,11 +4,9 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionTrace,
-    fast::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, FastProcessor},
-    parallel::build_trace,
+    DefaultHost, ExecutionOptions, ExecutionTrace, fast::FastProcessor, parallel::build_trace,
 };
-use miden_vm::internal::InputFile;
+use miden_vm::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, internal::InputFile};
 use tracing::instrument;
 
 use super::{

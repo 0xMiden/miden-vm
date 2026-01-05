@@ -120,6 +120,7 @@ fn build_trace(c: &mut Criterion) {
                                 &mut host,
                                 ExecutionOptions::default(),
                             )
+                            .await
                             .unwrap();
                             black_box(trace);
                         },

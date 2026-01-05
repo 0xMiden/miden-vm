@@ -1,5 +1,5 @@
 # Miden prover
-This crate contains the Miden VM prover, which proves correct execution of Miden VM. Internally, the prover uses [Miden processor](../processor/) to execute the programs, and then relies on the [Winterfell](https://github.com/novifinancial/winterfell) prover to generate STARK proofs.
+This crate contains the Miden VM prover, which proves correct execution of Miden VM. Internally, the prover uses [Miden processor](../processor/) to execute the programs, and then uses [Plonky3](https://github.com/0xMiden/Plonky3) to generate STARK proofs.
 
 ## Usage
 This crate exposes a `prove()` function which can be used to execute Miden VM programs and generate proofs of their execution. The function takes the following parameters:
@@ -39,12 +39,22 @@ let (outputs, proof) = prove(
 assert_eq!(8, outputs.first().unwrap().as_int());
 ```
 
+## STARK Backend
+
+The prover uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
+STARK configurations are defined in the `miden-air` crate and shared between the prover and verifier, ensuring consistency across the system.
+
+### Hash Function Selection
+
+Different hash functions offer different tradeoffs:
+- **BLAKE3/Keccak**: Fast proving but not efficient for recursion
+- **RPO256/Poseidon2/RPX256**: Slower proving but efficient for recursive verification in Miden VM
+
 ## Crate features
 Miden prover can be compiled with the following features:
 
 * `std` - enabled by default and relies on the Rust standard library.
 * `concurrent` - implies `std` and also enables multi-threaded proof generation.
-* `metal` - enables [Metal](https://en.wikipedia.org/wiki/Metal_(API))-based acceleration of proof generation (for recursive proofs) on supported platforms (e.g., Apple silicon).
 * `no_std` does not rely on the Rust standard library and enables compilation to WebAssembly.
     * Only the `wasm32-unknown-unknown` and `wasm32-wasip1` targets are officially supported.
 

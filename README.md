@@ -77,6 +77,8 @@ The project is organized into several crates like so:
 
 ## Performance
 
+> **Note:** The benchmarks in this section are outdated and need to be updated following the migration to the Plonky3 backend. Additionally, 128-bit security level is not currently supported.
+
 The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons for this are twofold:
 
 1. Not all constraints have been implemented yet, and we expect that there will be some slowdown once constraint evaluation is completed.
@@ -145,8 +147,11 @@ In the benchmarks below we execute the same Fibonacci calculator program for 2<s
 
 In the above, proof generation on some platforms can be hardware-accelerated. Specifically:
 
-- On Apple M1/M2 platforms the built-in GPU is used for a part of proof generation process.
 - On the Graviton platform, SVE vector extension is used to accelerate RPO computations.
+
+### STARK Proving System
+
+Miden VM uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
 
 ## References
 

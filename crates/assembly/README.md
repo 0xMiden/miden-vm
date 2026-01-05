@@ -167,21 +167,6 @@ end
 > method is used, it _must_ resolve to a procedure in the kernel specified to
 > the assembler, or compilation will fail with an error.
 
-### Debug Mode
-
-The assembler can be instantiated in debug mode. Compiling a program with such an assembler retains source mappings between assembly instructions and VM operations. Thus, when such a program is executed using the `execute_iter()` function of the [processor](../processor), it is possible to correlate each
-instruction with the source code that it is derived from. You can do this as
-shown below:
-
-```rust
-# use miden_assembly::Assembler;
-# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-# use std::sync::Arc;
-#
-// Instantiate the assembler in debug mode
-let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()));
-```
-
 ## Putting it all together
 
 To help illustrate how all of the topics we discussed above can be combined

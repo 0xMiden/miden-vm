@@ -1,9 +1,11 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
 
-use crate::{ContextId, ErrorContext, MemoryAddress, MemoryError, processor::MemoryInterface};
+use crate::{
+    ContextId, ErrorContext, MemoryAddress, MemoryError, PrimeField64, processor::MemoryInterface,
+};
 
 /// The memory for the processor.
 ///
@@ -176,7 +178,7 @@ impl Memory {
 /// - Returns an error if the provided address is out-of-bounds.
 #[inline(always)]
 fn clean_addr(addr: Felt, err_ctx: &impl ErrorContext) -> Result<u32, MemoryError> {
-    let addr = addr.as_int();
+    let addr = addr.as_canonical_u64();
     addr.try_into().map_err(|_| MemoryError::address_out_of_bounds(addr, err_ctx))
 }
 

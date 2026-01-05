@@ -21,19 +21,17 @@ std = [
     "miden-processor/std",
     "miden-prover/std",
     "miden-verifier/std",
-    "winter-prover/std",
 ]
 
 [dependencies]
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
-miden-core-lib.workspace = true
 miden-verifier.workspace = true
 test-case = "3.2"
-winter-prover.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }
@@ -42,4 +40,3 @@ pretty_assertions = { version = "1.4", default-features = false, features = ["al
 env_logger.workspace = true
 pretty_assertions = "1.4"
 proptest.workspace = true
-winter-rand-utils.workspace = true

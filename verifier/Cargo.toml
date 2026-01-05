@@ -19,14 +19,15 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-air/std", "miden-core/std", "thiserror/std", "winter-verifier/std"]
+std = ["miden-air/std", "miden-core/std", "thiserror/std"]
 
 [dependencies]
 # Miden dependencies
 miden-air.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 
 # External dependencies
 tracing.workspace = true
 thiserror.workspace = true
-winter-verifier.workspace = true
+bincode = "1.3"

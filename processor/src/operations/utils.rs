@@ -1,7 +1,7 @@
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 
 use super::{ExecutionError, Felt};
-use crate::{ContextId, ErrorContext, MemoryError, ONE, ZERO};
+use crate::{ContextId, ErrorContext, MemoryError, ONE, PrimeField64, ZERO};
 
 /// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
 /// are within u32 bounds and do not overlap in the same cycle.
@@ -17,8 +17,8 @@ pub(crate) fn validate_dual_word_stream_addrs(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // Convert to u32 and check end-exclusive bounds
-    let src_addr_u64 = src_addr.as_int();
-    let dst_addr_u64 = dst_addr.as_int();
+    let src_addr_u64 = src_addr.as_canonical_u64();
+    let dst_addr_u64 = dst_addr.as_canonical_u64();
 
     let src_addr_u32 = u32::try_from(src_addr_u64).map_err(|_| {
         ExecutionError::MemoryError(MemoryError::address_out_of_bounds(src_addr_u64, err_ctx))

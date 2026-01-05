@@ -5,16 +5,28 @@ use miden_core::utils::range;
 
 pub mod chiplets;
 pub mod decoder;
-pub mod main_trace;
 pub mod range;
-pub mod rows;
 pub mod stack;
+
+mod rows;
+pub use rows::{RowIndex, RowIndexError};
+
+mod main_trace;
+pub use main_trace::{MainTrace, MainTraceRow};
+
+mod aux_trace;
+pub use aux_trace::AuxTraceBuilder;
 
 // CONSTANTS
 // ================================================================================================
 
 /// The minimum length of the execution trace. This is the minimum required to support range checks.
-pub const MIN_TRACE_LEN: usize = 64;
+/// Minimum trace length required by FRI parameters.
+///
+/// FRI requires: log2(MIN_TRACE_LEN) > log_final_poly_len + log_blowup
+/// With log_final_poly_len=7 and log_blowup=3, we need: log2(MIN_TRACE_LEN) > 10
+/// Therefore: MIN_TRACE_LEN >= 2048
+pub const MIN_TRACE_LEN: usize = 2048;
 
 // MAIN TRACE LAYOUT
 // ------------------------------------------------------------------------------------------------

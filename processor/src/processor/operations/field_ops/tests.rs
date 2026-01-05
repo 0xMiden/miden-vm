@@ -1,6 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{BasedVectorSpace, Field, QuadFelt},
+    stack::MIN_STACK_DEPTH,
+};
 use miden_utils_testing::rand::rand_value;
 
 use super::{
@@ -73,7 +77,7 @@ fn test_op_inv() {
     // invert the top value
     if a != ZERO {
         op_inv(&mut processor, &()).unwrap();
-        let expected = build_expected(&[a.inv(), b, c]);
+        let expected = build_expected(&[a.inverse(), b, c]);
 
         assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
         assert_eq!(expected, processor.stack_top());
@@ -218,13 +222,13 @@ fn test_op_eq() {
 
     // --- test when top two values are equal -----------------------------
     let mut processor = FastProcessor::new(&[three, seven, seven]);
-    op_eq(&mut processor, &mut tracer).unwrap();
+    let _ = op_eq(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[ONE, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test when top two values are not equal -------------------------
     let mut processor = FastProcessor::new(&[three, five, seven]);
-    op_eq(&mut processor, &mut tracer).unwrap();
+    let _ = op_eq(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, three]);
     assert_eq!(expected, processor.stack_top());
 
@@ -240,13 +244,13 @@ fn test_op_eqz() {
 
     // --- test when top is zero ------------------------------------------
     let mut processor = FastProcessor::new(&[three, ZERO]);
-    op_eqz(&mut processor);
+    let _ = op_eqz(&mut processor);
     let expected = build_expected(&[ONE, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test when top is not zero --------------------------------------
     let mut processor = FastProcessor::new(&[three, four]);
-    op_eqz(&mut processor);
+    let _ = op_eqz(&mut processor);
     let expected = build_expected(&[ZERO, three]);
     assert_eq!(expected, processor.stack_top());
 }
@@ -266,7 +270,7 @@ fn test_op_expacc() {
     let new_base = Felt::new(0);
 
     let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
-    op_expacc(&mut processor);
+    let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ZERO, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
 
@@ -280,7 +284,7 @@ fn test_op_expacc() {
     let new_base = Felt::new(0);
 
     let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
-    op_expacc(&mut processor);
+    let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
 
@@ -294,7 +298,7 @@ fn test_op_expacc() {
     let new_base = Felt::new(16);
 
     let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
-    op_expacc(&mut processor);
+    let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ZERO, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
 
@@ -309,7 +313,7 @@ fn test_op_expacc() {
     let new_base = Felt::new(16 * 16);
 
     let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
-    op_expacc(&mut processor);
+    let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
 
@@ -329,7 +333,7 @@ fn test_op_expacc() {
         Felt::new(old_base_val),
         ZERO,
     ]);
-    op_expacc(&mut processor);
+    let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
 }
@@ -346,9 +350,10 @@ fn test_op_ext2mul() {
 
     // multiply the top two extension field elements
     op_ext2mul(&mut processor);
-    let a = QuadFelt::new(a0, a1);
-    let b = QuadFelt::new(b0, b1);
-    let c = (b * a).to_base_elements();
+    let a = QuadFelt::new_complex(a0, a1);
+    let b = QuadFelt::new_complex(b0, b1);
+    let product = b * a;
+    let c = product.as_basis_coefficients_slice();
     let expected = build_expected(&[b1, b0, c[1], c[0]]);
 
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());

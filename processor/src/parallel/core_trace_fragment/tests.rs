@@ -17,10 +17,10 @@ use miden_core::{
     },
 };
 use miden_utils_testing::rand::rand_value;
-use winter_prover::Trace;
 
 use crate::{
-    DefaultHost, ExecutionTrace, NoopEventHandler, fast::FastProcessor, parallel::build_trace,
+    DefaultHost, ExecutionTrace, NoopEventHandler, PrimeField64, fast::FastProcessor,
+    parallel::build_trace,
 };
 
 // CONSTANTS
@@ -1453,10 +1453,10 @@ fn test_dyn_node_decoding() {
 
     let (trace, trace_len) = build_dyn_trace_helper(
         &[
-            foo_root_node.digest()[0].as_int(),
-            foo_root_node.digest()[1].as_int(),
-            foo_root_node.digest()[2].as_int(),
-            foo_root_node.digest()[3].as_int(),
+            foo_root_node.digest()[0].as_canonical_u64(),
+            foo_root_node.digest()[1].as_canonical_u64(),
+            foo_root_node.digest()[2].as_canonical_u64(),
+            foo_root_node.digest()[3].as_canonical_u64(),
             FOO_ROOT_NODE_ADDR,
         ],
         &program,
@@ -1651,7 +1651,7 @@ fn build_call_trace_helper(
 fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
     use miden_air::trace::DECODER_TRACE_RANGE;
 
-    let main_segment = trace.main_segment();
+    let main_segment = trace.main_trace();
     DECODER_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
@@ -1659,7 +1659,7 @@ fn extract_decoder_trace(trace: &ExecutionTrace) -> DecoderTrace {
 fn extract_system_trace(trace: &ExecutionTrace) -> SystemTrace {
     use miden_air::trace::SYS_TRACE_RANGE;
 
-    let main_segment = trace.main_segment();
+    let main_segment = trace.main_trace();
     SYS_TRACE_RANGE.map(|i| main_segment.get_column(i).to_vec()).collect()
 }
 
@@ -1755,7 +1755,7 @@ fn contains_op(trace: &DecoderTrace, row_idx: usize, op: miden_core::Operation) 
 fn read_opcode(trace: &DecoderTrace, row_idx: usize) -> u8 {
     let mut result = 0;
     for (i, column) in trace.iter().skip(OP_BITS_OFFSET).take(NUM_OP_BITS).enumerate() {
-        let op_bit = column[row_idx].as_int();
+        let op_bit = column[row_idx].as_canonical_u64();
         assert!(op_bit <= 1, "invalid op bit");
         result += op_bit << i;
     }

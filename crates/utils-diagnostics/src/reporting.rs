@@ -5,7 +5,16 @@ pub use miette::{
     DebugReportHandler, JSONReportHandler, NarratableReportHandler, ReportHandler, set_hook,
 };
 #[cfg(feature = "std")]
-pub use miette::{GraphicalReportHandler, GraphicalTheme, set_panic_hook};
+pub use miette::{GraphicalReportHandler, GraphicalTheme};
+
+// set_panic_hook is only available with fancy or fancy-no-backtrace features,
+// not with fancy-no-syscall. Since we use fancy-no-syscall to avoid syscall
+// dependencies, we provide a no-op stub for compatibility.
+#[cfg(feature = "std")]
+pub fn set_panic_hook() {
+    // No-op when using fancy-no-syscall feature
+    // The fancy-no-syscall feature doesn't include panic hook support
+}
 
 pub type ReportHandlerOpts = miette::MietteHandlerOpts;
 

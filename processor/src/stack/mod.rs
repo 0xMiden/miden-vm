@@ -1,4 +1,4 @@
-use super::{Felt, FieldElement, ZERO};
+use super::{Felt, ZERO};
 
 mod overflow;
 pub(crate) use overflow::OverflowTable;

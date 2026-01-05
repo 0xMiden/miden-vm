@@ -1,7 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, FieldElement, QuadFelt};
-use winter_prover::crypto::ElementHasher;
+use miden_core::{Felt, ZERO, crypto::hash::Rpo256, field::PrimeCharacteristicRing};
 
 use super::*;
 use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
@@ -40,8 +39,8 @@ impl EncodedCircuit {
 
     /// Computes the hash of all circuit constants and instructions.
     #[expect(dead_code)]
-    fn raw_circuit_hash<H: ElementHasher<BaseField = Felt>>(&self) -> H::Digest {
-        H::hash_elements(&self.encoded_circuit)
+    fn raw_circuit_hash(&self) -> Word {
+        Rpo256::hash_elements(&self.encoded_circuit)
     }
 
     /// Returns the number of constants in the circuit.
@@ -85,8 +84,7 @@ impl EncodedCircuit {
         let mut encoded_circuit = Vec::with_capacity(circuit_size);
 
         // Add constants encoded as `QuadFelt`s
-        encoded_circuit
-            .extend(circuit.constants.iter().flat_map(|c| QuadFelt::from(*c).to_base_elements()));
+        encoded_circuit.extend(circuit.constants.iter().flat_map(|c| [c, &ZERO]));
         // Pad with zero constants.
         let encoded_constants_size = 2 * layout.num_constants;
         encoded_circuit.resize(encoded_constants_size, Felt::ZERO);

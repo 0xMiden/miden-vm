@@ -10,6 +10,7 @@ use core::{
     ops::{Index, IndexMut},
 };
 
+use miden_crypto::field::PrimeField64;
 pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
@@ -28,7 +29,6 @@ pub use node::{
 
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    crypto::hash::Hasher,
     utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
 };
 
@@ -645,7 +645,7 @@ impl MastForest {
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         let code: Felt = error_code_from_msg(&msg);
         // we use u64 as keys for the map
-        self.debug_info.insert_error_code(code.as_int(), msg);
+        self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
         code
     }
 }
@@ -996,7 +996,7 @@ pub enum MastForestError {
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly
-// by delegating to the existing winter-utils serialization which already handles
+// by delegating to the existing miden-crypto serialization which already handles
 // the conversion between linked and owned decorator formats.
 #[cfg(feature = "serde")]
 impl serde::Serialize for MastForest {
@@ -1004,7 +1004,7 @@ impl serde::Serialize for MastForest {
     where
         S: serde::Serializer,
     {
-        // Use the existing winter-utils serialization which already handles linked decorators
+        // Use the existing miden-crypto serialization which already handles linked decorators
         let bytes = crate::utils::Serializable::to_bytes(self);
         serializer.serialize_bytes(&bytes)
     }
@@ -1016,9 +1016,9 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     where
         D: serde::Deserializer<'de>,
     {
-        // Deserialize bytes, then use winter-utils Deserializable
+        // Deserialize bytes, then use miden-crypto Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
+        let mut slice_reader = miden_crypto::utils::SliceReader::new(&bytes);
         crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
     }
 }

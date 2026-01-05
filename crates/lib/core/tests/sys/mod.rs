@@ -107,10 +107,15 @@ fn log_precompile_request_procedure() {
     host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
         .expect("failed to register dummy handler");
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) =
-        miden_utils_testing::prove(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("failed to generate proof for log_precompile helper");
+    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
+    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
+        &program,
+        stack_inputs.clone(),
+        advice_inputs,
+        &mut host,
+        options,
+    )
+    .expect("failed to generate proof for log_precompile helper");
 
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);

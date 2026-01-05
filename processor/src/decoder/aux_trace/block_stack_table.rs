@@ -1,11 +1,11 @@
-use miden_air::RowIndex;
+use miden_air::trace::RowIndex;
 use miden_core::{
-    ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP,
-    OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, ZERO,
+    OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_JOIN, OPCODE_LOOP, OPCODE_RESPAN,
+    OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, field::ExtensionField,
 };
 
-use super::{AuxColumnBuilder, Felt, FieldElement, MainTrace};
-use crate::debug::BusDebugger;
+use super::{AuxColumnBuilder, Felt, MainTrace, ONE, ZERO};
+use crate::{PrimeField64, debug::BusDebugger};
 
 // BLOCK STACK TABLE COLUMN BUILDER
 // ================================================================================================
@@ -15,7 +15,7 @@ use crate::debug::BusDebugger;
 #[derive(Default)]
 pub struct BlockStackColumnBuilder {}
 
-impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
+impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockStackColumnBuilder {
     /// Removes a row from the block stack table.
     fn get_requests_at(
         &self,
@@ -25,7 +25,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockStackColumn
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(i);
-        let op_code = op_code_felt.as_int() as u8;
+        let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_RESPAN => get_block_stack_table_respan_multiplicand(main_trace, i, alphas),
@@ -43,7 +43,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockStackColumn
         _debugger: &mut BusDebugger<E>,
     ) -> E {
         let op_code_felt = main_trace.get_op_code(i);
-        let op_code = op_code_felt.as_int() as u8;
+        let op_code = op_code_felt.as_canonical_u64() as u8;
 
         match op_code {
             OPCODE_JOIN | OPCODE_SPLIT | OPCODE_SPAN | OPCODE_DYN | OPCODE_DYNCALL
@@ -60,7 +60,7 @@ impl<E: FieldElement<BaseField = Felt>> AuxColumnBuilder<E> for BlockStackColumn
 
 /// Computes the multiplicand representing the removal of a row from the block stack table when
 /// encountering a RESPAN operation.
-fn get_block_stack_table_respan_multiplicand<E: FieldElement<BaseField = Felt>>(
+fn get_block_stack_table_respan_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
     alphas: &[E],
@@ -74,14 +74,14 @@ fn get_block_stack_table_respan_multiplicand<E: FieldElement<BaseField = Felt>>(
 
     let mut table_row = E::ZERO;
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        table_row += alpha.mul_base(element);
+        table_row += alpha * element;
     }
     table_row
 }
 
 /// Computes the multiplicand representing the removal of a row from the block stack table when
 /// encountering an END operation.
-fn get_block_stack_table_end_multiplicand<E: FieldElement<BaseField = Felt>>(
+fn get_block_stack_table_end_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
     alphas: &[E],
@@ -120,13 +120,13 @@ fn get_block_stack_table_end_multiplicand<E: FieldElement<BaseField = Felt>>(
 
     let mut table_row = E::ZERO;
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        table_row += alpha.mul_base(element);
+        table_row += alpha * element;
     }
     table_row
 }
 
 /// Computes the multiplicand representing the inclusion of a new row to the block stack table.
-fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt>>(
+fn get_block_stack_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     i: RowIndex,
     alphas: &[E],
@@ -196,7 +196,7 @@ fn get_block_stack_table_inclusion_multiplicand<E: FieldElement<BaseField = Felt
     let mut value = E::ZERO;
 
     for (&alpha, &element) in alphas.iter().zip(elements.iter()) {
-        value += alpha.mul_base(element);
+        value += alpha * element;
     }
     value
 }

@@ -2,30 +2,30 @@ use alloc::{boxed::Box, vec::Vec};
 
 use itertools::Itertools;
 use miden_air::{
-    Felt, RowIndex,
+    Felt,
     trace::{
         CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, FN_HASH_RANGE,
-        MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
-        TRACE_WIDTH,
+        MIN_TRACE_LEN, MainTrace, PADDED_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
+        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
-        main_trace::MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
+    Kernel, ONE, Operation, Word, ZERO,
+    stack::MIN_STACK_DEPTH,
+    utils::{ColMatrix, uninit_vector},
 };
 use rayon::prelude::*;
-use winter_prover::{crypto::RandomCoin, math::batch_inversion};
+use tracing::instrument;
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, TraceLenSummary,
+    ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
     chiplets::Chiplets,
-    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -38,7 +38,8 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
+    trace::AuxTraceBuilders,
+    utils::invert_column_allow_zeros,
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
@@ -52,6 +53,7 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
+#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
@@ -102,7 +104,7 @@ pub fn build_trace(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Compute the final main trace length, after accounting for random rows
+    // Compute the final main trace length
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
 
@@ -110,14 +112,8 @@ pub fn build_trace(
         || pad_trace_columns(&mut core_trace_columns, main_trace_len),
         || {
             rayon::join(
-                || {
-                    range_checker.into_trace_with_table(
-                        range_table_len,
-                        main_trace_len,
-                        NUM_RAND_ROWS,
-                    )
-                },
-                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS, final_pc_transcript.state()),
+                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || chiplets.into_trace(main_trace_len, final_pc_transcript.state()),
             )
         },
     );
@@ -126,22 +122,12 @@ pub fn build_trace(
     let padding_columns = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
     // Chain all trace columns together
-    let mut trace_columns: Vec<Vec<Felt>> = core_trace_columns
+    let trace_columns: Vec<Vec<Felt>> = core_trace_columns
         .into_iter()
         .chain(range_checker_trace.trace)
         .chain(chiplets_trace.trace)
         .chain(padding_columns)
         .collect();
-
-    // Initialize random element generator using program hash
-    let mut rng = RpoRandomCoin::new(program_hash);
-
-    // Inject random values into the last NUM_RAND_ROWS rows for all columns
-    for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
-        for column in trace_columns.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
-        }
-    }
 
     // Create the MainTrace
     let main_trace = {
@@ -179,9 +165,8 @@ fn compute_main_trace_length(
     // Get the trace length required to hold all execution trace steps
     let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
 
-    // Pad the trace length to the next power of two and ensure that there is space for random
-    // rows
-    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
+    // Pad the trace length to the next power of two
+    let trace_len = max_len.next_power_of_two();
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
@@ -239,10 +224,7 @@ fn generate_core_trace_columns(
     // row of each fragment with non-inverted values.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
-        h0_column.par_chunks_mut(fragment_size).for_each(|chunk| {
-            let inverted = batch_inversion(chunk);
-            chunk.copy_from_slice(&inverted);
-        });
+        h0_column.par_chunks_mut(fragment_size).for_each(invert_column_allow_zeros);
     }
 
     // Truncate the core trace columns. After this point, there is no more uninitialized memory.
@@ -464,16 +446,16 @@ fn initialize_chiplets(
     for hasher_op in hasher_for_chiplet.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
-                chiplets.hasher.permute(input_state);
+                let _ = chiplets.hasher.permute(input_state);
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
-                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
-                chiplets.hasher.build_merkle_root(value, &path, index);
+                let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
                 chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
@@ -485,13 +467,13 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32xor(a, b, &())
                     .expect("bitwise XOR operation failed when populating chiplet");
@@ -534,7 +516,7 @@ fn initialize_chiplets(
             .kmerge_by(|a, b| a.clk() < b.clk())
             .for_each(|mem_access| match mem_access {
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read(ctx, addr, clk, &())
                         .expect("memory read element failed when populating chiplet");
@@ -596,7 +578,7 @@ fn initialize_chiplets(
 
 fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     let total_program_rows = trace_columns[0].len();
-    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= main_trace_len);
+    assert!(total_program_rows <= main_trace_len);
 
     let num_padding_rows = main_trace_len - total_program_rows;
 

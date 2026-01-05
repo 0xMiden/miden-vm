@@ -1,10 +1,10 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::{
-    RowIndex,
-    trace::{chiplets::ace::ACE_CHIPLET_NUM_COLS, main_trace::MainTrace},
+use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_CHIPLET_NUM_COLS};
+use miden_core::{
+    Felt, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing},
 };
-use miden_core::{Felt, FieldElement, ZERO};
 
 use crate::trace::TraceFragment;
 
@@ -81,7 +81,7 @@ impl Ace {
 
 /// Stores metadata associated to an evaluated circuit needed for building the portion of the
 /// auxiliary trace segment relevant for the ACE chiplet.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct EvaluatedCircuitsMetadata {
     ctx: u32,
     clk: u32,
@@ -125,7 +125,7 @@ impl EvaluatedCircuitsMetadata {
 /// and we also know the exact number of ACE chiplet rows per circuit evaluation and the exact
 /// number of rows per `READ` and `EVAL` portions, which allows us to avoid the need to compute
 /// selectors as part of the logic of auxiliary trace generation.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct AceHints {
     offset_chiplet_trace: usize,
     pub sections: Vec<EvaluatedCircuitsMetadata>,
@@ -140,7 +140,7 @@ impl AceHints {
         self.offset_chiplet_trace
     }
 
-    pub(crate) fn build_divisors<E: FieldElement<BaseField = Felt>>(
+    pub(crate) fn build_divisors<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         alphas: &[E],
@@ -173,17 +173,17 @@ impl AceHints {
                 let wire_1 = main_trace.chiplet_ace_wire_1(trace_row.into());
 
                 let value_0 = alphas[0]
-                    + alphas[1].mul_base(Felt::from(clk))
-                    + alphas[2].mul_base(Felt::from(ctx))
-                    + alphas[3].mul_base(wire_0[0])
-                    + alphas[4].mul_base(wire_0[1])
-                    + alphas[5].mul_base(wire_0[2]);
+                    + alphas[1] * Felt::from(clk)
+                    + alphas[2] * Felt::from(ctx)
+                    + alphas[3] * wire_0[0]
+                    + alphas[4] * wire_0[1]
+                    + alphas[5] * wire_0[2];
                 let value_1 = alphas[0]
-                    + alphas[1].mul_base(Felt::from(clk))
-                    + alphas[2].mul_base(Felt::from(ctx))
-                    + alphas[3].mul_base(wire_1[0])
-                    + alphas[4].mul_base(wire_1[1])
-                    + alphas[5].mul_base(wire_1[2]);
+                    + alphas[1] * Felt::from(clk)
+                    + alphas[2] * Felt::from(ctx)
+                    + alphas[3] * wire_1[0]
+                    + alphas[4] * wire_1[1]
+                    + alphas[5] * wire_1[2];
 
                 value[0] = value_0;
                 value[1] = value_1;
@@ -213,25 +213,25 @@ impl AceHints {
                 let wire_2 = main_trace.chiplet_ace_wire_2(trace_row.into());
 
                 let value_0 = alphas[0]
-                    + alphas[1].mul_base(Felt::from(clk))
-                    + alphas[2].mul_base(Felt::from(ctx))
-                    + alphas[3].mul_base(wire_0[0])
-                    + alphas[4].mul_base(wire_0[1])
-                    + alphas[5].mul_base(wire_0[2]);
+                    + alphas[1] * Felt::from(clk)
+                    + alphas[2] * Felt::from(ctx)
+                    + alphas[3] * wire_0[0]
+                    + alphas[4] * wire_0[1]
+                    + alphas[5] * wire_0[2];
 
                 let value_1 = alphas[0]
-                    + alphas[1].mul_base(Felt::from(clk))
-                    + alphas[2].mul_base(Felt::from(ctx))
-                    + alphas[3].mul_base(wire_1[0])
-                    + alphas[4].mul_base(wire_1[1])
-                    + alphas[5].mul_base(wire_1[2]);
+                    + alphas[1] * Felt::from(clk)
+                    + alphas[2] * Felt::from(ctx)
+                    + alphas[3] * wire_1[0]
+                    + alphas[4] * wire_1[1]
+                    + alphas[5] * wire_1[2];
 
                 let value_2 = alphas[0]
-                    + alphas[1].mul_base(Felt::from(clk))
-                    + alphas[2].mul_base(Felt::from(ctx))
-                    + alphas[3].mul_base(wire_2[0])
-                    + alphas[4].mul_base(wire_2[1])
-                    + alphas[5].mul_base(wire_2[2]);
+                    + alphas[1] * Felt::from(clk)
+                    + alphas[2] * Felt::from(ctx)
+                    + alphas[3] * wire_2[0]
+                    + alphas[4] * wire_2[1]
+                    + alphas[5] * wire_2[2];
 
                 value[0] = value_0;
                 value[1] = value_1;
@@ -249,7 +249,7 @@ impl AceHints {
         }
 
         // invert the accumulated product
-        acc = acc.inv();
+        acc = acc.inverse();
 
         for i in (0..total_values.len()).rev() {
             total_inv_values[i] *= acc;

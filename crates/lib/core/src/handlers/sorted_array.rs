@@ -1,6 +1,9 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, FieldElement, LexicographicWord, Word};
+use miden_core::{
+    EventName, Felt, LexicographicWord, Word,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
 
 /// Event name for the lowerbound_array operation.
@@ -57,7 +60,7 @@ pub fn handle_lowerbound_key_value(
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let use_full_key = process.get_stack_item(7);
 
-    let key_size = match use_full_key.as_int() {
+    let key_size = match use_full_key.as_canonical_u64() {
         0 => KeySize::Half,
         1 => KeySize::Full,
         _ => {
@@ -115,7 +118,7 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            Felt::from(false),
+            Felt::from_bool(false),
             Felt::from(addr_range.end),
         ])]);
     }
@@ -158,7 +161,7 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::from(was_key_found),
+        Felt::from_bool(was_key_found),
         Felt::from(result.unwrap_or(addr_range.end)),
     ])])
 }
