@@ -9,7 +9,7 @@ use miden_core::{
 
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
-    PrimeField64,
+    PrimeCharacteristicRing, PrimeField64,
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
@@ -262,7 +262,7 @@ where
     fn value(&self, alphas: &[E]) -> E {
         let state_elements: [Felt; 4] = self.state.into();
         alphas[0]
-            + alphas[1] * Felt::from(LOG_PRECOMPILE_LABEL)
+            + alphas[1] * Felt::from_u8(LOG_PRECOMPILE_LABEL)
             + build_value(&alphas[2..6], state_elements)
     }
 

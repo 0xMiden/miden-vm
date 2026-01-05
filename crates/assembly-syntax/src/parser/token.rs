@@ -336,7 +336,7 @@ impl crate::prettier::PrettyPrint for IntValue {
             Self::U8(v) => v.render(),
             Self::U16(v) => v.render(),
             Self::U32(v) => v.render(),
-            Self::Felt(v) => u64::from(*v).render(),
+            Self::Felt(v) => v.as_canonical_u64().render(),
         }
     }
 }

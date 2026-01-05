@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Decorator, Operation,
+    Decorator, Felt, Operation,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
 };
 
@@ -247,8 +247,8 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
 
     // Use actual operations instead of just noop to have meaningful execution flow
     let operations = [
-        Operation::Push(1_u32.into()), // Operation 0
-        Operation::Push(2_u32.into()), // Operation 1
+        Operation::Push(Felt::new(1)), // Operation 0
+        Operation::Push(Felt::new(2)), // Operation 1
         Operation::Add,                // Operation 2
         Operation::Drop,               // Clean up stack to prevent overflow
     ];

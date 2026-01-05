@@ -12,7 +12,7 @@ pub use inputs::AdviceInputs;
 mod errors;
 pub use errors::AdviceError;
 
-use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
+use crate::{PrimeCharacteristicRing, host::AdviceMutation, processor::AdviceProviderInterface};
 
 // ADVICE PROVIDER
 // ================================================================================================
@@ -182,7 +182,7 @@ impl AdviceProvider {
             // Note: we assume map_value.len() fits within the field modulus. This is always true
             // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
             // practical vector length that could fit in memory.
-            self.stack.push(Felt::from(map_value.len() as u64));
+            self.stack.push(Felt::from_usize(map_value.len()));
         }
 
         Ok(())

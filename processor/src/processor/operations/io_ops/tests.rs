@@ -192,14 +192,14 @@ fn test_op_mstream() {
     // Word at addr 8 (word2) is at stack positions 0-3, word at addr 4 (word1) at 4-7
     // Word elements are: word[3] at top, word[2] next, etc.
     let expected = build_expected(&[
-        word2[3].into(),
-        word2[2].into(),
-        word2[1].into(),
-        word2[0].into(),
-        word1[3].into(),
-        word1[2].into(),
-        word1[1].into(),
-        word1[0].into(),
+        word2[3].as_canonical_u64(),
+        word2[2].as_canonical_u64(),
+        word2[1].as_canonical_u64(),
+        word2[0].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[0].as_canonical_u64(),
         4,
         3,
         2,

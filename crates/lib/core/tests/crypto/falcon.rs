@@ -312,32 +312,25 @@ fn falcon_execution() {
 fn test_felt_conversion() {
     // Test that Felt conversion to u64 works correctly
     let f = Felt::new(12345);
-    let via_into: u64 = f.into();
     let via_canonical = f.as_canonical_u64();
-
-    assert_eq!(via_into, via_canonical, "Felt conversion methods should match!");
+    assert_eq!(via_canonical, 12345u64, "Felt conversion should work correctly!");
 
     // Test with small values < M
     const M: u64 = 12289;
     for val in [100, 1000, 5000, 10000, 12288] {
         let f = Felt::new(val);
-        let via_into: u64 = f.into();
         let via_canonical = f.as_canonical_u64();
-        assert_eq!(
-            via_into, via_canonical,
-            "Felt conversion methods should match for value {}",
-            val
-        );
-        assert!(via_into < M, "Converted value should be < M for input {}", val);
+        assert_eq!(via_canonical, val, "Felt conversion methods should match for value {}", val);
+        assert!(via_canonical < M, "Converted value should be < M for input {}", val);
     }
 
     // Test with values from a hash digest
     let test_values = vec![Felt::new(123), Felt::new(456), Felt::new(789)];
     let digest = Rpo256::hash_elements(&test_values);
     for &elem in digest.as_elements().iter() {
-        let via_into: u64 = elem.into();
         let via_canonical = elem.as_canonical_u64();
-        assert_eq!(via_into, via_canonical, "Hash element conversion should match!");
+        // Just verify we can convert - digest values will be > M but that's fine
+        assert!(via_canonical < Felt::ORDER_U64, "Hash element conversion should be valid!");
     }
 }
 

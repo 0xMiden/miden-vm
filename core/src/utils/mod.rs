@@ -2,30 +2,44 @@ use alloc::vec::Vec;
 use core::{
     fmt::Debug,
     ops::{Bound, Range},
+    slice,
 };
 
 mod col_matrix;
 pub use col_matrix::ColMatrix;
-// RE-EXPORTS
-// ================================================================================================
+use miden_crypto::field::{PrimeCharacteristicRing, PrimeField64};
 #[cfg(feature = "std")]
 pub use miden_crypto::utils::ReadAdapter;
+// RE-EXPORTS
+// ================================================================================================
 pub use miden_crypto::{
     hash::blake::{Blake3_256, Blake3Digest},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-        flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector,
+        uninit_vector,
     },
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
-use crate::{
-    Felt, Word,
-    field::{PrimeCharacteristicRing, PrimeField64},
-};
+use crate::{Felt, Word};
 
 pub mod math {
     pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
+}
+
+// UTILITY FUNCTIONS
+// ================================================================================================
+
+/// Transmutes a slice of `n` elements into a slice of `n` / `N` elements,
+/// each of which is an array of `N` elements.
+///
+/// # Panics
+/// Panics if `n` is not divisible by `N`.
+pub fn group_slice_elements<T, const N: usize>(source: &[T]) -> &[[T; N]] {
+    assert_eq!(source.len() % N, 0, "source length must be divisible by {N}");
+    let p = source.as_ptr();
+    let len = source.len() / N;
+    unsafe { slice::from_raw_parts(p as *const [T; N], len) }
 }
 
 // TO ELEMENTS
@@ -172,10 +186,10 @@ const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
 ///
 /// # Examples
 /// ```
-/// # use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
+/// # use miden_core::{Felt, PrimeCharacteristicRing, utils::bytes_to_packed_u32_elements};
 /// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
 /// let felts = bytes_to_packed_u32_elements(&bytes);
-/// assert_eq!(felts, vec![Felt::from(0x04030201_u32), Felt::from(0x00000005_u32)]);
+/// assert_eq!(felts, vec![Felt::new(0x04030201), Felt::new(0x00000005)]);
 /// ```
 pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
     bytes
@@ -184,7 +198,7 @@ pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
             // Pack up to 4 bytes into a u32 in little-endian format
             let mut packed = [0u8; BYTES_PER_U32];
             packed[..chunk.len()].copy_from_slice(chunk);
-            Felt::from(u32::from_le_bytes(packed))
+            Felt::from_u32(u32::from_le_bytes(packed))
         })
         .collect()
 }
@@ -231,7 +245,7 @@ mod tests {
         #[test]
         fn proptest_packed_u32_elements_roundtrip(values in prop::collection::vec(any::<u32>(), 0..100)) {
             // Convert u32 values to Felts
-            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from(v)).collect();
+            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from_u32(v)).collect();
 
             // Roundtrip: Felts -> bytes -> Felts
             let bytes = packed_u32_elements_to_bytes(&felts);

@@ -1,8 +1,9 @@
 use alloc::{borrow::Cow, string::String};
 use core::fmt::{Display, Formatter};
 
-use miden_crypto::utils::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use miden_crypto::{
+    field::PrimeField64,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -12,24 +13,26 @@ use crate::{Felt, utils::hash_string_to_word};
 // EVENT ID
 // ================================================================================================
 
-/// A type-safe wrapper around a [`Felt`] that represents an event identifier.
+/// A type-safe event identifier that semantically represents a [`Felt`] value.
 ///
 /// Event IDs are used to identify events that can be emitted by the VM or handled by the host.
 /// This newtype provides type safety and ensures that event IDs are not accidentally confused
-/// with other [`Felt`] values.
+/// with other field element values.
+///
+/// Internally stored as `u64` rather than [`Felt`] to enable `const` construction.
 ///
 /// [`EventId`] contains only the identifier. For events with human-readable names,
 /// use [`EventName`] instead.
 ///
 /// Event IDs are derived from event names using blake3 hashing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
     miden_test_serde_macros::serde_test(binary_serde(true))
 )]
-pub struct EventId(Felt);
+pub struct EventId(u64);
 
 impl EventId {
     /// Computes the canonical event identifier for the given `name`.
@@ -39,7 +42,7 @@ impl EventId {
     /// 1. Computing the BLAKE3 hash of the event name (produces 32 bytes)
     /// 2. Taking the first 8 bytes of the hash
     /// 3. Interpreting these bytes as a little-endian u64
-    /// 4. Reducing modulo the field prime to create a valid Felt
+    /// 4. Reducing modulo the field prime to produce a valid field element
     ///
     /// Note that this is the same procedure performed by [`hash_string_to_word`], where we take
     /// the first element of the resulting [`Word`](crate::Word).
@@ -48,45 +51,27 @@ impl EventId {
     /// providing good distribution properties to minimize collisions between different names.
     pub fn from_name(name: impl AsRef<str>) -> Self {
         let digest_word = hash_string_to_word(name.as_ref());
-        Self(digest_word[0])
+        Self(digest_word[0].as_canonical_u64())
     }
 
     /// Creates an EventId from a [`Felt`] value (e.g., from the stack).
-    pub const fn from_felt(event_id: Felt) -> Self {
-        Self(event_id)
+    pub fn from_felt(event_id: Felt) -> Self {
+        Self(event_id.as_canonical_u64())
     }
 
-    /// Creates an EventId from a u64, converting it to a [`Felt`].
+    /// Creates an EventId from a `u64` value, reducing modulo the field prime.
     pub const fn from_u64(event_id: u64) -> Self {
-        Self(Felt::new(event_id))
+        Self(event_id % Felt::ORDER_U64)
     }
 
-    /// Returns the underlying [`Felt`] value.
+    /// Converts this event ID to a [`Felt`].
     pub const fn as_felt(&self) -> Felt {
-        self.0
+        Felt::new(self.0)
     }
 
-    /// Returns the underlying `u64` value.
+    /// Returns the inner `u64` representation.
     pub const fn as_u64(&self) -> u64 {
-        self.0.as_int()
-    }
-}
-
-impl PartialOrd for EventId {
-    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for EventId {
-    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.inner().cmp(&other.0.inner())
-    }
-}
-
-impl core::hash::Hash for EventId {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.0.inner().hash(state);
+        self.0
     }
 }
 
@@ -164,13 +149,13 @@ impl AsRef<str> for EventName {
 
 impl Serializable for EventId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.0.write_into(target);
+        self.as_felt().write_into(target);
     }
 }
 
 impl Deserializable for EventId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        Ok(Self(Felt::read_from(source)?))
+        Ok(Self(Felt::read_from(source)?.as_canonical_u64()))
     }
 }
 
