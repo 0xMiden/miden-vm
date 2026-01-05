@@ -2,6 +2,8 @@ use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
+use crate::ast::Immediate;
+
 use super::{Block, Instruction};
 
 /// Represents the Miden Assembly instruction set syntax
@@ -29,9 +31,10 @@ pub enum Op {
     /// `for`-style loops where the iteration count is dynamic.
     Repeat {
         span: SourceSpan,
-        count: u32,
+        count: Immediate<u32>,
         body: Block,
     } = 2,
+
     /// A primitive operation, e.g. `add`
     Inst(Span<Instruction>) = 3,
 }

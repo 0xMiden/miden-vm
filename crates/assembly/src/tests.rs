@@ -155,6 +155,17 @@ fn repeat_basic_blocks_merged() -> TestResult {
     Ok(())
 }
 
+/// Ensures `repeat` supports dynamic iteration counts provided via constants.
+#[test]
+fn repeat_dynamic_iteration_count() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+
+    Ok(())
+}
+
 #[test]
 fn single_basic_block() -> TestResult {
     let context = TestContext::default();
