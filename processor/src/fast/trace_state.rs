@@ -5,7 +5,6 @@ use alloc::{
 };
 
 use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
-use crate::RowIndex;
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
@@ -15,7 +14,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ErrorContext, ExecutionError,
+    AdviceError, ContextId, ErrorContext, ExecutionError, RowIndex,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     fast::FastProcessor,
@@ -1216,8 +1215,9 @@ pub enum NodeExecutionState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miden_core::{Operation, mast::BasicBlockNodeBuilder};
+
+    use super::*;
 
     #[test]
     fn test_hasher_request_replay_deduplicates_basic_blocks() {
