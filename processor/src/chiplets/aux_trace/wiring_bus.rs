@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::main_trace::MainTrace;
-use miden_core::{Felt, FieldElement};
+use miden_air::trace::MainTrace;
+use miden_core::{Felt, field::ExtensionField};
 
 use crate::chiplets::ace::{AceHints, NUM_ACE_LOGUP_FRACTIONS_EVAL, NUM_ACE_LOGUP_FRACTIONS_READ};
 
@@ -15,7 +15,7 @@ impl<'a> WiringBusBuilder<'a> {
     }
 
     /// Builds the ACE chiplet wiring bus auxiliary trace column.
-    pub fn build_aux_column<E: FieldElement<BaseField = Felt>>(
+    pub fn build_aux_column<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         alphas: &[E],
@@ -38,7 +38,7 @@ impl<'a> WiringBusBuilder<'a> {
 
                 let m_0 = main_trace.chiplet_ace_m_0(trace_row.into());
                 let m_1 = main_trace.chiplet_ace_m_1(trace_row.into());
-                let value = divisor_tuple[0].mul_base(m_0) + divisor_tuple[1].mul_base(m_1);
+                let value = divisor_tuple[0] * m_0 + divisor_tuple[1] * m_1;
 
                 wiring_bus[trace_row + 1] = wiring_bus[trace_row] + value;
             }
@@ -53,7 +53,7 @@ impl<'a> WiringBusBuilder<'a> {
                 let trace_row = i + trace_offset;
 
                 let m_0 = main_trace.chiplet_ace_m_0(trace_row.into());
-                let value = divisor_tuple[0].mul_base(m_0) - (divisor_tuple[1] + divisor_tuple[2]);
+                let value = divisor_tuple[0] * m_0 - (divisor_tuple[1] + divisor_tuple[2]);
 
                 wiring_bus[trace_row + 1] = wiring_bus[trace_row] + value;
             }

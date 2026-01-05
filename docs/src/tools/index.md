@@ -9,8 +9,6 @@ The following tools are available for interacting with Miden VM:
 
 - Via the [miden-vm](https://crates.io/crates/miden-vm) crate (or within the Miden VM repo):
   - [CLI](../usage.md#cli-interface)
-  - [Debugger](./debugger.md)
-  - [REPL](./repl.md)
 - Via your browser:
   - The interactive [Miden VM Playground](https://0xMiden.github.io/examples/) for writing, executing, proving, and verifying programs from your browser.
 

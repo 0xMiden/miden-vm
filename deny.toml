@@ -48,7 +48,10 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0" },
 ]
 skip = [
-    #{ name = "ansi_term", version = "=0.11.0" },
+    # Allow duplicate spin versions - transitively pulled by p3-dft and flume
+    { name = "spin" },
+    # Allow duplicate itertools versions - different dependencies use different versions
+    { name = "itertools" },
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
@@ -74,3 +77,4 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

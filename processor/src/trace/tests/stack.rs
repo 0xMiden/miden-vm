@@ -1,10 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, STACK_AUX_TRACE_OFFSET};
+use miden_core::field::Field;
 
-use super::{
-    Felt, FieldElement, NUM_RAND_ROWS, ONE, Operation, ZERO, build_trace_from_ops, rand_array,
-};
+use super::{Felt, ONE, Operation, ZERO, build_trace_from_ops, rand_array};
 use crate::stack::OverflowTableRow;
 
 // CONSTANTS
@@ -63,7 +62,7 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[5]);
 
     // DROP removes a row from the overflow table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[6]);
 
     // PAD pushes the value onto the overflow table again
@@ -71,9 +70,9 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[7]);
 
     // two DROPs remove both values from the overflow table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[8]);
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[9]);
 
     // at this point the table should be empty
@@ -87,12 +86,12 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[11]);
 
     // and then the last DROP removes it from the overflow table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p1[12]);
 
     // at this point the table should be empty again, and it should stay empty until the end
     assert_eq!(expected_value, ONE);
-    for i in 13..(p1.len() - NUM_RAND_ROWS) {
+    for i in 13..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }

@@ -36,7 +36,7 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use either `execute()` or `execute_iter()` functions. The `execute()` function takes the following arguments:
+To execute a program on Miden VM, you can use `execute()` which takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -45,13 +45,11 @@ To execute a program on Miden VM, you can use either `execute()` or `execute_ite
 
 The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
 
-The `execute_iter()` function takes similar arguments (but without the `options`) and returns a `VmStateIterator` . This iterator can be used to iterate over the cycles of the executed program for debug purposes. In fact, when we execute a program using this function, a lot of the debug information is retained and we can get a precise picture of the VM's state at any cycle. Moreover, if the execution results in an error, the `VmStateIterator` can still be used to inspect VM states right up to the cycle at which the error occurred.
-
 For example:
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute_sync, DefaultHost, Program, StackInputs};
 use miden_processor::ExecutionOptions;
 
 // instantiate the assembler
@@ -73,20 +71,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
-
-// now, execute the same program in debug mode and iterate over VM states
-for vm_state in execute_iter(
-    &program,
-    stack_inputs,
-    advice_inputs,
-    &mut host,
-) {
-    match vm_state {
-        Ok(vm_state) => println!("{:?}", vm_state),
-        Err(_) => println!("something went terribly wrong!"),
-    }
-}
+let trace = execute_sync(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
@@ -109,7 +94,7 @@ Here is a simple example of executing a program which pushes two numbers onto th
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs};
+use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -118,7 +103,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof) = prove(
+let (outputs, proof) = prove_sync(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -214,7 +199,7 @@ let mut host = DefaultHost::default();
 let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
 
 // execute the program
-let (outputs, proof) = miden_vm::prove(
+let (outputs, proof) = miden_vm::prove_sync(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
@@ -259,9 +244,6 @@ We also provide a number of `make` commands to simplify building Miden VM for va
 ```shell
 # build an executable for a generic target (concurrent)
 make exec
-
-# build an executable for Apple silicon (concurrent+metal)
-make exec-metal
 
 # build an executable for targets with AVX2 instructions (concurrent)
 make exec-avx2

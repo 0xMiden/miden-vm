@@ -1,4 +1,4 @@
-use miden_core::FMP_INIT_VALUE;
+use miden_core::{FMP_INIT_VALUE, field::PrimeField64};
 use miden_utils_testing::build_debug_test;
 
 // STACK DEBUGGING TESTS
@@ -202,7 +202,7 @@ fn test_debug_mem() {
 
 #[test]
 fn test_debug_local() {
-    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+    let fmp_init_value_u64 = FMP_INIT_VALUE.as_canonical_u64();
 
     let stack_inputs = [5, 3, 2, 1];
     // Computed as follows:
@@ -210,7 +210,7 @@ fn test_debug_local() {
     // - "+ 8": find the `fmp` value for the `test` procedure (6 locals, which gets rounded up to 8)
     // - "- 8": find the address of the 0th local (use rounded value for alignment)
     // - "+ 4": get the address of the 4th local
-    let local_addr_4 = FMP_INIT_VALUE_U64 + 8 - 8 + 4;
+    let local_addr_4 = fmp_init_value_u64 + 8 - 8 + 4;
     let source = format!(
         "
         @locals(6)

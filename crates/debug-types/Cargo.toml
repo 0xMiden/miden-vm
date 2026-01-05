@@ -35,7 +35,7 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 memchr = { version = "2.7", default-features = false }
-miette = { package = "miden-miette", version = "8.0", default-features = false }
+miette = { package = "miden-miette", version = "8.0", default-features = false, features = ["fancy-no-syscall", "derive"] }
 paste.workspace = true
 serde = { workspace = true, optional = true }
 serde_spanned = { version = "1.0", optional = true, default-features = false }

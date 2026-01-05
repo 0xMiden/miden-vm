@@ -60,7 +60,8 @@ pub fn generate_advice_inputs(
     // add the public inputs, which is nothing but the input and output stacks to the VM as well as
     // the digests of the procedures making up the kernel against which the program was compiled,
     // to the advice tape
-    let pub_inputs_int: Vec<u64> = pub_inputs_elements.iter().map(|a| a.as_int()).collect();
+    let pub_inputs_int: Vec<u64> =
+        pub_inputs_elements.iter().map(|a| a.as_canonical_u64()).collect();
     advice_stack.extend_from_slice(&pub_inputs_int);
 
     // add a placeholder for the auxiliary randomness
@@ -97,10 +98,13 @@ pub fn generate_advice_inputs(
 
     let alpha = aux_trace_rand_elements[0][0].to_owned();
     let beta = aux_trace_rand_elements[0][2].to_owned();
-    advice_stack[aux_rand_insertion_index] = QuadFelt::base_element(&beta, 0).as_int();
-    advice_stack[aux_rand_insertion_index + 1] = QuadFelt::base_element(&beta, 1).as_int();
-    advice_stack[aux_rand_insertion_index + 2] = QuadFelt::base_element(&alpha, 0).as_int();
-    advice_stack[aux_rand_insertion_index + 3] = QuadFelt::base_element(&alpha, 1).as_int();
+    advice_stack[aux_rand_insertion_index] = QuadFelt::base_element(&beta, 0).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 1] =
+        QuadFelt::base_element(&beta, 1).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 2] =
+        QuadFelt::base_element(&alpha, 0).as_canonical_u64();
+    advice_stack[aux_rand_insertion_index + 3] =
+        QuadFelt::base_element(&alpha, 1).as_canonical_u64();
 
     // 3 ----- constraint composition trace -------------------------------------------------------
 
@@ -158,8 +162,8 @@ pub fn generate_advice_inputs(
         QuadFelt::ONE
     );
     let alpha_deep = deep_coefficients.constraints[deep_coefficients.constraints.len() - 2];
-    advice_stack[alpha_deep_index] = alpha_deep.base_element(0).as_int();
-    advice_stack[alpha_deep_index + 1] = alpha_deep.base_element(1).as_int();
+    advice_stack[alpha_deep_index] = alpha_deep.base_element(0).as_canonical_u64();
+    advice_stack[alpha_deep_index + 1] = alpha_deep.base_element(1).as_canonical_u64();
 
     let layer_commitments = fri_commitments_digests.clone();
     for commitment in layer_commitments.iter() {
@@ -218,10 +222,13 @@ pub fn generate_advice_inputs(
 pub fn digest_to_int_vec(digest: &[Word]) -> Vec<u64> {
     digest
         .iter()
-        .flat_map(|digest| digest.as_elements().iter().map(|e| e.as_int()))
+        .flat_map(|digest| digest.as_elements().iter().map(|e| e.as_canonical_u64()))
         .collect()
 }
 
 pub fn to_int_vec(ext_felts: &[QuadFelt]) -> Vec<u64> {
-    QuadFelt::slice_as_base_elements(ext_felts).iter().map(|e| e.as_int()).collect()
+    QuadFelt::slice_as_base_elements(ext_felts)
+        .iter()
+        .map(|e| e.as_canonical_u64())
+        .collect()
 }

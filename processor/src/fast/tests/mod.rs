@@ -1,9 +1,8 @@
 use alloc::{string::ToString, sync::Arc};
 
-use miden_air::ExecutionOptions;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    Kernel, ONE, Operation, StackInputs, assert_matches,
+    ONE, Operation, assert_matches,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
@@ -13,7 +12,7 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{DefaultHost, Process};
+use crate::DefaultHost;
 
 mod advice_provider;
 mod all_ops;
@@ -227,18 +226,9 @@ fn test_frie2f4() {
 
     // fast processor
     let fast_processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
+    let stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
 
-    // slow processor
-    let mut slow_processor = Process::new(
-        Kernel::default(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut host).unwrap();
-
-    assert_eq!(fast_stack_outputs, slow_stack_outputs);
+    insta::assert_debug_snapshot!(stack_outputs);
 }
 
 #[test]

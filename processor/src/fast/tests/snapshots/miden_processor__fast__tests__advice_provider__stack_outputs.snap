@@ -1,0 +1,24 @@
+---
+source: processor/src/fast/tests/advice_provider.rs
+expression: fast_stack_outputs
+---
+StackOutputs {
+    elements: [
+        0,
+        5,
+        4,
+        3,
+        2,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    ],
+}

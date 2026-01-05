@@ -1,6 +1,6 @@
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::{
+    chiplets::{
         MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
         MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
         MEMORY_WORD_COL_IDX,
@@ -11,12 +11,16 @@ use miden_air::{
         },
     },
 };
-use miden_core::WORD_SIZE;
+use miden_core::{
+    WORD_SIZE,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement,
-    NUM_RAND_ROWS, ONE, Operation, Trace, Word, ZERO, build_trace_from_ops, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, ONE, Operation,
+    Word, ZERO, build_trace_from_ops, rand_array,
 };
+use crate::PrimeField64;
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
@@ -73,7 +77,7 @@ fn b_chip_trace_mem() {
         ONE,
         word.into(),
     );
-    let mut expected = value.inv();
+    let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes after user operations that don't make requests to the Chiplets.
@@ -91,13 +95,13 @@ fn b_chip_trace_mem() {
         Felt::new(6),
         word[0],
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[7]);
 
     // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
     // from memory lookups, just set it explicitly and save the multiplied-in value for later.
     assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inv();
+    let span_result = b_chip[8] * b_chip[7].inverse();
     expected = b_chip[8];
 
     // Memory responses will be provided during the memory segment of the Chiplets trace,
@@ -113,7 +117,7 @@ fn b_chip_trace_mem() {
         Felt::new(8),
         word.into(),
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 8.into());
     assert_eq!(expected, b_chip[9]);
 
@@ -135,7 +139,7 @@ fn b_chip_trace_mem() {
         Felt::new(11),
         ONE,
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 11.into());
     assert_eq!(expected, b_chip[12]);
 
@@ -161,18 +165,18 @@ fn b_chip_trace_mem() {
         Felt::new(13),
         [ONE, ZERO, ZERO, ZERO].into(),
     );
-    expected *= (value1 * value2).inv();
+    expected *= (value1 * value2).inverse();
     expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 13.into());
     assert_eq!(expected, b_chip[14]);
 
     // At cycle 14 the decoder requests the span hash. We set this as the inverse of the previously
     // identified `span_result`, since this test is for consistency of the memory lookups.
     assert_ne!(expected, b_chip[15]);
-    expected *= span_result.inv();
+    expected *= span_result.inverse();
     assert_eq!(expected, b_chip[15]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 15..trace.length() - NUM_RAND_ROWS {
+    for row in 15..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -250,7 +254,7 @@ fn build_expected_bus_msg_from_trace(
         let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row];
         let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row];
 
-        word + idx1.mul_small(2) + idx0
+        word + idx1.double() + idx0
     };
     let clk = trace.main_trace.get_column(MEMORY_CLK_COL_IDX)[row];
 
@@ -261,8 +265,8 @@ fn build_expected_bus_msg_from_trace(
     }
 
     if element_or_word == MEMORY_ACCESS_ELEMENT {
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_int();
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_int();
+        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_canonical_u64();
+        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
         let idx = idx1 * 2 + idx0;
 
         build_expected_bus_element_msg(alphas, op_label, ctx, addr, clk, word[idx as usize])

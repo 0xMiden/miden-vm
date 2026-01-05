@@ -2,6 +2,7 @@
 name = "miden-test-serde-macros"
 version = "0.1.0"
 description = "Proc macros for serde roundtrip testing in Miden VM"
+readme = "README.md"
 categories = ["development-tools::testing", "no-std"]
 keywords = ["miden", "serde", "testing", "proc-macro"]
 publish = false

@@ -6,16 +6,13 @@ use miden_core_lib::CoreLibrary;
 use miden_processor::{
     DefaultHost, ExecutionOptions, ExecutionTrace, fast::FastProcessor, parallel::build_trace,
 };
-use miden_vm::internal::InputFile;
+use miden_vm::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, internal::InputFile};
 use tracing::instrument;
 
 use super::{
     data::{Libraries, OutputFile},
     utils::{get_masm_program, get_masp_program},
 };
-
-/// Default fragment size for trace generation.
-const DEFAULT_FRAGMENT_SIZE: usize = 1 << 16;
 
 #[derive(Debug, Clone, Parser)]
 #[command(about = "Run a Miden program")]
@@ -157,7 +154,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     };
 
     let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host, DEFAULT_FRAGMENT_SIZE)
+        .execute_for_trace_sync(&program, &mut host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(
@@ -228,7 +225,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     };
 
     let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host, DEFAULT_FRAGMENT_SIZE)
+        .execute_for_trace_sync(&program, &mut host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(

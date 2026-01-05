@@ -9,8 +9,9 @@ use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
+use miden_core::{Felt, field::{PrimeCharacteristicRing, PrimeField64}};
 
-use crate::{ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
+use crate::{ast::{*, types::{AddressSpace, Type}}, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
@@ -1878,7 +1879,7 @@ IntOrHexImm: Immediate<IntValue> = {
 
 IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n >= Felt::MODULUS {
+        if n >= Felt::ORDER_U64 {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral {
                 span: span!(source_id, l, r),
                 kind: LiteralErrorKind::FeltOverflow

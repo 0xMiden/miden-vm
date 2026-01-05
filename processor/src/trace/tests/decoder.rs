@@ -5,7 +5,8 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    FieldElement, ONE, Operation, Program, Word, ZERO,
+    ONE, Operation, Program, Word, ZERO,
+    field::{ExtensionField, Field},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
@@ -15,7 +16,6 @@ use miden_utils_testing::rand::rand_array;
 
 use super::{
     super::{
-        NUM_RAND_ROWS,
         tests::{build_trace_from_ops, build_trace_from_program},
         utils::build_span_with_respan_ops,
     },
@@ -56,7 +56,7 @@ fn decoder_p1_span_with_respan() {
     }
 
     // when RESPAN is executed, the first entry is replaced with a new entry
-    let expected_value = expected_value * row_values[0].inv() * row_values[1];
+    let expected_value = expected_value * row_values[0].inverse() * row_values[1];
     assert_eq!(expected_value, p1[10]);
 
     // for the next 11 cycles (as we execute user ops), the table is not affected
@@ -65,9 +65,9 @@ fn decoder_p1_span_with_respan() {
     }
 
     // at cycle 22, the END operation is executed and the table is cleared
-    let expected_value = expected_value * row_values[1].inv();
+    let expected_value = expected_value * row_values[1].inverse();
     assert_eq!(expected_value, ONE);
-    for i in 22..(p1.len() - NUM_RAND_ROWS) {
+    for i in 22..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }
@@ -120,7 +120,7 @@ fn decoder_p1_join() {
     assert_eq!(expected_value, p1[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[4]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -131,16 +131,16 @@ fn decoder_p1_join() {
     assert_eq!(expected_value, p1[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[7]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[8]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 9..(p1.len() - NUM_RAND_ROWS) {
+    for i in 9..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }
@@ -191,16 +191,16 @@ fn decoder_p1_split() {
     assert_eq!(expected_value, p1[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 6..(p1.len() - NUM_RAND_ROWS) {
+    for i in 6..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }
@@ -268,7 +268,7 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[5]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -279,11 +279,11 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p1[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[9]);
 
     // --- second iteration ---------------------------------------------------
@@ -303,7 +303,7 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inv();
+    expected_value *= row_values[5].inverse();
     assert_eq!(expected_value, p1[14]);
 
     // when the second SPAN is executed, its entry is added to the table
@@ -314,20 +314,20 @@ fn decoder_p1_loop_with_repeat() {
     assert_eq!(expected_value, p1[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[6].inv();
+    expected_value *= row_values[6].inverse();
     assert_eq!(expected_value, p1[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inv();
+    expected_value *= row_values[4].inverse();
     assert_eq!(expected_value, p1[18]);
 
     // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[19]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 20..(p1.len() - NUM_RAND_ROWS) {
+    for i in 20..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }
@@ -367,9 +367,9 @@ fn decoder_p2_span_with_respan() {
     }
 
     // at cycle 22, the END operation is executed and the table is cleared
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, ONE);
-    for i in 22..(p2.len() - NUM_RAND_ROWS) {
+    for i in 22..(p2.len()) {
         assert_eq!(ONE, p2[i]);
     }
 }
@@ -420,7 +420,7 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[3]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // for the next 2 cycles, the table is not affected
@@ -428,16 +428,16 @@ fn decoder_p2_join() {
     assert_eq!(expected_value, p2[6]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p2[7]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[8]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 9..(p2.len() - NUM_RAND_ROWS) {
+    for i in 9..(p2.len()) {
         assert_eq!(ONE, p2[i]);
     }
 }
@@ -487,16 +487,16 @@ fn decoder_p2_split_true() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 6..(p2.len() - NUM_RAND_ROWS) {
+    for i in 6..(p2.len()) {
         assert_eq!(ONE, p2[i]);
     }
 }
@@ -547,16 +547,16 @@ fn decoder_p2_split_false() {
     assert_eq!(expected_value, p2[3]);
 
     // when the SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[4]);
 
     // when the SPLIT block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 6..(p2.len() - NUM_RAND_ROWS) {
+    for i in 6..(p2.len()) {
         assert_eq!(ONE, p2[i]);
     }
 }
@@ -622,7 +622,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[4]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p2[5]);
 
     // for the next 2 cycles, the table is not affected
@@ -630,11 +630,11 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[7]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p2[8]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[9]);
 
     // --- second iteration ---------------------------------------------------
@@ -652,7 +652,7 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[13]);
 
     // when the first SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[4].inv();
+    expected_value *= row_values[4].inverse();
     assert_eq!(expected_value, p2[14]);
 
     // for the next 2 cycles, the table is not affected
@@ -660,20 +660,20 @@ fn decoder_p2_loop_with_repeat() {
     assert_eq!(expected_value, p2[16]);
 
     // when the second SPAN block ends, its entry is removed from the table
-    expected_value *= row_values[5].inv();
+    expected_value *= row_values[5].inverse();
     assert_eq!(expected_value, p2[17]);
 
     // when the JOIN block ends, its entry is removed from the table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p2[18]);
 
     // when the LOOP block ends, its entry is removed from the table
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[19]);
 
     // at this point the table should be empty, and thus, all subsequent values must be ONE
     assert_eq!(expected_value, ONE);
-    for i in 20..(p2.len() - NUM_RAND_ROWS) {
+    for i in 20..(p2.len()) {
         assert_eq!(ONE, p2[i]);
     }
 }
@@ -693,7 +693,7 @@ fn decoder_p3_trace_empty_table() {
     // no rows should have been added or removed from the op group table, and thus, all values
     // in the column must be ONE
     let p3 = aux_columns.get_column(P3_COL_IDX);
-    for &value in p3.iter().take(p3.len() - NUM_RAND_ROWS) {
+    for &value in p3.iter().take(p3.len()) {
         assert_eq!(ONE, value);
     }
 }
@@ -759,7 +759,7 @@ fn decoder_p3_trace_one_batch() {
 
     // at this point, the table should be empty and thus, running product should be ONE
     assert_eq!(expected_value, ONE);
-    for i in 11..(p3.len() - NUM_RAND_ROWS) {
+    for i in 11..(p3.len()) {
         assert_eq!(ONE, p3[i]);
     }
 }
@@ -817,7 +817,7 @@ fn decoder_p3_trace_two_batches() {
 
     // for the next 2 cycles (11, 12), an entry for an op group is removed from the table
     for (i, clk) in (11..13).enumerate() {
-        expected_value *= b1_values[i].inv();
+        expected_value *= b1_values[i].inverse();
         assert_eq!(expected_value, p3[clk]);
     }
 
@@ -828,12 +828,12 @@ fn decoder_p3_trace_two_batches() {
 
     // at cycle 19 we start executing group 3 - so, the entry for the last op group is removed
     // from the table
-    expected_value *= b1_values[2].inv();
+    expected_value *= b1_values[2].inverse();
     assert_eq!(expected_value, p3[19]);
 
     // at this point, the table should be empty and thus, running product should be ONE
     assert_eq!(expected_value, ONE);
-    for i in 20..(p3.len() - NUM_RAND_ROWS) {
+    for i in 20..(p3.len()) {
         assert_eq!(ONE, p3[i]);
     }
 }
@@ -875,20 +875,20 @@ impl BlockStackTableRow {
 impl BlockStackTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 12 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         let is_loop = if self.is_loop { ONE } else { ZERO };
         alphas[0]
-            + alphas[1].mul_base(self.block_id)
-            + alphas[2].mul_base(self.parent_id)
-            + alphas[3].mul_base(is_loop)
-            + alphas[4].mul_base(Felt::from(self.parent_ctx))
-            + alphas[5].mul_base(self.parent_fmp)
-            + alphas[6].mul_base(Felt::from(self.parent_stack_depth))
-            + alphas[7].mul_base(self.parent_next_overflow_addr)
-            + alphas[8].mul_base(self.parent_fn_hash[0])
-            + alphas[9].mul_base(self.parent_fn_hash[1])
-            + alphas[10].mul_base(self.parent_fn_hash[2])
-            + alphas[11].mul_base(self.parent_fn_hash[3])
+            + alphas[1] * self.block_id
+            + alphas[2] * self.parent_id
+            + alphas[3] * is_loop
+            + alphas[4] * Felt::from(self.parent_ctx)
+            + alphas[5] * self.parent_fmp
+            + alphas[6] * Felt::from(self.parent_stack_depth)
+            + alphas[7] * self.parent_next_overflow_addr
+            + alphas[8] * self.parent_fn_hash[0]
+            + alphas[9] * self.parent_fn_hash[1]
+            + alphas[10] * self.parent_fn_hash[2]
+            + alphas[11] * self.parent_fn_hash[3]
     }
 }
 
@@ -911,10 +911,10 @@ impl OpGroupTableRow {
 impl OpGroupTableRow {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 4 alpha values.
-    pub fn to_value<E: FieldElement<BaseField = Felt>>(&self, alphas: &[E]) -> E {
+    pub fn to_value<E: ExtensionField<Felt>>(&self, alphas: &[E]) -> E {
         alphas[0]
-            + alphas[1].mul_base(self.batch_id)
-            + alphas[2].mul_base(self.group_pos)
-            + alphas[3].mul_base(self.group_value)
+            + alphas[1] * self.batch_id
+            + alphas[2] * self.group_pos
+            + alphas[3] * self.group_value
     }
 }

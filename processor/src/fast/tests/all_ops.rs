@@ -1,3 +1,7 @@
+use alloc::string::String;
+
+use rstest::fixture;
+
 use super::*;
 
 /// Test a number of combinations of stack inputs and operations to ensure that the fast processor
@@ -7,6 +11,7 @@ use super::*;
 /// operations.
 #[rstest]
 fn test_basic_block(
+    testname: String,
     #[values(
         vec![],
         vec![0_u32.into()],
@@ -116,32 +121,21 @@ fn test_basic_block(
     let fast_stack_outputs =
         fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
 
-    let mut host = DefaultHost::default();
-    let mut slow_processor = Process::new(
-        Kernel::default(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut host);
-
-    match (&fast_stack_outputs, &slow_stack_outputs) {
-        (Ok(fast_stack_outputs), Ok(slow_stack_outputs)) => {
-            assert_eq!(fast_stack_outputs, slow_stack_outputs);
-        },
-        (Err(fast_error), Err(slow_error)) => {
-            assert_eq!(fast_error.to_string(), slow_error.to_string());
-
-            // Make sure that we're not getting an output stack overflow error, as it indicates that
-            // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
-            // us if the stack outputs are actually the same.
-            if matches!(fast_error, ExecutionError::OutputStackOverflow(_)) {
-                panic!("we don't want to be testing this output stack overflow error");
-            }
-        },
-        _ => panic!(
-            "Fast processor: {:?}. Slow processor: {:?}",
-            fast_stack_outputs, slow_stack_outputs
-        ),
+    // Make sure that we're not getting an output stack overflow error, as it indicates that
+    // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
+    // us if the stack outputs are actually the same.
+    if let Some(err) = fast_stack_outputs.as_ref().err()
+        && matches!(err, ExecutionError::OutputStackOverflow(_))
+    {
+        panic!("we don't want to be testing this output stack overflow error");
     }
+
+    insta::assert_debug_snapshot!(testname, fast_stack_outputs);
+}
+
+// Workaround to make insta and rstest work together.
+// See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
+#[fixture]
+fn testname() -> String {
+    std::thread::current().name().unwrap().to_string()
 }

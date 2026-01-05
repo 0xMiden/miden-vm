@@ -1,35 +1,45 @@
-pub use winter_rand_utils::*;
+#[cfg(feature = "std")]
+pub use miden_crypto::rand::{
+    random_felt, random_word,
+    test_utils::{rand_array, rand_value, rand_vector},
+};
 
-use super::{Felt, WORD_SIZE, Word};
+#[cfg(feature = "std")]
+use super::QuadFelt;
+use super::{Felt, Word};
+// RANDOM GENERATORS
+// ================================================================================================
+
+/// Generates a random QuadFelt
+#[cfg(feature = "std")]
+pub fn rand_quad_felt() -> QuadFelt {
+    QuadFelt::new_complex(rand_value(), rand_value())
+}
 
 // SEEDED GENERATORS
 // ================================================================================================
 
-/// Mutates a seed and generates a word deterministically
 pub fn seeded_word(seed: &mut u64) -> Word {
-    let seed = generate_bytes_seed(seed);
-    prng_array::<Felt, WORD_SIZE>(seed).into()
+    let elements = [
+        seeded_element(seed),
+        seeded_element(seed),
+        seeded_element(seed),
+        seeded_element(seed),
+    ];
+    elements.into()
 }
 
-/// Mutates a seed and generates an element deterministically
 pub fn seeded_element(seed: &mut u64) -> Felt {
-    let seed = generate_bytes_seed(seed);
-    let num = prng_array::<u64, 1>(seed)[0];
-    Felt::new(num)
+    *seed = (*seed).wrapping_add(0x9e37_79b9_7f4a_7c15);
+    Felt::new(splitmix64(*seed))
 }
 
 // HELPERS
 // ================================================================================================
 
-/// Generate a bytes seed that can be used as input for rand_utils.
-///
-/// Increments the argument.
-fn generate_bytes_seed(seed: &mut u64) -> [u8; 32] {
-    // increment the seed
-    *seed = seed.wrapping_add(1);
-
-    // generate a bytes seed
-    let mut bytes = [0u8; 32];
-    bytes[..8].copy_from_slice(&seed.to_le_bytes());
-    bytes
+/// SplitMix64 hash function for mixing RNG state into high-quality random output.
+fn splitmix64(mut z: u64) -> u64 {
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    z ^ (z >> 31)
 }

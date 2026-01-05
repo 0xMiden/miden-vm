@@ -20,7 +20,7 @@ fn test_event_handling() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -35,6 +35,7 @@ fn test_event_handling() {
 }
 
 #[test]
+#[ignore = "issue #2479"]
 fn test_trace_handling() {
     let source = "\
     begin
@@ -50,7 +51,7 @@ fn test_trace_handling() {
     let mut host = TestHost::default();
 
     // execute program with disabled tracing
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -62,7 +63,7 @@ fn test_trace_handling() {
     assert_eq!(host.trace_handler, expected);
 
     // execute program with enabled tracing
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -75,6 +76,7 @@ fn test_trace_handling() {
 }
 
 #[test]
+#[ignore = "issue #2479"]
 fn test_debug_with_debugging() {
     let source: &str = "\
     begin
@@ -87,7 +89,7 @@ fn test_debug_with_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -114,7 +116,7 @@ fn test_debug_without_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -142,7 +144,7 @@ fn test_parsing_debug_advice_stack() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

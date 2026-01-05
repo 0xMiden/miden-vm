@@ -1,0 +1,25 @@
+---
+source: processor/src/fast/tests/mod.rs
+assertion_line: 231
+expression: stack_outputs
+---
+StackOutputs {
+    elements: [
+        11,
+        10,
+        9599540363444312301,
+        3009346629896160918,
+        0,
+        1,
+        0,
+        0,
+        49,
+        18446744069414584320,
+        10,
+        2401,
+        9,
+        3083083082706785125,
+        1169829741043917980,
+        1,
+    ],
+}

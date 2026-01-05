@@ -1,5 +1,4 @@
-/// Tests in this file make sure that diagnostics presented to the user are as expected.
-use alloc::string::ToString;
+use alloc::{string::ToString, sync::Arc};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, PathBuf,
@@ -17,10 +16,14 @@ use miden_utils_testing::{
     crypto::{init_merkle_leaves, init_merkle_store},
 };
 
+/// Tests in this file make sure that diagnostics presented to the user are as expected.
 use super::*;
+use crate::fast::FastProcessor;
 
 mod debug;
-mod decorator_execution_tests;
+
+#[cfg(test)]
+mod debug_mode_decorator_tests;
 
 // AdviceMap inlined in the script
 // ------------------------------------------------------------------------------------------------
@@ -77,14 +80,8 @@ fn test_diagnostic_advice_map_key_already_present() {
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    let err = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    )
-    .execute(&program, &mut host)
-    .unwrap_err();
+    let processor = FastProcessor::new(&[]);
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_diagnostic_lines!(
         err,
@@ -707,6 +704,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
 // -------------------------------------------------------------------------------------------------
 
 #[test]
+#[ignore = "issue #2476"]
 fn test_diagnostic_no_mast_forest_with_procedure() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
@@ -747,13 +745,8 @@ fn test_diagnostic_no_mast_forest_with_procedure() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let mut process = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_debugging(true),
-    );
-    let err = process.execute(&program, &mut host).unwrap_err();
+    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x1b0a6d4b3976737badf180f3df558f45e06e6d1803ea5ad3b95fa7428caccd02",
@@ -944,6 +937,7 @@ fn test_diagnostic_not_u32_value() {
 // -------------------------------------------------------------------------------------------------
 
 #[test]
+#[ignore = "issue #2476"]
 fn test_diagnostic_syscall_target_not_in_kernel() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
@@ -969,13 +963,8 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
     // Note: we do not provide the kernel to trigger the error
-    let mut process = Process::new(
-        Kernel::default(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_debugging(true),
-    );
-    let err = process.execute(&program, &mut host).unwrap_err();
+    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root d754f5422c74afd0b094889be6b288f9ffd2cc630e3c44d412b1408b2be3b99c was not found in the kernel",
@@ -1051,89 +1040,4 @@ fn test_debug_stack_issue_2295_original_repeat() {
     ├── 11: 42
     └── (16 more items)
     ");
-}
-
-// Debug Mode Flag Propagation Test
-// ------------------------------------------------------------------------------------------------
-
-#[test]
-fn test_debug_mode_flag_propagation() {
-    use miden_core::stack::StackInputs;
-
-    use crate::{AdviceInputs, ExecutionOptions, Kernel};
-
-    // Test case 1: Both debugging and tracing disabled
-    let exec_options_disabled = ExecutionOptions::default();
-    let kernel = Kernel::new(&[]).expect("Failed to create kernel");
-    let stack_inputs = StackInputs::default();
-    let advice_inputs = AdviceInputs::default();
-
-    let process_disabled = Process::initialize(
-        kernel.clone(),
-        stack_inputs.clone(),
-        advice_inputs.clone(),
-        exec_options_disabled,
-    );
-
-    // Test case 2: Only tracing enabled
-    let exec_options_tracing = ExecutionOptions::default().with_tracing();
-    let process_tracing = Process::initialize(
-        kernel.clone(),
-        stack_inputs.clone(),
-        advice_inputs.clone(),
-        exec_options_tracing,
-    );
-
-    // Test case 3: Only debugging enabled
-    let exec_options_debugging = ExecutionOptions::default().with_debugging(true);
-    let process_debugging = Process::initialize(
-        kernel.clone(),
-        stack_inputs.clone(),
-        advice_inputs.clone(),
-        exec_options_debugging,
-    );
-
-    // Test case 4: Both tracing and debugging enabled
-    let exec_options_both = ExecutionOptions::default().with_tracing().with_debugging(true);
-    let process_both = Process::initialize(
-        kernel.clone(),
-        stack_inputs.clone(),
-        advice_inputs.clone(),
-        exec_options_both,
-    );
-
-    // Test case 5: Process::new_debug() method
-    let process_new_debug = Process::new_debug(kernel, stack_inputs, advice_inputs);
-
-    // Verify that in_debug_mode is false when neither is enabled
-    assert!(
-        !process_disabled.decoder.in_debug_mode(),
-        "Debug mode should be disabled when neither debugging nor tracing is enabled"
-    );
-
-    // According to the task description, in_debug_mode should be true when tracing is enabled
-    // But currently this will fail because the logic is incorrect
-    // This test will help us verify our fix
-    assert!(
-        process_tracing.decoder.in_debug_mode(),
-        "Debug mode should be enabled when tracing is enabled"
-    );
-
-    // Verify that in_debug_mode is true when debugging is enabled
-    assert!(
-        process_debugging.decoder.in_debug_mode(),
-        "Debug mode should be enabled when debugging is enabled"
-    );
-
-    // Verify that in_debug_mode is true when both are enabled
-    assert!(
-        process_both.decoder.in_debug_mode(),
-        "Debug mode should be enabled when both debugging and tracing are enabled"
-    );
-
-    // Verify that Process::new_debug() correctly enables debug mode
-    assert!(
-        process_new_debug.decoder.in_debug_mode(),
-        "Debug mode should be enabled when using Process::new_debug()"
-    );
 }

@@ -4,7 +4,10 @@ use core::{ops::Deref, slice};
 use super::{
     super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
 };
-use crate::utils::{ByteReader, Deserializable, DeserializationError};
+use crate::{
+    field::QuotientMap,
+    utils::{ByteReader, Deserializable, DeserializationError},
+};
 
 // STACK INPUTS
 // ================================================================================================
@@ -28,7 +31,7 @@ impl StackInputs {
     /// Returns an error if the number of input values exceeds the allowed maximum.
     pub fn new(mut values: Vec<Felt>) -> Result<Self, InputError> {
         if values.len() > MIN_STACK_DEPTH {
-            return Err(InputError::InputLengthExceeded(MIN_STACK_DEPTH, values.len()));
+            return Err(InputError::InputStackTooBig(MIN_STACK_DEPTH, values.len()));
         }
         values.reverse();
         values.resize(MIN_STACK_DEPTH, ZERO);
@@ -48,7 +51,7 @@ impl StackInputs {
     {
         let values = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(|v| Felt::from_canonical_checked(v).ok_or(InputError::InvalidStackElement(v)))
             .collect::<Result<Vec<_>, _>>()?;
 
         Self::new(values)

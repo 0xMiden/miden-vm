@@ -26,7 +26,6 @@ std = [
 ]
 serde = [
     "dep:serde",
-    "dep:serde-untagged",
     "miden-core/serde",
     "miden-debug-types/serde",
     "midenc-hir-type/serde",
@@ -54,7 +53,6 @@ proptest-derive = { workspace = true, optional = true }
 regex = { version = "1.12", default-features = false, features = ["unicode", "perf"] }
 semver = { version = "1.0", default-features = false }
 serde = { workspace = true, optional = true }
-serde-untagged = { workspace = true, optional = true }
 smallvec.workspace = true
 thiserror.workspace = true
 

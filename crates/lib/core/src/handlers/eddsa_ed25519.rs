@@ -11,7 +11,8 @@ use alloc::{vec, vec::Vec};
 use core::convert::TryInto;
 
 use miden_core::{
-    EventName,
+    EventName, Felt,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
@@ -47,9 +48,9 @@ pub struct EddsaPrecompile;
 impl EventHandler for EddsaPrecompile {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, pk_ptr, k_digest_ptr, sig_ptr, ...]
-        let pk_ptr = process.get_stack_item(1).as_int();
-        let k_digest_ptr = process.get_stack_item(2).as_int();
-        let sig_ptr = process.get_stack_item(3).as_int();
+        let pk_ptr = process.get_stack_item(1).as_canonical_u64();
+        let k_digest_ptr = process.get_stack_item(2).as_canonical_u64();
+        let sig_ptr = process.get_stack_item(3).as_canonical_u64();
 
         let pk = {
             let data_type = DataType::PublicKey;
@@ -78,7 +79,7 @@ impl EventHandler for EddsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([Felt::from_bool(result)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -130,7 +131,7 @@ impl EddsaRequest {
     }
 
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
-        let result = self.result().into();
+        let result = Felt::from_bool(self.result());
         let tag = [EDDSA25519_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         let pk_comm = {

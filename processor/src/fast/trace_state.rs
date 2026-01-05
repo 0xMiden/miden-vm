@@ -4,9 +4,9 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::hasher::{HasherState, STATE_WIDTH},
+    chiplets::hasher::{HasherState, STATE_WIDTH},
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
