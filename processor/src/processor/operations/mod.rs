@@ -2,9 +2,9 @@ use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    BaseHost, ErrorContext, ExecutionError, OperationResultExt,
     fast::Tracer,
-    processor::{Processor, StackInterface},
+    processor::{Processor, StackInterface, SystemInterface},
 };
 
 mod crypto_ops;
@@ -72,13 +72,25 @@ pub(super) fn execute_sync_op(
         Operation::Add => field_ops::op_add(processor, tracer),
         Operation::Neg => field_ops::op_neg(processor),
         Operation::Mul => field_ops::op_mul(processor, tracer),
-        Operation::Inv => field_ops::op_inv(processor, err_ctx)?,
+        Operation::Inv => {
+            let clk = processor.system().clk();
+            field_ops::op_inv(processor).map_exec_err(err_ctx, clk)?
+        },
         Operation::Incr => field_ops::op_incr(processor),
-        Operation::And => field_ops::op_and(processor, err_ctx, tracer)?,
-        Operation::Or => field_ops::op_or(processor, err_ctx, tracer)?,
-        Operation::Not => field_ops::op_not(processor, err_ctx)?,
+        Operation::And => {
+            let clk = processor.system().clk();
+            field_ops::op_and(processor, tracer).map_exec_err(err_ctx, clk)?
+        },
+        Operation::Or => {
+            let clk = processor.system().clk();
+            field_ops::op_or(processor, tracer).map_exec_err(err_ctx, clk)?
+        },
+        Operation::Not => {
+            let clk = processor.system().clk();
+            field_ops::op_not(processor).map_exec_err(err_ctx, clk)?
+        },
         Operation::Eq => {
-            let eq_helpers = field_ops::op_eq(processor, tracer)?;
+            let eq_helpers = field_ops::op_eq(processor, tracer);
             user_op_helpers = Some(eq_helpers);
         },
         Operation::Eqz => {

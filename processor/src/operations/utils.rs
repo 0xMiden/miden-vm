@@ -2,6 +2,8 @@ use miden_air::trace::RowIndex;
 
 use super::{ExecutionError, Felt};
 use crate::{ContextId, ErrorContext, MemoryError, ONE, PrimeField64, ZERO};
+// Note: assert_binary now returns OperationError, imported via crate::OperationError in the
+// function
 
 /// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
 /// are within u32 bounds and do not overlap in the same cycle.
@@ -52,9 +54,9 @@ pub(crate) fn validate_dual_word_stream_addrs(
 
 /// Asserts that the given value is a binary value (0 or 1).
 #[inline(always)]
-pub fn assert_binary(value: Felt, err_ctx: &impl ErrorContext) -> Result<Felt, ExecutionError> {
+pub fn assert_binary(value: Felt) -> Result<Felt, crate::OperationError> {
     if value != ZERO && value != ONE {
-        Err(ExecutionError::not_binary_value_op(value, err_ctx))
+        Err(crate::OperationError::NotBinaryValue { value })
     } else {
         Ok(value)
     }
