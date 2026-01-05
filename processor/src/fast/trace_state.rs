@@ -4,10 +4,8 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::{
-    RowIndex,
-    trace::chiplets::hasher::{HasherState, STATE_WIDTH},
-};
+use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
+use crate::RowIndex;
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
