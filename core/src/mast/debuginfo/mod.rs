@@ -40,14 +40,14 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
-use crate::LexicographicWord;
+use crate::{LexicographicWord, Word};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -78,7 +78,7 @@ pub struct DebugInfo {
 
     /// Maps MAST root digests to procedure names for debugging purposes.
     #[cfg_attr(feature = "serde", serde(skip))]
-    procedure_names: BTreeMap<LexicographicWord, String>,
+    procedure_names: BTreeMap<LexicographicWord, Arc<str>>,
 }
 
 impl DebugInfo {
@@ -290,12 +290,12 @@ impl DebugInfo {
     // --------------------------------------------------------------------------------------------
 
     /// Returns the procedure name for the given MAST root digest, if present.
-    pub fn procedure_name(&self, digest: &crate::Word) -> Option<&str> {
-        self.procedure_names.get(&LexicographicWord::from(*digest)).map(|s| s.as_str())
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.procedure_names.get(&LexicographicWord::from(*digest)).map(|s| s.as_ref())
     }
 
     /// Returns an iterator over all (digest, name) pairs.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (crate::Word, &String)> {
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
         self.procedure_names.iter().map(|(key, name)| (key.into_inner(), name))
     }
 
@@ -305,14 +305,14 @@ impl DebugInfo {
     }
 
     /// Inserts a procedure name for the given MAST root digest.
-    pub fn insert_procedure_name(&mut self, digest: crate::Word, name: String) {
+    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
         self.procedure_names.insert(LexicographicWord::from(digest), name);
     }
 
     /// Inserts multiple procedure names at once.
     pub fn extend_procedure_names<I>(&mut self, names: I)
     where
-        I: IntoIterator<Item = (crate::Word, String)>,
+        I: IntoIterator<Item = (Word, Arc<str>)>,
     {
         self.procedure_names
             .extend(names.into_iter().map(|(d, n)| (LexicographicWord::from(d), n)));

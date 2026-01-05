@@ -600,7 +600,7 @@ fn mast_forest_serialize_deserialize_procedure_names() {
     forest.make_root(block_id);
 
     let digest = forest[block_id].digest();
-    forest.insert_procedure_name(digest, "test_procedure".to_string());
+    forest.insert_procedure_name(digest, "test_procedure".into());
 
     assert_eq!(forest.procedure_name(&digest), Some("test_procedure"));
     assert_eq!(forest.debug_info.num_procedure_names(), 1);
@@ -634,9 +634,9 @@ fn mast_forest_serialize_deserialize_multiple_procedure_names() {
     let digest2 = forest[block2_id].digest();
     let digest3 = forest[block3_id].digest();
 
-    forest.insert_procedure_name(digest1, "exported_add".to_string());
-    forest.insert_procedure_name(digest2, "exported_mul".to_string());
-    forest.insert_procedure_name(digest3, "internal_sub".to_string());
+    forest.insert_procedure_name(digest1, "exported_add".into());
+    forest.insert_procedure_name(digest2, "exported_mul".into());
+    forest.insert_procedure_name(digest3, "internal_sub".into());
 
     assert_eq!(forest.debug_info.num_procedure_names(), 3);
 

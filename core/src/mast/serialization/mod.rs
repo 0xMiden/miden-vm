@@ -51,7 +51,7 @@ use alloc::{
 use decorator::{DecoratorDataBuilder, DecoratorInfo};
 use string_table::StringTable;
 
-use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
+use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeExt, MastNodeId};
 use crate::{
     AdviceMap,
     mast::{MastForestContributor, MastNodeBuilder},
@@ -176,7 +176,7 @@ impl Serializable for MastForest {
 
         // Write procedure names
         let procedure_names: BTreeMap<crate::Word, String> =
-            self.debug_info.procedure_names().map(|(k, v)| (k, v.clone())).collect();
+            self.debug_info.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
         procedure_names.write_into(target);
 
         // write all decorator data below
@@ -230,6 +230,8 @@ impl Deserializable for MastForest {
 
         // Reading procedure names
         let procedure_names: BTreeMap<crate::Word, String> = Deserializable::read_from(source)?;
+        let procedure_names: BTreeMap<crate::Word, Arc<str>> =
+            procedure_names.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
 
         // Reading Decorators
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
@@ -315,6 +317,17 @@ impl Deserializable for MastForest {
             .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
 
         mast_forest.debug_info.clear_procedure_names();
+
+        // Validate that all procedure name digests correspond to nodes in the forest
+        for digest in procedure_names.keys() {
+            if !mast_forest.nodes.iter().any(|node| node.digest() == *digest) {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "procedure name references digest not found in forest: {:?}",
+                    digest
+                )));
+            }
+        }
+
         mast_forest.debug_info.extend_procedure_names(procedure_names);
 
         Ok(mast_forest)

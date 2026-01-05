@@ -658,12 +658,16 @@ impl MastForest {
     }
 
     /// Returns an iterator over all (digest, name) pairs of procedure names.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &String)> {
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
         self.debug_info.procedure_names()
     }
 
     /// Inserts a procedure name for the given MAST root digest.
-    pub fn insert_procedure_name(&mut self, digest: Word, name: String) {
+    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
+        assert!(
+            self.nodes.iter().any(|node| node.digest() == digest),
+            "attempted to insert procedure name for digest not in forest"
+        );
         self.debug_info.insert_procedure_name(digest, name);
     }
 }

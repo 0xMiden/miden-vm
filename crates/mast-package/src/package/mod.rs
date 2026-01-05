@@ -1,7 +1,6 @@
 mod kind;
 mod manifest;
 mod section;
-pub mod sections;
 mod serialization;
 
 use alloc::{format, string::String, sync::Arc, vec::Vec};
@@ -141,7 +140,7 @@ impl Package {
     }
 
     /// Returns an iterator over all (digest, name) pairs of procedure names.
-    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &alloc::string::String)> {
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
         self.mast.mast_forest().procedure_names()
     }
 }
