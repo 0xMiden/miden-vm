@@ -4,9 +4,9 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_air::trace::{
+use miden_air::{
     RowIndex,
-    chiplets::hasher::{HasherState, STATE_WIDTH},
+    trace::chiplets::hasher::{HasherState, STATE_WIDTH},
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
@@ -1210,22 +1210,17 @@ pub enum NodeExecutionState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use miden_core::{
-        Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
+    use miden_core::{Operation, mast::BasicBlockNodeBuilder};
 
     #[test]
     fn test_hasher_request_replay_deduplicates_basic_blocks() {
         let mut replay = HasherRequestReplay::default();
-        let digest: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)];
+        let digest = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
 
         // Create a simple basic block with one operation to get op_batches
-        let mut forest = MastForest::new();
-        let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
-            .add_to_forest(&mut forest)
-            .unwrap();
-        let op_batches = forest[block_id].op_batches().to_vec();
+        let basic_block =
+            BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()).build().unwrap();
+        let op_batches = basic_block.op_batches().to_vec();
 
         // Record the same digest three times
         replay.record_hash_basic_block(op_batches.clone(), digest);
