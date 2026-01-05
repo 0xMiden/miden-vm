@@ -12,7 +12,7 @@ use miden_air::{
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
-        MainTrace,
+        main_trace::MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
@@ -20,10 +20,12 @@ use miden_core::{
     Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
-use winter_prover::{crypto::RandomCoin, math::batch_inversion};
+use winter_prover::crypto::RandomCoin;
+
+use crate::utils::math::batch_inversion;
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, RowIndex, TraceLenSummary,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, RowIndex, TraceLenSummary, NUM_RAND_ROWS,
     chiplets::Chiplets,
     crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
@@ -38,7 +40,7 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
+    trace::AuxTraceBuilders,
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
@@ -139,7 +141,7 @@ pub fn build_trace(
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            column[i] = rng.draw();
+            column[i] = rng.draw().expect("failed to draw a random value");
         }
     }
 
