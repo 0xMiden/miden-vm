@@ -211,6 +211,26 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
 
+# --- examples ------------------------------------------------------------------------------------
+
+.PHONY: run-examples
+run-examples: exec ## Runs all masm examples to verify they execute correctly
+	@echo "Running masm examples..."
+	@failed=0; \
+	for masm in miden-vm/masm-examples/*/*.masm miden-vm/masm-examples/*/*/*.masm; do \
+		[ -f "$$masm" ] || continue; \
+		echo "  $$masm"; \
+		if ! ./target/optimized/miden-vm run "$$masm" > /dev/null 2>&1; then \
+			echo "    FAILED: $$masm"; \
+			failed=1; \
+		fi; \
+	done; \
+	if [ $$failed -eq 1 ]; then \
+		echo "Some examples failed!"; \
+		exit 1; \
+	fi; \
+	echo "All examples passed."
+
 # --- benchmarking --------------------------------------------------------------------------------
 
 .PHONY: check-bench
