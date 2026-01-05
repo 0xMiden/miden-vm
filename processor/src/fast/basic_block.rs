@@ -223,16 +223,22 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         let batch = &basic_block.op_batches()[batch_index];
 
+        // Get the node ID once since it doesn't change within the loop
+        let node_id = basic_block
+            .linked_id()
+            .expect("basic block node should be linked when executing operations");
+
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
 
-            // Use the forest's decorator storage to get decorators for this operation
-            let node_id = basic_block
-                .linked_id()
-                .expect("basic block node should be linked when executing operations");
-            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
-                self.execute_decorator(decorator, host)?;
+            if self.in_debug_mode {
+                #[cfg(test)]
+                self.record_decorator_retrieval();
+
+                for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
+                    self.execute_decorator(decorator, host)?;
+                }
             }
 
             // if in trace mode, check if we need to record a trace state before executing the
@@ -250,7 +256,8 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx = err_ctx!(current_forest, node_id, host, op_idx_in_block);
+                let err_ctx =
+                    err_ctx!(current_forest, node_id, host, self.in_debug_mode, op_idx_in_block);
                 match op {
                     Operation::Emit => self.op_emit(host, &err_ctx).await?,
                     _ => {
@@ -276,40 +283,6 @@ impl FastProcessor {
             })?;
         }
 
-        ControlFlow::Continue(())
-    }
-
-    #[inline(always)]
-    async fn op_emit(
-        &mut self,
-        host: &mut impl AsyncHost,
-        err_ctx: &impl ErrorContext,
-    ) -> ControlFlow<BreakReason> {
-        let mut process = self.state();
-        let event_id = EventId::from_felt(process.get_stack_item(0));
-
-        // If it's a system event, handle it directly. Otherwise, forward it to the host.
-        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event, err_ctx) {
-                return ControlFlow::Break(BreakReason::Err(err));
-            }
-        } else {
-            let clk = process.clk();
-            let mutations = match host.on_event(&process).await {
-                Ok(m) => m,
-                Err(err) => {
-                    let event_name = host.resolve_event(event_id).cloned();
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::event_error(
-                        err, event_id, event_name, err_ctx,
-                    )));
-                },
-            };
-            if let Err(err) = self.advice.apply_mutations(mutations) {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::advice_error(
-                    err, clk, err_ctx,
-                )));
-            }
-        }
         ControlFlow::Continue(())
     }
 
@@ -354,11 +327,50 @@ impl FastProcessor {
         current_forest: &Arc<MastForest>,
         host: &mut impl AsyncHost,
     ) -> ControlFlow<BreakReason> {
-        let num_ops = basic_block_node.num_operations() as usize;
-        for decorator in current_forest.decorators_for_op(node_id, num_ops) {
-            self.execute_decorator(decorator, host)?;
+        if self.in_debug_mode {
+            #[cfg(test)]
+            self.record_decorator_retrieval();
+
+            let num_ops = basic_block_node.num_operations() as usize;
+            for decorator in current_forest.decorators_for_op(node_id, num_ops) {
+                self.execute_decorator(decorator, host)?;
+            }
         }
 
+        ControlFlow::Continue(())
+    }
+
+    #[inline(always)]
+    async fn op_emit(
+        &mut self,
+        host: &mut impl AsyncHost,
+        err_ctx: &impl ErrorContext,
+    ) -> ControlFlow<BreakReason> {
+        let mut process = self.state();
+        let event_id = EventId::from_felt(process.get_stack_item(0));
+
+        // If it's a system event, handle it directly. Otherwise, forward it to the host.
+        if let Some(system_event) = SystemEvent::from_event_id(event_id) {
+            if let Err(err) = handle_system_event(&mut process, system_event, err_ctx) {
+                return ControlFlow::Break(BreakReason::Err(err));
+            }
+        } else {
+            let clk = process.clk();
+            let mutations = match host.on_event(&process).await {
+                Ok(m) => m,
+                Err(err) => {
+                    let event_name = host.resolve_event(event_id).cloned();
+                    return ControlFlow::Break(BreakReason::Err(ExecutionError::event_error(
+                        err, event_id, event_name, err_ctx,
+                    )));
+                },
+            };
+            if let Err(err) = self.advice.apply_mutations(mutations) {
+                return ControlFlow::Break(BreakReason::Err(ExecutionError::advice_error(
+                    err, clk, err_ctx,
+                )));
+            }
+        }
         ControlFlow::Continue(())
     }
 }

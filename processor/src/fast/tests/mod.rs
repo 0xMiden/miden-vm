@@ -12,7 +12,7 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::DefaultHost;
+use crate::{AdviceInputs, DefaultHost};
 
 mod advice_provider;
 mod all_ops;
@@ -374,7 +374,7 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new(&alloc::vec::Vec::new());
+    let processor = FastProcessor::new_debug(&alloc::vec::Vec::new(), AdviceInputs::default());
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
