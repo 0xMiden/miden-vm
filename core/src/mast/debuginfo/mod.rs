@@ -109,6 +109,25 @@ impl DebugInfo {
         }
     }
 
+    /// Creates an empty [DebugInfo] with valid CSR structures for N nodes.
+    pub fn empty_for_nodes(num_nodes: usize) -> Self {
+        let mut node_indptr_for_op_idx = IndexVec::new();
+        for _ in 0..=num_nodes {
+            let _ = node_indptr_for_op_idx.push(0);
+        }
+
+        let op_decorator_storage =
+            OpToDecoratorIds::from_components(Vec::new(), Vec::new(), node_indptr_for_op_idx)
+                .expect("Empty CSR structure should be valid");
+
+        Self {
+            decorators: IndexVec::new(),
+            op_decorator_storage,
+            node_decorator_storage: NodeToDecoratorIds::new(),
+            error_codes: BTreeMap::new(),
+        }
+    }
+
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
