@@ -30,7 +30,7 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
     let ops = [
         // add 4 elements to the stack to be used as the capacity elements for the RPO permutation.
         // Since we are hashing 4 field elements, the first capacity element is set to 4.
-        Push(Felt::from(4_u32)), Pad, Pad, Pad,
+        Push(Felt::new(4)), Pad, Pad, Pad,
 
         // swap capacity elements such that they are below the elements to be hashed
         SwapW,

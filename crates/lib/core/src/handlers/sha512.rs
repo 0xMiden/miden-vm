@@ -9,7 +9,7 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, Word, ZERO,
+    EventName, Felt, PrimeCharacteristicRing, Word, ZERO,
     field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
@@ -75,7 +75,7 @@ impl Sha512FeltDigest {
             let limbs = array::from_fn(|j| bytes[BYTES_PER_U32 * i + j]);
             u32::from_le_bytes(limbs)
         });
-        Self(packed.map(Felt::from))
+        Self(packed.map(Felt::from_u32))
     }
 
     pub fn to_commitment(&self) -> Word {
