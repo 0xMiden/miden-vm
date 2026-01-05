@@ -48,7 +48,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, node_id, host);
+            let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode);
             return ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_if(
                 condition, &err_ctx,
             )));

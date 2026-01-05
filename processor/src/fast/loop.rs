@@ -69,7 +69,7 @@ impl FastProcessor {
                 stopper,
             )
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host);
+            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode);
             ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
                 condition, &err_ctx,
             )))
@@ -126,7 +126,7 @@ impl FastProcessor {
 
             self.execute_after_exit_decorators(current_node_id, current_forest, host)
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host);
+            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode);
             ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
                 condition, &err_ctx,
             )))
