@@ -236,11 +236,11 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
-            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, err_ctx, tracer)?;
+            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, tracer)?;
             user_op_helpers = Some(horner_base_helpers);
         },
         Operation::HornerExt => {
-            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, err_ctx, tracer)?;
+            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, tracer)?;
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {

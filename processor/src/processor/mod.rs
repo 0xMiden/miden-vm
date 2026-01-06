@@ -268,21 +268,11 @@ pub trait AdviceProviderInterface {
 /// Trait representing the memory subsystem of the processor.
 pub trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
-    fn read_element(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError>;
+    fn read_element(&mut self, ctx: ContextId, addr: Felt) -> Result<Felt, MemoryError>;
 
     /// Reads a word from memory starting at the provided address in the provided context.
-    fn read_word(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Word, MemoryError>;
+    fn read_word(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex)
+    -> Result<Word, MemoryError>;
 
     /// Writes an element to memory at the provided address in the provided context.
     fn write_element(
@@ -290,7 +280,6 @@ pub trait MemoryInterface {
         ctx: ContextId,
         addr: Felt,
         element: Felt,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 
     /// Writes a word to memory starting at the provided address in the provided context.
@@ -300,7 +289,6 @@ pub trait MemoryInterface {
         addr: Felt,
         clk: RowIndex,
         word: Word,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 }
 

@@ -43,7 +43,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(1000_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(1000_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 1000"
@@ -51,7 +51,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(1004_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(1004_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 1004"
@@ -59,7 +59,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(1008_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(1008_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 1008"
@@ -67,7 +67,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(1012_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(1012_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 1012"
@@ -75,7 +75,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(1016_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(1016_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 1016"
@@ -84,7 +84,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(2000_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(2000_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 2000"
@@ -92,7 +92,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(2004_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(2004_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 2004"
@@ -100,7 +100,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(2008_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(2008_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 2008"
@@ -108,7 +108,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(2012_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(2012_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 2012"
@@ -116,7 +116,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from(2016_u32), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from(2016_u32), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 2016"
@@ -156,10 +156,7 @@ fn test_memcopy_elements() {
 
     for addr in 2002_u32..2020_u32 {
         assert_eq!(
-            exec_output
-                .memory
-                .read_element(ContextId::root(), Felt::from(addr), &())
-                .unwrap(),
+            exec_output.memory.read_element(ContextId::root(), Felt::from(addr)).unwrap(),
             Felt::from(addr - 2000),
             "Address {}",
             addr

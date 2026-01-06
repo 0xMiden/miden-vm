@@ -67,9 +67,27 @@ pub enum ExecutionError {
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    /// Memory error with source context for diagnostics.
+    ///
+    /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
+    #[error("memory error")]
+    #[diagnostic()]
+    MemoryError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        #[source]
+        #[diagnostic_source]
+        err: MemoryError,
+    },
+    /// Memory error without source context (for internal operations like FMP initialization).
+    ///
+    /// Use `ExecutionError::MemoryErrorNoCtx` for memory errors that don't have error context
+    /// available (e.g., during call/syscall context initialization).
     #[error(transparent)]
     #[diagnostic(transparent)]
-    MemoryError(MemoryError),
+    MemoryErrorNoCtx(MemoryError),
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
@@ -341,6 +359,21 @@ impl<T> AceResultExt<T> for Result<T, AceError> {
     }
 }
 
+/// Extension trait for converting `Result<T, MemoryError>` to `Result<T, ExecutionError>`.
+pub trait MemoryResultExt<T> {
+    /// Maps a `MemoryError` to an `ExecutionError` with the provided context.
+    fn map_mem_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+}
+
+impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
+    fn map_mem_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            ExecutionError::MemoryError { label, source_file, err }
+        })
+    }
+}
+
 // ERROR CONTEXT
 // ===============================================================================================
 
@@ -384,8 +417,12 @@ macro_rules! err_ctx {
 #[cfg(feature = "no_err_ctx")]
 #[macro_export]
 macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {{ () }};
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {{ () }};
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {
+        ()
+    };
+    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {
+        ()
+    };
 }
 
 /// Trait defining the interface for error context providers.

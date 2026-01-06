@@ -290,7 +290,7 @@ impl Test {
         {
             let mem_state = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::from(addr as u32), &())
+                .read_element(ContextId::root(), Felt::from(addr as u32))
                 .unwrap();
             assert_eq!(
                 *mem_value,
