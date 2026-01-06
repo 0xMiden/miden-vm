@@ -374,6 +374,42 @@ impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
     }
 }
 
+/// Extension trait for converting `Result<T, SystemEventError>` to `Result<T, ExecutionError>`.
+pub trait SystemEventResultExt<T> {
+    /// Maps a `SystemEventError` to an `ExecutionError` with the provided context.
+    fn map_sys_event_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError>;
+}
+
+impl<T> SystemEventResultExt<T>
+    for Result<T, crate::operations::sys_ops::sys_event_handlers::SystemEventError>
+{
+    fn map_sys_event_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError> {
+        use crate::operations::sys_ops::sys_event_handlers::SystemEventError;
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            match err {
+                SystemEventError::Advice(err) => {
+                    ExecutionError::AdviceError { label, source_file, clk, err }
+                },
+                SystemEventError::Operation(err) => {
+                    ExecutionError::OperationError { label, source_file, clk, err }
+                },
+                SystemEventError::Memory(err) => {
+                    ExecutionError::MemoryError { label, source_file, err }
+                },
+            }
+        })
+    }
+}
+
 // ERROR CONTEXT
 // ===============================================================================================
 
