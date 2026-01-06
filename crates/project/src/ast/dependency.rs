@@ -1,4 +1,4 @@
-use crate::{SourceId, Span, Uri, VersionReqOrDigest};
+use crate::{SourceId, Span, Uri, VersionRequirement};
 
 use super::{parsing::SetSourceId, *};
 
@@ -14,7 +14,7 @@ pub struct DependencySpec {
         feature = "serde",
         serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")
     )]
-    pub version_or_digest: Option<VersionReqOrDigest>,
+    pub version_or_digest: Option<VersionRequirement>,
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "does_not_inherit_from_workspace")
@@ -44,7 +44,7 @@ impl DependencySpec {
     }
 
     /// Returns the version constraint to apply to this dependency
-    pub fn version(&self) -> Option<&VersionReqOrDigest> {
+    pub fn version(&self) -> Option<&VersionRequirement> {
         self.version_or_digest.as_ref()
     }
 

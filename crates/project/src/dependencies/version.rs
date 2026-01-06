@@ -1,63 +1,150 @@
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use core::{borrow::Borrow, fmt, str::FromStr};
 
-use miden_assembly_syntax::debuginfo::{SourceId, Span};
+use miden_core::{LexicographicWord, Word};
 
-pub use miden_assembly_syntax::semver::{Version, VersionReq};
+pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer, VersionReq};
 
-use crate::Word;
+use super::VersionRequirement;
 
-/// Represents a constraint on the version of a dependency that should be resolved
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
-pub enum VersionReqOrDigest {
-    /// A semantic versioning constraint, e.g. `~> 0.1`
-    ///
-    /// In general, this is meant to indicate that any version of a package that satisfies the
-    /// version constraint can be used to resolve the dependency.
-    ///
-    /// This form of constraint also permits us to compile a dependency from source, so long as
-    /// the semantic versioning constraint is satisfied.
-    Version(Span<VersionReq>),
-    /// The most precise and onerous form of versioning constraint.
-    ///
-    /// This requires that the dependency's package digest exactly matches the one provided here.
-    ///
-    /// Digest constraints also effectively require that the dependency already be compiled to a
-    /// Miden package, as digests are derived from the MAST of a compiled package. This means that
-    /// when the dependency is resolved, we must be able to find a `.masp` file with the expected
-    /// digest.
-    Digest(Span<Word>),
+/// The error type raised when attempting to parse a [Version] from a string.
+#[derive(Debug, thiserror::Error)]
+pub enum InvalidVersionError {
+    #[error("invalid digest: {0}")]
+    Digest(&'static str),
+    #[error("invalid semantic version: {0}")]
+    Version(SemVerError),
 }
 
-impl From<VersionReq> for VersionReqOrDigest {
-    fn from(version: VersionReq) -> Self {
-        Self::Version(Span::unknown(version))
-    }
+/// The representation of versioning information associated with packages in the package index.
+///
+/// This type provides the means by which dependency resolution can satisfy versioning constraints
+/// on packages using either semantic version constraints or explicit package digests
+/// simultaneously.
+///
+/// All packages have an associated semantic version. Packages which have been assembled to MAST,
+/// also have an associated content digest. However, for the purposes of indexing and dependency
+/// resolution, we cannot assume that all packages have a content digest (as they may not have been
+/// assembled yet), and so this type is used to represent versions within the index/resolver so that
+/// it can:
+///
+/// * Satisfy requirements for a package that has a specific digest
+/// * Record multiple entries in the index for the same semantic version string, when multiple
+///   assembled packages with that version are present, disambiguating using the content digest.
+/// * Provide a total ordering for package versions that may or may not include a specific digest
+#[derive(Debug, Clone)]
+pub struct Version {
+    /// The semantic version information
+    ///
+    /// This is the canonical human-facing version for a package.
+    pub version: SemVer,
+    /// The content digest for this version, if known.
+    ///
+    /// This is the most precise version for a package, and is used to disambiguate multiple
+    /// instances of a package with the same semantic version, but differing content.
+    pub digest: Option<LexicographicWord>,
 }
 
-impl From<Word> for VersionReqOrDigest {
-    fn from(digest: Word) -> Self {
-        Self::Digest(Span::unknown(digest))
-    }
-}
-
-impl VersionReqOrDigest {
-    /// Returns true if this version requirement is a semantic versioning requirement
-    pub fn is_semantic_version(&self) -> bool {
-        matches!(self, Self::Version(_))
+impl Version {
+    /// Construct a [Version] from its component parts.
+    pub fn new(version: SemVer, digest: Word) -> Self {
+        Self { version, digest: Some(digest.into()) }
     }
 
-    /// Returns true if this version requirement requires an exact digest match
-    pub fn is_digest(&self) -> bool {
-        matches!(self, Self::Digest(_))
-    }
-
-    pub(crate) fn set_source_id(&mut self, id: SourceId) {
-        match self {
-            Self::Version(version) => version.set_source_id(id),
-            Self::Digest(digest) => digest.set_source_id(id),
+    /// Check if this version satisfies the given `requirement`.
+    ///
+    /// Version requirements are expressed as either a semantic version constraint OR a specific
+    /// content digest.
+    pub fn satisfies(&self, requirement: &VersionRequirement) -> bool {
+        match requirement {
+            VersionRequirement::Semantic(req) => req.matches(&self.version),
+            VersionRequirement::Digest(req) => self
+                .digest
+                .as_ref()
+                .is_some_and(|digest| &LexicographicWord::new(req.into_inner()) == digest),
         }
+    }
+}
+
+impl FromStr for Version {
+    type Err = InvalidVersionError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.split_once('@') {
+            Some((v, digest)) => {
+                let v = v.parse::<SemVer>().map_err(InvalidVersionError::Version)?;
+                let digest = Word::parse(digest).map_err(InvalidVersionError::Digest)?;
+                Ok(Self::new(v, digest))
+            },
+            None => {
+                let v = s.parse::<SemVer>().map_err(InvalidVersionError::Version)?;
+                Ok(Self::from(v))
+            },
+        }
+    }
+}
+
+impl From<SemVer> for Version {
+    fn from(version: SemVer) -> Self {
+        Self { version, digest: None }
+    }
+}
+
+impl From<(SemVer, Word)> for Version {
+    fn from(version: (SemVer, Word)) -> Self {
+        let (version, word) = version;
+        Self { version, digest: Some(word.into()) }
+    }
+}
+
+impl Borrow<SemVer> for Version {
+    #[inline(always)]
+    fn borrow(&self) -> &SemVer {
+        &self.version
+    }
+}
+
+impl fmt::Display for Version {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(digest) = self.digest.as_ref() {
+            write!(f, "{}@{}", &self.version, digest.inner())
+        } else {
+            fmt::Display::fmt(&self.version, f)
+        }
+    }
+}
+
+impl Eq for Version {}
+impl PartialEq for Version {
+    fn eq(&self, other: &Self) -> bool {
+        if self.version != other.version {
+            return false;
+        }
+        if let Some(l) = self.digest.as_ref()
+            && let Some(r) = other.digest.as_ref()
+        {
+            l == r
+        } else {
+            true
+        }
+    }
+}
+
+impl PartialOrd for Version {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Version {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        use core::cmp::Ordering;
+        self.version.cmp_precedence(&other.version).then_with(|| {
+            if let Some(l) = self.digest.as_ref()
+                && let Some(r) = other.digest.as_ref()
+            {
+                l.cmp(r)
+            } else {
+                Ordering::Equal
+            }
+        })
     }
 }

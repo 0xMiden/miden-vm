@@ -22,6 +22,7 @@ pub use self::{
 
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
+pub use miden_core::LexicographicWord;
 #[cfg(feature = "serde")]
 pub use toml::Value;
 

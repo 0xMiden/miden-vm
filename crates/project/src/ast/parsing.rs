@@ -108,7 +108,7 @@ impl SetSourceId for toml::Value {
     fn set_source_id(&mut self, _source_id: SourceId) {}
 }
 
-impl SetSourceId for crate::Version {
+impl SetSourceId for crate::SemVer {
     #[inline(always)]
     fn set_source_id(&mut self, _source_id: SourceId) {}
 }
