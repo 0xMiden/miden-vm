@@ -41,13 +41,13 @@ pub proc mod_12289
     # => [qlo, qhi, a_hi, a_lo, ...]
 
     push.M
-    u32overflowing_mul
+    u32overflowing_mul swap
     # => [overflow, M * qlo % 2^32, qhi, a_hi, a_lo, ...]
 
     movup.2
     push.M
     # => [M, qhi, overflow, M * qlo % 2^32, a_hi, a_lo, ...]
-    u32overflowing_madd
+    u32overflowing_madd swap
     # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
     # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
     drop
@@ -56,8 +56,10 @@ pub proc mod_12289
 
     adv_push.1
     dup
-    u32overflowing_sub.M
-    # => [underflow_bit, r - M, r, res_hi, res_lo, a_hi, a_lo, ...]
+    push.M
+    u32overflowing_sub
+    # => [borrow, diff, r, res_hi, res_lo, a_hi, a_lo, ...]
+    # borrow = 1 when r < M (underflow). Assert borrow != 0, then drop diff.
     assert drop
     # => [r, res_hi, res_lo, a_hi, a_lo, ...]
 
@@ -100,27 +102,30 @@ pub proc hash_to_point
     movdn.12
 
     # Store MSG for later absorption
-    loc_storew_be.4 dropw
+    loc_storew_le.4 dropw
 
     # Absorb the nonce
     padw movdnw.2
     exec.rpo256::permute
 
     # Absorb the message
-    swapw loc_loadw_be.4 swapw exec.rpo256::permute
+    loc_loadw_le.4
+    exec.rpo256::permute
 
     # Squeeze the coefficients and save them
     repeat.63
-        swapw dup.12
-        mem_storew_be
-        swapw dup.12 add.8 swap.13 add.4
-        mem_storew_be
+        dup.12
+        mem_storew_le
+        swapw
+        dup.12 add.8 swap.13 add.4
+        mem_storew_le
+        swapw
         exec.rpo256::permute
     end
 
     # Save the last remaining coefficients
-    dup.12 add.4 mem_storew_be dropw
-    movup.8 mem_storew_be dropw
+    dup.12 mem_storew_le dropw
+    movup.8 add.4 mem_storew_le dropw
 
     # Clean up the stack
     dropw
@@ -170,12 +175,12 @@ pub proc load_h_s2_and_product
 
     ## b) Save PK to later compare it with the hash of the h polynomial
     swapw
-    loc_storew_be.0
-    # => [PK, ptr, tau_inv_ptr, acc1, acc0, ...]
+    loc_storew_le.0
+    # => [PK, ptr, tau_inv_ptr, acc0, acc1, ...]
 
     ## c) Prepare the capacity portion of the state of the hasher
     padw swapw
-    # => [Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc1, acc0, ...], where Y is a "garbage" word
+    # => [Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...], where Y is a "garbage" word
 
     ## d) Load the evaluation point tau from the advice tape, compute its inverse and save both
     ## Note that we will evaluate the polynomials at `tau_inv = tau^{-1}` as we are loading the coefficients
@@ -187,42 +192,44 @@ pub proc load_h_s2_and_product
     ##
     ## pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
     adv_push.2
-    dup.1 dup.1 ext2inv
-    movup.3 movup.3
-    loc_storew_be.4
-    # => [tau1, tau0, tau_inv1, tau_inv0, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc1, acc0, ...]
+    # advice stack has [tau0, tau1, ...] with tau0 on top (ready to pop first)
+    # adv_push.2: pops tau0 first, then tau1 → stack is [tau0, tau1, ...] (_le format)
+    dup.1 dup.1 ext2inv         # duplicate tau, compute inverse → [tau_inv0, tau_inv1, tau0, tau1, ...]
+    loc_storew_le.4             # store [tau_inv0, tau_inv1, tau0, tau1] - tau_inv first for horner
+    # => [tau_inv0, tau_inv1, tau0, tau1, Y, 0, 0, 0, 0, ptr, tau_inv_ptr, acc0, acc1, ...]
 
     # 2) Load the coefficients of the h polynomial and evaluate it at tau_inv
     repeat.64
         adv_pipe
 
         # check that all coefficients are less than Falcon prime
+        # Assert borrow != 0 (r < M), then drop diff
         dupw.1
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
 
         dupw
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
 
         horner_eval_base
 
         exec.rpo256::permute
     end
-    # => [Y, D, C, ptr, tau_inv_ptr, acc1, acc0, ...] where D is the digest expected to be PK
+    # => [Y, D, C, ptr, tau_inv_ptr, acc0, acc1, ...] where D is the digest expected to be PK
 
     # 3) Load PK, the saved claimed hash of h, and compare hashes
-    loc_loadw_be.0
+    loc_loadw_le.0
     assert_eqw
-    # => [C, ptr, tau_inv_ptr, h(tau)_1, h(tau)_0, ...]
+    # => [C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
 
     # 4) Load s2 and evaluate at tau_inv
 
@@ -230,77 +237,83 @@ pub proc load_h_s2_and_product
     push.0 movdn.6
     push.0 movdn.6
     padw padw
-    # => [0, 0, 0, 0, 0, 0, 0, 0, C, ptr, tau_inv_ptr, 0, 0, h(tau)_1, h(tau)_0, ...]
+    # => [0, 0, 0, 0, 0, 0, 0, 0, C, ptr, tau_inv_ptr, 0, 0, h(tau)_0, h(tau)_1, ...]
 
     ## b) Load and evaluate s2 at tau_inv
     repeat.64
         adv_pipe
 
         # check that all coefficients are less than Falcon prime
+        # Assert borrow != 0 (r < M), then drop diff
         dupw.1
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
 
         dupw
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
         u32assert2
-        u32overflowing_sub.M assert drop
-        u32overflowing_sub.M assert drop
+        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert drop
 
         horner_eval_base
         exec.rpo256::permute
     end
-    # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
-
+    # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     # 5) Load claimed h * s2 in Z_Q[x]
 
     ## a) Reset the accumulator, update the pointers and set up the state of the hasher
     push.0 movdn.14
     push.0 movdn.14
-    # => [Y, Y, C, ptr, tau_inv_ptr, 0, 0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+    # => [Y, Y, C, ptr, tau_inv_ptr, 0, 0, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     repeat.128
         adv_pipe
         horner_eval_base
         exec.rpo256::permute
     end
-    # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+    # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     # 6) Check that the challenge we computed the evaluations with is the correct one
 
-    ## a) Extract the expected challenge from the digest and leave a garbage word to load
-    ##    the challenge we got from the advice stack
-    dropw
-    swapw drop drop
-    # => [Y, tau1, tau0, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+    ## a) Clean up the stack
+    dropw swapw
+    # => [C, tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between
     ##    the two challenges
-    loc_loadw_be.4
-    dup.4 assert_eq
-    dup.4 assert_eq
-    drop drop
-    # => [tau1, tau0, ptr, tau_inv_ptr, pi(tau)_1, pi(tau)_0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+    loc_loadw_le.4              # load [tau_inv0, tau_inv1, tau0, tau1] from local memory
+    # => [tau_inv0, tau_inv1, tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+
+    drop drop                   # drop tau_inv, keep tau for comparison and later ext2mul
+    # => [tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+
+
+    dup.2 assert_eq             # assert tau0 == tau0(D)
+    dup.2 assert_eq             # assert tau1 == tau1(D)
+    # => [tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
+
+    movdn.5                     # move tau0 past D[2], D[3], ptr, tau_inv_ptr
+    movdn.5                     # move tau1 past D[2], D[3], ptr, tau_inv_ptr
+    dropw                       # drop D[2], D[3], ptr, tau_inv_ptr
+    # => [tau0, tau1, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     # 7) Assert the equality pi(tau_inv) * tau == h(tau_inv) * s2(tau_inv)
 
     ## a) Compute the left hand side of the equation
-    movup.2 drop
-    movup.2 drop
     ext2mul
-    # => [LHS1, LHS0, s2(tau)_1, s2(tau)_0, h(tau)_1, h(tau)_0, ...]
+    # => [LHS_0, LHS_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     ## b) Compute the right hand side of the equation
     movdn.5 movdn.5
     ext2mul
-    # => [RHS1, RHS0, LHS1, LHS0, ...]
+    # => [RHS_0, RHS_1, LHS_0, LHS_1, ...]
 
     ## c) Assert equality
     movup.2
@@ -388,11 +401,11 @@ pub proc diff_mod_M
     #=> [pi512 + J - pi, c_hi, c_lo, ...]
 
     # 2) u32split first u64
-    u32split
+    u32split swap
     #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
 
     # 3) Add the two u64-s
-    exec.u64::overflowing_add_le
+    exec.u64::overflowing_add_be
     #=> [flag, res_hi, res_lo, ..]
 
     # 4) Handle potential overflow in the u64 addition
@@ -465,7 +478,7 @@ pub proc compute_s1_norm_sq
 
         # 2) Compute the squared norm of (i + 0)-th coefficient of s1
 
-        u32split
+        u32split swap
         #=> [c0_hi, c0_lo, c1, c2, c3, PI_{i+512}, PI, pi_ptr, ...]
         movup.5
         push.J add
@@ -483,7 +496,7 @@ pub proc compute_s1_norm_sq
 
         # 3) Compute the squared norm of (i + 1)-th coefficient of s1
 
-        u32split
+        u32split swap
         #=> [c1_hi, c1_lo, c2, c3, pi512_1, pi512_2, pi512_3, pi1, pi2, pi3, pi_ptr, e0, ...]
         movup.4
         #=> [pi512_1, c1_hi, c1_lo, c2, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, ...]
@@ -499,7 +512,7 @@ pub proc compute_s1_norm_sq
 
         # 4) Compute the squared norm of (i + 2)-th coefficient of s1
 
-        u32split
+        u32split swap
         #=> [c2_hi, c2_lo, c3, pi512_2, pi512_3, pi2, pi3, pi_ptr, e0, e1, ...]
         movup.3
         push.J add
@@ -514,7 +527,7 @@ pub proc compute_s1_norm_sq
 
         # 5) Compute the squared norm of (i + 3)-th coefficient of s1
 
-        u32split
+        u32split swap
         #=> [c3_hi, c3_lo, pi512_3, pi3, pi_ptr, e0, e1, e2, ...]
         movup.2 push.J add
         movup.3
@@ -621,6 +634,8 @@ pub proc verify
     padw adv_loadw
     padw adv_loadw
     #=> [NONCE1, NONCE0, MSG, ...]
+    swapw
+    #=> [NONCE0, NONCE1, MSG, ...]
 
     # 3) Compute the hash-to-point of the message MSG from the provided NONCE and save
     # the resulting polynomial c in the memory region [c_ptr, c_ptr + 512)
@@ -672,7 +687,7 @@ end
 #!   Operand stack: [PK, MSG, ...]
 #!   Advice stack:  [SIGNATURE]
 pub proc move_sig_from_map_to_adv_stack
-    dupw.1 dupw.1 exec.rpo256::merge
+    dupw.1 dupw.1 hmerge
     #=> [hash(MSG || PK), PK, MSG, ...]
 
     adv.push_mapval dropw

@@ -4,8 +4,7 @@ use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::ExecutionError;
 use miden_utils_testing::{
-    Felt, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value,
+    Felt, U32_BOUND, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
 
 #[test]

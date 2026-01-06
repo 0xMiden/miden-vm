@@ -28,22 +28,23 @@ pub enum U32OpMode {
 
 /// Translates u32testw assembly instruction to VM operations.
 ///
-/// Implemented by executing DUP U32SPLIT SWAP DROP EQZ on each element in the word
-/// and combining the results using AND operation (total of 23 VM cycles)
+/// Implemented by executing DUP U32SPLIT DROP EQZ on each element in the word
+/// and combining the results using AND operation (total of 19 VM cycles)
+/// U32split outputs [lo, hi] with lo on top, so we drop lo and check if hi is zero.
 pub fn u32testw(span_builder: &mut BasicBlockBuilder) {
     #[rustfmt::skip]
     let ops = [
         // Test the fourth element
-        Dup3, U32split, Swap, Drop, Eqz,
+        Dup3, U32split, Drop, Eqz,
 
         // Test the third element
-        Dup3, U32split, Swap, Drop, Eqz, And,
+        Dup3, U32split, Drop, Eqz, And,
 
          // Test the second element
-        Dup2, U32split, Swap, Drop, Eqz, And,
+        Dup2, U32split, Drop, Eqz, And,
 
         // Test the first element
-        Dup1, U32split, Swap, Drop, Eqz, And,
+        Dup1, U32split, Drop, Eqz, And,
     ];
     span_builder.push_ops(ops);
 }
@@ -230,9 +231,10 @@ pub fn u32shr(
     prepare_bitwise::<MAX_U32_SHIFT_VALUE>(span_builder, proc_ctx, imm, span)?;
     if imm != Some(0) {
         // After prepare_bitwise, stack is [2^b, value, ...]
-        // U32div computes top/second, so swap to get value on top for value / 2^b
+        // U32div takes [divisor, dividend] and computes dividend/divisor (second/top)
+        // So with [2^b, value], it computes value / 2^b = value >> b
         // U32div outputs [quotient, remainder], swap before drop to keep quotient
-        span_builder.push_ops([Swap, U32div, Swap, Drop]);
+        span_builder.push_ops([U32div, Swap, Drop]);
     }
     Ok(())
 }
@@ -691,11 +693,12 @@ fn verify_ctz(block_builder: &mut BasicBlockBuilder) {
 
         Pad, Incr, Neg, Add, // [pow2(ctz) - 1, pow2(ctz), n, ctz, ...]
 
-        Swap, U32split, Drop, // [pow2(ctz), pow2(ctz) - 1, n, ctz, ...]
-                              // We need to drop the high bits of `pow2(ctz)` because if `ctz`
-                              // equals 32 `pow2(ctz)` will exceed the u32. Also in that case there
-                              // is no need to check the dividing one, since it is absent (value is
-                              // all 0's).
+        Swap, U32split, Swap, Drop, // [pow2(ctz), pow2(ctz) - 1, n, ctz, ...]
+                                    // U32split outputs [lo, hi], we need lo (the u32 part)
+                                    // We need to drop the high bits of `pow2(ctz)` because if `ctz`
+                                    // equals 32 `pow2(ctz)` will exceed the u32. Also in that case there
+                                    // is no need to check the dividing one, since it is absent (value is
+                                    // all 0's).
 
         Dup0, MovUp2, Add, // [bit_mask, pow2(ctz), n, ctz]
                            // 00..001111111111...11 <-- bitmask
@@ -765,11 +768,12 @@ fn verify_cto(block_builder: &mut BasicBlockBuilder) {
 
         Pad, Incr, Neg, Add, // [pow2(cto) - 1, pow2(cto), n, cto, ...]
 
-        Swap, U32split, Drop, // [pow2(cto), pow2(cto) - 1, n, cto, ...]
-                              // We need to drop the high bits of `pow2(cto)` because if `cto`
-                              // equals 32 `pow2(cto)` will exceed the u32. Also in that case there
-                              // is no need to check the dividing zero, since it is absent (value
-                              // is all 1's).
+        Swap, U32split, Swap, Drop, // [pow2(cto), pow2(cto) - 1, n, cto, ...]
+                                    // U32split outputs [lo, hi], we need lo (the u32 part)
+                                    // We need to drop the high bits of `pow2(cto)` because if `cto`
+                                    // equals 32 `pow2(cto)` will exceed the u32. Also in that case there
+                                    // is no need to check the dividing zero, since it is absent (value
+                                    // is all 1's).
 
         Dup1, Add, // [bit_mask, pow2(cto) - 1, n, cto]
                    // 00..001111111111...11 <-- bitmask

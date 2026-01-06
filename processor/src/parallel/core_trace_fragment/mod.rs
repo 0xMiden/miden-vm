@@ -516,10 +516,6 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         &self.context.state.stack.stack_top
     }
 
-    fn top_mut(&mut self) -> &mut [Felt] {
-        &mut self.context.state.stack.stack_top
-    }
-
     fn get(&self, idx: usize) -> Felt {
         debug_assert!(idx < MIN_STACK_DEPTH);
         self.context.state.stack.stack_top[MIN_STACK_DEPTH - idx - 1]

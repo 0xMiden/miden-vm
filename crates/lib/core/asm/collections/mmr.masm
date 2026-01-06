@@ -53,7 +53,7 @@ pub proc get
   # stack: [peak_ptr, relative_pos, depth, ...]
 
   # load the target peak (6 cycles)
-  padw movup.4 mem_loadw_be
+  padw movup.4 mem_loadw_le
   # stack: [P, relative_pos, depth, ...]
 
   # find the tree depth (2 cycles)
@@ -163,15 +163,15 @@ pub proc unpack
   adv_pipe exec.rpo256::permute
   adv_pipe exec.rpo256::permute
   adv_pipe exec.rpo256::permute
-  # => [C, B, A, mmr_ptr+68, mmt_ptr_end, HASH, ...]
+  # => [R0, R1, C, mmr_ptr+68, mmt_ptr_end, HASH, ...]
 
   # handle MMR with more than 16 elements (10 + 9 * words cycles)
   exec.mem::pipe_double_words_to_memory
-  # => [C, B, A, mmr_ptr+17, HASH, ...]
+  # => [R0, R1, C, mmr_ptr+17, HASH, ...]
 
-  # drop anything but the hash result, word B (11 cycles)
+  # drop anything but the digest (R1) (11 cycles)
   exec.rpo256::squeeze_digest movup.4 drop
-  # => [B, HASH, ...]
+  # => [DIGEST, HASH, ...]
 
   # assert on the resulting hash (11 cycles)
   assert_eqw

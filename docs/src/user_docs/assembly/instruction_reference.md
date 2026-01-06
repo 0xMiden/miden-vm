@@ -203,10 +203,10 @@ _Insert into Advice Map:_
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                  |
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
-| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K ← hash(A \|\| B, domain=0)`. `advice_map[K] ← [A,B]`.                               |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K ← hash(A \|\| B, domain=d)`. `advice_map[K] ← [A,B]`.                               |
+| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K ← hash(A \|\| B)` (deeper first). `advice_map[K] ← [A,B]`. MASM: `swapw hmerge`.    |
+| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (deeper first). `advice_map[K] ← [A,B]`.                               |
 | `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K ← hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] ← [A,B,C,D]`. |
-| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K ← permute(C,A,B).digest`. `advice_map[K] ← [A,B]`.                                  |
+| `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
 
 ### Random Access Memory
 
@@ -222,7 +222,7 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
 | `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                   |
 | `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
-| `mem_stream`                             | `[C, B, A, a, ... ]` | `[E,D,A,a',...]` | 1            | `[E,D] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory to top of stack.                                                                                                                |
+| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state (LE convention).                                                                       |
 
 #### Procedure Locals (Context-Specific)
 
@@ -245,9 +245,9 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 
 | Instruction    | Stack Input          | Stack Output     | Cycles | Notes                                                                                                                                                                                                 |
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hash`         | `[A, ...]`           | `[B, ...]`       | 20     | `B ← hash(A)`. 1-to-1 Rescue Prime Optimized hash.                                                                                                                                                    |
-| `hperm`        | `[B, A, C, ...]`     | `[F, E, D, ...]` | 1      | `D,E,F ← permute(C,A,B)`. Rescue Prime Optimized permutation. `C`=capacity, `A,B`=rate, `E`=digest.                                                                                                   |
-| `hmerge`       | `[B, A, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Rescue Prime Optimized hash.                                                                                                                                                  |
+| `hash`         | `[A, ...]`           | `[B, ...]`       | 19     | `B ← hash(A)`. 1-to-1 Rescue Prime Optimized hash.                                                                                                                                                    |
+| `hperm`        | `[R0, R1, C, ...]`   | `[R0', R1', C', ...]` | 1      | Rescue Prime Optimized permutation. `R0,R1`=rate (R0 on top), `C`=capacity, `R1'`=digest.                                                                                                   |
+| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Rescue Prime Optimized hash.                                                                                                                                                  |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 9      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 29     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[R, L, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |

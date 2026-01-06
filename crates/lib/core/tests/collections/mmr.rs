@@ -1,7 +1,7 @@
 use miden_core::WORD_SIZE;
-use miden_processor::{AdviceStackBuilder, ErrorContext};
+use miden_processor::AdviceStackBuilder;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
@@ -263,7 +263,7 @@ fn test_mmr_unpack() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     let hash_arr: [Felt; 4] = *peaks_hash;
@@ -392,7 +392,7 @@ fn test_mmr_unpack_large_mmr() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.try_into().unwrap(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
@@ -672,7 +672,11 @@ fn debug_mmr_peaks_vs_vm_memory() {
     for word_idx in 0..words_to_read {
         for limb in 0..4 {
             let addr = mmr_ptr + (word_idx as u32) * 4 + limb;
-            let v = execution_output.memory.read_element(ContextId::root(), Felt::new(addr as u64), &()).unwrap().as_int();
+            let v = execution_output
+                .memory
+                .read_element(ContextId::root(), Felt::new(addr as u64), &())
+                .unwrap()
+                .as_int();
             vm_mem.push(v);
         }
     }
@@ -712,7 +716,7 @@ fn test_mmr_large_add_roundtrip() {
 
     let mut map_data: Vec<Felt> = Vec::with_capacity(hash_data.len() + 1);
     let num_leaves = old_accumulator.num_leaves() as u64;
-    map_data.extend_from_slice(&[Felt::try_from(num_leaves).unwrap(), ZERO, ZERO, ZERO]);
+    map_data.extend_from_slice(&[Felt::new(num_leaves), ZERO, ZERO, ZERO]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data));
 
     // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.

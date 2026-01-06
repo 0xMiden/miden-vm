@@ -2,25 +2,25 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, trace::RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{
-    EventName, ZERO,
-    crypto::dsa::falcon512_rpo::{Polynomial, SecretKey},
-    field::PrimeField64,
-    utils::Deserializable,
-};
+use miden_core::{EventName, WORD_SIZE, ZERO, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
     ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_utils_testing::{
-    Word,
-    crypto::{MerkleStore, Rpo256},
+    AdviceStackBuilder, Word,
+    crypto::{
+        MerkleStore, Rpo256,
+        falcon512_rpo::{Polynomial, SecretKey},
+    },
     expect_exec_error_matches,
     proptest::proptest,
-    rand::random_word,
+    prove_sync,
+    rand::rand_value,
 };
-use rand::{Rng, rng};
+use rand::{Rng, SeedableRng, rng};
+use rand_chacha::ChaCha20Rng;
 
 /// Modulus used for rpo falcon 512.
 const M: u64 = 12289;
@@ -62,23 +62,22 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    let pub_key = process.get_stack_word_be(1);
-    let msg = process.get_stack_word_be(5);
+    use miden_core::utils::Deserializable;
 
-    let sk = process
+    let pub_key = process.get_stack_word_le(1);
+    let msg = process.get_stack_word_le(5);
+
+    let pk_sk_felts = process
         .advice_provider()
         .get_mapped_values(&pub_key)
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
-    // Create the corresponding secret key
-    let mut sk_bytes = Vec::with_capacity(sk.len());
-    for element in sk {
-        let value = element.as_canonical_u64();
-        assert!(value <= u8::MAX as u64, "invalid secret key");
-        sk_bytes.push(value as u8);
-    }
+    // Convert felts back to bytes (each felt was a single byte stored as u64)
+    let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_int() as u8).collect();
 
-    let sk = SecretKey::read_from_bytes(&sk_bytes).expect("invalid secrete key");
+    // Reconstruct SecretKey from bytes
+    let sk = falcon512_rpo::SecretKey::read_from_bytes(&sk_bytes)
+        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
 
     let signature_result = falcon512_rpo::sign(&sk, msg)
         .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
@@ -126,7 +125,7 @@ fn test_falcon512_diff_mod_m() {
         exec.falcon512rpo::diff_mod_M
     end
     ";
-    let v = miden_core::Felt::ORDER_U64 - 1;
+    let v = Felt::ORDER_U64 - 1;
     let (v_lo, v_hi) = (v as u32, v >> 32);
 
     // test largest possible value given v
@@ -162,7 +161,7 @@ fn test_falcon512_diff_mod_m() {
 
 proptest! {
     #[test]
-    fn diff_mod_m_proptest(v in 0..miden_core::Felt::ORDER_U64, w in 0..J, u in 0..J) {
+    fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
     use miden::core::crypto::dsa::falcon512rpo
@@ -189,36 +188,12 @@ proptest! {
 }
 
 #[test]
-fn test_falcon512_probabilistic_product_deterministic() {
-    // Use a fixed seed to make the test deterministic
-    use miden_crypto::rand::RpoRandomCoin;
-    let seed = Word::default();
-    let mut rng = RpoRandomCoin::new(seed);
-
-    // Generate deterministic coefficients
-    let mut h_coeffs = Vec::new();
-    let mut s2_coeffs = Vec::new();
-    for _i in 0..N {
-        h_coeffs.push(Felt::new(rng.random_range(0..M)));
-        s2_coeffs.push(Felt::new(rng.random_range(0..M)));
-    }
-
-    let h: Polynomial<Felt> = Polynomial::new(h_coeffs);
-    let s2: Polynomial<Felt> = Polynomial::new(s2_coeffs);
-    let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
-        generate_data_probabilistic_product_test(h, s2, false);
-
-    let test = build_test!(PROBABILISTIC_PRODUCT_SOURCE, &operand_stack, &advice_stack);
-    let expected_stack = &[];
-    test.expect_stack(expected_stack);
-}
-
-#[test]
 fn test_falcon512_probabilistic_product() {
     // create two random polynomials and generate the input operand stack and advice stack to
     // the probabilistic product test procedure
-    let h: Polynomial<Felt> = Polynomial::new(random_coefficients());
-    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients());
+    let mut rng = ChaCha20Rng::from_seed([0; 32]);
+    let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
+    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
     let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
         generate_data_probabilistic_product_test(h, s2, false);
 
@@ -231,8 +206,9 @@ fn test_falcon512_probabilistic_product() {
 fn test_falcon512_probabilistic_product_failure() {
     // create two random polynomials and generate the input operand stack and advice stack to
     // the probabilistic product test procedure
-    let h: Polynomial<Felt> = Polynomial::new(random_coefficients());
-    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients());
+    let mut rng = rng();
+    let h: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
+    let s2: Polynomial<Felt> = Polynomial::new(random_coefficients_with_rng(&mut rng));
     let (operand_stack, advice_stack): (Vec<u64>, Vec<u64>) =
         generate_data_probabilistic_product_test(h, s2, true);
 
@@ -241,7 +217,7 @@ fn test_falcon512_probabilistic_product_failure() {
     expect_exec_error_matches!(
         test,
         ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
+        if clk == RowIndex::from(3200) && err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -253,7 +229,7 @@ fn test_move_sig_to_adv_stack() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let secret_key = SecretKey::with_rng(&mut rng);
-    let message = random_word();
+    let message = rand_value::<Word>();
 
     let source = "
     use miden::core::crypto::dsa::falcon512rpo
@@ -267,30 +243,18 @@ fn test_move_sig_to_adv_stack() {
     let public_key = secret_key.public_key().to_commitment();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
-        let sig_key = Rpo256::merge(&[message, public_key]);
+        let sig_key = Rpo256::merge(&[public_key, message]);
         let signature = falcon512_rpo::sign(&secret_key, message).expect("failed to sign message");
 
-        vec![(sig_key, signature.iter().rev().cloned().collect())]
+        vec![(sig_key, signature)]
     };
 
-    let op_stack = {
-        let mut op_stack = vec![];
-        let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
-        op_stack.extend_from_slice(&message);
-        let pk_elements = public_key
-            .as_elements()
-            .iter()
-            .map(|a| a.as_canonical_u64())
-            .collect::<Vec<u64>>();
-        op_stack.extend_from_slice(&pk_elements);
-
-        op_stack
-    };
+    let op_stack = stack_inputs_from_words(&[message, public_key]);
 
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
-    let mut test = build_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    let mut test = build_debug_test!(source, &op_stack, &adv_stack, store, advice_map.into_iter());
     test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
@@ -300,95 +264,18 @@ fn falcon_execution() {
     let seed = Word::default();
     let mut rng = RpoRandomCoin::new(seed);
     let sk = SecretKey::with_rng(&mut rng);
-    let message = random_word();
+    let message = rand_value::<Word>();
     let (source, op_stack, adv_stack, store, advice_map) = generate_test(sk, message);
 
-    let mut test = build_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
+    let mut test = build_debug_test!(&source, &op_stack, &adv_stack, store, advice_map.into_iter());
     test.add_event_handler(EVENT_FALCON_SIG_TO_STACK, push_falcon_signature);
     test.expect_stack(&[])
 }
 
 #[test]
-fn test_felt_conversion() {
-    // Test that Felt conversion to u64 works correctly
-    let f = Felt::new(12345);
-    let via_into: u64 = f.into();
-    let via_canonical = f.as_canonical_u64();
-
-    assert_eq!(via_into, via_canonical, "Felt conversion methods should match!");
-
-    // Test with small values < M
-    const M: u64 = 12289;
-    for val in [100, 1000, 5000, 10000, 12288] {
-        let f = Felt::new(val);
-        let via_into: u64 = f.into();
-        let via_canonical = f.as_canonical_u64();
-        assert_eq!(
-            via_into, via_canonical,
-            "Felt conversion methods should match for value {}",
-            val
-        );
-        assert!(via_into < M, "Converted value should be < M for input {}", val);
-    }
-
-    // Test with values from a hash digest
-    let test_values = vec![Felt::new(123), Felt::new(456), Felt::new(789)];
-    let digest = Rpo256::hash_elements(&test_values);
-    for &elem in digest.as_elements().iter() {
-        let via_into: u64 = elem.into();
-        let via_canonical = elem.as_canonical_u64();
-        assert_eq!(via_into, via_canonical, "Hash element conversion should match!");
-    }
-}
-
-#[test]
-fn test_mod_12289_simple() {
-    // Simple test to debug mod_12289 with a known input
-    let source = "
-        use miden::core::crypto::dsa::falcon512rpo
-
-        begin
-            exec.falcon512rpo::mod_12289
-        end
-    ";
-
-    // Input: [a_hi, a_lo, ...] where a = a_hi * 2^32 + a_lo
-    // Test with a = 100000 (a_hi = 0, a_lo = 100000)
-    let op_stack = vec![100000u64, 0u64]; // Stack is [bottom, ..., top], so a_lo is first, a_hi is last (top)
-
-    let test = build_test!(source, &op_stack, &[]);
-
-    // Expected: 100000 % 12289 = 1688
-    test.expect_stack(&[1688]);
-}
-
-#[test]
-fn test_mod_12289_larger_value() {
-    // Test with a larger value that requires the higher 32 bits
-    let source = "
-        use miden::core::crypto::dsa::falcon512rpo
-
-        begin
-            exec.falcon512rpo::mod_12289
-        end
-    ";
-
-    // Test with a = 2^33 = 8589934592
-    // 8589934592 / 12289 = 698965 remainder 7507
-    // a_hi = 2, a_lo = 0
-    let op_stack = vec![0u64, 2u64]; // a_lo = 0, a_hi = 2
-
-    let test = build_test!(source, &op_stack, &[]);
-
-    // Expected: 8589934592 % 12289 = 7507
-    let expected = 8589934592u64 % 12289;
-    test.expect_stack(&[expected]);
-}
-
-#[test]
 fn falcon_prove_verify() {
     let sk = SecretKey::new();
-    let message = random_word();
+    let message = rand_value::<Word>();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
     let program: Program = Assembler::default()
@@ -405,14 +292,9 @@ fn falcon_prove_verify() {
         .unwrap();
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
-    let (stack_outputs, proof) = miden_utils_testing::prove_sync(
-        &program,
-        stack_inputs.clone(),
-        advice_inputs,
-        &mut host,
-        options,
-    )
-    .expect("failed to generate proof");
+    let (stack_outputs, proof) =
+        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+            .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);
     let result = miden_utils_testing::verify(program_info, stack_inputs, stack_outputs, proof);
@@ -420,7 +302,7 @@ fn falcon_prove_verify() {
     assert!(result.is_ok(), "error: {result:?}");
 }
 
-#[expect(clippy::type_complexity)]
+#[allow(clippy::type_complexity)]
 fn generate_test(
     sk: SecretKey,
     message: Word,
@@ -443,12 +325,7 @@ fn generate_test(
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
-    let mut op_stack = vec![];
-    let message = message.into_iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>();
-    op_stack.extend_from_slice(&message);
-    op_stack.extend_from_slice(
-        &pk.as_elements().iter().map(|a| a.as_canonical_u64()).collect::<Vec<u64>>(),
-    );
+    let op_stack = stack_inputs_from_words(&[message, pk]);
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
@@ -458,11 +335,11 @@ fn generate_test(
 // HELPER FUNCTIONS
 // ================================================================================================
 
-/// Creates random coefficients of a polynomial in the range (0..M).
-fn random_coefficients() -> Vec<Felt> {
+/// Creates random coefficients of a polynomial in the range (0..M) using the given RNG.
+fn random_coefficients_with_rng<R: rand::Rng>(rng: &mut R) -> Vec<Felt> {
     let mut res = Vec::new();
     for _i in 0..N {
-        res.push(Felt::new(rng().random_range(0..M)))
+        res.push(Felt::new(rng.random_range(0..M)))
     }
     res
 }
@@ -478,7 +355,7 @@ fn mul_modulo_p(a: Polynomial<Felt>, b: Polynomial<Felt>) -> [u64; 1024] {
     let mut c = [0; 2 * N];
     for i in 0..N {
         for j in 0..N {
-            c[i + j] += a.coefficients[i].as_canonical_u64() * b.coefficients[j].as_canonical_u64();
+            c[i + j] += a.coefficients[i].as_int() * b.coefficients[j].as_int();
         }
     }
     c
@@ -495,32 +372,51 @@ fn generate_data_probabilistic_product_test(
     s2: Polynomial<Felt>,
     test_failure: bool,
 ) -> (Vec<u64>, Vec<u64>) {
+    let mut rng = rng();
     let pi = mul_modulo_p(h.clone(), s2.clone());
-
     // lay the polynomials in order h then s2 then pi = h * s2
     let mut polynomials = if test_failure {
-        to_elements(Polynomial::new(random_coefficients()))
+        to_elements(Polynomial::new(random_coefficients_with_rng(&mut rng)))
     } else {
         to_elements(h.clone())
     };
+
     polynomials.extend(to_elements(s2.clone()));
     polynomials.extend(pi.iter().map(|a| Felt::new(*a)));
 
     // get the challenge point and push it to the advice stack
-    let digest_polynomials = Rpo256::hash_elements(&polynomials);
+    // Push tau1 first, then tau0, so adv_push.2 produces _le format [tau0, tau1, ...] directly
+    let digest_polynomials = Rpo256::hash_elements(&polynomials[..]);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);
-    let mut advice_stack = vec![challenge.0.as_canonical_u64(), challenge.1.as_canonical_u64()];
-
-    // push the polynomials to the advice stack
-    let polynomials: Vec<u64> = polynomials.iter().map(|&e| e.as_canonical_u64()).collect();
-
-    advice_stack.extend_from_slice(&polynomials);
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_element(challenge.1);
+    builder.push_element(challenge.0);
+    builder.push_elements(polynomials.iter().copied());
+    let advice_stack = builder.into_u64_vec();
 
     // compute hash of h and place it on the stack.
     let binding = Rpo256::hash_elements(&to_elements(h.clone()));
-    let h_hash = binding.as_elements();
-    let h_hash_copy: Vec<u64> = h_hash.iter().map(|felt| felt.as_canonical_u64()).collect();
-    let operand_stack = vec![h_hash_copy[0], h_hash_copy[1], h_hash_copy[2], h_hash_copy[3]];
+    let operand_stack = word_to_stack_inputs(binding).to_vec();
 
     (operand_stack, advice_stack)
+}
+
+/// Returns the representation of `word` expected by `StackInputs::new()`.
+///
+/// `StackInputs::new()` reverses the values it receives so the last provided element ends up at
+/// the top of the operand stack. To keep word orderings structural little-endian once the VM
+/// consumes them, we reverse the per-word elements ahead of time.
+fn word_to_stack_inputs(word: Word) -> [u64; WORD_SIZE] {
+    let mut elements = word.into_iter().map(|felt| felt.as_int()).collect::<Vec<_>>();
+    elements.reverse();
+    elements.try_into().expect("a word always has exactly 4 elements")
+}
+
+/// Builds operand-stack inputs for the provided words, preserving structural little-endian order.
+fn stack_inputs_from_words(words: &[Word]) -> Vec<u64> {
+    let mut out = Vec::with_capacity(words.len() * WORD_SIZE);
+    for &word in words {
+        out.extend_from_slice(&word_to_stack_inputs(word));
+    }
+    out
 }

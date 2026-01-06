@@ -1451,12 +1451,16 @@ fn test_dyn_node_decoding() {
 
     let program = Program::new(mast_forest.into(), program_root_node_id);
 
+    // Stack inputs are reversed by FastProcessor::new(), so to get the correct digest in memory
+    // after MStoreW (which uses LE layout), we pass digest elements in reverse order.
+    // Input: [d3, d2, d1, d0, 40] -> After reversal: [40, d0, d1, d2, d3] on stack
+    // MStoreW stores [d0, d1, d2, d3] to memory, which is the correct Word layout.
     let (trace, trace_len) = build_dyn_trace_helper(
         &[
-            foo_root_node.digest()[0].as_canonical_u64(),
-            foo_root_node.digest()[1].as_canonical_u64(),
-            foo_root_node.digest()[2].as_canonical_u64(),
             foo_root_node.digest()[3].as_canonical_u64(),
+            foo_root_node.digest()[2].as_canonical_u64(),
+            foo_root_node.digest()[1].as_canonical_u64(),
+            foo_root_node.digest()[0].as_canonical_u64(),
             FOO_ROOT_NODE_ADDR,
         ],
         &program,

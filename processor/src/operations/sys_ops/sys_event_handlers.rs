@@ -76,7 +76,7 @@ fn insert_mem_values_into_adv_map(
         values.push(mem_value);
     }
 
-    let key = process.get_stack_word_be(1);
+    let key = process.get_stack_word_le(1);
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
@@ -88,30 +88,31 @@ fn insert_mem_values_into_adv_map(
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, B, A, ...]
+///   Operand stack: [event_id, A, B, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
+///   Advice map: {KEY: [B, A]}
 /// ```
 ///
-/// Where `KEY` is computed as `hash(A || B, domain)`, where `domain` is provided via the immediate
-/// value.
+/// Where A is the first word after event_id (positions 1-4) and B is the second (positions 5-8).
+/// KEY is computed as `hash(B || A, domain)`, which matches `swapw hmerge` on stack `[A, B, ...]`.
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
     domain: Felt,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    // get the top two words from the stack and hash them to compute the key value
-    let word0 = process.get_stack_word_be(1);
-    let word1 = process.get_stack_word_be(5);
-    let key = Rpo256::merge_in_domain(&[word1, word0], domain);
+    // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
+    let a = process.get_stack_word_le(1);
+    let b = process.get_stack_word_le(5);
 
-    // build a vector of values from the two word and insert it into the advice map under the
-    // computed key
+    // Hash as [B, A] to match `swapw hmerge` behavior.
+    let key = Rpo256::merge_in_domain(&[b, a], domain);
+
+    // Store values as [B, A] for LIFO retrieval back to [A, B] order.
     let mut values = Vec::with_capacity(2 * WORD_SIZE);
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(b));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(a));
 
     process
         .advice_provider_mut()
@@ -124,35 +125,34 @@ fn insert_hdword_into_adv_map(
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, D, C, B, A, ...]
+///   Operand stack: [event_id, A, B, C, D, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [A', B', C', D'])}
+///   Advice map: {KEY: [A, B, C, D]} (16 elements)
 /// ```
 ///
-/// Where:
-/// - `KEY` is the hash computed as `hash(hash(hash(A || B) || C) || D)` with `domain = 0`.
-/// - `A'` (and other words with `'`) is the `A` word with the reversed element order: `A = [a3, a2,
-///   a1, a0]`, `A' = [a0, a1, a2, a3]`.
+/// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
+/// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
 fn insert_hqword_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    // get the top four words from the stack and hash them to compute the key value
-    let word0 = process.get_stack_word_be(1);
-    let word1 = process.get_stack_word_be(5);
-    let word2 = process.get_stack_word_be(9);
-    let word3 = process.get_stack_word_be(13);
-    let key = Rpo256::hash_elements(&[*word3, *word2, *word1, *word0].concat());
+    // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
+    let a = process.get_stack_word_le(1);
+    let b = process.get_stack_word_le(5);
+    let c = process.get_stack_word_le(9);
+    let d = process.get_stack_word_le(13);
 
-    // build a vector of values from the two word and insert it into the advice map under the
-    // computed key
+    // Hash in natural stack order [A, B, C, D].
+    let key = Rpo256::hash_elements(&[*a, *b, *c, *d].concat());
+
+    // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word3));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word2));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word1));
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(word0));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(a));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(b));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(c));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(d));
 
     process
         .advice_provider_mut()
@@ -160,25 +160,27 @@ fn insert_hqword_into_adv_map(
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
 }
 
-/// Reads three words from the operand stack and inserts the top two words into the advice map
+/// Reads three words from the operand stack and inserts the rate portion into the advice map
 /// under the key defined by applying an RPO permutation to all three words.
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, B, A, C, ...]
+///   Operand stack: [event_id, RATE1, RATE2, CAP, ...]
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
+///   Advice map: {KEY: [RATE1, RATE2]} (8 elements from rate portion)
 /// ```
 ///
-/// Where `KEY` is computed by extracting the digest elements from `hperm([C, A, B])`. For example,
-/// if `C` is `[0, d, 0, 0]`, `KEY` will be set as `hash(A || B, d)`.
+/// Where `KEY` is computed by applying `hperm` to the 12-element state and extracting the digest.
+/// The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
 fn insert_hperm_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    // read the state from the stack
+    // Read the 12-element state from stack positions 1-12.
+    // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
+    // We read in reverse order to build the state array.
     let mut state = [
         process.get_stack_item(12),
         process.get_stack_item(11),
@@ -194,10 +196,10 @@ fn insert_hperm_into_adv_map(
         process.get_stack_item(1),
     ];
 
-    // get the values to be inserted into the advice map from the state
+    // Extract the rate portion (first 8 elements) as values to store.
     let values = state[Rpo256::RATE_RANGE].to_vec();
 
-    // apply the permutation to the state and extract the key from it
+    // Apply permutation and extract digest as the key.
     Rpo256::apply_permutation(&mut state);
     let key = Word::new(
         state[Rpo256::DIGEST_RANGE]
@@ -232,8 +234,8 @@ fn merge_merkle_nodes(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // fetch the arguments from the stack
-    let lhs = process.get_stack_word_be(5);
-    let rhs = process.get_stack_word_be(1);
+    let lhs = process.get_stack_word_le(5);
+    let rhs = process.get_stack_word_le(1);
 
     // perform the merge
     process
@@ -268,15 +270,20 @@ fn copy_merkle_node_to_adv_stack(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
+    // Stack at this point (for `mtree_get` / `mtree_set`) is `[event_id, d, i, R, ...]` where:
+    // - `d` is depth,
+    // - `i` is index,
+    // - `R` is the Merkle root as it appears on the operand stack.
     let depth = process.get_stack_item(1);
     let index = process.get_stack_item(2);
-    let root = process.get_stack_word_be(3);
+    // Read the root in structural (little-endian) word order from the operand stack.
+    let root = process.get_stack_word_le(3);
 
-    let node = process
+    let mut node = process
         .advice_provider()
         .get_tree_node(root, depth, index)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
-
+    node.reverse();
     process.advice_provider_mut().push_stack_word(&node);
 
     Ok(())
@@ -310,7 +317,7 @@ fn copy_map_value_to_adv_stack(
     pad_to: u8,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let key = process.get_stack_word_be(1);
+    let key = process.get_stack_word_le(1);
 
     process
         .advice_provider_mut()
@@ -340,7 +347,7 @@ fn copy_map_value_length_to_adv_stack(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let key = process.get_stack_word_be(1);
+    let key = process.get_stack_word_le(1);
     let process_clk = process.clk();
     let advice_provider = process.advice_provider_mut();
 
@@ -374,7 +381,7 @@ fn copy_map_value_length_to_adv_stack(
 ///   Advice stack: [has_mapkey, ...]
 /// ```
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
-    let map_key = process.get_stack_word_be(1);
+    let map_key = process.get_stack_word_le(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from_bool(presence_flag));
@@ -382,20 +389,21 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     Ok(())
 }
 
-/// Given an element in a quadratic extension field on the top of the stack (i.e., a0, b1),
-/// computes its multiplicative inverse and push the result onto the advice stack.
+/// Given an element in a quadratic extension field on the top of the stack (LE convention:
+/// low coefficient closer to top), computes its multiplicative inverse and pushes the result
+/// onto the advice stack.
 ///
 /// ```text
-/// Inputs:
-///   Operand stack: [event_id, a1, a0, ...]
+/// Inputs (LE convention):
+///   Operand stack: [event_id, a0, a1, ...] where a = a0 + a1*x
 ///   Advice stack: [...]
 ///
 /// Outputs:
-///   Advice stack: [b0, b1...]
+///   Advice stack: [..., b0, b1] where b1 is on top
 /// ```
 ///
-/// Where `(b0, b1)` is the multiplicative inverse of the extension field element `(a0, a1)` at the
-/// top of the stack.
+/// Where `(b0, b1)` is the multiplicative inverse of the extension field element `(a0, a1)`.
+/// After two AdvPops, the operand stack will have [b0, b1, ...] in LE format.
 ///
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
@@ -403,18 +411,25 @@ fn push_ext2_inv_result(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let coef0 = process.get_stack_item(2);
-    let coef1 = process.get_stack_item(1);
+    // LE convention: stack = [event_id, a0, a1, ...] with event_id on top, a0 (low) at position 1
+    // Read from positions 1 and 2 (skipping event_id at position 0)
+    let coef0 = process.get_stack_item(1); // low coefficient
+    let coef1 = process.get_stack_item(2); // high coefficient
 
-    let element = QuadFelt::new_complex(coef0, coef1);
+    let element = QuadFelt::from_basis_coefficients_fn(|i: usize| [coef0, coef1][i]);
     if element == QuadFelt::ZERO {
         return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
     }
     let result = element.inverse();
     let result = result.as_basis_coefficients_slice();
 
-    process.advice_provider_mut().push_stack(result[1]);
+    // Push for LE output: after two AdvPops, result should be [b0', b1', ...] with b0' on top
+    // AdvPop pops from advice top, so push result[0] first (goes to bottom), result[1] second (on
+    // top) After AdvPop #1: gets result[1], stack becomes [result[1], b0, b1, ...]
+    // After AdvPop #2: gets result[0], stack becomes [result[0], result[1], b0, b1, ...]
+    // This gives [b0', b1', ...] which is LE!
     process.advice_provider_mut().push_stack(result[0]);
+    process.advice_provider_mut().push_stack(result[1]);
     Ok(())
 }
 

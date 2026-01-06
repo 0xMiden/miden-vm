@@ -123,8 +123,8 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let output = test.execute().unwrap();
 
     let stack = output.stack_outputs();
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = stack.get_stack_word_be(4).unwrap();
+    let commitment = stack.get_stack_word_le(0).unwrap();
+    let tag = stack.get_stack_word_le(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment = KeccakPrecompile.verify(preimage.as_ref()).unwrap();
     assert_eq!(precompile_commitment, verifier_commitment);

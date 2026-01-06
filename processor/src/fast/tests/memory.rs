@@ -58,10 +58,10 @@ fn test_mloadw_success() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
         let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
+        // LE convention: memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
             stack_outputs.stack_truncated(4),
-            // memory order is the reverse from the stack order
-            &[word_at_addr[3], word_at_addr[2], word_at_addr[1], word_at_addr[0]]
+            &[word_at_addr[0], word_at_addr[1], word_at_addr[2], word_at_addr[3]]
         );
     }
 
@@ -84,23 +84,25 @@ fn test_mloadw_success() {
 fn test_mstorew_success() {
     let mut host = DefaultHost::default();
     let addr = Felt::from(40_u32);
-    let word_to_store = [1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()];
+    let word_to_store = Word::from([Felt::from(1_u32), 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     let ctx = 0_u32.into();
     let clk = 0_u32.into();
 
     // Store the word at address 40
+    // LE convention: stack [word[0], word[1], word[2], word[3], addr] with word[0] at position 1
+    // Push in reverse order so word[0] ends up at position 1 after pushing addr
     let mut processor = FastProcessor::new(&[
-        word_to_store[0],
-        word_to_store[1],
-        word_to_store[2],
         word_to_store[3],
+        word_to_store[2],
+        word_to_store[1],
+        word_to_store[0],
         addr,
     ]);
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
-    assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store.into());
+    assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store);
 }
 
 #[rstest]
@@ -184,19 +186,19 @@ fn test_mstream() {
     let program = simple_program_with_ops(vec![Operation::MStream]);
     let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
-    // Ensure that Operation::MStream correctly reads the values on the stack
+    // LE convention: word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
+    // Word elements in LE order: word[0] at lowest position
     assert_eq!(
         stack_outputs.stack_truncated(8),
-        // memory order is the reverse from the stack order
         &[
-            word_at_addr_44[3],
-            word_at_addr_44[2],
-            word_at_addr_44[1],
-            word_at_addr_44[0],
-            word_at_addr_40[3],
-            word_at_addr_40[2],
+            word_at_addr_40[0],
             word_at_addr_40[1],
-            word_at_addr_40[0]
+            word_at_addr_40[2],
+            word_at_addr_40[3],
+            word_at_addr_44[0],
+            word_at_addr_44[1],
+            word_at_addr_44[2],
+            word_at_addr_44[3]
         ]
     );
 }

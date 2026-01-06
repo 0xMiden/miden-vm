@@ -3602,7 +3602,7 @@ expression: fast_host.snapshots()
     ],
     22: [
         ProcessStateSnapshot {
-            clk: 354,
+            clk: 362,
             ctx: 0,
             stack_state: [
                 0,

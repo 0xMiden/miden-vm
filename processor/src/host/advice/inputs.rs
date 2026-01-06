@@ -117,6 +117,25 @@ impl AdviceStackBuilder {
         Self::default()
     }
 
+    /// Pushes a single element onto the advice stack.
+    ///
+    /// Elements are consumed in FIFO order: first pushed = first consumed by advice operations.
+    pub fn push_element(&mut self, value: Felt) -> &mut Self {
+        self.stack.push_back(value);
+        self
+    }
+
+    /// Extends the advice stack with raw elements (already ordered top-to-bottom).
+    ///
+    /// Elements are consumed in FIFO order: first element in iter = first consumed.
+    pub fn push_elements<I>(&mut self, values: I) -> &mut Self
+    where
+        I: IntoIterator<Item = Felt>,
+    {
+        self.stack.extend(values);
+        self
+    }
+
     /// Adds elements for consumption by `adv_push.n` instructions.
     ///
     /// After `adv_push.n`, the operand stack will have `slice[0]` on top.
@@ -148,23 +167,28 @@ impl AdviceStackBuilder {
 
     /// Adds a word for consumption by `padw adv_loadw`.
     ///
-    /// After `adv_loadw`, the operand stack will have `word[0]` on top.
+    /// After `adv_loadw`, the operand stack will have the structural word loaded directly.
+    /// Use `reversew` afterward to convert to canonical (little-endian) order.
     ///
     /// # How it works
     ///
-    /// `adv_loadw` uses `pop_stack_word()` which has an internal reversal when constructing
-    /// the Word. This method does NOT reverse the input, letting `pop_stack_word()`'s reversal
-    /// produce the correct result.
+    /// The `adv_loadw` instruction:
+    /// 1. Calls `pop_stack_word()` which pops 4 elements from front and creates
+    ///    Word::new([e0,e1,e2,e3])
+    /// 2. Places the word on the operand stack with word[0] on top, word[1] at position 1, etc.
+    ///
+    /// Elements are pushed without reversal since `adv_loadw` loads the structural word directly.
     ///
     /// # Example
     ///
     /// ```ignore
     /// builder.push_word_adv_loadw([w0, w1, w2, w3].into());
-    /// // MASM: padw adv_loadw
-    /// // Result: operand stack = [w0, w1, w2, w3, ...] with w0 on top
+    /// // MASM: padw adv_loadw reversew
+    /// // Result: operand stack = [w3, w2, w1, w0, ...] with w3 on top (canonical LE order)
     /// ```
     pub fn push_word_adv_loadw(mut self, word: Word) -> Self {
-        // Add word elements as-is (no reversal needed) to the back of the stack
+        // Push elements without reversal. adv_loadw loads the structural word directly,
+        // so a `reversew` is needed afterward to get canonical order on the operand stack.
         for elem in word.iter() {
             self.stack.push_back(*elem);
         }
@@ -242,11 +266,7 @@ impl AdviceStackBuilder {
 
     /// Builds the `AdviceInputs` with additional map and store data.
     pub fn build_with(self, map: AdviceMap, store: MerkleStore) -> AdviceInputs {
-        AdviceInputs {
-            stack: self.stack.into(),
-            map,
-            store,
-        }
+        AdviceInputs { stack: self.stack.into(), map, store }
     }
 
     /// Builds just the advice stack as `Vec<u64>` for use with `build_test!` macro.
@@ -254,6 +274,29 @@ impl AdviceStackBuilder {
     /// This is a convenience method that avoids needing to modify the test infrastructure.
     pub fn build_vec_u64(self) -> Vec<u64> {
         self.stack.into_iter().map(|f| f.as_canonical_u64()).collect()
+    }
+
+    /// Alias for `build_vec_u64` for compatibility with existing tests.
+    pub fn into_u64_vec(self) -> Vec<u64> {
+        self.build_vec_u64()
+    }
+
+    /// Consumes the builder and returns the accumulated elements as `Vec<Felt>`.
+    pub fn into_elements(self) -> Vec<Felt> {
+        self.stack.into_iter().collect()
+    }
+
+    /// Adds a word for consumption by `adv_push.4`.
+    ///
+    /// After `adv_push.4`, the operand stack will have `word[0]` on top.
+    /// This is a convenience wrapper around `push_slice_adv_push_n`.
+    pub fn push_word_for_adv_push4(&mut self, word: &Word) {
+        // adv_push.4 pops 4 elements one-by-one. We need word[0] to end up on top.
+        // push_slice_adv_push_n handles the reversal, so we use the same logic.
+        let arr: [Felt; 4] = (*word).into();
+        for elem in arr.iter().rev() {
+            self.stack.push_back(*elem);
+        }
     }
 }
 
@@ -282,7 +325,10 @@ impl Deserializable for AdviceInputs {
 mod tests {
     use alloc::vec::Vec;
 
-    use miden_core::{Felt, Word, utils::{Deserializable, Serializable}};
+    use miden_core::{
+        Felt, Word,
+        utils::{Deserializable, Serializable},
+    };
 
     use super::AdviceStackBuilder;
     use crate::AdviceInputs;
@@ -320,9 +366,7 @@ mod tests {
         let b = Felt::new(2);
         let c = Felt::new(3);
 
-        let advice = AdviceStackBuilder::new()
-            .push_slice_adv_push_n(&[a, b, c])
-            .build();
+        let advice = AdviceStackBuilder::new().push_slice_adv_push_n(&[a, b, c]).build();
 
         // Builder stack is [c, b, a] with c on top (index 0)
         // This becomes AdviceInputs.stack = [c, b, a]
@@ -335,9 +379,7 @@ mod tests {
         // Input: [w0, w1, w2, w3] -> Builder stack: [w0, w1, w2, w3] (w0 on top)
         let word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
 
-        let advice = AdviceStackBuilder::new()
-            .push_word_adv_loadw(word)
-            .build();
+        let advice = AdviceStackBuilder::new().push_word_adv_loadw(word).build();
 
         // Builder stack is [w0, w1, w2, w3] with w0 on top
         assert_eq!(advice.stack, vec![Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
@@ -349,16 +391,20 @@ mod tests {
         let word0: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
         let word1: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
 
-        let advice = AdviceStackBuilder::new()
-            .push_dword_adv_pipe([word0, word1])
-            .build();
+        let advice = AdviceStackBuilder::new().push_dword_adv_pipe([word0, word1]).build();
 
         // Builder stack is [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
         assert_eq!(
             advice.stack,
             vec![
-                Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4),
-                Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)
+                Felt::new(1),
+                Felt::new(2),
+                Felt::new(3),
+                Felt::new(4),
+                Felt::new(5),
+                Felt::new(6),
+                Felt::new(7),
+                Felt::new(8)
             ]
         );
     }
@@ -368,9 +414,7 @@ mod tests {
         // push_slice_adv_pipe does NOT reverse (but requires 8-alignment)
         let slice: Vec<Felt> = (1..=8).map(Felt::new).collect();
 
-        let advice = AdviceStackBuilder::new()
-            .push_slice_adv_pipe(&slice)
-            .build();
+        let advice = AdviceStackBuilder::new().push_slice_adv_pipe(&slice).build();
 
         assert_eq!(advice.stack, slice);
     }
@@ -380,9 +424,7 @@ mod tests {
     fn test_builder_push_slice_adv_pipe_panics_on_misalignment() {
         let slice: Vec<Felt> = (1..=7).map(Felt::new).collect();
 
-        AdviceStackBuilder::new()
-            .push_slice_adv_pipe(&slice)
-            .build();
+        AdviceStackBuilder::new().push_slice_adv_pipe(&slice).build();
     }
 
     #[test]
@@ -423,9 +465,6 @@ mod tests {
         // So second should go BELOW first in the stack
         // Builder stack after first: [2, 1]
         // Builder stack after second: [2, 1, 4, 3]
-        assert_eq!(
-            advice.stack,
-            vec![Felt::new(2), Felt::new(1), Felt::new(4), Felt::new(3)]
-        );
+        assert_eq!(advice.stack, vec![Felt::new(2), Felt::new(1), Felt::new(4), Felt::new(3)]);
     }
 }

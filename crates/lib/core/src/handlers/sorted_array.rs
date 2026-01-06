@@ -86,8 +86,8 @@ fn push_lowerbound_result(
     // only support sorted arrays (stride = 4) and sorted key-value arrays (stride = 8)
     assert!(stride == 4 || stride == 8);
 
-    // Read inputs from the stack
-    let key = LexicographicWord::new(process.get_stack_word_be(KEY_OFFSET));
+    // Read inputs from the stack; keys are provided in structural / little-endian order.
+    let key = word_to_search_key(process.get_stack_word_le(KEY_OFFSET), key_size);
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
@@ -117,7 +117,7 @@ fn push_lowerbound_result(
 
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
-        return Ok(vec![AdviceMutation::extend_stack(vec![
+        return Ok(vec![AdviceMutation::extend_stack_for_adv_push(vec![
             Felt::from_bool(false),
             Felt::from(addr_range.end),
         ])]);
@@ -160,7 +160,7 @@ fn push_lowerbound_result(
         previous_word = word;
     }
 
-    Ok(vec![AdviceMutation::extend_stack(vec![
+    Ok(vec![AdviceMutation::extend_stack_for_adv_push(vec![
         Felt::from_bool(was_key_found),
         Felt::from(result.unwrap_or(addr_range.end)),
     ])])
@@ -170,13 +170,14 @@ fn push_lowerbound_result(
 ///
 /// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
 /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
-///   elements zeroized.
+///   elements (word[2] and word[3]) zeroized, keeping only the most significant half (word[0] and
+///   word[1]) for comparison.
 fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
     match key_size {
         KeySize::Full => LexicographicWord::new(word),
         KeySize::Half => {
-            word[0] = Felt::ZERO;
-            word[1] = Felt::ZERO;
+            word[2] = Felt::ZERO;
+            word[3] = Felt::ZERO;
 
             LexicographicWord::new(word)
         },

@@ -5,7 +5,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, ZERO, field::PrimeField64};
+use miden_core::{EventName, ZERO};
 use miden_processor::{AdviceMutation, EventError, ProcessState};
 
 use crate::handlers::u64_to_u32_elements;
@@ -37,8 +37,8 @@ pub const FALCON_DIV_EVENT_NAME: EventName =
 /// - Returns an error if the divisor is ZERO.
 /// - Returns an error if either a0 or a1 is not a u32.
 pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    let dividend_hi = process.get_stack_item(1).as_canonical_u64();
-    let dividend_lo = process.get_stack_item(2).as_canonical_u64();
+    let dividend_hi = process.get_stack_item(1).as_int();
+    let dividend_lo = process.get_stack_item(2).as_int();
 
     if dividend_lo > u32::MAX.into() {
         return Err(FalconDivError::InputNotU32 {
@@ -65,10 +65,12 @@ pub fn handle_falcon_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, 
     // Assertion from the original code: r_hi should always be zero for Falcon modulus
     assert_eq!(r_hi, ZERO);
 
-    // Create mutations to extend the advice stack with the result.
-    // The values are pushed in the order: r_lo, q_lo, q_hi
-    let mutation = AdviceMutation::extend_stack([r_lo, q_lo, q_hi]);
-    Ok(vec![mutation])
+    // `mod_12289` consumes the quotient via `adv_push.2` followed by the remainder via
+    // `adv_push.1`. Push the remainder first (so it stays below the quotient) and rely on
+    // `extend_stack_for_adv_push` to take care of the per-word little-endian layout.
+    let remainder = AdviceMutation::extend_stack_for_adv_push([r_lo]);
+    let quotient = AdviceMutation::extend_stack_for_adv_push([q_lo, q_hi]);
+    Ok(vec![remainder, quotient])
 }
 
 // ERROR TYPES

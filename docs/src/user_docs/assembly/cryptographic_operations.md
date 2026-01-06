@@ -11,9 +11,9 @@ Miden assembly provides a set of instructions for performing common cryptographi
 
 | Instruction                      | Stack_input        | Stack_output      | Notes                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| hash <br /> - *(20 cycles)*        | [A, ...]           | [B, ...]          | $\{B\} \leftarrow hash(A)$ <br /> where, $hash()$ computes a 1-to-1 Rescue Prime Optimized hash.                                                                                                                                                                                                                                                         |
-| hperm  <br /> - *(1 cycle)*        | [C, B, A, ...]     | [F, E, D, ...]    | $\{D, E, F\} \leftarrow permute(A, B, C)$ <br /> Performs a Rescue Prime Optimized permutation on the top 3 words of the operand stack, where the top 2 words elements are the rate (words C and B), the deepest word is the capacity (word A), the digest output is the word E.                                                                         |
-| hmerge  <br /> - *(16 cycles)*     | [B, A, ...]        | [C, ...]          | $C \leftarrow hash(A,B)$ <br /> where, $hash()$ computes a 2-to-1 Rescue Prime Optimized hash.                                                                                                                                                                                                                                                           |
+| hash <br /> - *(19 cycles)*        | [A, ...]           | [B, ...]          | $\{B\} \leftarrow hash(A)$ <br /> where, $hash()$ computes a 1-to-1 Rescue Prime Optimized hash.                                                                                                                                                                                                                                                         |
+| hperm  <br /> - *(1 cycle)*        | [R0, R1, C, ...]   | [R0', R1', C', ...]| $\{R0', R1', C'\} \leftarrow permute(R0, R1, C)$ <br /> Performs a Rescue Prime Optimized permutation on the top 3 words of the operand stack, where the top 2 words are the rate (R0 on top, R1 second), and the third word is the capacity (C). The digest is in R1' after permutation.                                                                         |
+| hmerge  <br /> - *(16 cycles)*     | [A, B, ...]        | [C, ...]          | $C \leftarrow hash(A,B)$ <br /> where, $hash()$ computes a 2-to-1 Rescue Prime Optimized hash.                                                                                                                                                                                                                                                           |
 | mtree_get  <br /> - *(9 cycles)*   | [d, i, R, ...]     | [V, R, ...]       | Fetches the node value from the advice provider and runs a verification equivalent to `mtree_verify`, returning the value if succeeded.                                                                                                                                                                                                                |
 | mtree_set <br /> - *(29 cycles)*   | [d, i, R, V', ...] | [V, R', ...]      | Updates a node in the Merkle tree with root $R$ at depth $d$ and index $i$ to value $V'$. $R'$ is the Merkle root of the resulting tree and $V$ is old value of the node. Merkle tree with root $R$ must be present in the advice provider, otherwise execution fails. At the end of the operation the advice provider will contain both Merkle trees. |
 | mtree_merge <br /> - *(16 cycles)* | [R, L, ...]        | [M, ...]          | Merges two Merkle trees with the provided roots R (right), L (left) into a new Merkle tree with root M (merged). The input trees are retained in the advice provider.                                                                                                                                                                                  |
@@ -39,29 +39,29 @@ As mentioned above, `hperm` instruction applies a single RPO permutation to the 
 - `RATE` - two words specifying the data to be absorbed into the sponge.
 - `CAPACITY` - a single word that maintains the state of the sponge across permutations.
 
-The `hperm` instruction expects the sponge to be on the stacks as follows:
+The `hperm` instruction expects the sponge state to be on the stack as follows:
 
 ```
-[RATE1, RATE0, CAPACITY]
+[R0, R1, C, ...]
 ```
-Note that this is in the "stack-order" - i.e., the first element of the sponge is the deepest in the stack.
+Where R0 (first rate word) is on top, R1 (second rate word) is second, and C (capacity) is third. After permutation, the digest is in R1'.
 
 According to the RPO specifications, the capacity should be initialized as follows:
 
-- The first capacity element (i.e., `stack[11]`) should be initialized to $n \mod 8$ where $n$ is the number of elements to be hashed across all permutations. For example, if we need to hash $100$ elements, the first capacity element must be initialized to $4$.
+- The first capacity element (i.e., `stack[8]`, the top element of word C) should be initialized to $n \mod 8$ where $n$ is the number of elements to be hashed across all permutations. For example, if we need to hash $100$ elements, the first capacity element must be initialized to $4$.
 - All other capacity elements must be initialized to zeros.
 
 The above rule is convenient as when we need to hash the number of elements divisible by $8$, all capacity elements should be initialized to zeros.
 
-Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack toward the "front" of the sponge (i.e., the deeper portion) and then pad the remaining elements with zeros. For example, if we wanted to hash 3 elements (e.g., `a`, `b`, `c`), we would arrange the stack as follows before executing the `hperm` instruction:
+Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack and pad the remaining elements with zeros. For example, if we wanted to hash 3 elements (e.g., `a`, `b`, `c`), we would arrange the stack as follows before executing the `hperm` instruction:
 
 ```
-[[0, 0, 0, 0], [0, c, b, a], [0, 0, 0, 3]]
+[R0, R1, C] = [[a, b, c, 0], [0, 0, 0, 0], [3, 0, 0, 0]]
 ```
 
 If we have more than $8$ elements to absorb, we need to iteratively load the rate portion of the sponge with $8$ elements, execute `hperm`, load the next $8$ elements, execute `hperm`, etc. - until all data has been absorbed.
 
-Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking the first rate word (i.e., `RATE0`). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::rpo256::squeeze_digest`.
+Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking R1' (the second rate word after permutation). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::rpo256::squeeze_digest`.
 
 For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
 
@@ -88,8 +88,8 @@ For more examples of how `hperm` instruction is used, please see `miden::core::c
 
 Both `hash` and `hmerge` instructions are actually "macro-instructions" which are implemented using `hperm` (and other) instructions. At assembly time, these are "expanded" into the following sequences of operations:
 
-- `hash`: `push.4.0.0.0 swapw push.0 dup.7 dup.7 dup.7 hperm dropw swapw dropw`.
-- `hmerge`: `padw swapw hperm dropw swapw dropw`.
+- `hash`: `padw push.0.0.0.4 swapw.2 hperm dropw swapw dropw`.
+- `hmerge`: `padw swapw.2 swapw hperm dropw swapw dropw`.
 
 ### Circuits and polynomials
 

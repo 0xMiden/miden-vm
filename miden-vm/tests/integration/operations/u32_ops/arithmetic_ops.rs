@@ -333,35 +333,33 @@ fn u32overflowing_mul() {
 
     // --- no overflow ----------------------------------------------------------------------------
     // c = a * b and d should be unset, since there was no arithmetic overflow.
+    // Output is [lo, hi] in LE order with lo on top
     let test = build_op_test!(asm_op, &[1, 2]);
-    test.expect_stack(&[0, 2]);
+    test.expect_stack(&[2, 0]);
 
     // --- overflow once --------------------------------------------------------------------------
     // c = a * b and d = 1, since it overflows once.
     let test = build_op_test!(asm_op, &[U32_BOUND / 2, 2]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
 
     // --- multiple overflows ---------------------------------------------------------------------
     // c = a * b and d = 2, since it overflows twice.
     let test = build_op_test!(asm_op, &[U32_BOUND / 2, 4]);
-    test.expect_stack(&[2, 0]);
+    test.expect_stack(&[0, 2]);
 
     // --- random u32 values ----------------------------------------------------------------------
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
-    let (c, overflow) = a.overflowing_mul(b);
-    let d = if !overflow {
-        0
-    } else {
-        (a as u64 * b as u64) / U32_BOUND
-    };
+    let result = a as u64 * b as u64;
+    let lo = (result % U32_BOUND) as u64;
+    let hi = result / U32_BOUND;
     let test = build_op_test!(asm_op, &[a as u64, b as u64]);
-    test.expect_stack(&[d, c as u64]);
+    test.expect_stack(&[lo, hi]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let e = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[e, a as u64, b as u64]);
-    test.expect_stack(&[d, c as u64, e]);
+    test.expect_stack(&[lo, hi, e]);
 }
 
 #[test]
@@ -370,11 +368,12 @@ fn u32overflowing_madd() {
 
     // --- no overflow ----------------------------------------------------------------------------
     // d = a * b + c and e should be unset, since there was no arithmetic overflow.
+    // Output is [lo, hi] in LE order with lo on top
     let test = build_op_test!(asm_op, &[1, 0, 0]);
-    test.expect_stack(&[0, 1]);
+    test.expect_stack(&[1, 0]);
 
     let test = build_op_test!(asm_op, &[3, 1, 2]);
-    test.expect_stack(&[0, 5]);
+    test.expect_stack(&[5, 0]);
 
     // --- overflow once --------------------------------------------------------------------------
     // c = a * b and d = 1, since it overflows once
@@ -384,22 +383,22 @@ fn u32overflowing_madd() {
     // --- multiple overflows ---------------------------------------------------------------------
     // c = a * b and d = 2, since it overflows twice
     let test = build_op_test!(asm_op, &[1, U32_BOUND / 2, 4]);
-    test.expect_stack(&[2, 1]);
+    test.expect_stack(&[1, 2]);
 
     // --- random u32 values ----------------------------------------------------------------------
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let c = rand_value::<u32>();
     let madd = a as u64 * b as u64 + c as u64;
-    let d = madd % U32_BOUND;
-    let e = madd / U32_BOUND;
+    let lo = madd % U32_BOUND;
+    let hi = madd / U32_BOUND;
     let test = build_op_test!(asm_op, &[c as u64, a as u64, b as u64]);
-    test.expect_stack(&[e, d]);
+    test.expect_stack(&[lo, hi]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let f = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[f, c as u64, a as u64, b as u64]);
-    test.expect_stack(&[e, d, f]);
+    test.expect_stack(&[lo, hi, f]);
 }
 
 #[test]
@@ -492,16 +491,18 @@ fn u32mod_fail() {
 #[test]
 fn u32divmod() {
     // --- simple cases ---------------------------------------------------------------------------
+    // Output is [quotient, remainder] with quotient on top
     let test = build_op_test!("u32divmod", &[0, 1]);
     test.expect_stack(&[0, 0]);
 
-    // division with no remainder
+    // division with no remainder: 2 / 1 = 2 remainder 0
     let test = build_op_test!("u32divmod", &[2, 1]);
-    test.expect_stack(&[0, 2]);
+    test.expect_stack(&[2, 0]);
 
-    // division with remainder
+    // division with remainder: 1 / 2 = 0 remainder 1
     let test = build_op_test!("u32divmod", &[1, 2]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
+    // 3 / 2 = 1 remainder 1
     let test = build_op_test!("u32divmod", &[3, 2]);
     test.expect_stack(&[1, 1]);
 
@@ -515,12 +516,12 @@ fn u32divmod() {
     let quot = (a / b) as u64;
     let rem = (a % b) as u64;
     let test = build_op_test!("u32divmod", &[a as u64, b as u64]);
-    test.expect_stack(&[rem, quot]);
+    test.expect_stack(&[quot, rem]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let e = rand_value::<u64>();
     let test = build_op_test!("u32divmod", &[e, a as u64, b as u64]);
-    test.expect_stack(&[rem, quot, e]);
+    test.expect_stack(&[quot, rem, e]);
 }
 
 #[test]
@@ -587,18 +588,16 @@ proptest! {
         let wrapping_asm_op = "u32wrapping_mul";
         let overflowing_asm_op = "u32overflowing_mul";
 
-        let (c, overflow) = a.overflowing_mul(b);
-        let d = if !overflow {
-            0
-        } else {
-            (a as u64 * b as u64) / U32_BOUND
-        };
+        // Output is [lo, hi] in LE order with lo on top
+        let result = a as u64 * b as u64;
+        let lo = result % U32_BOUND;
+        let hi = result / U32_BOUND;
 
         let test = build_op_test!(wrapping_asm_op, &[a as u64, b as u64]);
-        test.prop_expect_stack(&[c as u64])?;
+        test.prop_expect_stack(&[lo])?;
 
         let test = build_op_test!(overflowing_asm_op, &[a as u64, b as u64]);
-        test.prop_expect_stack(&[d, c as u64])?;
+        test.prop_expect_stack(&[lo, hi])?;
     }
 
     #[test]
@@ -635,28 +634,30 @@ proptest! {
     fn u32divmod_proptest(a in any::<u32>(), b in 1..u32::MAX) {
         let asm_op = "u32divmod";
 
+        // Output is [quotient, remainder] with quotient on top
         let quot = (a / b) as u64;
         let rem = (a % b) as u64;
 
         // b provided via the stack.
         let test = build_op_test!(&asm_op, &[a as u64, b as u64]);
-        test.prop_expect_stack(&[rem, quot])?;
+        test.prop_expect_stack(&[quot, rem])?;
 
         // b provided as a parameter.
         let asm_op = format!("{asm_op}.{b}");
         let test = build_op_test!(&asm_op, &[a as u64]);
-        test.prop_expect_stack(&[rem, quot])?;
+        test.prop_expect_stack(&[quot, rem])?;
     }
 
     #[test]
     fn u32overflowing_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
         let asm_op = "u32overflowing_madd";
 
+        // Output is [lo, hi] in LE order with lo on top
         let madd = a as u64 * b as u64 + c as u64;
-        let d = madd % U32_BOUND;
-        let e = madd / U32_BOUND;
+        let lo = madd % U32_BOUND;
+        let hi = madd / U32_BOUND;
 
         let test = build_op_test!(asm_op, &[c as u64, a as u64, b as u64]);
-        test.prop_expect_stack(&[e, d])?;
+        test.prop_expect_stack(&[lo, hi])?;
     }
 }

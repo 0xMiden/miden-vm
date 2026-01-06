@@ -119,11 +119,11 @@ fn test_advice_provider() {
         trace.12
 
         # Check that dyncalls are handled correctly
-        procref.dyncall_me mem_storew_be.4 dropw push.4 dyncall trace.13
-        procref.will_syscall mem_storew_be.8 dropw push.8 dyncall trace.14
+        procref.dyncall_me mem_storew_le.4 dropw push.4 dyncall trace.13
+        procref.will_syscall mem_storew_le.8 dropw push.8 dyncall trace.14
 
         # Check that dynexecs are handled correctly
-        procref.dynexec_me mem_storew_be.4 dropw push.4 dynexec trace.15
+        procref.dynexec_me mem_storew_le.4 dropw push.4 dynexec trace.15
 
         # Check that control flow operations are handled correctly
         exec.control_flow

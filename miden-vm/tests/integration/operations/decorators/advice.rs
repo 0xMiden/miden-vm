@@ -52,15 +52,10 @@ fn advice_insert_mem() {
     # stack: [5, 6, 7, 8, 1, 2, 3, 4]
     # advice_stack: []
 
-    # swap first 2 words on stack
-    swapw
-    # State Transition:
-    # stack: [1, 2, 3, 4, 5, 6, 7, 8]
-
     end";
     let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1];
     let test = build_test!(source, &stack_inputs);
-    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    test.expect_stack(&[8, 7, 6, 5, 4, 3, 2, 1]);
 }
 
 #[test]
@@ -80,8 +75,11 @@ fn advice_push_mapval() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack is [4, 3, 2, 1, ...]
+    // The advice map key must match the actual stack key
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
     )];
 
@@ -103,8 +101,10 @@ fn advice_push_mapval() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack is [4, 3, 2, 1, ...]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
     )];
 
@@ -130,8 +130,10 @@ fn adv_push_mapvaln() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
     )];
 
@@ -158,8 +160,10 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
     )];
 
@@ -184,8 +188,10 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13)],
     )];
 
@@ -210,8 +216,10 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![
             Felt::new(11),
             Felt::new(12),
@@ -231,10 +239,9 @@ fn advice_has_mapkey() {
     // --- test adv.has_mapkey: key is present --------------------------------
     let source: &str = r#"
     begin
-        # stack: [4, 3, 2, 1]
+        # stack: [4, 3, 2, 1] (after input reversal)
 
-        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
-        # map
+        # push the flag on the advice stack indicating if key [4, 3, 2, 1] exists in advice map
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
@@ -248,8 +255,10 @@ fn advice_has_mapkey() {
     end"#;
 
     let stack_inputs = [1, 2, 3, 4];
+    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
+    let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
-        Word::try_from(stack_inputs).unwrap(),
+        Word::try_from(stack_key).unwrap(),
         vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
     )];
 
@@ -259,10 +268,9 @@ fn advice_has_mapkey() {
     // --- test adv.has_mapkey: key is not present ----------------------------
     let source: &str = r#"
     begin
-        # stack: [4, 3, 2, 1]
+        # stack: [4, 3, 2, 1] (after input reversal)
 
-        # push the flag on the advice stack whether the [1, 2, 3, 4] key is presented in the advice
-        # map
+        # push the flag on the advice stack indicating if key [4, 3, 2, 1] exists in advice map
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
@@ -291,13 +299,15 @@ fn advice_insert_hdword() {
     // --- test hashing without domain ----------------------------------------
     let source: &str = "
     begin
-        # stack: [1, 2, 3, 4, 5, 6, 7, 8, ...]
+        # stack: [5, 6, 7, 8, 1, 2, 3, 4, ...]
+        # A = [1,2,3,4], B = [5,6,7,8]
 
         # hash and insert top two words into the advice map
         adv.insert_hdword
 
         # manually compute the hash of the two words
-        hmerge
+        # With LE convention, swap words before hmerge to match adv.insert_hdword's internal ordering
+        swapw hmerge
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
@@ -305,25 +315,29 @@ fn advice_insert_hdword() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.8
-        swapdw dropw dropw
+        adv_loadw swapw
+        adv_loadw swapw
     end";
-    let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1];
+    let stack_inputs = [4, 3, 2, 1, 8, 7, 6, 5];
     let test = build_test!(source, &stack_inputs);
+    // Values are stored as [A, B] = [1,2,3,4,5,6,7,8] in advice map.
+    // adv.push_mapval pushes to advice stack, then adv_push.8 pops in LIFO order.
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
     // --- test hashing with domain -------------------------------------------
     let source: &str = "
     begin
-        # stack: [1, 2, 3, 4, 5, 6, 7, 8, 9, ...]
+        # stack: [5, 6, 7, 8, 1, 2, 3, 4, 9, ...]
+        # A = [1,2,3,4], B = [5,6,7,8], domain = 9
 
         # hash and insert top two words into the advice map
         adv.insert_hdword_d
 
-        # manually compute the hash of the two words
-        push.0.9.0.0
-        swapw.2 swapw
+        # manually compute the hash of the two words with domain
+        swapw
+        push.0 movdn.8
         hperm
+        # Extract hash from state[4..8] (rate word 2)
         dropw swapw dropw
         # => [KEY, ...]
 
@@ -335,43 +349,41 @@ fn advice_insert_hdword() {
         adv_push.8
         swapdw dropw dropw
     end";
-    let stack_inputs = [9, 8, 7, 6, 5, 4, 3, 2, 1];
+    let stack_inputs = [9, 4, 3, 2, 1, 8, 7, 6, 5];
     let test = build_test!(source, &stack_inputs);
-    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    // Values retrieved in LIFO order from advice stack
+    test.expect_stack(&[8, 7, 6, 5, 4, 3, 2, 1]);
 }
 
 #[test]
 fn advice_insert_hqword() {
     let source: &str = "
     begin
-        # stack: [11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]
+        # stack: [A, B, C, D] = [11-14, 21-24, 31-34, 41-44]
 
         # hash and insert top four words into the advice map
         adv.insert_hqword
 
         # manually compute the hash of the four words
+        # hash_elements([A || B || C || D]) absorbs in two rounds:
+        # Round 1: absorb A, B with zero capacity
+        # Round 2: absorb C, D with capacity from round 1
 
-        swapdw
-        # => [31, 32, 33, 34, 41, 42, 43, 44, 11, 12, 13, 14, 21, 22, 23, 24]
-
-        # pad capacity element of the hasher
+        # First absorption: [A, B, cap=0]
+        # Stack: [A, B, C, D, ...]
         padw movdnw.2
-        # => [31, 32, 33, 34, 41, 42, 43, 44, CAPACITY, 11, 12, 13, 14, 21, 22, 23, 24]
 
         hperm
-        # => [RATE, RATE, PERM, 11, 12, 13, 14, 21, 22, 23, 24]
+        # => [RATE1', RATE2', CAP', C, D, ...]
 
-        # drop rate words
+        # Second absorption: use CAP' as new capacity, absorb C, D
         dropw dropw
-        # => [PERM, 11, 12, 13, 14, 21, 22, 23, 24]
-
+        # => [CAP', C, D, ...]
         movdnw.2
-        # => [11, 12, 13, 14, 21, 22, 23, 24, PERM]
-
         hperm
-        # => [RATE, RATE, PERM]
+        # => [RATE1'', RATE2'', CAP'', ...]
 
-        # get the resulting hash
+        # Extract hash 
         dropw swapw dropw
         # => [KEY]
 
@@ -382,10 +394,11 @@ fn advice_insert_hqword() {
         # move the values from the advice stack to the operand stack
         repeat.4
             movupw.3
-            adv_loadw
+            adv_loadw reversew
         end
     end";
     let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
     let test = build_test!(source, &stack_inputs);
-    test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
+    // Values retrieved from advice map in LIFO order
+    test.expect_stack(&[44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11]);
 }

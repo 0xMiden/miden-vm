@@ -145,7 +145,7 @@ end
 pub proc set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
-    movupw.2 dup.8 push.LEAF_DEPTH
+    movupw.2 dup.11 push.LEAF_DEPTH
     # => [depth, leaf_index, R, V, K]
 
     # Push MT node on advice stack, cleanup operand stack, and then
@@ -476,7 +476,7 @@ proc insert_single_leaf
         # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
         # `[K, V_in_leaf]` hashes to `NV_old`
         # (33 cycles)
-        movupw.2 dupw.3 swap hmerge assert_eqw
+        movupw.2 dupw.3 swapw hmerge assert_eqw
         # => [R_new, V_in_leaf]
 
         # Clean up stack for return

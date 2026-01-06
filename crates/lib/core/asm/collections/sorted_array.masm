@@ -188,11 +188,11 @@ end
 #!     - `(end_ptr - start_ptr)` must be divisible by 8
 #! - `start_ptr > end_ptr`
 pub proc find_half_key_value
-    # TODO(Al): Simplify
+    # Build KEY with key_prefix at word[0] (most significant) and key_suffix at word[1]
+    # word[2] and word[3] are 0 (will be zeroed in half-key comparison anyway)
     push.0 movdn.2 push.0 movdn.2
     # => [key_prefix, key_suffix, 0, 0, start_ptr, end_ptr]
-    reversew
-    # => [KEY, start_ptr, end_ptr]
+    # KEY = [key_prefix, key_suffix, 0, 0] with key_prefix at word[0]
 
     push.0
     # => [use_full_key = 0, KEY, start_ptr, end_ptr]
@@ -373,8 +373,9 @@ end
 
 #! Loads a key from the pointer.
 #!
-#! If use_full_key is 0, the key is loaded with the two least significant elements set to zero,
-#! e.g.: [key3, key2, 0, 0], while if it is 1, the full key [key3, key2, key1, key0] is loaded.
+#! If use_full_key is 0, the key is loaded with the two least significant elements (word[2] and
+#! word[3]) set to zero, keeping only word[0] and word[1] for half-key comparison.
+#! If use_full_key is 1, the full key is loaded unchanged.
 #!
 #! This procedure avoids branches as an optimization.
 #!
@@ -384,14 +385,12 @@ end
 #! Cycles: 16
 proc load_key
     padw movup.5 mem_loadw_le
-    # => [FULL_KEY, use_full_key]
+    # => [w0, w1, w2, w3, use_full_key]
 
-    # TODO(Al): simplify
-    reversew
-    # multiply the two least significant elements by use_full_key
-    movup.3 dup.4 mul
-    movup.3 movup.4 mul
-    movup.3 movup.3
-    # => [KEY]
-    reversew
+    # Zero word[2] and word[3] when use_full_key=0 (for half-key comparison)
+    movup.2 dup.4 mul movdn.2
+    # => [w0, w1, w2', w3, use_full_key] where w2' = w2 * use_full_key
+
+    movup.3 movup.4 mul movdn.3
+    # => [w0, w1, w2', w3'] where w3' = w3 * use_full_key
 end

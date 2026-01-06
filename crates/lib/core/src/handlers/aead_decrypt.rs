@@ -7,7 +7,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, field::PrimeField64};
+use miden_core::EventName;
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
@@ -48,7 +48,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::a
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
 pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    // Stack: [event_id, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    // Stack: [event_id, key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)
     //   dst_ptr = plaintext destination (output)
@@ -56,13 +56,14 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
 
     // Read parameters from stack
     // Note: Stack position 0 contains the Event ID when the handler is called,
-    // so the actual parameters start at position 1
-    // Also note: Words on the stack are stored in reverse element order
-    let nonce_word = process.get_stack_word_be(1);
-    let key_word = process.get_stack_word_be(5);
+    // so the actual parameters start at position 1. Words on the stack are
+    // interpreted in little-endian (memory) order, i.e. element at stack index N
+    // becomes the first limb of the word.
+    let key_word = process.get_stack_word_le(1);
+    let nonce_word = process.get_stack_word_le(5);
 
-    let src_ptr = process.get_stack_item(9).as_canonical_u64();
-    let num_blocks = process.get_stack_item(11).as_canonical_u64();
+    let src_ptr = process.get_stack_item(9).as_int();
+    let num_blocks = process.get_stack_item(11).as_int();
 
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
     let num_ciphertext_elements = (num_blocks + 1) * 8;
@@ -107,10 +108,9 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let mut plaintext_data = plaintext_with_padding;
     plaintext_data.truncate(data_blocks_count);
 
-    // Push plaintext data (WITHOUT padding) onto advice stack
-    // The padding will be added by the MASM encrypt procedure during re-encryption
-    // Note: We push in reverse order so adv_pipe reads them in forward order
-    plaintext_data.reverse();
+    // Push plaintext data (WITHOUT padding) onto advice stack.
+    // Values are provided in structural order; `extend_stack` ensures the first element
+    // ends up at the top of the advice stack, matching `adv_pipe` expectations.
     let advice_stack_mutation = AdviceMutation::extend_stack(plaintext_data);
 
     Ok(vec![advice_stack_mutation])

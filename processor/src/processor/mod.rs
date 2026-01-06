@@ -127,10 +127,6 @@ pub trait StackInterface {
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
 
-    /// Returns a mutable reference to the top 16 elements of the stack, such that the top of the
-    /// stack is at the last index of the returned slice.
-    fn top_mut(&mut self) -> &mut [Felt];
-
     /// Returns the element on the stack at index `idx`.
     fn get(&self, idx: usize) -> Felt;
 

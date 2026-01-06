@@ -23,10 +23,13 @@ pub(super) fn build_bitwise_request<E: ExtensionField<Felt>>(
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
+    // NOTE: The processor calls chiplets.bitwise.u32and(stack[0], stack[1]), so
+    // the chiplet stores a_col = stack[0] (top) and b_col = stack[1] (second).
+    // The request must use the same order to match the chiplet's response.
     let bitwise_request_message = BitwiseMessage {
         op_label: get_op_label(ONE, ZERO, is_xor, ZERO),
-        a: main_trace.stack_element(1, row),
-        b: main_trace.stack_element(0, row),
+        a: main_trace.stack_element(0, row),
+        b: main_trace.stack_element(1, row),
         z: main_trace.stack_element(0, row + 1),
         source: if is_xor == ONE { "u32xor" } else { "u32and" },
     };

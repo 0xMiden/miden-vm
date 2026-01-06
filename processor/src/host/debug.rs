@@ -75,12 +75,10 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
                 self.print_local_interval(process, n..=m, num_locals as u32)
             },
             DebugOptions::AdvStackTop(n) => {
-                // Reverse the advice stack so last element becomes index 0
+                // .stack() already returns elements from top (index 0) to bottom
                 let stack = process.advice_provider().stack();
-                let reversed_stack: Vec<_> = stack.iter().copied().rev().collect();
-
                 let count = if n == 0 { None } else { Some(n as usize) };
-                self.print_stack(&reversed_stack, count, "Advice stack", process)
+                self.print_stack(&stack, count, "Advice stack", process)
             },
         }
         .map_err(DebugError::from)

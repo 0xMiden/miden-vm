@@ -13,14 +13,15 @@ pub proc init_no_padding
     padw padw padw
 end
 
-#! Given the hasher state, returns the hash output.
+#! Given the hasher state, returns the hash output (digest).
 #!
-#! Input: [C, B, A, ...]
-#! Output: [HASH, ...]
+#! Input: [R0, R1, C, ...]
+#! Output: [DIGEST, ...]
 #!
-#! Where:
-#! - `A` is the capacity word that will be used by the hashing function.
-#! - `B` is the hash output.
+#! Where the sponge state uses LE convention:
+#! - `R0` is the first rate word (positions 0-3, on top of stack).
+#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `C` is the capacity word (positions 8-11).
 #!
 #! Cycles: 9
 pub proc squeeze_digest
@@ -34,18 +35,18 @@ pub proc squeeze_digest
     dropw
 end
 
-#! Copies the result of hash permutation to the top of the stack.
+#! Copies the digest (R1) to the top of the stack.
 #!
 #! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
 #! execution.
 #!
-#! Input: [C, B, A, ...]
-#! Output: [B, C, B, A, ...]
+#! Input: [R0, R1, C, ...]
+#! Output: [R1, R0, R1, C, ...]
 #!
-#! Where:
-#! - `A` is the capacity word that will be used by the hashing function.
-#! - `B` is the hash output.
-#! - `C` is the rate word that will be used by the hashing function.
+#! Where the sponge state uses LE convention:
+#! - `R0` is the first rate word (positions 0-3, on top of stack).
+#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `C` is the capacity word (positions 8-11).
 #!
 #! Cycles: 4
 pub proc copy_digest
@@ -57,12 +58,13 @@ end
 #! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
 #! will enter an infinite loop.
 #!
-#! Input: [C, B, A, start_addr, end_addr, ...]
-#! Output: [C', B', A', end_addr, end_addr ...]
+#! Input: [R0, R1, C, start_addr, end_addr, ...]
+#! Output: [R0', R1', C', end_addr, end_addr ...]
 #!
-#! Where:
-#! - `A` is the capacity word that will be used by the hashing function.
-#! - `B` is the hash output.
+#! Where the sponge state uses LE convention:
+#! - `R0` is the first rate word (positions 0-3, on top of stack).
+#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `C` is the capacity word (positions 8-11).
 #!
 #! Cycles: 4 + 3 * words, where `words` is the `start_addr - end_addr`
 pub proc absorb_double_words_from_memory
@@ -93,10 +95,10 @@ pub proc hash_double_words
 
     # prepare hasher state
     padw padw padw
-    # => [C, B, A, start_addr, end_addr, ...]
+    # => [R0, R1, C, start_addr, end_addr, ...]
 
     exec.absorb_double_words_from_memory
-    # => [C', B', A', end_addr, end_addr, ...]
+    # => [R0', R1', C', end_addr, end_addr, ...]
 
     exec.squeeze_digest
     # => [HASH, end_addr, end_addr, ...]
@@ -136,15 +138,15 @@ pub proc hash_words
 
     # prepare hasher state (14 cycles)
     dup.2 mul.4 push.0.0.0 movup.3 padw padw
-    # => [C, B, A, start_addr, end_addr, is_odd, ...]
+    # => [R0, R1, C, start_addr, end_addr, is_odd, ...]
 
     # (4 + 3 * words cycles)
     exec.absorb_double_words_from_memory
-    # => [C', B', A', end_addr, end_addr, is_odd, ...]
+    # => [R0', R1', C', end_addr, end_addr, is_odd, ...]
 
     # (1 cycles)
     movup.14
-    # => [is_odd, C', B', A', end_addr, end_addr, ...]
+    # => [is_odd, R0', R1', C', end_addr, end_addr, ...]
 
     # handle the odd element, if any (12 cycles)
     if.true
@@ -175,7 +177,7 @@ end
 #!   number of hashed elements by 8 (num_elements%8).
 #!
 #! Inputs:  [ptr, num_elements, pad_inputs_flag]
-#! Outputs: [C, B, A, ptr, end_pairs_addr, num_elements%8]
+#! Outputs: [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 #!
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
@@ -183,7 +185,7 @@ end
 #! - num_elements is the number of elements to be hashed.
 #! - pad_inputs_flag is the flag which indicates whether the values which will be hashed should be
 #!   padded with zeros to the next multiple of 8.
-#! - C, B, A are three words representing the hasher state.
+#! - R0, R1, C are three words representing the hasher state (LE convention: R0 on top).
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
@@ -212,7 +214,7 @@ pub proc prepare_hasher_state
 
     # prepare hasher state for RPO permutation
     push.0.0.0 movup.3 padw padw
-    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 end
 
 #! Computes hash of Felt values starting at the specified memory address using the provided hasher
@@ -222,13 +224,13 @@ end
 #! `absorb_double_words_from_memory` procedure and hashing the remaining values using the `permute`
 #! procedure.
 #!
-#! Inputs:  [C, B, A, ptr, end_pairs_addr, num_elements%8]
+#! Inputs:  [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 #! Outputs: [HASH]
 #!
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - C, B, A are three words representing the hasher state.
+#! - R0, R1, C are three words representing the hasher state (LE convention: R0 on top).
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
@@ -236,7 +238,7 @@ end
 pub proc hash_elements_with_state
     # hash every pair of words
     exec.absorb_double_words_from_memory
-    # => [C', B', A', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
+    # => [R0', R1', C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
 
     # hash remaining input values if there are any left
     # if num_elements%8 is ZERO and there are no elements to hash
@@ -385,7 +387,7 @@ pub proc hash_elements
     # => [ptr, num_elements, pad_inputs_flag = 0]
 
     exec.prepare_hasher_state
-    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 
     exec.hash_elements_with_state
     # => [HASH]
@@ -419,7 +421,7 @@ pub proc pad_and_hash_elements
     # => [ptr, num_elements, pad_inputs_flag = 1]
 
     exec.prepare_hasher_state
-    # => [C, B, A, ptr, end_pairs_addr, num_elements%8]
+    # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 
     exec.hash_elements_with_state
     # => [HASH]
@@ -455,12 +457,12 @@ end
 
 #! Performs RPO permutation on the hasher state.
 #!
-#! Inputs:  [C, B, A]
-#! Outputs: [C', B', A']
+#! Inputs:  [R0, R1, C]
+#! Outputs: [R0', R1', C']
 #!
-#! Where:
-#! - C, B, A are three words representing the hasher state.
-#! - C', B', A' are the permuted state words.
+#! Where the sponge state uses LE convention:
+#! - R0, R1, C are three words representing the hasher state (R0 on top).
+#! - R0', R1', C' are the permuted state words.
 #!
 #! Cycles: 1
 pub proc permute

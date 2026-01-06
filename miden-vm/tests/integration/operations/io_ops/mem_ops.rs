@@ -255,16 +255,11 @@ fn mem_stream() {
 
     // the state is built by replacing the values on the top of the stack with the values in memory
     // addresses `[0..8)`. Thus, the first 8 elements on the stack will be 1
-    // through 8 (in stack order, with 8 at stack[0]), and the remaining 4 are untouched (i.e., 9,
-    // 10, 11, 12).
-    let state: [Felt; 12] =
-        [12_u64, 11, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8].to_elements().try_into().unwrap();
-
-    // to get the final state of the stack, reverse the above state and push the expected address
-    // to the end (the address will be 2 since 0 + 2 = 2).
-    let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
-    final_stack.reverse();
-    final_stack.push(8);
+    // through 8 (in stack order, with 1 at stack[0] with LE convention), and the remaining 4 are
+    // untouched (i.e., 9, 10, 11, 12).
+    // With LE convention, values are in natural order (no reversal needed)
+    let mut final_stack: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    final_stack.push(8); // address after reading 2 words (8 elements)
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -292,21 +287,20 @@ fn mem_stream_with_hperm() {
 
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
-    // the state of the hasher is the first 12 elements of the stack (in reverse order). the state
+    // the state of the hasher is the first 12 elements of the stack. With LE convention, the state
     // is built by replacing the values on the top of the stack with the values in memory addresses
-    // 0 and 1 (i.e., 1 through 8). Thus, the first 8 elements on the stack will be 1 through 8 (in
-    // stack order, with 8 at stack[0]), and the remaining 4 are untouched (i.e., 9, 10, 11, 12).
+    // 0 and 4 (i.e., 1 through 8). Thus, the first 8 elements on the stack will be 1 through 8 (in
+    // stack order, with 1 at stack[0]), and the remaining 4 are untouched (i.e., 9, 10, 11, 12).
+    // With LE convention, stack order matches hasher state order (no reversal needed)
     let mut state: [Felt; 12] =
-        [12_u64, 11, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8].to_elements().try_into().unwrap();
+        [1_u64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
     // apply a hash permutation to the state
     apply_permutation(&mut state);
 
-    // to get the final state of the stack, reverse the hasher state and push the expected address
-    // to the end (the address will be 2 since 0 + 2 = 2).
+    // With LE convention, hasher state order matches stack order (no reversal needed)
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
-    final_stack.reverse();
-    final_stack.push(8);
+    final_stack.push(8); // address after reading 2 words (8 elements)
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);

@@ -1,16 +1,16 @@
 use core::cmp::Ordering;
 
-use miden_core::LexicographicWord;
-use miden_utils_testing::{prepend_word_to_vec as prepend_word, rand};
+use miden_core::{Felt, LexicographicWord, Word, field::PrimeField64};
+use miden_utils_testing::rand;
 use num::Integer;
 use rstest::rstest;
 
 #[rstest]
-#[case::gt("gt", &[Ordering::Greater])]
-#[case::gte("gte", &[Ordering::Greater, Ordering::Equal])]
+#[case::gt("gt_le", &[Ordering::Greater])]
+#[case::gte("gte_le", &[Ordering::Greater, Ordering::Equal])]
 #[case::eq("eq", &[Ordering::Equal])]
-#[case::lt("lt", &[Ordering::Less])]
-#[case::lte("lte", &[Ordering::Less, Ordering::Equal])]
+#[case::lt("lt_le", &[Ordering::Less])]
+#[case::lte("lte_le", &[Ordering::Less, Ordering::Equal])]
 fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]) {
     let source = &format!(
         "
@@ -31,9 +31,9 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
         let expected_cmp = LexicographicWord::cmp(&lhs.into(), &rhs.into());
 
         let mut operand_stack: Vec<u64> = Default::default();
-        prepend_word(&mut operand_stack, rhs);
-        prepend_word(&mut operand_stack, lhs);
-        // => [RHS, LHS]
+        prepend_word_le(&mut operand_stack, rhs);
+        prepend_word_le(&mut operand_stack, lhs);
+        // => [RHS, LHS] in LE format (word[0] on top)
 
         let expected = u64::from(valid_ords.contains(&expected_cmp));
 
@@ -145,10 +145,10 @@ fn store_word_u32s_le_stores_limbs() {
 
         begin
             push.{ptr}
-            push.{w0}
-            push.{w1}
-            push.{w2}
             push.{w3}
+            push.{w2}
+            push.{w1}
+            push.{w0}
             exec.word::store_word_u32s_le
         end
     ",
@@ -162,4 +162,16 @@ fn store_word_u32s_le_stores_limbs() {
     let expected_mem = [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi];
 
     build_test!(&source).expect_stack_and_memory(&[], PTR, &expected_mem);
+}
+
+/// Add a Word to the bottom of the operand stack Vec.
+/// After `StackInputs::try_from_ints` reversal, `word[3]` will be on top of the stack.
+fn prepend_word(target: &mut Vec<u64>, word: Word) {
+    let _iterator = target.splice(0..0, word.iter().map(Felt::as_canonical_u64));
+}
+
+/// Add a Word to the bottom of the operand stack Vec in LE order.
+/// After `StackInputs::try_from_ints` reversal, `word[0]` will be on top of the stack.
+fn prepend_word_le(target: &mut Vec<u64>, word: Word) {
+    let _iterator = target.splice(0..0, word.iter().rev().map(Felt::as_canonical_u64));
 }

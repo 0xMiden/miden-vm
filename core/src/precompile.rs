@@ -57,7 +57,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
-use miden_crypto::{Felt, Word, hash::rpo::Rpo256};
+use miden_crypto::{Felt, Word, ZERO, hash::rpo::Rpo256};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -329,12 +329,25 @@ impl PrecompileTranscript {
 
     /// Records a precompile commitment into the transcript, updating the state.
     pub fn record(&mut self, commitment: PrecompileCommitment) {
-        let mut state =
-            Word::words_as_elements(&[self.state, commitment.tag(), commitment.comm_calldata()])
-                .try_into()
-                .unwrap();
+        // Internal RPO state layout is [RATE0, RATE1, CAPACITY].
+        // For the transcript:
+        // - RATE0 = COMM (commitment to calldata)
+        // - RATE1 = TAG  (event metadata)
+        // - CAPACITY = current transcript state.
+        let mut state = [ZERO; Rpo256::STATE_WIDTH];
+        let comm = commitment.comm_calldata();
+        let tag = commitment.tag();
+
+        state[Rpo256::RATE_RANGE.start..Rpo256::RATE_RANGE.start + 4]
+            .copy_from_slice(comm.as_elements());
+        state[Rpo256::RATE_RANGE.start + 4..Rpo256::RATE_RANGE.end]
+            .copy_from_slice(tag.as_elements());
+        state[Rpo256::CAPACITY_RANGE.start..Rpo256::CAPACITY_RANGE.start + 4]
+            .copy_from_slice(self.state.as_elements());
+
         Rpo256::apply_permutation(&mut state);
-        self.state = Word::new(state[0..4].try_into().unwrap());
+        // After absorption, update the state.
+        self.state = Word::new(state[Rpo256::CAPACITY_RANGE.clone()].try_into().unwrap());
     }
 
     /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
@@ -346,11 +359,13 @@ impl PrecompileTranscript {
     /// - The initial capacity is set to the zero word since we absord full double words when
     ///   calling `record` or `finalize`.
     pub fn finalize(self) -> PrecompileTranscriptDigest {
-        let mut state = Word::words_as_elements(&[self.state, Word::empty(), Word::empty()])
-            .try_into()
-            .unwrap();
+        // Interpret state as [RATE0, RATE1, CAPACITY] with two empty rate words.
+        let mut state = [ZERO; Rpo256::STATE_WIDTH];
+        state[Rpo256::CAPACITY_RANGE.start..Rpo256::CAPACITY_RANGE.start + 4]
+            .copy_from_slice(self.state.as_elements());
+
         Rpo256::apply_permutation(&mut state);
-        PrecompileTranscriptDigest::new(state[4..8].try_into().unwrap())
+        PrecompileTranscriptDigest::new(state[Rpo256::DIGEST_RANGE.clone()].try_into().unwrap())
     }
 }
 

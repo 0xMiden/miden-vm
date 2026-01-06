@@ -188,7 +188,7 @@ fn test_pipe_double_words_to_memory() {
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
     let mut expected_stack =
-        felt_slice_to_ints(&build_expected_perm(&[0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
+        felt_slice_to_ints(&build_expected_perm(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]));
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,

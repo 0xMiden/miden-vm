@@ -155,8 +155,9 @@ pub proc gt(rhs: word, lhs: word) -> i1
 end
 
 #! Similar to word::gt except that its inputs are in LE/canonical order.
+#! With LE input, word[0] (most significant) is on top, and gt compares from position 0,
+#! so we can call gt directly without transformation.
 pub proc gt_le(rhs: word, lhs: word) -> i1
-    reversew swapw reversew swapw
     exec.gt
 end
 
@@ -225,9 +226,22 @@ pub proc lt(rhs: word, lhs: word) -> i1
 end
 
 #! Similar to word::lt except that its inputs are in LE/canonical order.
+#! With LE input, word[0] (most significant) is on top, and lt compares from position 0,
+#! so we can call lt directly without transformation.
 pub proc lt_le(rhs: word, lhs: word) -> i1
-    reversew swapw reversew swapw
     exec.lt
+end
+
+#! Similar to word::gte except that its inputs are in LE/canonical order.
+pub proc gte_le(rhs: word, lhs: word) -> i1
+    exec.lt_le
+    not
+end
+
+#! Similar to word::lte except that its inputs are in LE/canonical order.
+pub proc lte_le(rhs: word, lhs: word) -> i1
+    exec.gt_le
+    not
 end
 
 #! Returns true if LHS is less than or equal to RHS, false otherwise.

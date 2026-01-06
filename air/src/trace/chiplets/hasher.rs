@@ -35,6 +35,7 @@ pub type HasherState = [Felt; STATE_WIDTH];
 /// This value is set to 12: 8 elements are reserved for rate and the remaining 4 elements are
 /// reserved for capacity. This configuration enables computation of 2-to-1 hash in a single
 /// permutation.
+/// The sponge state is `[RATE0(4), RATE1(4), CAPACITY(4)]`.
 pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 
 /// The hasher state portion of the execution trace, located in columns 3..15.
@@ -43,8 +44,12 @@ pub const STATE_COL_RANGE: Range<usize> = create_range(NUM_SELECTORS, STATE_WIDT
 /// Number of field elements in the capacity portion of the hasher's state.
 pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 
-/// The index of the capacity register where the domain is set when initializing the hasher.
-pub const CAPACITY_DOMAIN_IDX: usize = 1;
+/// The index in the hasher state where the domain is set when initializing the hasher.
+///
+/// The domain is stored in the second element of the capacity word.
+/// With LE sponge state layout [RATE0, RATE1, CAP], this is at index 9 (= CAPACITY_RANGE.start +
+/// 1).
+pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
 /// The capacity portion of the hasher state in the execution trace, located in columns 3..7.
 pub const CAPACITY_COL_RANGE: Range<usize> = Range {
