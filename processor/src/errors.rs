@@ -33,8 +33,6 @@ pub enum ExecutionError {
         #[diagnostic_source]
         err: AdviceError,
     },
-    #[error("exceeded the allowed number of max cycles {0}")]
-    CycleLimitExceeded(u32),
     #[error("debug handler error at clock cycle {clk}: {err}")]
     DebugHandlerError {
         clk: RowIndex,
@@ -133,25 +131,6 @@ pub enum ExecutionError {
     },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
-    #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
-    SmtNodeNotFound {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        node: Word,
-    },
-    #[error("expected pre-image length of node {node_hex} to be a multiple of 8 but was {preimage_len}",
-      node_hex = to_hex(node.as_bytes()),
-    )]
-    SmtNodePreImageNotValid {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        node: Word,
-        preimage_len: usize,
-    },
     #[error("syscall failed: procedure with root {hex} was not found in the kernel",
       hex = to_hex(proc_root.as_bytes())
     )]
@@ -171,8 +150,6 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
     },
-    #[error("execution yielded unexpected precompiles")]
-    UnexpectedPrecompiles,
     #[error(
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth} at clock cycle {clk}"
     )]
@@ -269,20 +246,6 @@ impl ExecutionError {
     pub fn no_mast_forest_with_procedure(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::NoMastForestWithProcedure { label, source_file, root_digest }
-    }
-
-    pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SmtNodeNotFound { label, source_file, node }
-    }
-
-    pub fn smt_node_preimage_not_valid(
-        node: Word,
-        preimage_len: usize,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SmtNodePreImageNotValid { label, source_file, node, preimage_len }
     }
 
     pub fn syscall_target_not_in_kernel(proc_root: Word, err_ctx: &impl ErrorContext) -> Self {
