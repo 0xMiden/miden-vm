@@ -3,7 +3,7 @@ use alloc::{borrow::Cow, collections::BTreeMap};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{Map, MetadataSet, RelatedLabel, SourceId, Span, TargetType, Uri, Version};
+use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, TargetType, Uri};
 
 use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
@@ -36,7 +36,7 @@ impl SetSourceId for PackageTable {
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageDetail {
     /// The semantic version assigned to this package
-    pub version: Span<MaybeInherit<Version>>,
+    pub version: Span<MaybeInherit<SemVer>>,
     /// An (optional) brief description of this project
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub description: Option<Span<MaybeInherit<Arc<str>>>>,
@@ -123,7 +123,7 @@ impl PackageFile {
     }
 
     /// Returns the semantic version of this project.
-    pub fn version(&self) -> &Span<MaybeInherit<Version>> {
+    pub fn version(&self) -> &Span<MaybeInherit<SemVer>> {
         &self.package.detail.version
     }
 

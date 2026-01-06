@@ -19,7 +19,7 @@ pub struct Package {
     /// The name of the package
     name: Span<Arc<str>>,
     /// The semantic version associated with the package
-    version: Span<Version>,
+    version: Span<SemVer>,
     /// The optional package description
     description: Option<Arc<str>>,
     /// The set of dependencies required by this package
@@ -44,7 +44,7 @@ impl Package {
         self.name.clone()
     }
 
-    pub fn version(&self) -> Span<&Version> {
+    pub fn version(&self) -> Span<&SemVer> {
         self.version.as_ref()
     }
 
@@ -263,10 +263,12 @@ impl Package {
                     match workspace.workspace.config.dependencies.get(&dependency.name) {
                         Some(dep) => {
                             debug_assert!(!dep.inherits_workspace_version());
-                            dependencies.push(Dependency::new(
-                                dep.name.clone(),
-                                DependencyVersionScheme::try_from(dep.as_ref())?,
-                            ));
+
+                            let version = DependencyVersionScheme::try_from_in_workspace(
+                                dep.as_ref(),
+                                workspace,
+                            )?;
+                            dependencies.push(Dependency::new(dep.name.clone(), version));
                         },
                         None => {
                             return Err(ProjectFileError::InvalidPackageDependency {
