@@ -2,7 +2,7 @@ use core::cmp;
 
 use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
-use miden_processor::ExecutionError;
+use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
     Felt, TRUNCATE_STACK_PROC, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
     rand::rand_value,
@@ -727,7 +727,7 @@ fn checked_and_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
+        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0))
@@ -772,7 +772,7 @@ fn checked_or_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
+        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0))
@@ -817,7 +817,7 @@ fn checked_xor_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
+        ExecutionError::OperationError{ err: OperationError::NotU32Values{ values }, .. } if
             values.len() == 2 &&
             values.contains(&Felt::new(a0)) &&
             values.contains(&Felt::new(b0))

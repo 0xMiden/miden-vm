@@ -489,8 +489,8 @@ pub enum AceError {
 pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValue { value: Felt },
-    #[error("operation expected u32 value, but got {value}")]
-    NotU32Value { value: Felt },
+    #[error("operation expected u32 values, but got values: {values:?}")]
+    NotU32Values { values: Vec<Felt> },
     #[error("division by zero")]
     DivideByZero,
 }

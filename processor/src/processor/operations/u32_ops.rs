@@ -5,7 +5,7 @@ use miden_core::{Felt, ZERO, field::PrimeField64};
 use paste::paste;
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ExecutionError, OperationError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     utils::split_element,
@@ -17,7 +17,7 @@ mod tests;
 const U32_MAX: u64 = u32::MAX as u64;
 
 macro_rules! require_u32_operands {
-    ($processor:expr, [$($idx:expr),*], $err_ctx:expr) => {{
+    ($processor:expr, [$($idx:expr),*]) => {{
         let mut invalid_values = Vec::new();
 
         paste!{
@@ -29,7 +29,7 @@ macro_rules! require_u32_operands {
             )*
 
             if !invalid_values.is_empty() {
-                return Err(ExecutionError::not_u32_values(invalid_values, $err_ctx));
+                return Err(OperationError::NotU32Values { values: invalid_values });
             }
             // Return tuple of operands based on indices
             ($([<operand_ $idx>]),*)
@@ -61,11 +61,10 @@ pub(super) fn op_u32split<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32add<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let (sum_hi, sum_lo) = {
-        let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+        let (b, a) = require_u32_operands!(processor, [0, 1]);
 
         let result = Felt::new(a.as_canonical_u64() + b.as_canonical_u64());
         split_element(result)
@@ -85,11 +84,10 @@ pub(super) fn op_u32add<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32add3<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let (sum_hi, sum_lo) = {
-        let (c, b, a) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
+        let (c, b, a) = require_u32_operands!(processor, [0, 1, 2]);
 
         let sum = Felt::new(a.as_canonical_u64() + b.as_canonical_u64() + c.as_canonical_u64());
         split_element(sum)
@@ -110,10 +108,9 @@ pub(super) fn op_u32add3<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32sub<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (first_old, second_old) = require_u32_operands!(processor, [0, 1], err_ctx);
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    let (first_old, second_old) = require_u32_operands!(processor, [0, 1]);
 
     let result = second_old.as_canonical_u64().wrapping_sub(first_old.as_canonical_u64());
     let first_new = Felt::new(result >> 63);
@@ -132,10 +129,9 @@ pub(super) fn op_u32sub<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32mul<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    let (b, a) = require_u32_operands!(processor, [0, 1]);
 
     let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64());
     let (hi, lo) = split_element(result);
@@ -153,10 +149,9 @@ pub(super) fn op_u32mul<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32madd<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (b, a, c) = require_u32_operands!(processor, [0, 1, 2], err_ctx);
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    let (b, a, c) = require_u32_operands!(processor, [0, 1, 2]);
 
     let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64() + c.as_canonical_u64());
     let (hi, lo) = split_element(result);
@@ -178,17 +173,16 @@ pub(super) fn op_u32madd<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32div<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let (denominator, numerator) = {
-        let (denominator, numerator) = require_u32_operands!(processor, [0, 1], err_ctx);
+        let (denominator, numerator) = require_u32_operands!(processor, [0, 1]);
 
         (denominator.as_canonical_u64(), numerator.as_canonical_u64())
     };
 
     if denominator == 0 {
-        return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
+        return Err(OperationError::DivideByZero);
     }
 
     // a/b = n*q + r for some n>=0 and 0<=r<b
@@ -213,10 +207,9 @@ pub(super) fn op_u32div<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32and<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
-    let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+) -> Result<(), OperationError> {
+    let (b, a) = require_u32_operands!(processor, [0, 1]);
     tracer.record_u32and(a, b);
 
     let result = a.as_canonical_u64() & b.as_canonical_u64();
@@ -232,10 +225,9 @@ pub(super) fn op_u32and<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32xor<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
-    let (b, a) = require_u32_operands!(processor, [0, 1], err_ctx);
+) -> Result<(), OperationError> {
+    let (b, a) = require_u32_operands!(processor, [0, 1]);
     tracer.record_u32xor(a, b);
 
     let result = a.as_canonical_u64() ^ b.as_canonical_u64();
@@ -252,11 +244,9 @@ pub(super) fn op_u32xor<P: Processor>(
 #[inline(always)]
 pub(super) fn op_u32assert2<P: Processor>(
     processor: &mut P,
-    _err_code: Felt,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    let (first, second) = require_u32_operands!(processor, [0, 1], err_ctx);
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    let (first, second) = require_u32_operands!(processor, [0, 1]);
 
     tracer.record_u32_range_checks(processor.system().clk(), first, second);
 

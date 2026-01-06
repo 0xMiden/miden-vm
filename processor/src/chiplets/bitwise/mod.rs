@@ -205,7 +205,7 @@ impl Default for Bitwise {
 pub fn assert_u32(value: Felt) -> Result<Felt, OperationError> {
     let val_u64 = value.as_canonical_u64();
     if val_u64 > u32::MAX.into() {
-        Err(OperationError::NotU32Value { value })
+        Err(OperationError::NotU32Values { values: vec![value] })
     } else {
         Ok(value)
     }
