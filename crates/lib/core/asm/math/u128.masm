@@ -3,7 +3,7 @@
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
 #! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [overflowing_flag, chh, cmh, cml, cll, ...], where c = (a + b) % 2^128
-pub proc overflowing_add(b: u128, a: u128) -> (u32, u128)
+pub proc overflowing_add(b: u128, a: u128) -> (i1, u128)
                         # [bhh bmh bml bll ahh amh aml all ...]
     movup.7             # [all bhh bmh bml bll ahh amh aml ...]
     movup.4             # [bll all bhh bmh bml ahh amh aml ...]
@@ -32,7 +32,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
 #! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [underflowing_flag, chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
-pub proc overflowing_sub(b: u128, a: u128) -> (u32, u128)
+pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
                         # [bhh bmh bml bll ahh amh aml all ...]
     movup.7             # [all bhh bmh bml bll ahh amh aml ...]
     movup.4             # [bll all bhh bmh bml ahh amh aml ...]
@@ -67,7 +67,7 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
 #! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
-pub proc wrapping_sub(b: u128, a: u128) -> (u32, u128)
+pub proc wrapping_sub(b: u128, a: u128) -> u128
                         # [bhh bmh bml bll ahh amh aml all ...]
     movup.7             # [all bhh bmh bml bll ahh amh aml ...]
     movup.4             # [bll all bhh bmh bml ahh amh aml ...]
@@ -116,7 +116,7 @@ end
 # -------------------------------------------
 #           f      rhh    rmh     rml     rll
 
-pub proc overflowing_mul(b: u128, a: u128) -> (u64, u128)
+pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
                          # [bhh bmh bml bll ahh amh aml all ... ]
      # all x bll
      dup.7 dup.4
