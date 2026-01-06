@@ -58,7 +58,7 @@ impl AdviceMutation {
     pub fn extend_stack_for_adv_pipe(iter: impl IntoIterator<Item = Felt>) -> Self {
         let values: Vec<Felt> = iter.into_iter().collect();
         debug_assert!(
-            values.len() % 8 == 0,
+            values.len().is_multiple_of(8),
             "extend_stack_for_adv_pipe requires length to be a multiple of 8, got {}",
             values.len()
         );

@@ -41,7 +41,7 @@ pub fn ext2_sub(block_builder: &mut BasicBlockBuilder) {
 
 /// Given a stack with initial configuration given by [b0, b1, a0, a1, ...] where a = (a0, a1)
 /// and b = (b0, b1) represent elements in the extension field of degree 2, this series
-/// of operations outputs the product c = (c0, c1) 
+/// of operations outputs the product c = (c0, c1)
 /// c0 = a0*b0 + 7*a1*b1 and c1 = a0*b1 + a1*b0.
 ///
 /// This operation takes 3 VM cycles.

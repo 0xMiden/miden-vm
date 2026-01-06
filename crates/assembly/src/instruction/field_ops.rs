@@ -618,8 +618,8 @@ fn check_lte(span_builder: &mut BasicBlockBuilder) {
 ///
 /// This operation takes 8 cycles.
 fn check_gt_high_bits(span_builder: &mut BasicBlockBuilder) {
-    // reorder the stack to check a_hi > b_hi (need [a_hi, b_hi, ...] for U32sub to check b_hi < a_hi)
-    // [a_lo, a_hi, b_lo, b_hi, ...] => [a_hi, a_lo, b_lo, b_hi, ...]
+    // reorder the stack to check a_hi > b_hi (need [a_hi, b_hi, ...] for U32sub to check b_hi <
+    // a_hi) [a_lo, a_hi, b_lo, b_hi, ...] => [a_hi, a_lo, b_lo, b_hi, ...]
     span_builder.push_op(Swap);
     // => [b_hi, a_hi, a_lo, b_lo, ...]
     span_builder.push_op(MovUp3);

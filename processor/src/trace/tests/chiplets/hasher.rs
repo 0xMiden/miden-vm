@@ -22,8 +22,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
 };
-
-use miden_utils_testing::{stack, };
+use miden_utils_testing::stack;
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,

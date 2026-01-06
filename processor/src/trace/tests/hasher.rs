@@ -2,12 +2,11 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, MainTrace, chiplets::hasher::P1_COL_IDX};
 use miden_core::{
+    Word,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{ExtensionField, Field},
 };
 use rstest::rstest;
-
-use miden_core::Word;
 
 use super::{Felt, ONE, Operation, ZERO, build_trace_from_ops_with_inputs, rand_array};
 use crate::{AdviceInputs, PrimeField64, StackInputs};
