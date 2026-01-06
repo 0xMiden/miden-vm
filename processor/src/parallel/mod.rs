@@ -17,7 +17,7 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
+    Kernel, ONE, Operation, Word, ZERO, field::Field, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
 
