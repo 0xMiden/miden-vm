@@ -10,9 +10,9 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceProvider, ContextId, ExecutionError, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::{AceError, AceEvalError, AceEvalResultExt, OperationError},
+    errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
@@ -90,18 +90,13 @@ impl Processor for FastProcessor {
     /// Note that we do not record any memory reads in this operation (through a
     /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
         let circuit_evaluation =
-            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)
-                .map_ace_eval_err(err_ctx)?;
+            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)?;
         self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 

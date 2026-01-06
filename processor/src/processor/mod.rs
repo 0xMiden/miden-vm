@@ -6,7 +6,9 @@ use miden_core::{
 
 use crate::{
     AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
-    errors::OperationError, fast::Tracer, processor::operations::execute_sync_op,
+    errors::{AceEvalError, OperationError},
+    fast::Tracer,
+    processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -77,11 +79,7 @@ pub trait Processor: Sized {
     ///
     /// # Note
     /// All processors need to support this operation.
-    fn op_eval_circuit(
-        &mut self,
-        _err_ctx: &impl ErrorContext,
-        _tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the provided synchronous operation.
     ///
