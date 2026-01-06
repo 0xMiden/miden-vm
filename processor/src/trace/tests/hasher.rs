@@ -7,7 +7,9 @@ use miden_core::{
 };
 use rstest::rstest;
 
-use super::{Felt, ONE, Operation, Word, ZERO, build_trace_from_ops_with_inputs, rand_array};
+use miden_core::Word;
+
+use super::{Felt, ONE, Operation, ZERO, build_trace_from_ops_with_inputs, rand_array};
 use crate::{AdviceInputs, PrimeField64, StackInputs};
 
 // SIBLING TABLE TESTS

@@ -23,13 +23,14 @@ use miden_core::{
     utils::range,
 };
 
+use miden_utils_testing::{stack, };
+
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
-    build_trace_from_program, build_trace_from_program_with_runtime, init_state_from_words,
-    rand_array, stack_inputs_from_runtime, word_to_stack_inputs,
+    build_trace_from_program, init_state_from_words, rand_array,
 };
-use crate::PrimeField64;
+use crate::{PrimeField64, StackInputs};
 
 // CONSTANTS
 // ================================================================================================
@@ -469,14 +470,12 @@ pub fn b_chip_log_precompile() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    // Runtime stack layout: [COMM(5,6,7,8), TAG(1,2,3,4)] on top. Convert to StackInputs by
-    // reversing once before passing to the program helper.
-    let mut runtime_stack = Vec::new();
+    // Runtime stack layout: [COMM(5,6,7,8), TAG(1,2,3,4)] with comm[0]=5 on top
     let comm_word: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
     let tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(comm_word));
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(tag_word));
-    let trace = build_trace_from_program_with_runtime(&program, &runtime_stack);
+    // stack! takes elements in runtime order (first = top) and handles reversal
+    let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
+    let trace = build_trace_from_program(&program, &stack_inputs);
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -590,12 +589,14 @@ fn b_chip_mpverify() {
     let tree = MerkleTree::new(&leaves).unwrap();
 
     // Build runtime stack layout: [node(0-3), depth(4), index(5), root(6-9)]
+    // Element 0 (node[0]) is on top of stack
     let mut runtime_stack = Vec::new();
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(leaves[index]));
+    runtime_stack.extend_from_slice(&word_to_ints(leaves[index]));
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(tree.root()));
-    let stack_inputs = stack_inputs_from_runtime(runtime_stack);
+    runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
+    runtime_stack.reverse();
+    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -714,14 +715,15 @@ fn b_chip_mrupdate() {
     let new_leaf_value = leaves[0];
 
     // Build runtime stack layout: [old_leaf(0-3), depth(4), index(5), old_root(6-9),
-    // new_leaf(10-13)]
+    // new_leaf(10-13)]. Element 0 (old_leaf[0]) is on top of stack.
     let mut runtime_stack = Vec::new();
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(old_leaf_value));
+    runtime_stack.extend_from_slice(&word_to_ints(old_leaf_value));
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(old_root));
-    runtime_stack.extend_from_slice(&word_to_stack_inputs(new_leaf_value));
-    let stack_inputs = stack_inputs_from_runtime(runtime_stack);
+    runtime_stack.extend_from_slice(&word_to_ints(old_root));
+    runtime_stack.extend_from_slice(&word_to_ints(new_leaf_value));
+    runtime_stack.reverse();
+    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -1045,4 +1047,9 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 /// Initializes a Merkle tree leaf with the specified value.
 fn init_leaf(value: u64) -> Word {
     [Felt::new(value), ZERO, ZERO, ZERO].into()
+}
+
+/// Converts a Word to stack input values (u64 array) in element order.
+fn word_to_ints(w: Word) -> [u64; 4] {
+    [w[0].as_int(), w[1].as_int(), w[2].as_int(), w[3].as_int()]
 }

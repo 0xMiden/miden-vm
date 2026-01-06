@@ -3,11 +3,12 @@ use miden_air::trace::{
 };
 use miden_utils_testing::rand::rand_value;
 
+use miden_core::Word;
+
 use super::{
     super::utils::build_span_with_respan_ops, AdviceInputs, ExecutionTrace, Felt, ONE, Operation,
-    Word, ZERO, build_trace_from_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
-    build_trace_from_program_with_runtime, init_state_from_words, rand_array,
-    stack_inputs_from_runtime, word_to_stack_inputs,
+    ZERO, build_trace_from_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
+    init_state_from_words, rand_array,
 };
 
 mod bitwise;

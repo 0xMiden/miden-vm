@@ -22,11 +22,11 @@ fn test_sorted_array_find_word() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.8456.415.4922.593 mem_storew_be.100 dropw
-                push.8675.5816.5458.2767 mem_storew_be.104 dropw
-                push.3015.7211.2002.5143 mem_storew_be.108 dropw
+                push.8456.415.4922.593 mem_storew_le.100 dropw
+                push.8675.5816.5458.2767 mem_storew_le.104 dropw
+                push.3015.7211.2002.5143 mem_storew_le.108 dropw
 
-                push.112 push.100 push.[{key}]
+                push.112 push.100 push.[{key}] reversew
 
                 exec.sorted_array::find_word
                 exec.truncate_stack
@@ -35,7 +35,6 @@ fn test_sorted_array_find_word() {
         );
 
         let program = build_test!(source, &[]);
-        println!("testing {key}");
         program.expect_stack(&[was_key_found, key_ptr, 100, 112, 0]);
     }
 }
@@ -49,7 +48,7 @@ fn test_empty_sorted_array_find_word() {
         {TRUNCATE_STACK_PROC}
 
         begin
-            push.100 push.100 push.[8413,5080,6742,354]
+            push.100 push.100 push.[8413,5080,6742,354] reversew
 
             exec.sorted_array::find_word
             exec.truncate_stack
@@ -71,11 +70,11 @@ fn test_unsorted_array_find_word_fails() {
 
         begin
             # these words are NOT in ascending order, must fail
-            push.8675.5816.5458.2767 mem_storew_be.100 dropw
-            push.8456.415.4922.593 mem_storew_be.104 dropw
-            push.3015.7211.2002.5143 mem_storew_be.108 dropw
+            push.8675.5816.5458.2767 mem_storew_le.100 dropw
+            push.8456.415.4922.593 mem_storew_le.104 dropw
+            push.3015.7211.2002.5143 mem_storew_le.108 dropw
 
-            push.112 push.100 push.[8675,5816,5458,2767]
+            push.112 push.100 push.[8675,5816,5458,2767] reversew
 
             exec.sorted_array::find_word
             exec.truncate_stack
@@ -89,7 +88,7 @@ fn test_unsorted_array_find_word_fails() {
 
 #[test]
 fn test_sorted_key_value_array_find_key() {
-    // (word, was_key_found, value_ptr)
+    // (word, was_value_found, value_ptr)
     let tests = [
         ("8413,5080,6742,354", 0, 100),  // less than smallest key
         ("8456,415,4922,593", 1, 100),   // smallest key
@@ -112,16 +111,16 @@ fn test_sorted_key_value_array_find_key() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.8456.415.4922.593 mem_storew_be.100 dropw
-                push.8595.8794.8303.7256 mem_storew_be.104 dropw
+                push.8456.415.4922.593 mem_storew_le.100 dropw
+                push.8595.8794.8303.7256 mem_storew_le.104 dropw
 
-                push.3348.6058.5470.2813 mem_storew_be.108 dropw
-                push.3015.7211.2002.5143 mem_storew_be.112 dropw
+                push.3348.6058.5470.2813 mem_storew_le.108 dropw
+                push.3015.7211.2002.5143 mem_storew_le.112 dropw
 
-                push.7513.7106.9944.7176 mem_storew_be.116 dropw
-                push.4942.5573.1077.1968 mem_storew_be.120 dropw
+                push.7513.7106.9944.7176 mem_storew_le.116 dropw
+                push.4942.5573.1077.1968 mem_storew_le.120 dropw
 
-                push.124 push.100 push.[{key}]
+                push.124 push.100 push.[{key}] reversew
 
                 exec.sorted_array::find_key_value
                 exec.truncate_stack
@@ -129,8 +128,7 @@ fn test_sorted_key_value_array_find_key() {
         "
         );
 
-        let program = build_debug_test!(source, &[]);
-        println!("testing {key}");
+        let program = build_test!(source, &[]);
         program.expect_stack(&[was_key_found, key_ptr, 100, 124, 0]);
     }
 }
@@ -154,14 +152,14 @@ fn test_sorted_key_value_array_find_half_key() {
             {TRUNCATE_STACK_PROC}
 
             begin
-                push.9.9.3.4 mem_storew_be.100 dropw
-                push.5.5.5.5 mem_storew_be.104 dropw
+                push.9.9.3.4 mem_storew_le.100 dropw
+                push.5.5.5.5 mem_storew_le.104 dropw
 
-                push.10.11.12.13 mem_storew_be.108 dropw
-                push.3.3.3.3 mem_storew_be.112 dropw
+                push.10.11.12.13 mem_storew_le.108 dropw
+                push.3.3.3.3 mem_storew_le.112 dropw
 
-                push.1.1.1.103 mem_storew_be.116 dropw
-                push.8.8.8.8 mem_storew_be.120 dropw
+                push.1.1.1.103 mem_storew_le.116 dropw
+                push.8.8.8.8 mem_storew_le.120 dropw
 
                 push.124 push.100 push.{key_suffix} push.{key_prefix}
 
@@ -172,7 +170,6 @@ fn test_sorted_key_value_array_find_half_key() {
         );
 
         let program = build_debug_test!(source, &[]);
-        println!("testing prefix {key_prefix}, suffix {key_suffix}");
         program.expect_stack(&[was_key_found, key_ptr, 100, 124, 0]);
     }
 }
@@ -186,7 +183,7 @@ fn test_empty_sorted_key_value_array_find_key() {
         {TRUNCATE_STACK_PROC}
 
         begin
-            push.100 push.100 push.[8413,5080,6742,354]
+            push.100 push.100 push.[8413,5080,6742,354] reversew
 
             exec.sorted_array::find_key_value
             exec.truncate_stack
@@ -208,16 +205,16 @@ fn test_unsorted_key_value_find_key_fails() {
 
         begin
             # these keys are NOT in ascending order, must fail
-            push.8675.5816.5458.2767 mem_storew_be.100 dropw
-            push.4942.5573.1077.1968 mem_storew_be.104 dropw
+            push.8675.5816.5458.2767 mem_storew_le.100 dropw
+            push.4942.5573.1077.1968 mem_storew_le.104 dropw
 
-            push.8456.415.4922.593 mem_storew_be.108 dropw
-            push.3015.7211.2002.5143 mem_storew_be.112 dropw
+            push.8456.415.4922.593 mem_storew_le.108 dropw
+            push.3015.7211.2002.5143 mem_storew_le.112 dropw
 
-            push.3015.7211.2002.5143 mem_storew_be.116 dropw
-            push.8595.8794.8303.7256 mem_storew_be.120 dropw
+            push.3015.7211.2002.5143 mem_storew_le.116 dropw
+            push.8595.8794.8303.7256 mem_storew_le.120 dropw
 
-            push.124 push.100 push.[8675,5816,5458,2767]
+            push.124 push.100 push.[8675,5816,5458,2767] reversew
 
             exec.sorted_array::find_key_value
             exec.truncate_stack
@@ -239,15 +236,15 @@ fn test_misaligned_key_value_find_key_fails() {
 
         begin
             # last value is missing
-            push.8456.415.4922.593 mem_storew_be.100 dropw
-            push.8595.8794.8303.7256 mem_storew_be.104 dropw
+            push.8456.415.4922.593 mem_storew_le.100 dropw
+            push.8595.8794.8303.7256 mem_storew_le.104 dropw
 
-            push.3348.6058.5470.2813 mem_storew_be.108 dropw
-            push.3015.7211.2002.5143 mem_storew_be.112 dropw
+            push.3348.6058.5470.2813 mem_storew_le.108 dropw
+            push.3015.7211.2002.5143 mem_storew_le.112 dropw
 
-            push.7513.7106.9944.7176 mem_storew_be.116 dropw
+            push.7513.7106.9944.7176 mem_storew_le.116 dropw
 
-            push.120 push.100 push.[8675,5816,5458,2767]
+            push.120 push.100 push.[8675,5816,5458,2767] reversew
 
             exec.sorted_array::find_key_value
             exec.truncate_stack
