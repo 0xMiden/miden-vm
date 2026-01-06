@@ -67,6 +67,8 @@ pub enum ExecutionError {
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
+    #[error("exceeded the allowed number of max cycles {0}")]
+    CycleLimitExceeded(u32),
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -309,6 +311,17 @@ pub enum OperationError {
         "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
     )]
     InvalidMerklePathLength { path_len: usize, depth: Felt },
+}
+
+impl OperationError {
+    /// Wraps this error with execution context to produce an `ExecutionError`.
+    ///
+    /// This is useful when working with `ControlFlow` or other non-`Result` return types
+    /// where the `OperationResultExt::map_exec_err` extension trait cannot be used directly.
+    pub fn with_context(self, err_ctx: &impl ErrorContext, clk: AirRowIndex) -> ExecutionError {
+        let (label, source_file) = err_ctx.label_and_source_file();
+        ExecutionError::OperationError { label, source_file, clk, err: self }
+    }
 }
 
 /// Inner data for `OperationError::MerklePathVerificationFailed`.
