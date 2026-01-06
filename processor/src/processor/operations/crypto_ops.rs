@@ -1,3 +1,5 @@
+use alloc::boxed::Box;
+
 use miden_air::trace::{
     decoder::NUM_USER_OP_HELPERS,
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
@@ -14,6 +16,7 @@ use miden_core::{
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ErrorContext, ExecutionError, ONE,
+    errors::{MerklePathVerificationFailedInner, OperationError, OperationResultExt},
     fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
     processor::{
@@ -104,9 +107,17 @@ pub(super) fn op_mpverify<P: Processor>(
         // If the hasher doesn't compute the same root (using the same path),
         // then it means that `node` is not the value currently in the tree at `index`
         let err_msg = program.resolve_error_message(err_code);
-        ExecutionError::merkle_path_verification_failed(
-            node, index, root, err_code, err_msg, err_ctx,
-        )
+        Err::<(), _>(OperationError::MerklePathVerificationFailed {
+            inner: Box::new(MerklePathVerificationFailedInner {
+                value: node,
+                index,
+                root,
+                err_code,
+                err_msg,
+            }),
+        })
+        .map_exec_err(err_ctx, clk)
+        .unwrap_err()
     })?;
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
@@ -169,7 +180,12 @@ pub(super) fn op_mrupdate<P: Processor>(
     if let Some(path) = &path
         && path.len() != depth.as_canonical_u64() as usize
     {
-        return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
+        return Err(Err::<(), _>(OperationError::InvalidMerklePathLength {
+            path_len: path.len(),
+            depth,
+        })
+        .map_exec_err(err_ctx, clk)
+        .unwrap_err());
     }
 
     let (addr, new_root) = processor.hasher().update_merkle_root(
@@ -179,14 +195,17 @@ pub(super) fn op_mrupdate<P: Processor>(
         path.as_ref(),
         index,
         || {
-            ExecutionError::merkle_path_verification_failed(
-                old_value,
-                index,
-                claimed_old_root,
-                ZERO,
-                None,
-                err_ctx,
-            )
+            Err::<(), _>(OperationError::MerklePathVerificationFailed {
+                inner: Box::new(MerklePathVerificationFailedInner {
+                    value: old_value,
+                    index,
+                    root: claimed_old_root,
+                    err_code: ZERO,
+                    err_msg: None,
+                }),
+            })
+            .map_exec_err(err_ctx, clk)
+            .unwrap_err()
         },
     )?;
     tracer.record_hasher_update_merkle_root(
