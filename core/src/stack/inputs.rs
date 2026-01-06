@@ -16,7 +16,7 @@ use crate::{
 ///
 /// The values in the struct are stored in the "stack order" - i.e., the last input is at the top
 /// of the stack (in position 0).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StackInputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
