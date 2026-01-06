@@ -1,6 +1,19 @@
+mod index;
+mod package_id;
+mod provider;
+mod pubgrub_compat;
 mod version;
+mod version_requirement;
+mod version_set;
 
-pub use self::version::{Version, VersionReq, VersionReqOrDigest};
+pub use self::{
+    index::PackageIndex,
+    package_id::PackageId,
+    provider::PackageResolver,
+    version::{SemVer, Version, VersionReq},
+    version_requirement::VersionRequirement,
+    version_set::VersionSet,
+};
 
 use alloc::{format, sync::Arc, vec};
 
@@ -34,12 +47,13 @@ impl Dependency {
     }
 
     /// Get the version requirement for this dependency, if one was given
-    pub fn required_version(&self) -> Option<VersionReqOrDigest> {
+    pub fn required_version(&self) -> Option<VersionRequirement> {
         match &self.version {
             DependencyVersionScheme::Registry(version) => Some(version.clone()),
+            DependencyVersionScheme::Workspace { .. } => None,
             DependencyVersionScheme::Path { version, .. } => version.clone(),
             DependencyVersionScheme::Git { version, .. } => {
-                version.as_ref().map(|spanned| VersionReqOrDigest::Version(spanned.clone()))
+                version.as_ref().map(|spanned| VersionRequirement::Semantic(spanned.clone()))
             },
         }
     }
@@ -59,7 +73,9 @@ pub enum DependencyVersionScheme {
     ///
     /// Resolution of packages using this scheme relies on the specific implementation of the
     /// package registry in use, which can vary depending on context.
-    Registry(VersionReqOrDigest),
+    Registry(VersionRequirement),
+    /// Resolve the given path to a member of the current workspace.
+    Workspace { member: Span<Uri> },
     /// Resolve the given path to a Miden project/workspace, or assembled Miden package artifact.
     Path {
         /// The path to a Miden project directory containing a `miden-project.toml` OR a Miden
@@ -70,7 +86,7 @@ pub enum DependencyVersionScheme {
         ///
         /// If unspecified, the version requirement is presumed to be an exact match for the version
         /// found in the package/project at the given path.
-        version: Option<VersionReqOrDigest>,
+        version: Option<VersionRequirement>,
     },
     /// Resolve the given Git repository to a Miden project/workspace.
     Git {
@@ -132,10 +148,10 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
             Ok(Self::Registry(ast.version().unwrap().clone()))
         } else if ast.is_git() {
             let version = match ast.version() {
-                Some(VersionReqOrDigest::Digest(digest)) => {
+                Some(VersionRequirement::Digest(digest)) => {
                     return Err(InvalidDependencySpecError::GitWithDigest { span: digest.span() });
                 },
-                Some(VersionReqOrDigest::Version(v)) => Some(v.clone()),
+                Some(VersionRequirement::Semantic(v)) => Some(v.clone()),
                 None => None,
             };
             let revision = ast
@@ -160,6 +176,62 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
                 path: ast.path.clone().unwrap(),
                 version: ast.version_or_digest.clone(),
             })
+        }
+    }
+}
+
+impl DependencyVersionScheme {
+    #[cfg(feature = "std")]
+    pub fn try_from_in_workspace(
+        spec: Span<&crate::ast::DependencySpec>,
+        workspace: &crate::ast::WorkspaceFile,
+    ) -> Result<Self, InvalidDependencySpecError> {
+        use std::path::Path;
+
+        // If the dependency is a path dependency, check if the path refers to any of the workspace
+        // members, and if so, convert the dependency version scheme to `Workspace` to aid in
+        // dependency resolution
+        match Self::try_from(spec)? {
+            Self::Path { path: uri, version } => {
+                let workspace_path = workspace
+                    .source_file
+                    .as_ref()
+                    .map(|file| Path::new(file.content().uri().path()));
+                let workspace_member = if uri.scheme().is_none_or(|scheme| scheme == "file") {
+                    let path = Path::new(uri.path());
+                    if path.is_relative() {
+                        workspace
+                            .workspace
+                            .members
+                            .iter()
+                            .find(|uri| path.starts_with(uri.path()))
+                            .cloned()
+                    } else if let Some(workspace_path) =
+                        workspace_path.and_then(|p| p.canonicalize().ok())
+                    {
+                        let relative_path = path.strip_prefix(workspace_path).ok();
+                        if let Some(relative_path) = relative_path {
+                            workspace
+                                .workspace
+                                .members
+                                .iter()
+                                .find(|uri| relative_path.starts_with(uri.path()))
+                                .cloned()
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                match workspace_member {
+                    Some(member) => Ok(Self::Workspace { member }),
+                    None => Ok(Self::Path { path: uri, version }),
+                }
+            },
+            scheme => Ok(scheme),
         }
     }
 }
