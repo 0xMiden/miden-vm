@@ -45,7 +45,9 @@ pub(super) fn execute_sync_op(
             // do nothing
         },
         Operation::Assert(err_code) => {
-            sys_ops::op_assert(processor, *err_code, host, current_forest, err_ctx, tracer)?
+            let clk = processor.system().clk();
+            sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)
+                .map_exec_err(err_ctx, clk)?
         },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
