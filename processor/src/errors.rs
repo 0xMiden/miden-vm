@@ -171,6 +171,23 @@ impl From<ExecutionError> for IoError {
     }
 }
 
+// CRYPTO ERROR
+// ================================================================================================
+
+/// Context-free error type for cryptographic operations (Merkle path verification, updates).
+///
+/// This enum wraps errors from the advice provider and operation subsystems without
+/// carrying source location context. Context is added at the call site via
+/// `CryptoResultExt::map_crypto_err`.
+#[derive(Debug, thiserror::Error, Diagnostic)]
+pub enum CryptoError {
+    #[error(transparent)]
+    Advice(#[from] AdviceError),
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Operation(#[from] OperationError),
+}
+
 // OPERATION ERROR
 // ================================================================================================
 
@@ -456,6 +473,36 @@ impl<T> IoResultExt<T> for Result<T, IoError> {
                 IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
                 // Execution errors are already fully formed, just unwrap
                 IoError::Execution(err) => *err,
+            }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, CryptoError>` to `Result<T, ExecutionError>`.
+pub trait CryptoResultExt<T> {
+    /// Maps a `CryptoError` to an `ExecutionError` with the provided context.
+    fn map_crypto_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError>;
+}
+
+impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
+    fn map_crypto_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            match err {
+                CryptoError::Advice(err) => {
+                    ExecutionError::AdviceError { label, source_file, clk, err }
+                },
+                CryptoError::Operation(err) => {
+                    ExecutionError::OperationError { label, source_file, clk, err }
+                },
             }
         })
     }

@@ -12,7 +12,7 @@ use miden_core::{
 use crate::{
     AdviceProvider, ContextId, ErrorContext, ExecutionError, MemoryResultExt, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::{AceError, AceResultExt},
+    errors::{AceError, AceResultExt, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
@@ -132,8 +132,8 @@ impl HasherInterface for FastProcessor {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
         match path.verify(index.as_canonical_u64(), value, &claimed_root) {
             // Return a default value for the address, as it is not needed in trace generation.
@@ -150,8 +150,8 @@ impl HasherInterface for FastProcessor {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
 
         // Verify the old value against the claimed old root.

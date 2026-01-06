@@ -13,9 +13,10 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ExecutionError,
+    AdviceError, ContextId,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
+    errors::OperationError,
     fast::FastProcessor,
     processor::{AdviceProviderInterface, HasherInterface, MemoryInterface},
 };
@@ -933,8 +934,8 @@ impl HasherInterface for HasherResponseReplay {
         _value: Word,
         _path: Option<&MerklePath>,
         _index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError> {
         let (addr, computed_root) = self.replay_build_merkle_root();
         if claimed_root == computed_root {
             Ok(addr)
@@ -952,8 +953,8 @@ impl HasherInterface for HasherResponseReplay {
         _new_value: Word,
         _path: Option<&MerklePath>,
         _index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError> {
         let (address, old_root, new_root) = self.replay_update_merkle_root();
 
         if claimed_old_root == old_root {
