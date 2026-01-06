@@ -59,15 +59,14 @@ pub async fn prove(
     // (first element = bottom of stack, last element = top)
     let stack_inputs_reversed: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().rev().collect();
 
-    let processor = if options.execution_options().enable_debugging() {
-        FastProcessor::new_debug(&stack_inputs_reversed, advice_inputs)
-    } else {
-        FastProcessor::new_with_advice_inputs(&stack_inputs_reversed, advice_inputs)
-    };
+    let processor = FastProcessor::new_with_options(
+        &stack_inputs_reversed,
+        advice_inputs,
+        *options.execution_options(),
+    );
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace(program, host, options.execution_options().core_trace_fragment_size())
-        .await?;
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace(program, host).await?;
 
     let trace = build_trace(
         execution_output,

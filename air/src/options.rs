@@ -110,6 +110,12 @@ impl ExecutionOptions {
     /// Creates a new instance of [ExecutionOptions] from the specified parameters.
     ///
     /// If the `max_cycles` is `None` the maximum number of cycles will be set to 2^29.
+    ///
+    /// # Errors
+    /// Returns an error if:
+    /// - `max_cycles` is outside the valid range
+    /// - `expected_cycles` exceeds `max_cycles`
+    /// - `core_trace_fragment_size` is zero
     pub fn new(
         max_cycles: Option<u32>,
         expected_cycles: u32,
@@ -146,6 +152,11 @@ impl ExecutionOptions {
         // MIN_TRACE_LEN -- pad expected number to it.
         let expected_cycles = expected_cycles.next_power_of_two().max(MIN_TRACE_LEN as u32);
 
+        // Validate core trace fragment size.
+        if core_trace_fragment_size == 0 {
+            return Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall);
+        }
+
         Ok(ExecutionOptions {
             max_cycles,
             expected_cycles,
@@ -156,9 +167,17 @@ impl ExecutionOptions {
     }
 
     /// Sets the fragment size for core trace generation.
-    pub fn with_core_trace_fragment_size(mut self, size: usize) -> Self {
+    ///
+    /// Returns an error if the size is zero.
+    pub fn with_core_trace_fragment_size(
+        mut self,
+        size: usize,
+    ) -> Result<Self, ExecutionOptionsError> {
+        if size == 0 {
+            return Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall);
+        }
         self.core_trace_fragment_size = size;
-        self
+        Ok(self)
     }
 
     /// Enables execution of the `trace` instructions.
@@ -209,5 +228,45 @@ impl ExecutionOptions {
     /// Returns a flag indicating whether the VM should execute a program in debug mode.
     pub fn enable_debugging(&self) -> bool {
         self.enable_debugging
+    }
+}
+
+// TESTS
+// ================================================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_fragment_size() {
+        // Valid power of two values should succeed
+        let opts = ExecutionOptions::new(None, 64, 1024, false, false);
+        assert!(opts.is_ok());
+        assert_eq!(opts.unwrap().core_trace_fragment_size(), 1024);
+
+        let opts = ExecutionOptions::new(None, 64, 4096, false, false);
+        assert!(opts.is_ok());
+
+        let opts = ExecutionOptions::new(None, 64, 1, false, false);
+        assert!(opts.is_ok());
+    }
+
+    #[test]
+    fn zero_fragment_size_fails() {
+        let opts = ExecutionOptions::new(None, 64, 0, false, false);
+        assert!(matches!(opts, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
+    }
+
+    #[test]
+    fn with_core_trace_fragment_size_validates() {
+        // Valid size should succeed
+        let result = ExecutionOptions::default().with_core_trace_fragment_size(2048);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().core_trace_fragment_size(), 2048);
+
+        // Zero should fail
+        let result = ExecutionOptions::default().with_core_trace_fragment_size(0);
+        assert!(matches!(result, Err(ExecutionOptionsError::CoreTraceFragmentSizeTooSmall)));
     }
 }

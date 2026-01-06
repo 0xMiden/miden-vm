@@ -14,7 +14,7 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
 use super::*;
-use crate::{DefaultHost, HostLibrary, fast::FastProcessor};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::FastProcessor};
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
@@ -285,11 +285,17 @@ fn test_trace_generation_at_fragment_boundaries(
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let trace_from_fragments = {
-        let processor = FastProcessor::new(stack_inputs);
+        let processor = FastProcessor::new_with_options(
+            stack_inputs,
+            AdviceInputs::default(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(fragment_size)
+                .unwrap(),
+        );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host, fragment_size).unwrap();
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
         build_trace(
             execution_output,
@@ -300,12 +306,17 @@ fn test_trace_generation_at_fragment_boundaries(
     };
 
     let trace_from_single_fragment = {
-        let processor = FastProcessor::new(stack_inputs);
+        let processor = FastProcessor::new_with_options(
+            stack_inputs,
+            AdviceInputs::default(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+                .unwrap(),
+        );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (execution_output, trace_fragment_contexts) = processor
-            .execute_for_trace_sync(&program, &mut host, MAX_FRAGMENT_SIZE)
-            .unwrap();
+        let (execution_output, trace_fragment_contexts) =
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
         build_trace(

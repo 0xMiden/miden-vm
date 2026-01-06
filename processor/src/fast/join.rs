@@ -38,7 +38,7 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the JOIN operation added
         // to the trace.
-        self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+        self.increment_clk(tracer, stopper)
     }
 
     /// Executes the finish phase of a Join node.
@@ -61,8 +61,8 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the END operation added
         // to the trace.
-        self.increment_clk(tracer, stopper).map_break(|_| {
-            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(node_id)))
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)

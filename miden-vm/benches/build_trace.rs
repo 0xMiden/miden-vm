@@ -65,18 +65,19 @@ fn build_trace(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new_with_advice_inputs(
+                            let processor = FastProcessor::new_with_options(
                                 &stack_inputs,
                                 advice_inputs.clone(),
+                                ExecutionOptions::default()
+                                    .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
+                                    .unwrap(),
                             );
 
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let (execution_output, trace_generation_context) = processor
-                                .execute_for_trace(&program, &mut host, TRACE_FRAGMENT_SIZE)
-                                .await
-                                .unwrap();
+                            let (execution_output, trace_generation_context) =
+                                processor.execute_for_trace(&program, &mut host).await.unwrap();
 
                             let trace = parallel::build_trace(
                                 execution_output,

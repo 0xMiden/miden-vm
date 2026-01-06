@@ -387,9 +387,15 @@ impl Test {
         let fast_stack_result = {
             let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-            let fast_processor =
-                FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-            fast_processor.execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE)
+            let fast_processor = FastProcessor::new_with_options(
+                &stack_inputs,
+                advice_inputs,
+                miden_air::ExecutionOptions::default()
+                    .with_debugging(self.in_debug_mode)
+                    .with_core_trace_fragment_size(FRAGMENT_SIZE)
+                    .unwrap(),
+            );
+            fast_processor.execute_for_trace_sync(&program, &mut host)
         };
 
         // compare fast and slow processors' stack outputs
@@ -575,7 +581,11 @@ impl Test {
         let fast_result_by_step = {
             let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
-            let fast_process = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+            let fast_process = if self.in_debug_mode {
+                FastProcessor::new_debug(&stack_inputs, advice_inputs)
+            } else {
+                FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
+            };
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

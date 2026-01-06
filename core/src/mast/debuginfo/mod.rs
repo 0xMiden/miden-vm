@@ -47,6 +47,7 @@ use miden_utils_indexing::{Idx, IndexVec};
 use serde::{Deserialize, Serialize};
 
 use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
+use crate::{LexicographicWord, Word};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -74,6 +75,10 @@ pub struct DebugInfo {
 
     /// Maps error codes to error messages.
     error_codes: BTreeMap<u64, Arc<str>>,
+
+    /// Maps MAST root digests to procedure names for debugging purposes.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    procedure_names: BTreeMap<LexicographicWord, Arc<str>>,
 }
 
 impl DebugInfo {
@@ -87,6 +92,7 @@ impl DebugInfo {
             op_decorator_storage: OpToDecoratorIds::new(),
             node_decorator_storage: NodeToDecoratorIds::new(),
             error_codes: BTreeMap::new(),
+            procedure_names: BTreeMap::new(),
         }
     }
 
@@ -106,24 +112,46 @@ impl DebugInfo {
             ),
             node_decorator_storage: NodeToDecoratorIds::with_capacity(nodes_capacity, 0, 0),
             error_codes: BTreeMap::new(),
+            procedure_names: BTreeMap::new(),
+        }
+    }
+
+    /// Creates an empty [DebugInfo] with valid CSR structures for N nodes.
+    pub fn empty_for_nodes(num_nodes: usize) -> Self {
+        let mut node_indptr_for_op_idx = IndexVec::new();
+        for _ in 0..=num_nodes {
+            let _ = node_indptr_for_op_idx.push(0);
+        }
+
+        let op_decorator_storage =
+            OpToDecoratorIds::from_components(Vec::new(), Vec::new(), node_indptr_for_op_idx)
+                .expect("Empty CSR structure should be valid");
+
+        Self {
+            decorators: IndexVec::new(),
+            op_decorator_storage,
+            node_decorator_storage: NodeToDecoratorIds::new(),
+            error_codes: BTreeMap::new(),
+            procedure_names: BTreeMap::new(),
         }
     }
 
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators or error codes.
+    /// Returns true if this [DebugInfo] has no decorators, error codes, or procedure names.
     pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty() && self.error_codes.is_empty()
+        self.decorators.is_empty() && self.error_codes.is_empty() && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators and error codes.
+    /// Strips all debug information, removing decorators, error codes, and procedure names.
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn clear(&mut self) {
         self.clear_mappings();
         self.decorators = IndexVec::new();
         self.error_codes.clear();
+        self.procedure_names.clear();
     }
 
     // DECORATOR ACCESSORS
@@ -257,6 +285,43 @@ impl DebugInfo {
     /// This is used when error code information needs to be reset.
     pub fn clear_error_codes(&mut self) {
         self.error_codes.clear();
+    }
+
+    // PROCEDURE NAME METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the procedure name for the given MAST root digest, if present.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.procedure_names.get(&LexicographicWord::from(*digest)).map(|s| s.as_ref())
+    }
+
+    /// Returns an iterator over all (digest, name) pairs.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
+        self.procedure_names.iter().map(|(key, name)| (key.into_inner(), name))
+    }
+
+    /// Returns the number of procedure names.
+    pub fn num_procedure_names(&self) -> usize {
+        self.procedure_names.len()
+    }
+
+    /// Inserts a procedure name for the given MAST root digest.
+    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
+        self.procedure_names.insert(LexicographicWord::from(digest), name);
+    }
+
+    /// Inserts multiple procedure names at once.
+    pub fn extend_procedure_names<I>(&mut self, names: I)
+    where
+        I: IntoIterator<Item = (Word, Arc<str>)>,
+    {
+        self.procedure_names
+            .extend(names.into_iter().map(|(d, n)| (LexicographicWord::from(d), n)));
+    }
+
+    /// Clears all procedure names.
+    pub fn clear_procedure_names(&mut self) {
+        self.procedure_names.clear();
     }
 
     // TEST HELPERS

@@ -50,14 +50,14 @@ impl FastProcessor {
 
             // Corresponds to the row inserted for the LOOP operation added
             // to the trace.
-            self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+            self.increment_clk(tracer, stopper)
         } else if condition == ZERO {
             // Start and exit the loop immediately - corresponding to adding a LOOP and END row
             // immediately since there is no body to execute.
 
             // Increment the clock, corresponding to the LOOP operation
-            self.increment_clk(tracer, stopper).map_break(|_| {
-                BreakReason::Stopped(Some(Continuation::FinishLoopUnentered(current_node_id)))
+            self.increment_clk_with_continuation(tracer, stopper, || {
+                Some(Continuation::FinishLoopUnentered(current_node_id))
             })?;
 
             self.finish_loop_node_unentered(
@@ -69,7 +69,7 @@ impl FastProcessor {
                 stopper,
             )
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host);
+            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
             ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
                 condition, &err_ctx,
             )))
@@ -108,7 +108,7 @@ impl FastProcessor {
             continuation_stack.push_start_node(loop_node.body());
 
             // Corresponds to the REPEAT operation added to the trace.
-            self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+            self.increment_clk(tracer, stopper)
         } else if condition == ZERO {
             // Exit the loop - add END row
             tracer.start_clock_cycle(
@@ -120,13 +120,13 @@ impl FastProcessor {
             self.decrement_stack_size(tracer);
 
             // Corresponds to the END operation added to the trace.
-            self.increment_clk(tracer, stopper).map_break(|_| {
-                BreakReason::Stopped(Some(Continuation::AfterExitDecorators(current_node_id)))
+            self.increment_clk_with_continuation(tracer, stopper, || {
+                Some(Continuation::AfterExitDecorators(current_node_id))
             })?;
 
             self.execute_after_exit_decorators(current_node_id, current_forest, host)
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host);
+            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
             ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
                 condition, &err_ctx,
             )))
@@ -155,8 +155,8 @@ impl FastProcessor {
         );
 
         // Increment the clock, corresponding to the END operation added to the trace.
-        self.increment_clk(tracer, stopper).map_break(|_| {
-            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(current_node_id)))
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(current_node_id))
         })?;
 
         // Execute decorators that should be executed after exiting the node

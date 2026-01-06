@@ -48,7 +48,7 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, node_id, host);
+            let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
             return ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_if(
                 condition, &err_ctx,
             )));
@@ -56,7 +56,7 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the SPLIT operation added
         // to the trace.
-        self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+        self.increment_clk(tracer, stopper)
     }
 
     /// Executes the finish phase of a Split node.
@@ -79,8 +79,8 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the END operation added
         // to the trace.
-        self.increment_clk(tracer, stopper).map_break(|_| {
-            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(node_id)))
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)?;

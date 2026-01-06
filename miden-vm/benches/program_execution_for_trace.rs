@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{AdviceInputs, fast::FastProcessor};
+use miden_processor::{AdviceInputs, ExecutionOptions, fast::FastProcessor};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -61,18 +61,19 @@ fn program_execution_for_trace(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new_with_advice_inputs(
+                            let processor = FastProcessor::new_with_options(
                                 &stack_inputs,
                                 advice_inputs.clone(),
+                                ExecutionOptions::default()
+                                    .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
+                                    .unwrap(),
                             );
 
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let out = processor
-                                .execute_for_trace(&program, &mut host, TRACE_FRAGMENT_SIZE)
-                                .await
-                                .unwrap();
+                            let out =
+                                processor.execute_for_trace(&program, &mut host).await.unwrap();
                             black_box(out);
                         },
                         BatchSize::SmallInput,

@@ -589,3 +589,65 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let result = MastForest::read_from_bytes(&corrupted);
     assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
 }
+
+#[test]
+fn mast_forest_serialize_deserialize_procedure_names() {
+    let mut forest = MastForest::new();
+
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_procedure".into());
+
+    assert_eq!(forest.procedure_name(&digest), Some("test_procedure"));
+    assert_eq!(forest.debug_info.num_procedure_names(), 1);
+
+    let serialized = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+
+    assert_eq!(deserialized.procedure_name(&digest), Some("test_procedure"));
+    assert_eq!(deserialized.debug_info.num_procedure_names(), 1);
+    assert_eq!(forest, deserialized);
+}
+
+#[test]
+fn mast_forest_serialize_deserialize_multiple_procedure_names() {
+    let mut forest = MastForest::new();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block3_id = BasicBlockNodeBuilder::new(vec![Operation::U32sub], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    forest.make_root(block1_id);
+    forest.make_root(block2_id);
+    forest.make_root(block3_id);
+
+    let digest1 = forest[block1_id].digest();
+    let digest2 = forest[block2_id].digest();
+    let digest3 = forest[block3_id].digest();
+
+    forest.insert_procedure_name(digest1, "proc_add".into());
+    forest.insert_procedure_name(digest2, "proc_mul".into());
+    forest.insert_procedure_name(digest3, "proc_sub".into());
+
+    assert_eq!(forest.debug_info.num_procedure_names(), 3);
+
+    let serialized = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+
+    assert_eq!(deserialized.procedure_name(&digest1), Some("proc_add"));
+    assert_eq!(deserialized.procedure_name(&digest2), Some("proc_mul"));
+    assert_eq!(deserialized.procedure_name(&digest3), Some("proc_sub"));
+    assert_eq!(deserialized.debug_info.num_procedure_names(), 3);
+
+    assert_eq!(forest, deserialized);
+}

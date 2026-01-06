@@ -24,6 +24,9 @@
 //! (error_codes map section)
 //! - Error codes map (BTreeMap<u64, String>)
 //!
+//! (procedure_names map section)
+//! - Procedure names map (BTreeMap<Word, String>)
+//!
 //! (decorator data section)
 //! - Decorator data
 //! - String table
@@ -171,6 +174,11 @@ impl Serializable for MastForest {
             self.debug_info.error_codes().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
+        // Write procedure names
+        let procedure_names: BTreeMap<crate::Word, String> =
+            self.debug_info.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
+        procedure_names.write_into(target);
+
         // write all decorator data below
 
         let mut decorator_data_builder = DecoratorDataBuilder::new();
@@ -219,6 +227,11 @@ impl Deserializable for MastForest {
         let error_codes: BTreeMap<u64, String> = Deserializable::read_from(source)?;
         let error_codes: BTreeMap<u64, Arc<str>> =
             error_codes.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
+
+        // Reading procedure names
+        let procedure_names: BTreeMap<crate::Word, String> = Deserializable::read_from(source)?;
+        let procedure_names: BTreeMap<crate::Word, Arc<str>> =
+            procedure_names.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
 
         // Reading Decorators
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
@@ -302,6 +315,20 @@ impl Deserializable for MastForest {
         mast_forest
             .debug_info
             .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
+
+        mast_forest.debug_info.clear_procedure_names();
+
+        // Validate that all procedure name digests correspond to procedure roots in the forest
+        for digest in procedure_names.keys() {
+            if mast_forest.find_procedure_root(*digest).is_none() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "procedure name references digest that is not a procedure root: {:?}",
+                    digest
+                )));
+            }
+        }
+
+        mast_forest.debug_info.extend_procedure_names(procedure_names);
 
         Ok(mast_forest)
     }

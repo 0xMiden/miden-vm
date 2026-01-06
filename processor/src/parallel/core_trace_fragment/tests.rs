@@ -1,12 +1,15 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::{
-    CTX_COL_IDX,
-    decoder::{
-        ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
-        NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
-        OP_BATCH_8_GROUPS, OP_BATCH_FLAGS_RANGE, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET,
-        OP_INDEX_COL_IDX,
+use miden_air::{
+    ExecutionOptions,
+    trace::{
+        CTX_COL_IDX,
+        decoder::{
+            ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX,
+            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
+            OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS, OP_BATCH_FLAGS_RANGE,
+            OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
+        },
     },
 };
 use miden_core::{
@@ -19,7 +22,7 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    DefaultHost, ExecutionTrace, NoopEventHandler, PrimeField64, fast::FastProcessor,
+    AdviceInputs, DefaultHost, ExecutionTrace, NoopEventHandler, PrimeField64, fast::FastProcessor,
     parallel::build_trace,
 };
 
@@ -1596,12 +1599,18 @@ const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 /// portion.
 fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new_with_options(
+        &stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
     let mut host = DefaultHost::default();
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host, MAX_FRAGMENT_SIZE).unwrap();
+        processor.execute_for_trace_sync(program, &mut host).unwrap();
 
     let trace = build_trace(
         execution_output,
@@ -1630,11 +1639,17 @@ fn build_call_trace_helper(
     program: &Program,
     kernel: Kernel,
 ) -> (SystemTrace, DecoderTrace, usize) {
-    let processor = FastProcessor::new(&[]);
+    let processor = FastProcessor::new_with_options(
+        &[],
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+            .unwrap(),
+    );
     let mut host = DefaultHost::default();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host, MAX_FRAGMENT_SIZE).unwrap();
+        processor.execute_for_trace_sync(program, &mut host).unwrap();
 
     let trace = build_trace(execution_output, trace_generation_context, program.hash(), kernel);
 

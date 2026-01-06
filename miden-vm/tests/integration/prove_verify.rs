@@ -201,7 +201,9 @@ mod fast_parallel {
 
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::Felt;
-    use miden_processor::{AdviceInputs, StackInputs, fast::FastProcessor, parallel::build_trace};
+    use miden_processor::{
+        AdviceInputs, ExecutionOptions, StackInputs, fast::FastProcessor, parallel::build_trace,
+    };
     use miden_prover::{
         ExecutionProof, HashFunction, ProcessorAir, config, execution_trace_to_row_major, stark,
     };
@@ -237,10 +239,15 @@ mod fast_parallel {
         // Convert stack inputs for fast processor (reversed order)
         let stack_inputs_vec: Vec<Felt> = stack_inputs.clone().into_iter().rev().collect();
 
-        let fast_processor =
-            FastProcessor::new_with_advice_inputs(&stack_inputs_vec, advice_inputs.clone());
+        let fast_processor = FastProcessor::new_with_options(
+            &stack_inputs_vec,
+            advice_inputs.clone(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(FRAGMENT_SIZE)
+                .unwrap(),
+        );
         let (execution_output, trace_context) = fast_processor
-            .execute_for_trace_sync(&program, &mut host, FRAGMENT_SIZE)
+            .execute_for_trace_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
         let fast_stack_outputs = execution_output.stack.clone();
