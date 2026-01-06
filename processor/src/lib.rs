@@ -84,7 +84,7 @@ use crate::{fast::FastProcessor, parallel::build_trace};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::Felt;
+    pub use miden_core::{Felt, PrimeField64};
 }
 
 pub mod crypto {
