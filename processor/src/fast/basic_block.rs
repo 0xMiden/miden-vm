@@ -8,9 +8,10 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ErrorContext, ExecutionError,
+    AsyncHost, ErrorContext,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
+    errors::{AdviceResultExt, EventResultExt},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -358,15 +359,15 @@ impl FastProcessor {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::event_error(
-                        err, event_id, event_name, err_ctx,
-                    )));
+                    return ControlFlow::Break(BreakReason::Err(
+                        Err::<(), _>(err).map_event_err(err_ctx, event_id, event_name).unwrap_err(),
+                    ));
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::advice_error(
-                    err, clk, err_ctx,
-                )));
+                return ControlFlow::Break(BreakReason::Err(
+                    Err::<(), _>(err).map_advice_err(err_ctx, clk).unwrap_err(),
+                ));
             }
         }
         ControlFlow::Continue(())
