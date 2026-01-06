@@ -20,12 +20,13 @@ use miden_core::{
     Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
+use winter_prover::crypto::RandomCoin;
 
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, NUM_RAND_ROWS, RowIndex,
+    ChipletsLengths, ContextId, ExecutionTrace, RowIndex,
     TraceLenSummary,
     chiplets::Chiplets,
-    crypto::{RandomCoin, RpoRandomCoin},
+    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -38,8 +39,8 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::AuxTraceBuilders,
-    utils::math::batch_inversion,
+    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
+    utils::{math::batch_inversion, ColMatrix},
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
@@ -115,10 +116,9 @@ pub fn build_trace(
                     range_checker.into_trace_with_table(
                         range_table_len,
                         main_trace_len,
-                        NUM_RAND_ROWS,
                     )
                 },
-                || chiplets.into_trace(main_trace_len, NUM_RAND_ROWS, final_pc_transcript.state()),
+                || chiplets.into_trace(main_trace_len, final_pc_transcript.state()),
             )
         },
     );
@@ -140,7 +140,7 @@ pub fn build_trace(
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw();
         }
     }
 
