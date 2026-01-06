@@ -3,6 +3,7 @@ use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError, OperationResultExt,
+    errors::IoResultExt,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -206,14 +207,38 @@ pub(super) fn execute_sync_op(
 
         // ----- input / output ---------------------------------------------------------------
         Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
-        Operation::AdvPop => io_ops::op_advpop(processor, err_ctx, tracer)?,
-        Operation::AdvPopW => io_ops::op_advpopw(processor, err_ctx, tracer)?,
-        Operation::MLoadW => io_ops::op_mloadw(processor, err_ctx, tracer)?,
-        Operation::MStoreW => io_ops::op_mstorew(processor, err_ctx, tracer)?,
-        Operation::MLoad => io_ops::op_mload(processor, err_ctx, tracer)?,
-        Operation::MStore => io_ops::op_mstore(processor, err_ctx, tracer)?,
-        Operation::MStream => io_ops::op_mstream(processor, err_ctx, tracer)?,
-        Operation::Pipe => io_ops::op_pipe(processor, err_ctx, tracer)?,
+        Operation::AdvPop => {
+            let clk = processor.system().clk();
+            io_ops::op_advpop(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::AdvPopW => {
+            let clk = processor.system().clk();
+            io_ops::op_advpopw(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::MLoadW => {
+            let clk = processor.system().clk();
+            io_ops::op_mloadw(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::MStoreW => {
+            let clk = processor.system().clk();
+            io_ops::op_mstorew(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::MLoad => {
+            let clk = processor.system().clk();
+            io_ops::op_mload(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::MStore => {
+            let clk = processor.system().clk();
+            io_ops::op_mstore(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::MStream => {
+            let clk = processor.system().clk();
+            io_ops::op_mstream(processor, tracer).map_io_err(err_ctx, clk)?
+        },
+        Operation::Pipe => {
+            let clk = processor.system().clk();
+            io_ops::op_pipe(processor, tracer).map_io_err(err_ctx, clk)?
+        },
 
         // ----- cryptographic operations -----------------------------------------------------
         Operation::HPerm => {

@@ -14,7 +14,7 @@ use miden_core::{
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{BaseHost, DebugError, EventError, MemoryError, TraceError, host::advice::AdviceError};
+use crate::{AdviceError, BaseHost, DebugError, EventError, MemoryError, TraceError};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -140,6 +140,35 @@ pub enum AceError {
     FailedWireBusRead,
     #[error("num of wires must be less than 2^30 but was {0}")]
     TooManyWires(u64),
+}
+
+// IO ERROR
+// ================================================================================================
+
+/// Context-free error type for IO operations.
+///
+/// This enum wraps errors from the advice provider and memory subsystems without
+/// carrying source location context. Context is added at the call site via
+/// `IoResultExt::map_io_err`.
+#[derive(Debug, thiserror::Error, Diagnostic)]
+pub enum IoError {
+    #[error(transparent)]
+    Advice(#[from] AdviceError),
+    #[error(transparent)]
+    Memory(#[from] MemoryError),
+    /// Stack operation error (increment/decrement size failures).
+    ///
+    /// These are internal execution errors that don't need additional context
+    /// since they already carry their own error information.
+    #[error(transparent)]
+    #[diagnostic(transparent)]
+    Execution(Box<ExecutionError>),
+}
+
+impl From<ExecutionError> for IoError {
+    fn from(err: ExecutionError) -> Self {
+        IoError::Execution(Box::new(err))
+    }
 }
 
 // OPERATION ERROR
@@ -405,6 +434,28 @@ impl<T> SystemEventResultExt<T>
                 SystemEventError::Memory(err) => {
                     ExecutionError::MemoryError { label, source_file, err }
                 },
+            }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, IoError>` to `Result<T, ExecutionError>`.
+pub trait IoResultExt<T> {
+    /// Maps an `IoError` to an `ExecutionError` with the provided context.
+    fn map_io_err(self, err_ctx: &impl ErrorContext, clk: RowIndex) -> Result<T, ExecutionError>;
+}
+
+impl<T> IoResultExt<T> for Result<T, IoError> {
+    fn map_io_err(self, err_ctx: &impl ErrorContext, clk: RowIndex) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            match err {
+                IoError::Advice(err) => {
+                    ExecutionError::AdviceError { label, source_file, clk, err }
+                },
+                IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                // Execution errors are already fully formed, just unwrap
+                IoError::Execution(err) => *err,
             }
         })
     }
