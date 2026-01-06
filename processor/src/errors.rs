@@ -142,6 +142,22 @@ pub enum AceError {
     TooManyWires(u64),
 }
 
+// ACE EVAL ERROR
+// ================================================================================================
+
+/// Context-free error type for ACE circuit evaluation operations.
+///
+/// This enum wraps errors from ACE evaluation and memory subsystems without
+/// carrying source location context. Context is added at the call site via
+/// `AceEvalResultExt::map_ace_eval_err`.
+#[derive(Debug, thiserror::Error)]
+pub enum AceEvalError {
+    #[error(transparent)]
+    Ace(#[from] AceError),
+    #[error(transparent)]
+    Memory(#[from] MemoryError),
+}
+
 // IO ERROR
 // ================================================================================================
 
@@ -390,21 +406,6 @@ impl<T> EventResultExt<T> for Result<T, EventError> {
     }
 }
 
-/// Extension trait for converting `Result<T, AceError>` to `Result<T, ExecutionError>`.
-pub trait AceResultExt<T> {
-    /// Maps an `AceError` to an `ExecutionError` with the provided context.
-    fn map_ace_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
-}
-
-impl<T> AceResultExt<T> for Result<T, AceError> {
-    fn map_ace_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
-        self.map_err(|error| {
-            let (label, source_file) = err_ctx.label_and_source_file();
-            ExecutionError::AceChipError { label, source_file, error }
-        })
-    }
-}
-
 /// Extension trait for converting `Result<T, MemoryError>` to `Result<T, ExecutionError>`.
 pub trait MemoryResultExt<T> {
     /// Maps a `MemoryError` to an `ExecutionError` with the provided context.
@@ -502,6 +503,28 @@ impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
                 },
                 CryptoError::Operation(err) => {
                     ExecutionError::OperationError { label, source_file, clk, err }
+                },
+            }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, AceEvalError>` to `Result<T, ExecutionError>`.
+pub trait AceEvalResultExt<T> {
+    /// Maps an `AceEvalError` to an `ExecutionError` with the provided context.
+    fn map_ace_eval_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+}
+
+impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
+    fn map_ace_eval_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            match err {
+                AceEvalError::Ace(error) => {
+                    ExecutionError::AceChipError { label, source_file, error }
+                },
+                AceEvalError::Memory(err) => {
+                    ExecutionError::MemoryError { label, source_file, err }
                 },
             }
         })
