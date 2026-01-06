@@ -471,10 +471,10 @@ fn initialize_chiplets(
     for hasher_op in hasher_ops.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
-                chiplets.hasher.permute(input_state);
+                let _ = chiplets.hasher.permute(input_state);
             },
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
-                chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
+                let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
             HasherOp::HashBasicBlock(expected_hash) => {
                 // Look up the operation batches from the deduplication map
@@ -490,10 +490,10 @@ fn initialize_chiplets(
                 let _ = chiplets.hasher.hash_basic_block(op_batches.as_slice(), expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
-                chiplets.hasher.build_merkle_root(value, &path, index);
+                let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
-                chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
+                let _ = chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
             },
         }
     }
@@ -502,13 +502,13 @@ fn initialize_chiplets(
     for (bitwise_op, a, b) in bitwise {
         match bitwise_op {
             BitwiseOp::U32And => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32and(a, b, &())
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
-                chiplets
+                let _ = chiplets
                     .bitwise
                     .u32xor(a, b, &())
                     .expect("bitwise XOR operation failed when populating chiplet");
@@ -551,25 +551,25 @@ fn initialize_chiplets(
             .kmerge_by(|a, b| a.clk() < b.clk())
             .for_each(|mem_access| match mem_access {
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read(ctx, addr, clk, &())
                         .expect("memory read element failed when populating chiplet");
                 },
                 MemoryAccess::WriteElement(addr, element, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .write(ctx, addr, clk, element, &())
                         .expect("memory write element failed when populating chiplet");
                 },
                 MemoryAccess::ReadWord(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read_word(ctx, addr, clk, &())
                         .expect("memory read word failed when populating chiplet");
                 },
                 MemoryAccess::WriteWord(addr, word, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .write_word(ctx, addr, clk, word, &())
                         .expect("memory write word failed when populating chiplet");
@@ -602,7 +602,7 @@ fn initialize_chiplets(
 
     // populate kernel ROM
     for proc_hash in kernel_replay.into_iter() {
-        chiplets
+        let _ = chiplets
             .kernel_rom
             .access_proc(proc_hash, &())
             .expect("kernel proc access failed when populating chiplet");
