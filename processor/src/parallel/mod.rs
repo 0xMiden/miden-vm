@@ -39,7 +39,7 @@ use crate::{
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::AuxTraceBuilders,
-    utils::{math::batch_inversion, ColMatrix},
+    utils::ColMatrix,
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
@@ -47,6 +47,40 @@ pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STAC
 /// Number of random rows to inject at the end of the trace.
 /// This matches the RPO permutation rate (8 elements).
 const NUM_RAND_ROWS: usize = 8;
+
+/// Batch inversion that handles zeros by leaving them unchanged.
+/// This is needed because the H0 column may contain zeros, and regular batch inversion
+/// would panic when trying to invert zero.
+fn batch_inversion_with_zeros(values: &mut [Felt]) {
+    if values.is_empty() {
+        return;
+    }
+
+    // Save original values since we'll modify the slice in place
+    let original_values: Vec<Felt> = values.to_vec();
+
+    // Forward pass: compute cumulative products, skipping zeros
+    let mut last = ONE;
+    for (result, &value) in values.iter_mut().zip(original_values.iter()) {
+        *result = last;
+        if value != ZERO {
+            last *= value;
+        }
+    }
+
+    // Invert the final cumulative product
+    last = last.inverse();
+
+    // Backward pass: compute individual inverses
+    for i in (0..values.len()).rev() {
+        if original_values[i] == ZERO {
+            values[i] = ZERO;
+        } else {
+            values[i] *= last;
+            last *= original_values[i];
+        }
+    }
+}
 
 mod core_trace_fragment;
 
@@ -241,11 +275,12 @@ fn generate_core_trace_columns(
     // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
     // row of each fragment with non-inverted values.
+    // Note: We need to handle zeros properly, so we use a helper function that processes chunks
+    // and handles zeros by leaving them unchanged.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
         h0_column.par_chunks_mut(fragment_size).for_each(|chunk| {
-            let inverted = batch_inversion(chunk);
-            chunk.copy_from_slice(&inverted);
+            batch_inversion_with_zeros(chunk);
         });
     }
 
