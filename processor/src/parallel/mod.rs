@@ -20,12 +20,13 @@ use miden_core::{
     Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
+use winter_prover::crypto::RandomCoin;
 
 use crate::{
-    ChipletsLengths, ContextId, ExecutionTrace, NUM_RAND_ROWS, RowIndex,
+    ChipletsLengths, ContextId, ExecutionTrace, RowIndex,
     TraceLenSummary,
     chiplets::Chiplets,
-    crypto::{RandomCoin, RpoRandomCoin},
+    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -137,7 +138,7 @@ pub fn build_trace(
     let mut rng = RpoRandomCoin::new(program_hash);
 
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
-    for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
+    for i in main_trace_len - ExecutionTrace::NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
             column[i] = rng.draw();
         }
@@ -181,7 +182,7 @@ fn compute_main_trace_length(
 
     // Pad the trace length to the next power of two and ensure that there is space for random
     // rows
-    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
+    let trace_len = (max_len + ExecutionTrace::NUM_RAND_ROWS).next_power_of_two();
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
@@ -609,7 +610,7 @@ fn initialize_chiplets(
 
 fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     let total_program_rows = trace_columns[0].len();
-    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= main_trace_len);
+    assert!(total_program_rows + ExecutionTrace::NUM_RAND_ROWS - 1 <= main_trace_len);
 
     let num_padding_rows = main_trace_len - total_program_rows;
 
