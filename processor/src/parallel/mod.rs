@@ -12,7 +12,7 @@ use miden_air::{
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
-        main_trace::MainTrace,
+        MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
@@ -22,10 +22,10 @@ use miden_core::{
 use rayon::prelude::*;
 
 use crate::{
-    ChipletsLengths, ContextId, ExecutionTrace, NUM_RAND_ROWS, RowIndex,
+    ChipletsLengths, ContextId, ExecutionTrace, RowIndex,
     TraceLenSummary,
     chiplets::Chiplets,
-    crypto::{RandomCoin, RpoRandomCoin},
+    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -43,6 +43,10 @@ use crate::{
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
+
+/// Number of random rows to inject at the end of the trace.
+/// This matches the RPO permutation rate (8 elements).
+const NUM_RAND_ROWS: usize = 8;
 
 mod core_trace_fragment;
 
@@ -139,7 +143,7 @@ pub fn build_trace(
     // Inject random values into the last NUM_RAND_ROWS rows for all columns
     for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
         for column in trace_columns.iter_mut() {
-            column[i] = rng.draw().expect("failed to draw a random value");
+            column[i] = rng.draw();
         }
     }
 
