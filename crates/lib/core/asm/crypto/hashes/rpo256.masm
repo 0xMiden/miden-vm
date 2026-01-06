@@ -238,7 +238,7 @@ end
 pub proc hash_elements_with_state
     # hash every pair of words
     exec.absorb_double_words_from_memory
-    # => [R0', R1', C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
+    # => [A, B, C', ptr', end_pairs_addr, num_elements%8] where ptr' = end_pairs_addr
 
     # hash remaining input values if there are any left
     # if num_elements%8 is ZERO and there are no elements to hash
@@ -247,118 +247,126 @@ pub proc hash_elements_with_state
         # clean the stack
         exec.squeeze_digest
         swapw drop drop drop movdn.4
-        # => [B']
+        # => [HASH]
     else
         # load the remaining double word
         mem_stream
-        # => [E, D, A', ptr'+2, end_pairs_addr, num_elements%8]
+        # => [A, B, C', ptr'+2, end_pairs_addr, num_elements%8]
 
         # clean the stack
         movup.12 drop movup.12 drop
-        # => [E, D, A', num_elements%8]
+        # => [A, B, C', num_elements%8]
 
         # get the number of elements we need to drop
         # notice that drop_counter could be any number from 1 to 7
         push.8 movup.13 sub movdn.12
-        # => [D, E, C', drop_counter]
-
-        # TODO(Al): remove this work-around 
-        reversew swapw reversew
+        # => [A, B, C', drop_counter]
+        # => [a0, a1, a2, a3, b0, b1, b2, b3, C', drop_counter]
 
         ### 0th value ########################################################
 
-        # we need to drop first value anyway, since number of values is not divisible by 8
-        # push the padding 0 on to the stack and move it down to the 6th position
-        drop push.0 movdn.6
-        # => [e_2, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+        # we need to drop the last value anyway, since number of values is not divisible by 8
+        # push the padding 0 on to the stack
+        movup.7 drop push.0
+        # => [0, a0, a1, a2, a3, b0, b1, b2, C', drop_counter]
 
         ### 1st value ########################################################
 
-        # prepare the second element of the E Word for cdrop instruction
-        push.0 swap
-        # => [e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+        # bring b2 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
 
         # push latch variable onto the stack; this will be the control for the cdrop instruction
         push.0
-        # => [latch = 0, e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+        # => [latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
 
         # get the flag whether the drop counter is equal 1
         dup.14 eq.1
-        # => [drop_counter == 1, latch = 0, e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+        # => [drop_counter==1, latch=0, b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
 
         # update the latch: if drop_counter == 1, latch will become 1
         or
-        # => [latch', e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', drop_counter]
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', drop_counter]
 
         # save the latch value
         dup movdn.14
-        # => [latch', e_2, 0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', latch', drop_counter]
+        # => [latch', b2, 0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
 
-        # if latch == 1, drop 0; otherwise drop e_1
+        # if latch == 1, keep 0; otherwise keep b2
         cdrop
-        # => [e_2_or_0, e_1, e_0, d_3, d_2, d_1, 0, d_0, A', latch', drop_counter]
-
-        # move the calculated value down the stack
-        movdn.6
-        # => [e_1, e_0, d_3, d_2, d_1, 0, e_2_or_0, d_0, A', latch', drop_counter]
+        # => [b2_or_0, 0, a0, a1, a2, a3, b0, b1, C', latch', drop_counter]
 
         ### 2nd value ########################################################
 
-        # repeat the above process but now compare drop_counter to 2
-        push.0 swap
+        # bring b1 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+
+        # update latch: if drop_counter == 2, latch becomes 1
         movup.13 dup.14 eq.2 or
         dup movdn.14
-        cdrop movdn.6
-        # => [e_0, d_3, d_2, d_1, 0, e_2_or_0, e_1_or_0, d_0, A', latch', drop_counter]
+        # => [latch', b1, 0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
+
+        cdrop
+        # => [b1_or_0, b2_or_0, 0, a0, a1, a2, a3, b0, C', latch', drop_counter]
 
         ### 3rd value ########################################################
 
-        # repeat the above process but now compare drop_counter to 3
-        push.0 swap
+        # bring b0 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [b0, 0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
+
         movup.13 dup.14 eq.3 or
         dup movdn.14
-        cdrop movdn.6
-        # => [d_3, d_2, d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_0, A', latch', drop_counter]
+        cdrop
+        # => [b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, a3, C', latch', drop_counter]
 
         ### 4th value ########################################################
 
-        # repeat the above process but now compare drop_counter to 4
-        push.0 swap
+        # bring a3 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a3, 0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
+
         movup.13 dup.14 eq.4 or
         dup movdn.14
-        cdrop movdn.6
-        # => [d_2, d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_0, A', latch', drop_counter]
+        cdrop
+        # => [a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, a2, C', latch', drop_counter]
 
         ### 5th value ########################################################
 
-        # repeat the above process but now compare drop_counter to 5
-        push.0 swap
+        # bring a2 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a2, 0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
+
         movup.13 dup.14 eq.5 or
         dup movdn.14
-        cdrop movdn.6
-        # => [d_1, 0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_2_or_0, d_0, A', latch', drop_counter]
+        cdrop
+        # => [a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, a1, C', latch', drop_counter]
 
         ### 6th value ########################################################
 
-        # repeat the above process but now compare drop_counter to 6
-        push.0 swap
-        movup.13 movup.14 eq.6 or
-        cdrop movdn.6
-        # => [0, e_2_or_0, e_1_or_0, e_0_or_0, d_3_or_0, d_2_or_0, d_1_or_0, d_0, A']
-        # or in other words
-        # => [C, B, A', ... ]
-        # notice that we don't need to check the d_0 value: entering the else branch means that
-        # we have number of elements not divisible by 8, so we will have at least one element to
-        # hash here (which turns out to be d_0)
+        # bring a1 to top and prepare for cdrop
+        movup.7 push.0 swap
+        # => [a1, 0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C', latch', drop_counter]
 
-        # TODO(Al): remove this work-around 
-        reversew swapw reversew
+        movup.13 movup.14 eq.6 or
+        cdrop
+        # => [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
+        # Notice that we don't need to check a0: entering the else branch means that
+        # we have number of elements not divisible by 8, so we will have at least one
+        # element to hash here (which is a0).
+
+        # Reorder to get [A, B, C'] format for permute
+        # Current: [a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, a0, C']
+        # Need:    [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
+        movup.7
+        # => [a0, a1_or_0, a2_or_0, a3_or_0, b0_or_0, b1_or_0, b2_or_0, 0, C']
 
         exec.permute
-        # => [F, E, D]
+        # => [A', B', C']
 
         exec.squeeze_digest
-        # => [E]
+        # => [HASH]
     end
 end
 
