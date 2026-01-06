@@ -22,10 +22,9 @@ use miden_core::{
 use rayon::prelude::*;
 use winter_prover::crypto::RandomCoin;
 
-use crate::utils::math::batch_inversion;
-
 use crate::{
-    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, RowIndex, TraceLenSummary, NUM_RAND_ROWS,
+    ChipletsLengths, ColMatrix, ContextId, ExecutionTrace, NUM_RAND_ROWS, RowIndex,
+    TraceLenSummary,
     chiplets::Chiplets,
     crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
@@ -41,6 +40,7 @@ use crate::{
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::AuxTraceBuilders,
+    utils::math::batch_inversion,
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
