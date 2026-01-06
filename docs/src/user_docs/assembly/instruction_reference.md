@@ -13,10 +13,10 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 | Instruction          | Stack Input   | Stack Output     | Cycles       | Notes                                                                                                         |
 | -------------------- | ------------- | ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
-| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 15 <br /> 16 | $$c = \begin{cases} 1, & \text{if } a \leq b  0, & \text{otherwise} \end{cases}$$                             |
-| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 14 <br /> 15 | $$c = \begin{cases} 1, & \text{if } a < b  0, & \text{otherwise} \end{cases}$$                                |
-| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 17 | $$c = \begin{cases} 1, & \text{if } a \geq b  0, & \text{otherwise} \end{cases}$$                             |
-| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 15 <br /> 16 | $$c = \begin{cases} 1, & \text{if } a > b  0, & \text{otherwise} \end{cases}$$                                |
+| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 18 <br /> 19 | $$c = \begin{cases} 1, & \text{if } a \leq b  0, & \text{otherwise} \end{cases}$$                             |
+| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a < b  0, & \text{otherwise} \end{cases}$$                                |
+| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a \geq b  0, & \text{otherwise} \end{cases}$$                             |
+| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 17 | $$c = \begin{cases} 1, & \text{if } a > b  0, & \text{otherwise} \end{cases}$$                                |
 | `eq` <br /> `eq.b`   | `[b, a, ...]` | `[c, ...]`       | 1 <br /> 1-2 | $$c = \begin{cases} 1, & \text{if } a = b  0, & \text{otherwise} \end{cases}$$                                |
 | `neq` <br /> `neq.b` | `[b, a, ...]` | `[c, ...]`       | 2 <br /> 2-3 | $$c = \begin{cases} 1, & \text{if } a \neq b  0, & \text{otherwise} \end{cases}$$                             |
 | `eqw`                | `[A, B, ...]` | `[c, A, B, ...]` | 15           | $$c = \begin{cases} 1, & \text{if } a_i = b_i\ \forall i \in \{0,1,2,3\}  0, & \text{otherwise} \end{cases}$$ |
