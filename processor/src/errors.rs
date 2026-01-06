@@ -33,8 +33,6 @@ pub enum ExecutionError {
         #[diagnostic_source]
         err: AdviceError,
     },
-    #[error("external node with mast root {0} resolved to an external node")]
-    CircularExternalNode(Word),
     #[error("exceeded the allowed number of max cycles {0}")]
     CycleLimitExceeded(u32),
     #[error("debug handler error at clock cycle {clk}: {err}")]
@@ -82,12 +80,6 @@ pub enum ExecutionError {
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
-    #[error("FRI domain segment value cannot exceed 3, but was {0}")]
-    InvalidFriDomainSegment(u64),
-    #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
-    InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    #[error("FRI domain size was 0")]
-    InvalidFriDomainGenerator,
     #[error(
         "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
     )]
@@ -109,8 +101,6 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         root_digest: Word,
     },
-    #[error("node id {node_id} does not exist in MAST forest")]
-    MastNodeNotFoundInForest { node_id: MastNodeId },
     #[error(transparent)]
     #[diagnostic(transparent)]
     MemoryError(MemoryError),
@@ -386,6 +376,14 @@ pub enum OperationError {
     #[error("attempted to calculate integer logarithm with zero argument")]
     #[diagnostic(help("ilog2 requires a non-zero argument"))]
     LogArgumentZero,
+    #[error("external node with mast root {0} resolved to an external node")]
+    CircularExternalNode(Word),
+    #[error("FRI domain segment value cannot exceed 3, but was {0}")]
+    InvalidFriDomainSegment(u64),
+    #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
+    InvalidFriLayerFolding(QuadFelt, QuadFelt),
+    #[error("FRI domain size was 0")]
+    InvalidFriDomainGenerator,
 }
 
 /// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.

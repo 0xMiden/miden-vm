@@ -230,7 +230,9 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
-            let frie2f4_helpers = fri_ops::op_fri_ext2fold4(processor, tracer)?;
+            let clk = processor.system().clk();
+            let frie2f4_helpers =
+                fri_ops::op_fri_ext2fold4(processor, tracer).map_exec_err(err_ctx, clk)?;
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
