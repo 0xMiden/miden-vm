@@ -61,7 +61,7 @@ impl FastProcessor {
             .load_mast_forest(
                 external_node.digest(),
                 host,
-                ExecutionError::no_mast_forest_with_procedure,
+                |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
                 &(),
             )
             .await?;

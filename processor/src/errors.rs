@@ -46,17 +46,6 @@ pub enum ExecutionError {
         #[source]
         err: TraceError,
     },
-    #[error("failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
-      hex = .digest.to_hex()
-    )]
-    #[diagnostic()]
-    DynamicNodeNotFound {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        digest: Word,
-    },
     #[error("error during processing of event {}", match event_name {
         Some(name) => format!("'{}' (ID: {})", name, event_id),
         None => format!("with ID: {}", event_id),
@@ -79,17 +68,6 @@ pub enum ExecutionError {
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
     #[error(
-        "when returning from a call or dyncall, stack depth must be {MIN_STACK_DEPTH}, but was {depth}"
-    )]
-    #[diagnostic()]
-    InvalidStackDepthOnReturn {
-        #[label("when returning from this call site")]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        depth: usize,
-    },
-    #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
     MalformedMastForestInHost {
@@ -102,14 +80,6 @@ pub enum ExecutionError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     MemoryError(MemoryError),
-    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
-    NoMastForestWithProcedure {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-    },
     #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
       value = to_hex(value.as_bytes()),
       root = to_hex(root.as_bytes()),
@@ -131,16 +101,6 @@ pub enum ExecutionError {
     },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
-    #[error("syscall failed: procedure with root {hex} was not found in the kernel",
-      hex = to_hex(proc_root.as_bytes())
-    )]
-    SyscallTargetNotInKernel {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        proc_root: Word,
-    },
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
     #[diagnostic()]
     AceChipError {
@@ -189,12 +149,6 @@ impl ExecutionError {
         ExecutionError::AdviceError { label, source_file, err, clk }
     }
 
-    pub fn dynamic_node_not_found(digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::DynamicNodeNotFound { label, source_file, digest }
-    }
-
     pub fn event_error(
         error: EventError,
         event_id: EventId,
@@ -210,11 +164,6 @@ impl ExecutionError {
             event_name,
             error,
         }
-    }
-
-    pub fn invalid_stack_depth_on_return(depth: usize, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::InvalidStackDepthOnReturn { label, source_file, depth }
     }
 
     pub fn malformed_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
@@ -241,16 +190,6 @@ impl ExecutionError {
             err_code,
             err_msg,
         }
-    }
-
-    pub fn no_mast_forest_with_procedure(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NoMastForestWithProcedure { label, source_file, root_digest }
-    }
-
-    pub fn syscall_target_not_in_kernel(proc_root: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::SyscallTargetNotInKernel { label, source_file, proc_root }
     }
 
     pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
@@ -347,6 +286,14 @@ pub enum OperationError {
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
     #[error("FRI domain size was 0")]
     InvalidFriDomainGenerator,
+    #[error("failed to execute dynamic code block; block with root {digest} could not be found")]
+    DynamicNodeNotFound { digest: Word },
+    #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
+    SyscallTargetNotInKernel { proc_root: Word },
+    #[error("when returning from a call, stack depth must be {MIN_STACK_DEPTH}, but was {depth}")]
+    InvalidStackDepthOnReturn { depth: usize },
+    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
+    NoMastForestWithProcedure { root_digest: Word },
 }
 
 /// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.
