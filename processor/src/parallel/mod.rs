@@ -20,13 +20,12 @@ use miden_core::{
     Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
-use winter_prover::crypto::RandomCoin;
 
 use crate::{
-    ChipletsLengths, ContextId, ExecutionTrace, RowIndex,
+    ChipletsLengths, ContextId, ExecutionTrace, NUM_RAND_ROWS, RowIndex,
     TraceLenSummary,
     chiplets::Chiplets,
-    crypto::RpoRandomCoin,
+    crypto::{RandomCoin, RpoRandomCoin},
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -39,7 +38,7 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::{AuxTraceBuilders, NUM_RAND_ROWS},
+    trace::AuxTraceBuilders,
     utils::{math::batch_inversion, ColMatrix},
 };
 
