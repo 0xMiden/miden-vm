@@ -746,8 +746,8 @@ fn test_smt_randomized_round_trip() {
 
 /// Generates a random key word with word[0] constrained to one of BUCKETS values.
 /// This ensures keys are distributed across a limited number of buckets, which exercises
-/// multi-leaf functionality in the SMT. We constrain word[0] because in LE convention,
-/// word[0] is the most significant element for lexicographic comparison.
+/// multi-leaf functionality in the SMT. We constrain word[0] because it is the most
+/// significant element for lexicographic comparison.
 fn random_word(seed: &mut u64, buckets: usize) -> Word {
     let mut word = [Felt::new(0); 4];
     for element in word.iter_mut() {

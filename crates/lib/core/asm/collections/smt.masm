@@ -513,7 +513,7 @@ proc insert_single_to_multi_leaf
     dupw dupw.2
     # => [K, K_l, K_l, K, V_l, V, R]
 
-    exec.word::lt_le
+    exec.word::lt
     # => [K_l < K, K_l, K, V_l, V, R]
 
     # We need a contiguous region of memory containing the sorted pairs. Converting a single-leaf

@@ -58,7 +58,7 @@ fn test_mloadw_success() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
         let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
-        // LE convention: memory word[i] maps to stack position i (word[0] at top)
+        // Memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
             stack_outputs.stack_truncated(4),
             &[word_at_addr[0], word_at_addr[1], word_at_addr[2], word_at_addr[3]]
@@ -89,7 +89,7 @@ fn test_mstorew_success() {
     let clk = 0_u32.into();
 
     // Store the word at address 40
-    // LE convention: stack [word[0], word[1], word[2], word[3], addr] with word[0] at position 1
+    // Stack layout: [word[0], word[1], word[2], word[3], addr] with word[0] at position 1
     // Push in reverse order so word[0] ends up at position 1 after pushing addr
     let mut processor = FastProcessor::new(&[
         word_to_store[3],
@@ -186,8 +186,8 @@ fn test_mstream() {
     let program = simple_program_with_ops(vec![Operation::MStream]);
     let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
-    // LE convention: word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
-    // Word elements in LE order: word[0] at lowest position
+    // Word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
+    // word[0] at lowest position (top of stack)
     assert_eq!(
         stack_outputs.stack_truncated(8),
         &[

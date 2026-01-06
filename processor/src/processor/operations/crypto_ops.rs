@@ -5,7 +5,7 @@ use miden_air::trace::{
 use miden_core::{
     Felt, Word, ZERO,
     chiplets::hasher::STATE_WIDTH,
-    field::{BasedVectorSpace, QuadFelt},
+    field::{BasedVectorSpace, PrimeField64, QuadFelt},
     mast::MastForest,
 };
 
@@ -29,7 +29,7 @@ mod tests;
 /// Returns a word from the stack in LE order (top element first).
 ///
 /// `get_word()` returns `[s3, s2, s1, s0]` where s0 is at the top of the stack.
-/// This helper reverses to `[s0, s1, s2, s3]` for LE convention.
+/// This helper reverses to `[s0, s1, s2, s3]`.
 #[inline(always)]
 fn get_word_le<P: Processor>(processor: &mut P, start_idx: usize) -> Word {
     let mut word = processor.stack().get_word(start_idx);
@@ -53,7 +53,7 @@ fn set_word_le<P: Processor>(processor: &mut P, start_idx: usize, word: &Word) {
 /// Performs a hash permutation operation.
 /// Applies Rescue Prime Optimized permutation to the top 12 elements of the stack.
 ///
-/// Stack layout (LE convention):
+/// Stack layout:
 /// ```text
 /// stack[0..4]   = R1 word (rate word 1)      → state[0..4]
 /// stack[4..8]   = R2 word (rate word 2)      → state[4..8]
@@ -192,7 +192,7 @@ pub(super) fn op_mrupdate<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
 
     if let Some(path) = &path
-        && path.len() != depth.as_int() as usize
+        && path.len() != depth.as_canonical_u64() as usize
     {
         return Err(ExecutionError::invalid_crypto_input(clk, path.len(), depth, err_ctx));
     }
@@ -287,7 +287,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants: low coefficient closer to top (lower index) - LE convention
+    // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
@@ -401,7 +401,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants: low coefficient closer to top (lower index) - LE convention
+    // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;

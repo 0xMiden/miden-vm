@@ -172,7 +172,7 @@ pub proc verify_prehash_impl
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
-    # With LE convention, hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
     swapw
     # => [COMM_PK, COMM_DIGEST, result, sig_ptr]
     exec.rpo256::merge
@@ -183,7 +183,7 @@ pub proc verify_prehash_impl
     # => [COMM_SIG, COMM_PK_DIGEST, result]
 
     # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
-    # With LE convention, hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_DIGEST on top
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_DIGEST on top
     swapw
     # => [COMM_PK_DIGEST, COMM_SIG, result]
     exec.rpo256::merge

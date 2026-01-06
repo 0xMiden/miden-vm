@@ -7,7 +7,7 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::EventName;
+use miden_core::{EventName, field::PrimeField64};
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
@@ -62,8 +62,8 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let key_word = process.get_stack_word_le(1);
     let nonce_word = process.get_stack_word_le(5);
 
-    let src_ptr = process.get_stack_item(9).as_int();
-    let num_blocks = process.get_stack_item(11).as_int();
+    let src_ptr = process.get_stack_item(9).as_canonical_u64();
+    let num_blocks = process.get_stack_item(11).as_canonical_u64();
 
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
     let num_ciphertext_elements = (num_blocks + 1) * 8;

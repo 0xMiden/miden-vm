@@ -63,7 +63,7 @@ fn mem_stream_pipe() {
 
     // --- assert that the hashed output values are correct ---------------------------------------
     // compute the expected result of hashing the elements in the advice stack inputs.
-    // With LE convention, rate words come first in state, then capacity:
+    // Rate words come first in state, then capacity:
     // state = [rate1_0-3, rate2_4-7, capacity_8-11]
     let mut state: [Felt; 12] =
         [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0].to_elements().try_into().unwrap();

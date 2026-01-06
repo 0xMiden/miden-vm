@@ -98,11 +98,11 @@ pub fn ext2_neg(block_builder: &mut BasicBlockBuilder) {
 /// can't be inverted, program execution fails, as advice provider won't calculate multiplicative
 /// inverse in that case.
 ///
-/// Expected input stack (LE convention)
+/// Expected input stack
 ///
 /// [a0, a1, ...] | a = (a0, a1) ∈ Quadratic extension field over F_p, p = 2^64 - 2^32 + 1
 ///
-/// Expected output stack (LE convention)
+/// Expected output stack
 ///
 /// [a'0, a'1, ...] | a' = (a'0, a'1) ∈ Quadratic extension field over F_p, p = 2^64 - 2^32 + 1
 ///

@@ -318,7 +318,7 @@ fn test_debug_adv_stack() {
             debug.adv_stack.10
 
             padw adv_loadw
-            # adv_loadw loads structural word (no reversal in LE convention)
+            # adv_loadw loads structural word (no reversal needed)
             # => [8, 7, 6, 5, 4, 3, 2, 1, 0]
             debug.adv_stack # => [4, 3, 2, 1]
             debug.stack.9

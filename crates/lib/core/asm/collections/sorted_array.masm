@@ -80,7 +80,7 @@ pub proc find_word
 
                 # there was no match, the first array element must be larger than VALUE
                 # (123 cycles)
-                exec.word::lt_le
+                exec.word::lt
                 assert.err="lowerbound_array invariant: start_ptr not greater than VALUE"
 
                 # No value was found (1 cycle)
@@ -101,7 +101,7 @@ pub proc find_word
 
                 # there was no match, the last array element must be smaller than VALUE
                 # (119 cycles)
-                exec.word::gt_le
+                exec.word::gt
                 assert.err="lowerbound_array invariant: last word not smaller than VALUE"
 
                 # No value was found (1 cycle)
@@ -123,7 +123,7 @@ pub proc find_word
                 #=> [MAYBE_VALUE, VALUE, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # there was no match, MAYBE_VALUE must be larger than VALUE (123 cycles)
-                exec.word::lt_le
+                exec.word::lt
                 assert.err="lowerbound_array invariant: *maybe_value_ptr not greater than VALUE"
 
                 # dereference `maybe_value_ptr-4` (11 cycles)
@@ -131,7 +131,7 @@ pub proc find_word
                 #=> [MAYBE_VALUE_PREV, VALUE, maybe_value_ptr, start_ptr, end_ptr]
 
                 # there was no match, MAYBE_VALUE_PREV must be smaller than VALUE (119 cycles)
-                exec.word::gt_le
+                exec.word::gt
                 assert.err="lowerbound_array invariant: *(maybe_value_ptr-4) not smaller than VALUE"
 
                 # No value was found (1 cycle)
@@ -298,7 +298,7 @@ proc find_partial_key_value
 
                 # there was no match, the first map element must be larger than KEY
                 # (123 cycles)
-                exec.word::lt_le
+                exec.word::lt
                 assert.err="lowerbound_key_value invariant: start_ptr not greater than KEY"
 
                 # No value was found (1 cycle)
@@ -322,7 +322,7 @@ proc find_partial_key_value
 
                 # there was no match, the last map element must be smaller than KEY
                 # (119 cycles)
-                exec.word::gt_le
+                exec.word::gt
                 assert.err="lowerbound_key_value invariant: last key-value pair not smaller than KEY"
 
                 # No value was found (1 cycle)
@@ -348,7 +348,7 @@ proc find_partial_key_value
                 #=> [MAYBE_KEY, KEY, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 # there was no match, `*maybe_key_ptr` must be larger than KEY (123 cycles)
-                exec.word::lt_le
+                exec.word::lt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY not greater than KEY"
                 #=> [KEY, maybe_key_ptr, start_ptr, end_ptr]
 
@@ -360,7 +360,7 @@ proc find_partial_key_value
                 #=> [MAYBE_KEY_PREV, KEY, maybe_key_ptr, start_ptr, end_ptr]
 
                 # there was no match, `*(maybe_key_ptr-8)` must be smaller than KEY (119 cycles)
-                exec.word::gt_le
+                exec.word::gt
                 assert.err="lowerbound_key_value invariant: MAYBE_KEY_PREV not smaller than KEY"
 
                 # No value was found (1 cycle)

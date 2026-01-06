@@ -255,9 +255,8 @@ fn mem_stream() {
 
     // the state is built by replacing the values on the top of the stack with the values in memory
     // addresses `[0..8)`. Thus, the first 8 elements on the stack will be 1
-    // through 8 (in stack order, with 1 at stack[0] with LE convention), and the remaining 4 are
-    // untouched (i.e., 9, 10, 11, 12).
-    // With LE convention, values are in natural order (no reversal needed)
+    // through 8 (in stack order, with 1 at stack[0]), and the remaining 4 are
+    // untouched (i.e., 9, 10, 11, 12). Values are in natural order (no reversal needed).
     let mut final_stack: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     final_stack.push(8); // address after reading 2 words (8 elements)
 
@@ -287,18 +286,18 @@ fn mem_stream_with_hperm() {
 
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
-    // the state of the hasher is the first 12 elements of the stack. With LE convention, the state
-    // is built by replacing the values on the top of the stack with the values in memory addresses
-    // 0 and 4 (i.e., 1 through 8). Thus, the first 8 elements on the stack will be 1 through 8 (in
+    // The state of the hasher is the first 12 elements of the stack. The state is built by
+    // replacing the values on the top of the stack with the values in memory addresses 0 and 4
+    // (i.e., 1 through 8). Thus, the first 8 elements on the stack will be 1 through 8 (in
     // stack order, with 1 at stack[0]), and the remaining 4 are untouched (i.e., 9, 10, 11, 12).
-    // With LE convention, stack order matches hasher state order (no reversal needed)
+    // Stack order matches hasher state order (no reversal needed).
     let mut state: [Felt; 12] =
         [1_u64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
     // apply a hash permutation to the state
     apply_permutation(&mut state);
 
-    // With LE convention, hasher state order matches stack order (no reversal needed)
+    // Hasher state order matches stack order (no reversal needed)
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
     final_stack.push(8); // address after reading 2 words (8 elements)
 

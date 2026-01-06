@@ -44,8 +44,7 @@ where
 /// little-endian order.
 ///
 /// The elements are pushed in reverse order (Word[3], Word[2], Word[1], Word[0]) so that
-/// Word[0] ends up on top of the stack. This is consistent with the LE convention where the
-/// low element is at the lowest address / on top of the stack.
+/// Word[0] ends up on top of the stack (low element at lowest address / on top).
 ///
 /// After this operation, calling `get_stack_word_le(0)` will return the original Word.
 pub fn push_word(word: &[Felt; 4], block_builder: &mut BasicBlockBuilder) {

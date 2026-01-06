@@ -155,7 +155,7 @@ end
 #! Output: `[PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]`
 proc write_mem_stream_pair
     # Read two words from memory starting at `ptr_in`.
-    # With LE convention, mem_stream returns [MEM[ptr_in], MEM[ptr_in+4], ...]
+    # mem_stream returns [MEM[ptr_in], MEM[ptr_in+4], ...]
     mem_stream
     # => [MEM[ptr_in], MEM[ptr_in+4], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
@@ -238,7 +238,7 @@ pub proc verify_prehash_impl
     # => [COMM_K, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_K into COMM_PK_K = rpo::merge(COMM_PK, COMM_K)
-    # With LE convention, hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
     swapw
     # => [COMM_PK, COMM_K, result, sig_ptr]
     exec.rpo256::merge
@@ -249,7 +249,7 @@ pub proc verify_prehash_impl
     # => [COMM_SIG, COMM_PK_K, result]
 
     # Merge into final commitment COMM = rpo::merge(COMM_PK_K, COMM_SIG)
-    # With LE convention, hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
     swapw
     # => [COMM_PK_K, COMM_SIG, result]
     exec.rpo256::merge

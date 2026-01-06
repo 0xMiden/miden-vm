@@ -19,7 +19,7 @@ fn ext2add() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     // Input: [b0, b1, a0, a1] with b0 on top
     // build_op_test! reverses, so pass [a1, a0, b1, b0]
     let stack_init = [a1, a0, b1, b0];
@@ -42,7 +42,7 @@ fn ext2sub() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     let stack_init = [a1, a0, b1, b0];
     let expected = [c0, c1];
 
@@ -62,7 +62,7 @@ fn ext2mul() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     let stack_init = [a1, a0, b1, b0];
     let expected = [c0, c1];
 
@@ -81,7 +81,7 @@ fn ext2div() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     let stack_init = [a1, a0, b1, b0];
     let expected = [c0, c1];
 
@@ -98,7 +98,7 @@ fn ext2neg() {
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     // Input: [a0, a1] with a0 on top
     let stack_init = [a1, a0];
     // Output: [b0, b1] with b0 on top
@@ -118,7 +118,7 @@ fn ext2inverse() {
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
 
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     let stack_init = [a1, a0];
     let expected = [b0, b1];
 

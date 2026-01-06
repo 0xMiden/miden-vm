@@ -383,8 +383,8 @@ impl<'a> ProcessState<'a> {
         start_idx: usize,
         end_idx: usize,
     ) -> Result<core::ops::Range<u32>, MemoryError> {
-        let start_addr = self.get_stack_item(start_idx).as_int();
-        let end_addr = self.get_stack_item(end_idx).as_int();
+        let start_addr = self.get_stack_item(start_idx).as_canonical_u64();
+        let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
 
         if start_addr > u32::MAX as u64 {
             return Err(MemoryError::address_out_of_bounds(start_addr, &()));

@@ -163,7 +163,7 @@ pub(super) fn build_mem_mloadw_mstorew_request<E: ExtensionField<Felt>>(
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // With LE convention, word[i] maps directly to stack position i.
+    // word[i] maps directly to stack position i.
     let word = [
         main_trace.stack_element(0, row + 1),
         main_trace.stack_element(1, row + 1),
@@ -241,7 +241,7 @@ pub(super) fn build_mstream_request<E: ExtensionField<Felt>>(
     let ctx = main_trace.ctx(row);
     let clk = main_trace.clk(row);
 
-    // With LE convention, word[0] is at stack position 0 (top).
+    // word[0] is at stack position 0 (top).
     // MSTREAM loads two words: first word (from addr) to s0-s3, second word (from addr+4) to s4-s7.
     let mem_req_1 = MemoryWordMessage {
         op_label,
@@ -293,7 +293,7 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     let ctx = main_trace.ctx(row);
     let clk = main_trace.clk(row);
 
-    // With LE convention, word[0] is at stack position 0 (top).
+    // word[0] is at stack position 0 (top).
     // PIPE writes two words: first word (from s0-s3) to addr, second word (from s4-s7) to addr+4.
     let mem_req_1 = MemoryWordMessage {
         op_label,

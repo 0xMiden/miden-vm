@@ -7,6 +7,7 @@
 
 use miden_core::{
     Felt,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_core_lib::handlers::sha512::{
@@ -138,6 +139,6 @@ fn test_sha512_hash_memory(bytes: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }

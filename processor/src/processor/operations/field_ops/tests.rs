@@ -344,7 +344,7 @@ fn test_op_expacc() {
 #[test]
 fn test_op_ext2mul() {
     // initialize the stack with random values
-    // LE convention: low coefficient closer to top
+    // Low coefficient closer to top
     let [a0, a1, b0, b1] = [rand_value::<Felt>(); 4];
 
     // For LE, stack should be [b0, b1, a0, a1] with b0 on top

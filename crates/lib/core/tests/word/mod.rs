@@ -6,11 +6,11 @@ use num::Integer;
 use rstest::rstest;
 
 #[rstest]
-#[case::gt("gt_le", &[Ordering::Greater])]
-#[case::gte("gte_le", &[Ordering::Greater, Ordering::Equal])]
+#[case::gt("gt", &[Ordering::Greater])]
+#[case::gte("gte", &[Ordering::Greater, Ordering::Equal])]
 #[case::eq("eq", &[Ordering::Equal])]
-#[case::lt("lt_le", &[Ordering::Less])]
-#[case::lte("lte_le", &[Ordering::Less, Ordering::Equal])]
+#[case::lt("lt", &[Ordering::Less])]
+#[case::lte("lte", &[Ordering::Less, Ordering::Equal])]
 fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]) {
     let source = &format!(
         "
@@ -44,10 +44,8 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
 #[test]
 fn test_reverse() {
     const SOURCE: &str = "
-        use miden::core::word
-
         begin
-            exec.word::reverse
+            reversew
         end
     ";
 

@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::{Felt, ProvingOptions, trace::RowIndex};
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventName, WORD_SIZE, ZERO, field::PrimeField64};
+use miden_core::{EventName, ZERO, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
@@ -73,7 +73,7 @@ pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutatio
         .ok_or(FalconError::NoSecretKey { key: pub_key })?;
 
     // Convert felts back to bytes (each felt was a single byte stored as u64)
-    let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_int() as u8).collect();
+    let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_canonical_u64() as u8).collect();
 
     // Reconstruct SecretKey from bytes
     let sk = falcon512_rpo::SecretKey::read_from_bytes(&sk_bytes)
@@ -249,7 +249,7 @@ fn test_move_sig_to_adv_stack() {
         vec![(sig_key, signature)]
     };
 
-    let op_stack = stack_inputs_from_words(&[message, public_key]);
+    let op_stack = stack_from_words(&[public_key, message]);
 
     let adv_stack = vec![];
     let store = MerkleStore::new();
@@ -325,7 +325,7 @@ fn generate_test(
 
     let advice_map: Vec<(Word, Vec<Felt>)> = vec![(pk, to_adv_map)];
 
-    let op_stack = stack_inputs_from_words(&[message, pk]);
+    let op_stack = stack_from_words(&[pk, message]);
     let adv_stack = vec![];
     let store = MerkleStore::new();
 
@@ -355,7 +355,7 @@ fn mul_modulo_p(a: Polynomial<Felt>, b: Polynomial<Felt>) -> [u64; 1024] {
     let mut c = [0; 2 * N];
     for i in 0..N {
         for j in 0..N {
-            c[i + j] += a.coefficients[i].as_int() * b.coefficients[j].as_int();
+            c[i + j] += a.coefficients[i].as_canonical_u64() * b.coefficients[j].as_canonical_u64();
         }
     }
     c
@@ -395,28 +395,19 @@ fn generate_data_probabilistic_product_test(
     let advice_stack = builder.into_u64_vec();
 
     // compute hash of h and place it on the stack.
-    let binding = Rpo256::hash_elements(&to_elements(h.clone()));
-    let operand_stack = word_to_stack_inputs(binding).to_vec();
+    let h_hash = Rpo256::hash_elements(&to_elements(h.clone()));
+    let operand_stack = stack_from_words(&[h_hash]);
 
     (operand_stack, advice_stack)
 }
 
-/// Returns the representation of `word` expected by `StackInputs::new()`.
+/// Builds operand-stack inputs from words. The first word ends up on top of the stack.
 ///
-/// `StackInputs::new()` reverses the values it receives so the last provided element ends up at
-/// the top of the operand stack. To keep word orderings structural little-endian once the VM
-/// consumes them, we reverse the per-word elements ahead of time.
-fn word_to_stack_inputs(word: Word) -> [u64; WORD_SIZE] {
-    let mut elements = word.into_iter().map(|felt| felt.as_int()).collect::<Vec<_>>();
-    elements.reverse();
-    elements.try_into().expect("a word always has exactly 4 elements")
-}
-
-/// Builds operand-stack inputs for the provided words, preserving structural little-endian order.
-fn stack_inputs_from_words(words: &[Word]) -> Vec<u64> {
-    let mut out = Vec::with_capacity(words.len() * WORD_SIZE);
-    for &word in words {
-        out.extend_from_slice(&word_to_stack_inputs(word));
-    }
+/// This matches `stack![]` semantics: `stack_from_words(&[A, B])` results in stack `[A, B, ...]`
+/// with A at position 0 (top).
+fn stack_from_words(words: &[Word]) -> Vec<u64> {
+    let mut out: Vec<u64> =
+        words.iter().flat_map(|w| w.iter().map(|f| f.as_canonical_u64())).collect();
+    out.reverse();
     out
 }

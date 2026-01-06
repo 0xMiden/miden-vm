@@ -464,12 +464,11 @@ pub fn is_odd(span_builder: &mut BasicBlockBuilder) {
 /// The expected starting state of the stack (from the top) is: [b, a, ...].
 ///
 /// After these operations, the stack state will be: [b_lo, b_hi, a_lo, a_hi, ...].
-/// This preserves the input order (b on top) and uses LE convention where the low limb
-/// is on top for each split value.
+/// This preserves the input order (b on top), with the low limb on top for each split value.
 ///
 /// This operation takes 4 cycles.
 fn split_elements(span_builder: &mut BasicBlockBuilder) {
-    // U32split outputs [lo, hi] with lo on top (LE convention).
+    // U32split outputs [lo, hi] with lo on top.
 
     // stack: [b, a, ...] => [a, b, ...]
     span_builder.push_op(Swap);

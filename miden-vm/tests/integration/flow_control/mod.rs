@@ -429,7 +429,7 @@ fn simple_dyn_exec() {
     // Build stack inputs with foo's digest.
     // We want the stack after call.foo + movdn.4 to be:
     //   [digest[0], digest[1], digest[2], digest[3], 3, 3, ...]
-    // where digest[0] is on top (LE convention).
+    // where digest[0] is on top.
     //
     // Initial stack needs: [2, 1, digest[0], digest[1], digest[2], digest[3], 3, ...]
     // (2 on top, so call.foo computes 2+1=3)
@@ -437,10 +437,10 @@ fn simple_dyn_exec() {
     //   [3, digest[3], digest[2], digest[1], digest[0], 1, 2]
     let stack_init: [u64; 7] = [
         3,
-        foo_digest[3].as_int(),
-        foo_digest[2].as_int(),
-        foo_digest[1].as_int(),
-        foo_digest[0].as_int(),
+        foo_digest[3].as_canonical_u64(),
+        foo_digest[2].as_canonical_u64(),
+        foo_digest[1].as_canonical_u64(),
+        foo_digest[0].as_canonical_u64(),
         1,
         2,
     ];
@@ -535,10 +535,10 @@ fn simple_dyncall() {
     //   [3, digest[3], digest[2], digest[1], digest[0], 1, 2]
     let stack_init: [u64; 7] = [
         3,
-        foo_digest[3].as_int(),
-        foo_digest[2].as_int(),
-        foo_digest[1].as_int(),
-        foo_digest[0].as_int(),
+        foo_digest[3].as_canonical_u64(),
+        foo_digest[2].as_canonical_u64(),
+        foo_digest[1].as_canonical_u64(),
+        foo_digest[0].as_canonical_u64(),
         1,
         2,
     ];
@@ -599,14 +599,14 @@ fn dyncall_with_syscall_and_caller() {
     // bar is the first procedure root in the forest (index 0)
     let bar_digest = procedure_digests[0];
 
-    // The `caller` instruction returns the hash of bar in LE convention.
+    // The `caller` instruction returns the hash of bar with digest[0] on top.
     // The Word from procedure_digests stores elements in BE order (word[0] = high),
-    // so we need to reverse when comparing to LE stack output (word[3] on top).
+    // so we need to reverse when comparing to stack output (word[3] on top).
     test.expect_stack(&[
-        bar_digest[3].as_int(),
-        bar_digest[2].as_int(),
-        bar_digest[1].as_int(),
-        bar_digest[0].as_int(),
+        bar_digest[3].as_canonical_u64(),
+        bar_digest[2].as_canonical_u64(),
+        bar_digest[1].as_canonical_u64(),
+        bar_digest[0].as_canonical_u64(),
         4,
         3,
         2,
@@ -670,9 +670,9 @@ fn procref() -> Result<(), Report> {
     test.libraries.push(core_lib.library().clone());
     test.add_event_handlers(core_lib.handlers());
 
-    // procref now pushes in LE convention: element[0] on top
+    // procref pushes element[0] on top
     // Word from procedure_digests stores elements in BE order (word[0] = high)
-    // So we need to reverse when comparing to LE stack output
+    // So we need to reverse when comparing to stack output
     test.expect_stack(&[
         mast_roots[0][0].as_canonical_u64(),
         mast_roots[0][1].as_canonical_u64(),

@@ -18,7 +18,7 @@ end
 #! Input: [R0, R1, C, ...]
 #! Output: [DIGEST, ...]
 #!
-#! Where the sponge state uses LE convention:
+#! Where:
 #! - `R0` is the first rate word (positions 0-3, on top of stack).
 #! - `R1` is the second rate word / digest (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
@@ -43,7 +43,7 @@ end
 #! Input: [R0, R1, C, ...]
 #! Output: [R1, R0, R1, C, ...]
 #!
-#! Where the sponge state uses LE convention:
+#! Where:
 #! - `R0` is the first rate word (positions 0-3, on top of stack).
 #! - `R1` is the second rate word / digest (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
@@ -61,7 +61,7 @@ end
 #! Input: [R0, R1, C, start_addr, end_addr, ...]
 #! Output: [R0', R1', C', end_addr, end_addr ...]
 #!
-#! Where the sponge state uses LE convention:
+#! Where:
 #! - `R0` is the first rate word (positions 0-3, on top of stack).
 #! - `R1` is the second rate word / digest (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
@@ -185,7 +185,7 @@ end
 #! - num_elements is the number of elements to be hashed.
 #! - pad_inputs_flag is the flag which indicates whether the values which will be hashed should be
 #!   padded with zeros to the next multiple of 8.
-#! - R0, R1, C are three words representing the hasher state (LE convention: R0 on top).
+#! - R0, R1, C are three words representing the hasher state (R0 on top).
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
@@ -230,7 +230,7 @@ end
 #! Where:
 #! - ptr is the  memory address of the first element to be hashed. This address must be
 #!   word-aligned - i.e., divisible by 4.
-#! - R0, R1, C are three words representing the hasher state (LE convention: R0 on top).
+#! - R0, R1, C are three words representing the hasher state (R0 on top).
 #! - end_pairs_addr is the memory address at which the pairs of words end.
 #! - num_elements%8 is the number of elements which didn't fit to the word pairs and should be
 #!   hashed separately.
@@ -460,7 +460,7 @@ end
 #! Inputs:  [R0, R1, C]
 #! Outputs: [R0', R1', C']
 #!
-#! Where the sponge state uses LE convention:
+#! Where:
 #! - R0, R1, C are three words representing the hasher state (R0 on top).
 #! - R0', R1', C' are the permuted state words.
 #!

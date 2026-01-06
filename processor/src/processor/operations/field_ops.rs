@@ -215,8 +215,8 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
     P::HelperRegisters::op_expacc_registers(acc_update_val)
 }
 
-/// Gets the top four values from the stack [b0, b1, a0, a1] (LE convention: low coefficient
-/// at lower index/closer to top), where a = (a0, a1) and b = (b0, b1) are elements of the
+/// Gets the top four values from the stack [b0, b1, a0, a1] (low coefficient at lower
+/// index/closer to top), where a = (a0, a1) and b = (b0, b1) are elements of the
 /// extension field, and outputs the product c = (c0, c1) where c0 = a0 * b0 + 7 * a1 * b1
 /// and c1 = a0 * b1 + a1 * b0. The extension field is defined by the irreducible polynomial
 /// x² - 7. It leaves b0, b1 in the first and second positions on the stack, sets c0 and c1
@@ -225,7 +225,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const SEVEN: Felt = Felt::new(7);
     // get_word returns [s3, s2, s1, s0] where s0 is top of stack
-    // For LE convention: s0=b0, s1=b1, s2=a0, s3=a1
+    // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
     let [a1, a0, b1, b0]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */

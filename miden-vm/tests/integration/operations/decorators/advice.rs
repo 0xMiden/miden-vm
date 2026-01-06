@@ -306,7 +306,7 @@ fn advice_insert_hdword() {
         adv.insert_hdword
 
         # manually compute the hash of the two words
-        # With LE convention, swap words before hmerge to match adv.insert_hdword's internal ordering
+        # Swap words before hmerge to match adv.insert_hdword's internal ordering
         swapw hmerge
         # => [KEY, ...]
 

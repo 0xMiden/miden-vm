@@ -222,7 +222,7 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
 | `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                   |
 | `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
-| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state (LE convention).                                                                       |
+| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state.                                                                       |
 
 #### Procedure Locals (Context-Specific)
 

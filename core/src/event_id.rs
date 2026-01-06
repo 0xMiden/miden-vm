@@ -68,7 +68,7 @@ impl EventId {
 
     /// Returns the underlying `u64` value.
     pub const fn as_u64(&self) -> u64 {
-        self.0.as_int()
+        self.0.inner()
     }
 }
 

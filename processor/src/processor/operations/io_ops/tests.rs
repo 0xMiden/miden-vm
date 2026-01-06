@@ -40,7 +40,7 @@ fn test_op_advpopw() {
     // popping a word from the advice stack should overwrite top 4 elements of the operand stack
     // Advice stack: with_stack_values([3, 4, 5, 6]) puts 3 at front (top when popping).
     // pop_stack_word() pops: 3, 4, 5, 6 -> Word([3, 4, 5, 6])
-    // In LE convention, word[0]=3 goes to stack position 0 (top), so result is [3, 4, 5, 6, 1].
+    // word[0]=3 goes to stack position 0 (top), so result is [3, 4, 5, 6, 1].
     let advice_stack: Vec<u64> = vec![3, 4, 5, 6];
     let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
     let mut processor = FastProcessor::new_with_advice_inputs(&[], advice_inputs);
@@ -86,7 +86,7 @@ fn test_op_mloadw() {
     op_mloadw(&mut processor, &(), &mut tracer).unwrap();
     let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
-    // LE convention: word[0] at top. Store puts Word([1,3,5,7]) in memory,
+    // word[0] at top. Store puts Word([1,3,5,7]) in memory,
     // load puts [1,3,5,7,...] on stack. First 4 positions are loaded word,
     // next 4 are the word left on stack after store.
     let expected = build_expected(&[1, 3, 5, 7, 1, 3, 5, 7]);
@@ -126,7 +126,7 @@ fn test_op_mload() {
     op_mload(&mut processor, &(), &mut tracer).unwrap();
     let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
-    // LE convention: element at addr 4 is word[0] = 1.
+    // Element at addr 4 is word[0] = 1.
     // After store, stack is [1, 3, 5, 7, ...]. After push addr: [4, 1, 3, 5, 7, ...]
     // After mload: [1, 1, 3, 5, 7, ...] (addr replaced by loaded element)
     let expected = build_expected(&[1, 1, 3, 5, 7]);
@@ -193,8 +193,8 @@ fn test_op_mstream() {
     op_mstream(&mut processor, &(), &mut tracer).unwrap();
     let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
-    // LE convention: word at addr 4 (word1) goes to positions 0-3, word at addr 8 (word2) to 4-7.
-    // Word elements are loaded in LE order: word[0] at lowest position.
+    // Word at addr 4 (word1) goes to positions 0-3, word at addr 8 (word2) to 4-7.
+    // word[0] at lowest position.
     let expected = build_expected(&[
         word1[0].into(),
         word1[1].into(),
@@ -225,7 +225,7 @@ fn test_op_mstorew() {
     let word1: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
     store_word(&mut processor, 0, word1, &mut tracer);
 
-    // LE convention: after store, word remains on stack with word[0] at top: [1, 3, 5, 7]
+    // After store, word remains on stack with word[0] at top: [1, 3, 5, 7]
     let expected = build_expected(&[1, 3, 5, 7]);
     assert_eq!(expected, processor.stack_top());
 
@@ -240,7 +240,7 @@ fn test_op_mstorew() {
     let word2: Word = [Felt::new(2), Felt::new(4), Felt::new(6), Felt::new(8)].into();
     store_word(&mut processor, 4, word2, &mut tracer);
 
-    // LE convention: word2 on top of word1: [2, 4, 6, 8, 1, 3, 5, 7]
+    // word2 on top of word1: [2, 4, 6, 8, 1, 3, 5, 7]
     let expected = build_expected(&[2, 4, 6, 8, 1, 3, 5, 7]);
     assert_eq!(expected, processor.stack_top());
 
@@ -296,7 +296,7 @@ fn test_op_mstore() {
     let element2 = Felt::new(12);
     store_element(&mut processor, 4, element2, &mut tracer);
 
-    // LE convention: after store_word, stack is [1, 3, 5, 7, 10]
+    // After store_word, stack is [1, 3, 5, 7, 10]
     // After store_element: [12, 1, 3, 5, 7, 10]
     let expected = build_expected(&[12, 1, 3, 5, 7, 10]);
     assert_eq!(expected, processor.stack_top());
@@ -359,8 +359,8 @@ fn test_op_pipe() {
     let word1 = stored_word1;
     let word2 = stored_word2;
 
-    // LE convention: words[0] goes to positions 0-3, words[1] to 4-7
-    // Word elements in LE order: word[0] at lowest position.
+    // words[0] goes to positions 0-3, words[1] to 4-7
+    // word[0] at lowest position.
     let expected = build_expected(&[
         word1[0].as_canonical_u64(),
         word1[1].as_canonical_u64(),
@@ -428,7 +428,7 @@ fn test_read_twice_in_same_clock_cycle() {
 // --------------------------------------------------------------------------------------------
 
 fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut NoopTracer) {
-    // Push word elements in reverse order for LE convention.
+    // Push word elements in reverse order so word[0] ends up at position 1.
     // After pushing, word[0] should be at stack position 1 (after addr at position 0).
     // So push word[3], then word[2], word[1], word[0], then addr.
     for &value in word.iter().rev() {

@@ -36,7 +36,7 @@ let (outputs, proof) = prove(
 .unwrap();
 
 // the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_int());
+assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 ```
 
 ## STARK Backend

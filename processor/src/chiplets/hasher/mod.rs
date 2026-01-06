@@ -430,7 +430,7 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 /// to be ZERO or ONE, depending on whether the number of elements to be absorbed is a multiple of
 /// the rate or not. The remaining elements in the capacity portion of the state are set to ZERO.
 ///
-/// State layout (LE convention): [R1, R2, CAP] where:
+/// State layout: [R1, R2, CAP] where:
 /// - state[0..8] = init_values (rate)
 /// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
 #[inline(always)]
@@ -459,7 +459,7 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
 /// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
 /// the Rescue Prime Optimized padding rule.
 ///
-/// State layout (LE convention): [R1, R2, CAP] where:
+/// State layout: [R1, R2, CAP] where:
 /// - state[0..4] = w1 (first rate word)
 /// - state[4..8] = w2 (second rate word, also digest location)
 /// - state[8..12] = capacity
@@ -472,7 +472,7 @@ pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
 /// capacity register to the provided domain. All other elements of the capacity register are set
 /// to 0.
 ///
-/// State layout (LE convention): [R1, R2, CAP] where:
+/// State layout: [R1, R2, CAP] where:
 /// - state[0..4] = w1 (first rate word)
 /// - state[4..8] = w2 (second rate word, also digest location)
 /// - state[8..12] = [ZERO, domain, ZERO, ZERO] (capacity)
@@ -488,7 +488,7 @@ pub fn init_state_from_words_with_domain(
 /// Absorbs the specified values into the provided state by overwriting the corresponding elements
 /// in the rate portion of the state.
 ///
-/// State layout (LE convention): rate is at state[0..8]
+/// State layout: rate is at state[0..8]
 #[inline(always)]
 pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; RATE_LEN]) {
     state[0] = values[0];

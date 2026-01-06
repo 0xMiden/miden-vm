@@ -109,7 +109,7 @@ end
 #! Inputs:  [R0, R1, C, write_ptr, end_ptr]
 #! Outputs: [R0', R1', C', write_ptr]
 #!
-#! Where the sponge state uses LE convention:
+#! Where:
 #! - R0 is the first rate word (positions 0-3, on top of stack).
 #! - R1 is the second rate word / digest (positions 4-7).
 #! - C is the capacity word (positions 8-11).
@@ -145,7 +145,7 @@ end
 #! - num_words is the number of words which will be copied to the memory.
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
-#! - R0, R1, C are the final RPO hasher state (LE convention: R0 on top).
+#! - R0, R1, C are the final RPO hasher state (R0 on top).
 #!
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
@@ -170,7 +170,7 @@ pub proc pipe_words_to_memory
   dup.2 mul.4 push.0.0.0
   movup.3
   # => [C, write_ptr, end_ptr, needs_padding, ...]
-  # (C is capacity word in LE convention [R0, R1, C])
+  # (C is the capacity word)
 
   # set initial hasher state (8 cycles)
   padw padw
@@ -274,8 +274,8 @@ pub proc pipe_double_words_preimage_to_memory
   mul.4 dup.1 add swap
   # => [write_ptr, end_ptr, COMMITMENT, ...]
 
-  # Setup the initial hasher state. With LE convention [R0, R1, C], the capacity C
-  # starts entirely empty.
+  # Setup the initial hasher state [R0, R1, C] with empty capacity.
+  #
   # (12 cycles).
   exec.rpo256::init_no_padding
   # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]

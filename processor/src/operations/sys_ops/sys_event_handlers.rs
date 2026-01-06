@@ -389,12 +389,12 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
     Ok(())
 }
 
-/// Given an element in a quadratic extension field on the top of the stack (LE convention:
-/// low coefficient closer to top), computes its multiplicative inverse and pushes the result
-/// onto the advice stack.
+/// Given an element in a quadratic extension field on the top of the stack (low coefficient
+/// closer to top), computes its multiplicative inverse and pushes the result onto the advice
+/// stack.
 ///
 /// ```text
-/// Inputs (LE convention):
+/// Inputs:
 ///   Operand stack: [event_id, a0, a1, ...] where a = a0 + a1*x
 ///   Advice stack: [...]
 ///
@@ -403,7 +403,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), Executio
 /// ```
 ///
 /// Where `(b0, b1)` is the multiplicative inverse of the extension field element `(a0, a1)`.
-/// After two AdvPops, the operand stack will have [b0, b1, ...] in LE format.
+/// After two AdvPops, the operand stack will have [b0, b1, ...].
 ///
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
@@ -411,7 +411,7 @@ fn push_ext2_inv_result(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    // LE convention: stack = [event_id, a0, a1, ...] with event_id on top, a0 (low) at position 1
+    // Stack layout: [event_id, a0, a1, ...] with event_id on top, a0 (low) at position 1
     // Read from positions 1 and 2 (skipping event_id at position 0)
     let coef0 = process.get_stack_item(1); // low coefficient
     let coef1 = process.get_stack_item(2); // high coefficient

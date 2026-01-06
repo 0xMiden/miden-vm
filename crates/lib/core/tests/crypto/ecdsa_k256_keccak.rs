@@ -157,7 +157,7 @@ impl EcdsaSignatureHandler {
 
 impl EventHandler for EcdsaSignatureHandler {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        // Stack layout (LE convention): [event_id, pk_commitment(1-4), message(5-8), ...]
+        // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
         // Position 0 has the event ID, so pk_commitment starts at position 1
         let provided_pk_rpo = process.get_stack_word_le(1);
         let secret_key =

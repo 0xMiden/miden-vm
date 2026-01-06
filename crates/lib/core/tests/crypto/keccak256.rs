@@ -10,6 +10,7 @@ use core::array;
 
 use miden_core::{
     Felt,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_core_lib::handlers::keccak256::{
@@ -172,7 +173,7 @@ fn test_keccak_hash_bytes(input_u8: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }
 
@@ -203,7 +204,7 @@ fn test_keccak_hash() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }
 
@@ -234,6 +235,6 @@ fn test_keccak_merge() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }

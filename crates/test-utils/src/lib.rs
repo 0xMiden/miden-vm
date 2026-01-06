@@ -594,7 +594,7 @@ impl Test {
 
 /// Appends a Word to an operand stack Vec.
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    target.extend(word.iter().map(Felt::as_int));
+    target.extend(word.iter().map(Felt::as_canonical_u64));
 }
 
 /// Converts a slice of Felts into a vector of u64 values.

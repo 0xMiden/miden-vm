@@ -74,7 +74,7 @@ proptest! {
         let mut tracer = NoopTracer;
 
         // Compute expected result
-        // LE convention: input_state[i] = stack.get(i)
+        // input_state[i] = stack.get(i)
         // So input_state = [s0, s1, s2, ..., s11]
         let expected_state = {
             let mut expected_state = [
@@ -103,7 +103,7 @@ proptest! {
         // Check the result
         let stack = processor.stack_top();
 
-        // LE convention: output_state[i] -> stack.set(i)
+        // output_state[i] -> stack.set(i)
         // stack_top() returns [pos15, ..., pos0] so we need to check stack[15-i]
         for i in 0..STATE_WIDTH {
             prop_assert_eq!(
@@ -289,7 +289,7 @@ proptest! {
         acc_0 in any::<u64>(),
         acc_1 in any::<u64>(),
     ) {
-        // Build the initial stack state (LE convention: low index coefficient at lower position)
+        // Build the initial stack state (low index coefficient at lower position)
         // Stack layout (top first): [c0, c1, c2, c3, c4, c5, c6, c7, s8, s9, s10, s11, s12, alpha_addr, acc0, acc1]
         // Position 0 (top) = c0, position 7 = c7, position 13 = alpha_addr, position 14 = acc0, position 15 = acc1
         //
@@ -414,7 +414,7 @@ proptest! {
         acc_0 in any::<u64>(),
         acc_1 in any::<u64>(),
     ) {
-        // Build the initial stack state (LE convention: low coefficient at lower position)
+        // Build the initial stack state (low coefficient at lower position)
         // Stack layout for extension field coefficients:
         // Position 0 (top) = c0_0 (low), position 1 = c0_1 (high)
         // Position 2 = c1_0 (low), position 3 = c1_1 (high)
@@ -545,7 +545,7 @@ proptest! {
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
         // Build the initial stack state
-        // LE convention: word[0] at lowest position (closest to top)
+        // word[0] at lowest position (closest to top)
         // Stack layout (top first): [node[0], node[1], node[2], node[3], depth, index, root[0], root[1], root[2], root[3], ...]
         let stack_inputs = [
             ZERO,                  // position 15 (bottom)
@@ -639,7 +639,7 @@ proptest! {
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
         // Build the initial stack state
-        // LE convention: word[0] at lowest position (closest to top)
+        // word[0] at lowest position (closest to top)
         // Stack layout (top first):
         // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
         let stack_inputs = [
@@ -743,7 +743,7 @@ fn test_op_mrupdate_merge_subtree() {
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
     // Build the initial stack state
-    // LE convention: word[0] at lowest position (closest to top)
+    // word[0] at lowest position (closest to top)
     // Stack layout (top first):
     // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
     let stack_inputs = [

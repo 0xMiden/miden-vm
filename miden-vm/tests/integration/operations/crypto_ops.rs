@@ -144,7 +144,7 @@ fn mtree_get() {
 
     // Expected final stack after mtree_get:
     // [V, R] where V is the node value, R is the root
-    // In LE convention: [v0, v1, v2, v3, r0, r1, r2, r3]
+    // Stack layout: [v0, v1, v2, v3, r0, r1, r2, r3]
     let final_stack = [
         leaves[index][0].as_canonical_u64(),
         leaves[index][1].as_canonical_u64(),
@@ -322,7 +322,7 @@ fn crypto_stream_basic() {
     let test = build_op_test!(asm_op, &[]);
     let stack = test.get_last_stack_state();
 
-    // With LE convention, plaintext[i] combines with keystream[7-i]:
+    // plaintext[i] combines with keystream[7-i]:
     // plaintext[0..3]=[1,2,3,4], keystream[7..4]=[8,7,6,5] -> [9,9,9,9]
     // plaintext[4..7]=[5,6,7,8], keystream[3..0]=[4,3,2,1] -> [9,9,9,9]
 
@@ -552,7 +552,7 @@ fn crypto_stream_allows_adjacent_before() {
 // HORNER EVALUATION TESTS
 // ================================================================================================
 
-// Constants for stack positions - LE convention: low coefficient closer to top (lower index)
+// Constants for stack positions (low coefficient closer to top / lower index)
 const ALPHA_ADDR_INDEX: usize = 13;
 const ACC_LOW_INDEX: usize = 14;
 const ACC_HIGH_INDEX: usize = 15;
@@ -597,7 +597,7 @@ proptest! {
         ";
 
         // Build stack inputs array.
-        // With LE convention, stack position 0 = c0 (highest degree, α^7 term), position 7 = c7 (constant).
+        // Stack position 0 = c0 (highest degree, α^7 term), position 7 = c7 (constant).
         let mut inputs = [0u64; 16];
         inputs[0] = c0;  // position 0 = c0 (highest degree)
         inputs[1] = c1;
@@ -636,7 +636,7 @@ proptest! {
         // Create the expected operand stack (top-first order for expect_stack)
         // The accumulator values are updated; rest of stack unchanged
         let mut expected = Vec::new();
-        // Updated accumulators (at positions 14-15 after reverse, LE convention: low at 14, high at 15)
+        // Updated accumulators (at positions 14-15 after reverse: low at 14, high at 15)
         // Since we reverse at the end, push in reverse order: high first, then low
         let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();
         expected.push(acc_new_coeffs[1].as_canonical_u64()); // acc_high (will be at position 15 after reverse)
@@ -693,7 +693,7 @@ proptest! {
         ";
 
         // Build stack inputs array.
-        // With LE convention for extension fields, element a = (a0, a1) is stored as [a0, a1]
+        // For extension fields, element a = (a0, a1) is stored as [a0, a1]
         // with a0 (low coefficient) on top. Stack layout: [c0_0, c0_1, c1_0, c1_1, ...]
         let mut inputs = [0u64; 16];
         inputs[0] = c0_0;  // c0 low coeff at position 0 (top)
@@ -732,7 +732,7 @@ proptest! {
         // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
         let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
 
-        // Create the expected operand stack (LE convention: low at position 14, high at position 15)
+        // Create the expected operand stack (low at position 14, high at position 15)
         // Since we reverse at the end, push in reverse order: high first, then low
         let mut expected = Vec::new();
         let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();

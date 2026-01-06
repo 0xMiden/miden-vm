@@ -1050,5 +1050,10 @@ fn init_leaf(value: u64) -> Word {
 
 /// Converts a Word to stack input values (u64 array) in element order.
 fn word_to_ints(w: Word) -> [u64; 4] {
-    [w[0].as_int(), w[1].as_int(), w[2].as_int(), w[3].as_int()]
+    [
+        w[0].as_canonical_u64(),
+        w[1].as_canonical_u64(),
+        w[2].as_canonical_u64(),
+        w[3].as_canonical_u64(),
+    ]
 }

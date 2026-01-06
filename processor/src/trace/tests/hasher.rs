@@ -166,7 +166,7 @@ fn init_leaf(value: u64) -> Word {
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {
-    // In LE convention, word[0] should be at stack top, so no reversal needed.
+    // word[0] is at stack top, so no reversal needed.
     word.iter().for_each(|v| target.push(v.as_canonical_u64()));
 }
 

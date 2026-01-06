@@ -1,7 +1,7 @@
 use miden_core::WORD_SIZE;
 use miden_processor::AdviceStackBuilder;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },
@@ -478,7 +478,7 @@ fn test_mmr_pack_roundtrip() {
         end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
-    let expected_stack: Vec<u64> = hash.iter().rev().map(|e| e.as_int()).collect();
+    let expected_stack: Vec<u64> = hash.iter().rev().map(|e| e.as_canonical_u64()).collect();
 
     let mut expect_memory: Vec<u64> = Vec::new();
 
@@ -676,7 +676,7 @@ fn debug_mmr_peaks_vs_vm_memory() {
                 .memory
                 .read_element(ContextId::root(), Felt::new(addr as u64), &())
                 .unwrap()
-                .as_int();
+                .as_canonical_u64();
             vm_mem.push(v);
         }
     }
@@ -762,13 +762,13 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
     digests
         .iter()
         .flat_map(Into::<[Felt; WORD_SIZE]>::into)
-        .map(|v| v.as_int())
+        .map(|v| v.as_canonical_u64())
         .collect()
 }
 
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
-    arr.iter().map(|v| v.as_int()).collect()
+    arr.iter().map(|v| v.as_canonical_u64()).collect()
 }
 
 fn word_to_advice_stack_order(word: &Word) -> Vec<u64> {

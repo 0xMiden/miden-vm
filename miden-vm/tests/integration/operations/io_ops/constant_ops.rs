@@ -73,7 +73,7 @@ fn push_without_separator() {
     0100000000000000\
     0200000000000000\
     0300000000000000";
-    // With LE convention, first word goes to position 0 (top)
+    // First word goes to position 0 (top)
     let expected = vec![0, 1, 2, 3];
 
     let test = build_op_test!(asm_op);
