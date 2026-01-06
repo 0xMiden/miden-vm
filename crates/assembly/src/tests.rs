@@ -162,7 +162,6 @@ fn repeat_dynamic_iteration_count() -> TestResult {
     let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
     let program = context.assemble(source)?;
     insta::assert_snapshot!(program);
-
     Ok(())
 }
 

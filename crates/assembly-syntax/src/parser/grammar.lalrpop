@@ -948,15 +948,8 @@ While: Op = {
 }
 
 Repeat: Op = {
-  <l:@L> "repeat" <imm:MaybeImm<U32>> <body:Block> "end" <r:@R> =>? {
-    let span = span!(source_id, l, r);
-
-    match imm {
-      Some(imm) => Ok(Op::Repeat { span, count: imm, body }),
-      None => Err(ParseError::User {
-        error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) },
-      }),
-    }
+  <l:@L> "repeat" <imm:Imm<U32>> <body:Block> "end" <r:@R> => {
+    Op::Repeat { span: span!(source_id, l, r), count: imm, body }
   }
 }
 
