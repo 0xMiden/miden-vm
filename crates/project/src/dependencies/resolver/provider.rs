@@ -5,6 +5,7 @@ use pubgrub::{Dependencies, DependencyProvider, SelectedDependencies};
 use smallvec::SmallVec;
 
 use super::{version_set::VersionSetFilter, *};
+use crate::{SemVer, Version};
 
 /// Represents package priorities in the resolver.
 ///
@@ -366,7 +367,9 @@ impl From<pubgrub::PubGrubError<PackageResolver<'_>>> for DependencyResolutionEr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
+    use crate::VersionReq;
     use miden_core::{Word, crypto::hash::Rpo256};
     use pubgrub::{SelectedDependencies, VersionSet as _};
 

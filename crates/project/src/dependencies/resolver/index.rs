@@ -5,7 +5,7 @@ use alloc::collections::BTreeMap;
 use pubgrub::VersionSet as _;
 
 use super::*;
-use crate::Package;
+use crate::{Package, Version, VersionRequirement};
 
 /// A type alias for an ordered map of packages and the set of versions that can satisfy the
 /// requirement for that package.

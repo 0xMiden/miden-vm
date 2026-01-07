@@ -1,18 +1,15 @@
-mod index;
-mod package_id;
-mod provider;
-mod pubgrub_compat;
+#![expect(unused_assignments)]
+
+#[cfg(feature = "resolver")]
+mod resolver;
 mod version;
 mod version_requirement;
-mod version_set;
 
+#[cfg(feature = "resolver")]
+pub use self::resolver::*;
 pub use self::{
-    index::PackageIndex,
-    package_id::PackageId,
-    provider::PackageResolver,
     version::{SemVer, Version, VersionReq},
     version_requirement::VersionRequirement,
-    version_set::VersionSet,
 };
 
 use alloc::{format, sync::Arc, vec};
