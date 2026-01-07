@@ -69,14 +69,11 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
 
 mod errors;
-pub use errors::{
-    ErrorContext, ErrorContextImpl, ExecutionError, MemoryResultExt, OperationError,
-    OperationResultExt,
-};
+pub use errors::{ExecutionError, MemoryResultExt, OperationError, OperationResultExt};
 
 pub mod utils;
 
-#[cfg(all(test, not(feature = "no_err_ctx")))]
+#[cfg(test)]
 mod tests;
 
 mod debug;

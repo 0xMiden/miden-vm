@@ -1,5 +1,5 @@
 use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
-use miden_processor::{AdviceError, ExecutionError, RowIndex};
+use miden_processor::{AdviceError, ExecutionError};
 use miden_utils_testing::{PrimeField64, expect_exec_error_matches};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
@@ -34,9 +34,7 @@ fn adv_push_invalid() {
     let test = build_op_test!("adv_push.1");
     expect_exec_error_matches!(
         test,
-        ExecutionError::AdviceError {
-            err: AdviceError::StackReadFailed, clk, ..
-        } if clk == RowIndex::from(6),
+        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
     )
 }
 
@@ -60,9 +58,7 @@ fn adv_loadw_invalid() {
     let test = build_op_test!("adv_loadw", &[0, 0, 0, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::AdviceError {
-            err: AdviceError::StackReadFailed, clk, ..
-        } if clk == RowIndex::from(6),
+        ExecutionError::AdviceError { err: AdviceError::StackReadFailed, .. }
     );
 }
 

@@ -16,9 +16,6 @@ OperationError {
         ),
     },
     source_file: None,
-    clk: RowIndex(
-        5,
-    ),
     err: NotU32Values {
         values: [
             4294967296,

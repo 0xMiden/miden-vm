@@ -1,11 +1,14 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{Felt, Operation, mast::MastForest};
+use miden_core::{
+    Felt, Operation,
+    mast::{MastForest, MastNodeId},
+};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError, OperationResultExt,
+    BaseHost, ExecutionError, OperationResultExt,
     errors::{AceEvalResultExt, CryptoResultExt, IoResultExt},
     fast::Tracer,
-    processor::{Processor, StackInterface, SystemInterface},
+    processor::{Processor, StackInterface},
 };
 
 mod crypto_ops;
@@ -33,9 +36,11 @@ pub(super) fn execute_sync_op(
     processor: &mut impl Processor,
     op: &Operation,
     current_forest: &MastForest,
+    node_id: MastNodeId,
     host: &mut impl BaseHost,
-    err_ctx: &impl ErrorContext,
+    in_debug_mode: bool,
     tracer: &mut impl Tracer,
+    op_idx: usize,
 ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
     let mut user_op_helpers = None;
 
@@ -45,9 +50,8 @@ pub(super) fn execute_sync_op(
             // do nothing
         },
         Operation::Assert(err_code) => {
-            let clk = processor.system().clk();
             sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)
-                .map_exec_err(err_ctx, clk)?
+                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?
         },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
@@ -75,23 +79,35 @@ pub(super) fn execute_sync_op(
         Operation::Add => field_ops::op_add(processor, tracer),
         Operation::Neg => field_ops::op_neg(processor),
         Operation::Mul => field_ops::op_mul(processor, tracer),
-        Operation::Inv => {
-            let clk = processor.system().clk();
-            field_ops::op_inv(processor).map_exec_err(err_ctx, clk)?
-        },
+        Operation::Inv => field_ops::op_inv(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
         Operation::Incr => field_ops::op_incr(processor),
-        Operation::And => {
-            let clk = processor.system().clk();
-            field_ops::op_and(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
-        Operation::Or => {
-            let clk = processor.system().clk();
-            field_ops::op_or(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
-        Operation::Not => {
-            let clk = processor.system().clk();
-            field_ops::op_not(processor).map_exec_err(err_ctx, clk)?
-        },
+        Operation::And => field_ops::op_and(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::Or => field_ops::op_or(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::Not => field_ops::op_not(processor).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
         Operation::Eq => {
             let eq_helpers = field_ops::op_eq(processor, tracer);
             user_op_helpers = Some(eq_helpers);
@@ -114,53 +130,82 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(u32split_helpers);
         },
         Operation::U32add => {
-            let clk = processor.system().clk();
-            let u32add_helpers =
-                u32_ops::op_u32add(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32add_helpers = u32_ops::op_u32add(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32add_helpers);
         },
         Operation::U32add3 => {
-            let clk = processor.system().clk();
-            let u32add3_helpers =
-                u32_ops::op_u32add3(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32add3_helpers = u32_ops::op_u32add3(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32add3_helpers);
         },
         Operation::U32sub => {
-            let clk = processor.system().clk();
-            let u32sub_helpers =
-                u32_ops::op_u32sub(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32sub_helpers = u32_ops::op_u32sub(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32sub_helpers);
         },
         Operation::U32mul => {
-            let clk = processor.system().clk();
-            let u32mul_helpers =
-                u32_ops::op_u32mul(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32mul_helpers = u32_ops::op_u32mul(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32mul_helpers);
         },
         Operation::U32madd => {
-            let clk = processor.system().clk();
-            let u32madd_helpers =
-                u32_ops::op_u32madd(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32madd_helpers = u32_ops::op_u32madd(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32madd_helpers);
         },
         Operation::U32div => {
-            let clk = processor.system().clk();
-            let u32div_helpers =
-                u32_ops::op_u32div(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32div_helpers = u32_ops::op_u32div(processor, tracer).map_exec_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
             user_op_helpers = Some(u32div_helpers);
         },
-        Operation::U32and => {
-            let clk = processor.system().clk();
-            u32_ops::op_u32and(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
-        Operation::U32xor => {
-            let clk = processor.system().clk();
-            u32_ops::op_u32xor(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
+        Operation::U32and => u32_ops::op_u32and(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::U32xor => u32_ops::op_u32xor(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
         Operation::U32assert2(_err_code) => {
-            let clk = processor.system().clk();
-            let u32assert2_helpers =
-                u32_ops::op_u32assert2(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let u32assert2_helpers = u32_ops::op_u32assert2(processor, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
             user_op_helpers = Some(u32assert2_helpers);
         },
 
@@ -198,49 +243,79 @@ pub(super) fn execute_sync_op(
         Operation::MovDn6 => processor.stack().rotate_right(7),
         Operation::MovDn7 => processor.stack().rotate_right(8),
         Operation::MovDn8 => processor.stack().rotate_right(9),
-        Operation::CSwap => {
-            let clk = processor.system().clk();
-            stack_ops::op_cswap(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
-        Operation::CSwapW => {
-            let clk = processor.system().clk();
-            stack_ops::op_cswapw(processor, tracer).map_exec_err(err_ctx, clk)?
-        },
+        Operation::CSwap => stack_ops::op_cswap(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::CSwapW => stack_ops::op_cswapw(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
 
         // ----- input / output ---------------------------------------------------------------
         Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
-        Operation::AdvPop => {
-            let clk = processor.system().clk();
-            io_ops::op_advpop(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::AdvPopW => {
-            let clk = processor.system().clk();
-            io_ops::op_advpopw(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::MLoadW => {
-            let clk = processor.system().clk();
-            io_ops::op_mloadw(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::MStoreW => {
-            let clk = processor.system().clk();
-            io_ops::op_mstorew(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::MLoad => {
-            let clk = processor.system().clk();
-            io_ops::op_mload(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::MStore => {
-            let clk = processor.system().clk();
-            io_ops::op_mstore(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::MStream => {
-            let clk = processor.system().clk();
-            io_ops::op_mstream(processor, tracer).map_io_err(err_ctx, clk)?
-        },
-        Operation::Pipe => {
-            let clk = processor.system().clk();
-            io_ops::op_pipe(processor, tracer).map_io_err(err_ctx, clk)?
-        },
+        Operation::AdvPop => io_ops::op_advpop(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::MLoadW => io_ops::op_mloadw(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::MStoreW => io_ops::op_mstorew(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::MLoad => io_ops::op_mload(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::MStore => io_ops::op_mstore(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::MStream => io_ops::op_mstream(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
+        Operation::Pipe => io_ops::op_pipe(processor, tracer).map_io_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            in_debug_mode,
+            op_idx,
+        )?,
 
         // ----- cryptographic operations -----------------------------------------------------
         Operation::HPerm => {
@@ -248,22 +323,25 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(hperm_helpers);
         },
         Operation::MpVerify(err_code) => {
-            let clk = processor.system().clk();
             let mpverify_helpers =
                 crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
-                    .map_crypto_err(err_ctx, clk)?;
+                    .map_crypto_err_with_op_idx(
+                        current_forest,
+                        node_id,
+                        host,
+                        in_debug_mode,
+                        op_idx,
+                    )?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
-            let clk = processor.system().clk();
-            let mrupdate_helpers =
-                crypto_ops::op_mrupdate(processor, tracer).map_crypto_err(err_ctx, clk)?;
+            let mrupdate_helpers = crypto_ops::op_mrupdate(processor, tracer)
+                .map_crypto_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
-            let clk = processor.system().clk();
-            let frie2f4_helpers =
-                fri_ops::op_fri_ext2fold4(processor, tracer).map_exec_err(err_ctx, clk)?;
+            let frie2f4_helpers = fri_ops::op_fri_ext2fold4(processor, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
@@ -275,7 +353,13 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(tracer).map_ace_eval_err(err_ctx)?;
+            processor.op_eval_circuit(tracer).map_ace_eval_err_with_op_idx(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+                op_idx,
+            )?;
         },
         Operation::LogPrecompile => {
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);

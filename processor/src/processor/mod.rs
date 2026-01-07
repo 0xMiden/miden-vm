@@ -1,11 +1,14 @@
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
-    Felt, Operation, Word, crypto::merkle::MerklePath, field::QuadFelt, mast::MastForest,
+    Felt, Operation, Word,
+    crypto::merkle::MerklePath,
+    field::QuadFelt,
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
+    AdviceError, BaseHost, ContextId, ExecutionError, MemoryError, ProcessState,
     errors::{AceEvalError, OperationError},
     fast::Tracer,
     processor::operations::execute_sync_op,
@@ -93,11 +96,13 @@ pub trait Processor: Sized {
         &mut self,
         op: &Operation,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         host: &mut impl BaseHost,
-        err_ctx: &impl ErrorContext,
+        in_debug_mode: bool,
         tracer: &mut impl Tracer,
+        op_idx: usize,
     ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, current_forest, host, err_ctx, tracer)
+        execute_sync_op(self, op, current_forest, node_id, host, in_debug_mode, tracer, op_idx)
     }
 }
 

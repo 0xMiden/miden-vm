@@ -11,7 +11,6 @@ use miden_core::{
 use crate::{
     AsyncHost, ContextId, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
     errors::OperationError,
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
@@ -44,9 +43,6 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        #[allow(clippy::let_unit_value)]
-        let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
-
         let callee_hash = current_forest[call_node.callee()].digest();
 
         self.save_context_and_truncate_stack(tracer);
@@ -54,9 +50,13 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !kernel.contains_proc(callee_hash) {
-                let clk = self.clk;
                 let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
-                return ControlFlow::Break(BreakReason::Err(err.with_context(&err_ctx, clk)));
+                return ControlFlow::Break(BreakReason::Err(err.with_context(
+                    current_forest,
+                    current_node_id,
+                    host,
+                    self.in_debug_mode(),
+                )));
             }
             tracer.record_kernel_proc_access(callee_hash);
 
@@ -103,20 +103,16 @@ impl FastProcessor {
             current_forest,
         );
 
-        // When the `no_err_ctx` feature is enabled, the err_ctx! macro expands to `()`
-        // and doesn't use its parameters. In this case, _call_node would be unused,
-        // so we prefix it with underscore to indicate this intentional unused state
-        // and suppress warnings in feature combinations that include `no_err_ctx`.
-        let _call_node = current_forest[node_id].unwrap_call();
-        #[allow(clippy::let_unit_value)]
-        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // when returning from a function call or a syscall, restore the
-        // context of the
-        // system registers and the operand stack to what it was prior
+        // context of the system registers and the operand stack to what it was prior
         // to the call.
-        let clk = self.clk;
         if let Err(e) = self.restore_context(tracer) {
-            return ControlFlow::Break(BreakReason::Err(e.with_context(&err_ctx, clk)));
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                host,
+                self.in_debug_mode(),
+            )));
         }
 
         // Corresponds to the row inserted for the END operation added to the trace.
@@ -151,9 +147,6 @@ impl FastProcessor {
         // Corresponds to the row inserted for the DYN or DYNCALL operation
         // added to the trace.
         let dyn_node = current_forest[current_node_id].unwrap_dyn();
-
-        #[allow(clippy::let_unit_value)]
-        let err_ctx = err_ctx!(&current_forest, current_node_id, host, self.in_debug_mode());
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -206,12 +199,15 @@ impl FastProcessor {
                 continuation_stack.push_start_node(callee_id);
             },
             None => {
+                let in_debug_mode = self.in_debug_mode();
                 let (root_id, new_forest) = match self
                     .load_mast_forest(
                         callee_hash,
                         host,
                         |digest| OperationError::DynamicNodeNotFound { digest },
-                        &err_ctx,
+                        current_forest,
+                        current_node_id,
+                        in_debug_mode,
                     )
                     .await
                 {
@@ -255,14 +251,16 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        #[allow(clippy::let_unit_value)]
-        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // For dyncall, restore the context.
-        if dyn_node.is_dyncall() {
-            let clk = self.clk;
-            if let Err(e) = self.restore_context(tracer) {
-                return ControlFlow::Break(BreakReason::Err(e.with_context(&err_ctx, clk)));
-            }
+        if dyn_node.is_dyncall()
+            && let Err(e) = self.restore_context(tracer)
+        {
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                host,
+                self.in_debug_mode(),
+            )));
         }
 
         // Corresponds to the row inserted for the END operation added to

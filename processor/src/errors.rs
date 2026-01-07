@@ -3,7 +3,6 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_air::trace::{RowIndex, RowIndex as AirRowIndex};
 use miden_core::{
     EventId, EventName, Felt, Word,
     field::QuadFelt,
@@ -21,27 +20,24 @@ use crate::{AdviceError, BaseHost, DebugError, EventError, MemoryError, TraceErr
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
-    #[error("advice provider error at clock cycle {clk}")]
+    #[error("advice provider error")]
     #[diagnostic()]
     AdviceError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
         #[source]
         #[diagnostic_source]
         err: AdviceError,
     },
-    #[error("debug handler error at clock cycle {clk}: {err}")]
+    #[error("debug handler error: {err}")]
     DebugHandlerError {
-        clk: RowIndex,
         #[source]
         err: DebugError,
     },
-    #[error("trace handler error at clock cycle {clk} for trace ID {trace_id}: {err}")]
+    #[error("trace handler error for trace ID {trace_id}: {err}")]
     TraceHandlerError {
-        clk: RowIndex,
         trace_id: u32,
         #[source]
         err: TraceError,
@@ -103,14 +99,13 @@ pub enum ExecutionError {
     },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
-    #[error("operation error at clock cycle {clk}")]
+    #[error("operation error")]
     #[diagnostic()]
     OperationError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        clk: AirRowIndex,
         #[source]
         #[diagnostic_source]
         err: OperationError,
@@ -220,11 +215,11 @@ pub enum CryptoError {
 ///
 /// **Use `OperationError` when:**
 /// - The error occurs during operation execution (e.g., assertion failures, type mismatches)
-/// - Context can be resolved at the call site via `err_ctx.label_and_source_file()`
+/// - Context can be resolved at the call site via the extension traits
 /// - The error needs both a human-readable message and optional diagnostic help
 ///
-/// **Avoid duplicating error context.** If context comes from the call site via
-/// `ErrorContext`, do NOT add `label` or `source_file` fields to the variant.
+/// **Avoid duplicating error context.** Context is added by the extension traits,
+/// so do NOT add `label` or `source_file` fields to the variant.
 ///
 /// **Pattern at call sites:**
 /// ```ignore
@@ -234,7 +229,7 @@ pub enum CryptoError {
 /// }
 ///
 /// // Caller wraps with context lazily:
-/// some_op().map_exec_err(err_ctx, clk)?;
+/// some_op().map_exec_err(mast_forest, node_id, host, in_debug_mode)?;
 /// ```
 ///
 /// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the
@@ -318,9 +313,16 @@ impl OperationError {
     ///
     /// This is useful when working with `ControlFlow` or other non-`Result` return types
     /// where the `OperationResultExt::map_exec_err` extension trait cannot be used directly.
-    pub fn with_context(self, err_ctx: &impl ErrorContext, clk: AirRowIndex) -> ExecutionError {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        ExecutionError::OperationError { label, source_file, clk, err: self }
+    pub fn with_context(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+    ) -> ExecutionError {
+        let (label, source_file) =
+            get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+        ExecutionError::OperationError { label, source_file, err: self }
     }
 }
 
@@ -336,31 +338,89 @@ pub struct MerklePathVerificationFailedInner {
     pub err_msg: Option<Arc<str>>,
 }
 
+// EXTENSION TRAITS
+// ================================================================================================
+
+/// Computes the label and source file for error context.
+///
+/// When not in debug mode, returns `(SourceSpan::UNKNOWN, None)` to skip the expensive
+/// decorator traversal. This function is called by the extension traits to lazily
+/// compute source location only when an error occurs.
+fn get_label_and_source_file(
+    op_idx: Option<usize>,
+    mast_forest: &MastForest,
+    node_id: MastNodeId,
+    host: &impl BaseHost,
+    in_debug_mode: bool,
+) -> (SourceSpan, Option<Arc<SourceFile>>) {
+    // When not in debug mode, skip the expensive decorator traversal entirely.
+    // Decorators (including AsmOp decorators used for error context) should only
+    // be accessed when debugging is enabled.
+    if !in_debug_mode {
+        return (SourceSpan::UNKNOWN, None);
+    }
+
+    mast_forest
+        .get_assembly_op(node_id, op_idx)
+        .and_then(|assembly_op| assembly_op.location())
+        .map_or_else(
+            || (SourceSpan::UNKNOWN, None),
+            |location| host.get_label_and_source_file(location),
+        )
+}
+
 /// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.
 ///
 /// This trait provides methods to wrap an `OperationError` with execution context
-/// (source location, clock cycle) at the point where the error needs to be propagated.
+/// (source location) at the point where the error needs to be propagated.
 pub trait OperationResultExt<T> {
     /// Maps an `OperationError` to an `ExecutionError` with the provided context.
-    ///
-    /// The `err_ctx` parameter provides source location information, and `clk` is the
-    /// clock cycle at which the error occurred.
     fn map_exec_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: AirRowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+    ) -> Result<T, ExecutionError>;
+
+    /// Maps an `OperationError` to an `ExecutionError` with op index context.
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
 
 impl<T> OperationResultExt<T> for Result<T, OperationError> {
     fn map_exec_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: AirRowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
-            ExecutionError::OperationError { label, source_file, clk, err }
+            let (label, source_file) =
+                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+            ExecutionError::OperationError { label, source_file, err }
+        })
+    }
+
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) =
+                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
+            ExecutionError::OperationError { label, source_file, err }
         })
     }
 }
@@ -370,20 +430,38 @@ pub trait AdviceResultExt<T> {
     /// Maps an `AdviceError` to an `ExecutionError` with the provided context.
     fn map_advice_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
+
+    /// Maps an `AdviceError` to an `ExecutionError` without context.
+    ///
+    /// Use this when no error context is available (e.g., during initialization).
+    fn map_advice_err_no_ctx(self) -> Result<T, ExecutionError>;
 }
 
 impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
     fn map_advice_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
-            ExecutionError::AdviceError { label, source_file, clk, err }
+            let (label, source_file) =
+                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+            ExecutionError::AdviceError { label, source_file, err }
+        })
+    }
+
+    fn map_advice_err_no_ctx(self) -> Result<T, ExecutionError> {
+        self.map_err(|err| ExecutionError::AdviceError {
+            label: SourceSpan::UNKNOWN,
+            source_file: None,
+            err,
         })
     }
 }
@@ -393,7 +471,10 @@ pub trait EventResultExt<T> {
     /// Maps an `EventError` to an `ExecutionError` with the provided context.
     fn map_event_err(
         self,
-        err_ctx: &impl ErrorContext,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
         event_id: EventId,
         event_name: Option<EventName>,
     ) -> Result<T, ExecutionError>;
@@ -402,12 +483,16 @@ pub trait EventResultExt<T> {
 impl<T> EventResultExt<T> for Result<T, EventError> {
     fn map_event_err(
         self,
-        err_ctx: &impl ErrorContext,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
         event_id: EventId,
         event_name: Option<EventName>,
     ) -> Result<T, ExecutionError> {
         self.map_err(|error| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
             ExecutionError::EventError {
                 label,
                 source_file,
@@ -422,13 +507,26 @@ impl<T> EventResultExt<T> for Result<T, EventError> {
 /// Extension trait for converting `Result<T, MemoryError>` to `Result<T, ExecutionError>`.
 pub trait MemoryResultExt<T> {
     /// Maps a `MemoryError` to an `ExecutionError` with the provided context.
-    fn map_mem_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+    fn map_mem_err(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+    ) -> Result<T, ExecutionError>;
 }
 
 impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
-    fn map_mem_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+    fn map_mem_err(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+    ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
             ExecutionError::MemoryError { label, source_file, err }
         })
     }
@@ -439,8 +537,10 @@ pub trait SystemEventResultExt<T> {
     /// Maps a `SystemEventError` to an `ExecutionError` with the provided context.
     fn map_sys_event_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
 }
 
@@ -449,18 +549,21 @@ impl<T> SystemEventResultExt<T>
 {
     fn map_sys_event_err(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         use crate::operations::sys_ops::sys_event_handlers::SystemEventError;
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
             match err {
                 SystemEventError::Advice(err) => {
-                    ExecutionError::AdviceError { label, source_file, clk, err }
+                    ExecutionError::AdviceError { label, source_file, err }
                 },
                 SystemEventError::Operation(err) => {
-                    ExecutionError::OperationError { label, source_file, clk, err }
+                    ExecutionError::OperationError { label, source_file, err }
                 },
                 SystemEventError::Memory(err) => {
                     ExecutionError::MemoryError { label, source_file, err }
@@ -473,17 +576,30 @@ impl<T> SystemEventResultExt<T>
 /// Extension trait for converting `Result<T, IoError>` to `Result<T, ExecutionError>`.
 pub trait IoResultExt<T> {
     /// Maps an `IoError` to an `ExecutionError` with the provided context.
-    fn map_io_err(self, err_ctx: &impl ErrorContext, clk: RowIndex) -> Result<T, ExecutionError>;
+    fn map_io_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>;
 }
 
 impl<T> IoResultExt<T> for Result<T, IoError> {
-    fn map_io_err(self, err_ctx: &impl ErrorContext, clk: RowIndex) -> Result<T, ExecutionError> {
+    fn map_io_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
             match err {
-                IoError::Advice(err) => {
-                    ExecutionError::AdviceError { label, source_file, clk, err }
-                },
+                IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                 IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
                 // Execution errors are already fully formed, just unwrap
                 IoError::Execution(err) => *err,
@@ -495,27 +611,32 @@ impl<T> IoResultExt<T> for Result<T, IoError> {
 /// Extension trait for converting `Result<T, CryptoError>` to `Result<T, ExecutionError>`.
 pub trait CryptoResultExt<T> {
     /// Maps a `CryptoError` to an `ExecutionError` with the provided context.
-    fn map_crypto_err(
+    fn map_crypto_err_with_op_idx(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
 
 impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
-    fn map_crypto_err(
+    fn map_crypto_err_with_op_idx(
         self,
-        err_ctx: &impl ErrorContext,
-        clk: RowIndex,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
             match err {
-                CryptoError::Advice(err) => {
-                    ExecutionError::AdviceError { label, source_file, clk, err }
-                },
+                CryptoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                 CryptoError::Operation(err) => {
-                    ExecutionError::OperationError { label, source_file, clk, err }
+                    ExecutionError::OperationError { label, source_file, err }
                 },
             }
         })
@@ -525,13 +646,28 @@ impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
 /// Extension trait for converting `Result<T, AceEvalError>` to `Result<T, ExecutionError>`.
 pub trait AceEvalResultExt<T> {
     /// Maps an `AceEvalError` to an `ExecutionError` with the provided context.
-    fn map_ace_eval_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+    fn map_ace_eval_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>;
 }
 
 impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
-    fn map_ace_eval_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+    fn map_ace_eval_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        in_debug_mode: bool,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) = err_ctx.label_and_source_file();
+            let (label, source_file) =
+                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
             match err {
                 AceEvalError::Ace(error) => {
                     ExecutionError::AceChipError { label, source_file, error }
@@ -541,135 +677,6 @@ impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
                 },
             }
         })
-    }
-}
-
-// ERROR CONTEXT
-// ===============================================================================================
-
-/// Constructs an error context for the given node in the MAST forest.
-///
-/// When the `no_err_ctx` feature is disabled, this macro returns a proper error context; otherwise,
-/// it returns `()`. That is, this macro is designed to be zero-cost when the `no_err_ctx` feature
-/// is enabled.
-///
-/// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx)` - creates error context with operation
-///   index
-#[cfg(not(feature = "no_err_ctx"))]
-#[macro_export]
-macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {
-        $crate::errors::ErrorContextImpl::new($mast_forest, $node, $host, $in_debug_mode)
-    };
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {
-        $crate::errors::ErrorContextImpl::new_with_op_idx(
-            $mast_forest,
-            $node,
-            $host,
-            $in_debug_mode,
-            $op_idx,
-        )
-    };
-}
-
-/// Constructs an error context for the given node in the MAST forest.
-///
-/// When the `no_err_ctx` feature is disabled, this macro returns a proper error context; otherwise,
-/// it returns `()`. That is, this macro is designed to be zero-cost when the `no_err_ctx` feature
-/// is enabled.
-///
-/// Usage:
-/// - `err_ctx!(mast_forest, node, source_manager)` - creates basic error context
-/// - `err_ctx!(mast_forest, node, source_manager, op_idx)` - creates error context with operation
-///   index
-#[cfg(feature = "no_err_ctx")]
-#[macro_export]
-macro_rules! err_ctx {
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr) => {
-        ()
-    };
-    ($mast_forest:expr, $node:expr, $host:expr, $in_debug_mode:expr, $op_idx:expr) => {
-        ()
-    };
-}
-
-/// Trait defining the interface for error context providers.
-///
-/// This trait contains the same methods as `ErrorContext` to provide a common
-/// interface for error context functionality.
-pub trait ErrorContext {
-    /// Returns the label and source file associated with the error context, if any.
-    ///
-    /// Note that `SourceSpan::UNKNOWN` will be returned to indicate an empty span.
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>);
-}
-
-/// Context information to be used when reporting errors.
-pub struct ErrorContextImpl {
-    label: SourceSpan,
-    source_file: Option<Arc<SourceFile>>,
-}
-
-impl ErrorContextImpl {
-    pub fn new(
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        in_debug_mode: bool,
-    ) -> Self {
-        let (label, source_file) =
-            Self::precalc_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-        Self { label, source_file }
-    }
-
-    pub fn new_with_op_idx(
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        in_debug_mode: bool,
-        op_idx: usize,
-    ) -> Self {
-        let op_idx = op_idx.into();
-        let (label, source_file) =
-            Self::precalc_label_and_source_file(op_idx, mast_forest, node_id, host, in_debug_mode);
-        Self { label, source_file }
-    }
-
-    fn precalc_label_and_source_file(
-        op_idx: Option<usize>,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        in_debug_mode: bool,
-    ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        // When not in debug mode, skip the expensive decorator traversal entirely.
-        // Decorators (including AsmOp decorators used for error context) should only
-        // be accessed when debugging is enabled.
-        if !in_debug_mode {
-            return (SourceSpan::UNKNOWN, None);
-        }
-
-        mast_forest
-            .get_assembly_op(node_id, op_idx)
-            .and_then(|assembly_op| assembly_op.location())
-            .map_or_else(
-                || (SourceSpan::UNKNOWN, None),
-                |location| host.get_label_and_source_file(location),
-            )
-    }
-}
-
-impl ErrorContext for ErrorContextImpl {
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        (self.label, self.source_file.clone())
-    }
-}
-
-impl ErrorContext for () {
-    fn label_and_source_file(&self) -> (SourceSpan, Option<Arc<SourceFile>>) {
-        (SourceSpan::UNKNOWN, None)
     }
 }
 

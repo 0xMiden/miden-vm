@@ -8,9 +8,8 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ErrorContext,
+    AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
     errors::{AdviceResultExt, EventResultExt, SystemEventResultExt},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
@@ -257,16 +256,22 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                #[allow(clippy::let_unit_value)]
-                let err_ctx =
-                    err_ctx!(current_forest, node_id, host, self.in_debug_mode(), op_idx_in_block);
+                let in_debug_mode = self.in_debug_mode();
                 match op {
-                    Operation::Emit => self.op_emit(host, &err_ctx).await?,
+                    Operation::Emit => {
+                        self.op_emit(host, current_forest, node_id, in_debug_mode).await?
+                    },
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        if let Err(err) =
-                            self.execute_sync_op(op, current_forest, host, &err_ctx, tracer)
-                        {
+                        if let Err(err) = self.execute_sync_op(
+                            op,
+                            current_forest,
+                            node_id,
+                            host,
+                            in_debug_mode,
+                            tracer,
+                            op_idx_in_block,
+                        ) {
                             return ControlFlow::Break(BreakReason::Err(err));
                         }
                     },
@@ -344,33 +349,47 @@ impl FastProcessor {
     async fn op_emit(
         &mut self,
         host: &mut impl AsyncHost,
-        err_ctx: &impl ErrorContext,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+        in_debug_mode: bool,
     ) -> ControlFlow<BreakReason> {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            let clk = process.clk();
-            if let Err(err) =
-                handle_system_event(&mut process, system_event).map_sys_event_err(err_ctx, clk)
-            {
+            if let Err(err) = handle_system_event(&mut process, system_event).map_sys_event_err(
+                current_forest,
+                node_id,
+                host,
+                in_debug_mode,
+            ) {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
         } else {
-            let clk = process.clk();
             let mutations = match host.on_event(&process).await {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();
                     return ControlFlow::Break(BreakReason::Err(
-                        Err::<(), _>(err).map_event_err(err_ctx, event_id, event_name).unwrap_err(),
+                        Err::<(), _>(err)
+                            .map_event_err(
+                                current_forest,
+                                node_id,
+                                host,
+                                in_debug_mode,
+                                event_id,
+                                event_name,
+                            )
+                            .unwrap_err(),
                     ));
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
                 return ControlFlow::Break(BreakReason::Err(
-                    Err::<(), _>(err).map_advice_err(err_ctx, clk).unwrap_err(),
+                    Err::<(), _>(err)
+                        .map_advice_err(current_forest, node_id, host, in_debug_mode)
+                        .unwrap_err(),
                 ));
             }
         }

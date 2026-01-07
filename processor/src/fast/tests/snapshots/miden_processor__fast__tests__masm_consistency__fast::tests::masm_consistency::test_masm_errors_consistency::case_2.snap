@@ -16,9 +16,6 @@ OperationError {
         ),
     },
     source_file: None,
-    clk: RowIndex(
-        13,
-    ),
     err: NotBinaryValueLoop {
         value: 100,
     },
