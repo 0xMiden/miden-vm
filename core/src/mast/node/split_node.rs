@@ -10,7 +10,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_SPLIT,
     chiplets::hasher,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // SPLIT NODE
@@ -214,7 +214,9 @@ impl MastNodeExt for SplitNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                MastNode::Split(split_node) => split_node as *const SplitNode as *const (),
+                crate::mast::MastNode::Split(split_node) => {
+                    split_node as *const SplitNode as *const ()
+                },
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();

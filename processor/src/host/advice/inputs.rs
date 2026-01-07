@@ -169,7 +169,7 @@ impl AdviceStackBuilder {
     /// Adds a word for consumption by `adv_push.4`.
     ///
     /// After `adv_push.4`, the operand stack will have `word[0]` on top.
-    /// This is a convenience wrapper around [`push_for_adv_push`] for Word types.
+    /// This is a convenience wrapper around [`Self::push_for_adv_push`] for Word types.
     ///
     /// # Example
     ///
@@ -192,8 +192,9 @@ impl AdviceStackBuilder {
     ///
     /// The `adv_loadw` instruction:
     /// 1. Calls `pop_stack_word()` which pops 4 elements from front and creates
-    ///    Word::new([e0,e1,e2,e3])
-    /// 2. Places the word on the operand stack with word[0] on top, word[1] at position 1, etc.
+    ///    `Word::new(\[e0,e1,e2,e3\])`
+    /// 2. Places the word on the operand stack with `word\[0\]` on top, `word\[1\]` at position 1,
+    ///    etc.
     ///
     /// Elements are pushed without reversal since `adv_loadw` loads the structural word directly.
     ///

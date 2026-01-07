@@ -1,7 +1,7 @@
 // MACROS TO BUILD TESTS
 // ================================================================================================
 
-/// Creates a Vec<u64> for stack inputs where the first element will be on top of the stack.
+/// Creates a `Vec<u64>` for stack inputs where the first element will be on top of the stack.
 ///
 /// This macro handles the reversal required by `StackInputs::try_from_ints`, which reverses
 /// its input internally. With this macro, you can specify stack inputs in intuitive order.
@@ -16,7 +16,7 @@
 ///
 /// # Word Helper
 ///
-/// To add a Word to the stack with word[0] on top, use the `word` helper:
+/// To add a Word to the stack with `word[0]` on top, use the `word` helper:
 ///
 /// ```ignore
 /// // Stack will be [w[0], w[1], w[2], w[3], ...] with w[0] on top
