@@ -59,8 +59,8 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     // so the actual parameters start at position 1. Words on the stack are
     // interpreted in little-endian (memory) order, i.e. element at stack index N
     // becomes the first limb of the word.
-    let key_word = process.get_stack_word_le(1);
-    let nonce_word = process.get_stack_word_le(5);
+    let key_word = process.get_stack_word(1);
+    let nonce_word = process.get_stack_word(5);
 
     let src_ptr = process.get_stack_item(9).as_canonical_u64();
     let num_blocks = process.get_stack_item(11).as_canonical_u64();

@@ -194,7 +194,7 @@ fn caller() {
     // top 4 elements should be overwritten with the hash of `bar` procedure, but the 5th
     // element should remain untouched
     let bar_hash = build_bar_hash();
-    test.expect_stack(&[bar_hash[3], bar_hash[2], bar_hash[1], bar_hash[0], 1]);
+    test.expect_stack(&[bar_hash[0], bar_hash[1], bar_hash[2], bar_hash[3], 1]);
 
     test.prove_and_verify(vec![1, 2, 3, 4, 5], false);
 }

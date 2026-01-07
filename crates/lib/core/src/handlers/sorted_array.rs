@@ -87,7 +87,7 @@ fn push_lowerbound_result(
     assert!(stride == 4 || stride == 8);
 
     // Read inputs from the stack; keys are provided in structural / little-endian order.
-    let key = word_to_search_key(process.get_stack_word_le(KEY_OFFSET), key_size);
+    let key = word_to_search_key(process.get_stack_word(KEY_OFFSET), key_size);
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)

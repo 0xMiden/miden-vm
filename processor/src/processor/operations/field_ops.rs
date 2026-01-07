@@ -224,9 +224,9 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const SEVEN: Felt = Felt::new(7);
-    // get_word returns [s3, s2, s1, s0] where s0 is top of stack
+    // get_word returns [s0, s1, s2, s3] where s0 is top of stack
     // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
-    let [a1, a0, b1, b0]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 

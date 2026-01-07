@@ -503,7 +503,7 @@ pub fn b_chip_log_precompile() {
     // at cycle 1 log_precompile is executed and the initialization and result of the hash are both
     // requested by the stack.
 
-    // Build the input state in LE sponge order: [COMM, TAG, CAP_PREV] = [RATE0, RATE1, CAP]
+    // Build the input state in sponge order: [COMM, TAG, CAP_PREV] = [RATE0, RATE1, CAP]
     // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
     // COMM = [5,6,7,8] is at stack positions 0-3.
     // TAG = [1,2,3,4] is at stack positions 4-7.

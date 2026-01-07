@@ -55,7 +55,7 @@ fn test_op_advpopw() {
     op_advpopw(&mut processor, &(), &mut tracer).unwrap();
     let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
-    // LE order: word[0]=3 at top, word[3]=6 at position 3
+    // word[0]=3 at top, word[3]=6 at position 3
     let expected = build_expected(&[3, 4, 5, 6, 1]);
     assert_eq!(expected, processor.stack_top());
 }

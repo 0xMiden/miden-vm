@@ -111,9 +111,9 @@ fn test_ecdsa_verify_impl_commitment() {
 
         // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
         // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
-        // Use get_stack_word_le to match LE stack convention
-        let commitment = stack.get_stack_word_le(0).unwrap();
-        let tag = stack.get_stack_word_le(4).unwrap();
+        // Use get_stack_word to match LE stack convention
+        let commitment = stack.get_stack_word(0).unwrap();
+        let tag = stack.get_stack_word(4).unwrap();
         // Commitment and tag must match verifier output
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
         let verifier_commitment =
@@ -159,7 +159,7 @@ impl EventHandler for EcdsaSignatureHandler {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
         // Position 0 has the event ID, so pk_commitment starts at position 1
-        let provided_pk_rpo = process.get_stack_word_le(1);
+        let provided_pk_rpo = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
@@ -174,7 +174,7 @@ impl EventHandler for EcdsaSignatureHandler {
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)
-        let message = process.get_stack_word_le(5);
+        let message = process.get_stack_word(5);
         let calldata = ecdsa_sign(&secret_key, message);
 
         // Use extend_stack to make elements available in order: pk first, then sig

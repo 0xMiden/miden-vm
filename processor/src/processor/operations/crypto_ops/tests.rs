@@ -158,7 +158,7 @@ proptest! {
         let dst_addr: u64 = 2000;
 
         // Build the initial stack state
-        // Stack layout (top first, LE order): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
+        // Stack layout (top first): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
         let stack_inputs = [
             ZERO,                    // position 15 (bottom)
             ZERO,                    // position 14
@@ -238,8 +238,7 @@ proptest! {
         // Check stack state
         let stack = processor.stack_top();
 
-        // Stack[0..7] should be updated with ciphertext (in LE order)
-        // Word 1 (cipher1) goes to stack[0..3], word 2 (cipher2) goes to stack[4..7]
+        // Stack[0..7] should be updated with ciphertext
         prop_assert_eq!(stack[15], expected_cipher1[0], "cipher1[0] at position 0");
         prop_assert_eq!(stack[14], expected_cipher1[1], "cipher1[1] at position 1");
         prop_assert_eq!(stack[13], expected_cipher1[2], "cipher1[2] at position 2");
@@ -249,7 +248,7 @@ proptest! {
         prop_assert_eq!(stack[9], expected_cipher2[2], "cipher2[2] at position 6");
         prop_assert_eq!(stack[8], expected_cipher2[3], "cipher2[3] at position 7");
 
-        // Capacity should be unchanged (LE order: c0 at position 8)
+        // Capacity should be unchanged (c0 at position 8)
         prop_assert_eq!(stack[7], Felt::new(c0), "c0 at position 8");
         prop_assert_eq!(stack[6], Felt::new(c1), "c1 at position 9");
         prop_assert_eq!(stack[5], Felt::new(c2), "c2 at position 10");

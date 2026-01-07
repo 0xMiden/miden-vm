@@ -538,18 +538,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        4,
-                        5,
-                        6,
                         7,
+                        6,
+                        5,
+                        4,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        1,
-                        2,
                         3,
+                        2,
+                        1,
+                        0,
                     ],
                 ),
                 Word(
@@ -637,34 +637,34 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         6,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
+                        2,
+                        1,
+                        0,
                         7,
-                        0,
-                        1,
-                        2,
                     ],
                 ),
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         6,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
             ],
@@ -727,18 +727,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -817,18 +817,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -931,18 +931,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1045,18 +1045,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1153,18 +1153,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1283,18 +1283,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1469,18 +1469,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1607,18 +1607,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1769,18 +1769,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -1955,18 +1955,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -2142,18 +2142,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         1,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -2328,18 +2328,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -2515,18 +2515,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         0,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -2701,18 +2701,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -2889,17 +2889,17 @@ expression: fast_host.snapshots()
                 Word(
                     [
                         3,
-                        4,
                         5,
+                        4,
                         3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3073,18 +3073,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         2,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3258,18 +3258,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         1,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3445,18 +3445,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         0,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3625,18 +3625,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        3,
-                        4,
-                        5,
                         0,
+                        5,
+                        4,
+                        3,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        1,
                         2,
+                        1,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3829,18 +3829,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(
@@ -3943,18 +3943,18 @@ expression: fast_host.snapshots()
             stack_words: [
                 Word(
                     [
-                        2,
-                        3,
-                        4,
                         5,
+                        4,
+                        3,
+                        2,
                     ],
                 ),
                 Word(
                     [
-                        0,
-                        0,
-                        0,
                         1,
+                        0,
+                        0,
+                        0,
                     ],
                 ),
                 Word(

@@ -398,9 +398,9 @@ fn test_log_precompile_correctness() {
     let processor = FastProcessor::new(&stack_inputs);
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    let actual_r0 = execution_output.stack.get_stack_word_le(0).unwrap();
-    let actual_r1 = execution_output.stack.get_stack_word_le(4).unwrap();
-    let actual_cap = execution_output.stack.get_stack_word_le(8).unwrap();
+    let actual_r0 = execution_output.stack.get_stack_word(0).unwrap();
+    let actual_r1 = execution_output.stack.get_stack_word(4).unwrap();
+    let actual_cap = execution_output.stack.get_stack_word(8).unwrap();
 
     assert_eq!(expected_r0, actual_r0, "R0 mismatch");
     assert_eq!(expected_r1, actual_r1, "R1 mismatch");

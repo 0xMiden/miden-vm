@@ -202,8 +202,8 @@ impl AdviceStackBuilder {
     ///
     /// ```ignore
     /// builder.push_for_adv_loadw([w0, w1, w2, w3].into());
-    /// // MASM: padw adv_loadw reversew
-    /// // Result: operand stack = [w3, w2, w1, w0, ...] with w3 on top (canonical LE order)
+    /// // MASM: padw adv_loadw
+    /// // Result: operand stack = [w0, w1, w2, w3, ...] with w0 on top
     /// ```
     pub fn push_for_adv_loadw(&mut self, word: Word) -> &mut Self {
         // Push elements without reversal. adv_loadw loads the structural word directly,

@@ -298,8 +298,7 @@ impl FastProcessor {
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
     ///
-    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
-    /// word.
+    /// For `start_idx=0` the top element of the stack will be at position 0 in the word.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -308,8 +307,8 @@ impl FastProcessor {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
-    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
+    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
+    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
@@ -320,8 +319,10 @@ impl FastProcessor {
         );
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let result: [Felt; WORD_SIZE] =
+        let mut result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        // Reverse so top of stack (idx 0) goes to word[0]
+        result.reverse();
         result.into()
     }
 
@@ -347,14 +348,15 @@ impl FastProcessor {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// The index is the index of the first element of the word, and the word is written in reverse
-    /// order.
+    /// Word[0] goes to stack position start_idx (top), word[1] to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
         debug_assert!(start_idx < MIN_STACK_DEPTH);
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let source: [Felt; WORD_SIZE] = (*word).into();
+        let mut source: [Felt; WORD_SIZE] = (*word).into();
+        // Reverse so word[0] ends up at the top of stack (highest internal index)
+        source.reverse();
         self.stack[range(word_start_idx, WORD_SIZE)].copy_from_slice(&source)
     }
 

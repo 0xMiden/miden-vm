@@ -603,10 +603,10 @@ fn dyncall_with_syscall_and_caller() {
     // The Word from procedure_digests stores elements in BE order (word[0] = high),
     // so we need to reverse when comparing to stack output (word[3] on top).
     test.expect_stack(&[
-        bar_digest[3].as_canonical_u64(),
-        bar_digest[2].as_canonical_u64(),
-        bar_digest[1].as_canonical_u64(),
         bar_digest[0].as_canonical_u64(),
+        bar_digest[1].as_canonical_u64(),
+        bar_digest[2].as_canonical_u64(),
+        bar_digest[3].as_canonical_u64(),
         4,
         3,
         2,

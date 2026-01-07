@@ -76,7 +76,7 @@ fn insert_mem_values_into_adv_map(
         values.push(mem_value);
     }
 
-    let key = process.get_stack_word_le(1);
+    let key = process.get_stack_word(1);
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
@@ -103,8 +103,8 @@ fn insert_hdword_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
-    let a = process.get_stack_word_le(1);
-    let b = process.get_stack_word_le(5);
+    let a = process.get_stack_word(1);
+    let b = process.get_stack_word(5);
 
     // Hash as [B, A] to match `swapw hmerge` behavior.
     let key = Rpo256::merge_in_domain(&[b, a], domain);
@@ -139,10 +139,10 @@ fn insert_hqword_into_adv_map(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
-    let a = process.get_stack_word_le(1);
-    let b = process.get_stack_word_le(5);
-    let c = process.get_stack_word_le(9);
-    let d = process.get_stack_word_le(13);
+    let a = process.get_stack_word(1);
+    let b = process.get_stack_word(5);
+    let c = process.get_stack_word(9);
+    let d = process.get_stack_word(13);
 
     // Hash in natural stack order [A, B, C, D].
     let key = Rpo256::hash_elements(&[*a, *b, *c, *d].concat());
@@ -234,8 +234,8 @@ fn merge_merkle_nodes(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // fetch the arguments from the stack
-    let lhs = process.get_stack_word_le(5);
-    let rhs = process.get_stack_word_le(1);
+    let lhs = process.get_stack_word(5);
+    let rhs = process.get_stack_word(1);
 
     // perform the merge
     process
@@ -277,7 +277,7 @@ fn copy_merkle_node_to_adv_stack(
     let depth = process.get_stack_item(1);
     let index = process.get_stack_item(2);
     // Read the root in structural (little-endian) word order from the operand stack.
-    let root = process.get_stack_word_le(3);
+    let root = process.get_stack_word(3);
 
     let mut node = process
         .advice_provider()
@@ -317,7 +317,7 @@ fn copy_map_value_to_adv_stack(
     pad_to: u8,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let key = process.get_stack_word_le(1);
+    let key = process.get_stack_word(1);
 
     process
         .advice_provider_mut()
@@ -347,7 +347,7 @@ fn copy_map_value_length_to_adv_stack(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let key = process.get_stack_word_le(1);
+    let key = process.get_stack_word(1);
     let process_clk = process.clk();
     let advice_provider = process.advice_provider_mut();
 
@@ -381,7 +381,7 @@ fn copy_map_value_length_to_adv_stack(
 ///   Advice stack: [has_mapkey, ...]
 /// ```
 pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), ExecutionError> {
-    let map_key = process.get_stack_word_le(1);
+    let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from_bool(presence_flag));

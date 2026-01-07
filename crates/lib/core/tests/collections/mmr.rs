@@ -404,7 +404,7 @@ fn test_mmr_unpack_large_mmr() {
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word_le(1)`.
+    // The key must match how the VM reads it from the stack via `get_stack_word(1)`.
     let hash_arr: [Felt; 4] = *peaks_hash;
     let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
     let advice_map: &[(Word, Vec<Felt>)] = &[(hash_key, mmr_mem_repr)];
@@ -469,7 +469,7 @@ fn test_mmr_pack_roundtrip() {
     map_data.extend_from_slice(Word::words_as_elements(&hash_data).as_ref());
 
     // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word_le(1)` given
+    // The key must match how the VM reads it from the stack via `get_stack_word(1)` given
     // the stack initialization and `StackInputs` reversing.
     let hash_arr: [Felt; 4] = *hash;
     let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
@@ -706,7 +706,7 @@ fn test_mmr_large_add_roundtrip() {
 
     let old_accumulator = mmr.peaks();
     let mut hash = old_accumulator.hash_peaks();
-    // Reverse the digest so that after StackInputs reversing, get_stack_word_le(1)
+    // Reverse the digest so that after StackInputs reversing, get_stack_word(1)
     // sees the canonical hash word used as the advice map key, matching mmr::unpack.
     hash.reverse();
 
@@ -728,7 +728,7 @@ fn test_mmr_large_add_roundtrip() {
     map_data.extend_from_slice(Word::words_as_elements(&hash_data));
 
     // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word_le(1)`.
+    // The key must match how the VM reads it from the stack via `get_stack_word(1)`.
     let hash_arr: [Felt; 4] = *hash;
     let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
     let advice_map: &[(Word, Vec<Felt>)] = &[(hash_key, map_data)];

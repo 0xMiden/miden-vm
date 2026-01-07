@@ -189,8 +189,8 @@ pub proc verify_prehash_impl
     exec.rpo256::merge
     # => [COMM, result]
 
-    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0] in LE order on stack
-    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word_le(4)
+    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0] on stack
+    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
     push.0.0 dup.6 push.ECDSA_VERIFY_EVENT swapw
     # => [COMM, TAG, result]
 end

@@ -23,30 +23,6 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-// HELPER FUNCTIONS
-// ================================================================================================
-
-/// Returns a word from the stack in LE order (top element first).
-///
-/// `get_word()` returns `[s3, s2, s1, s0]` where s0 is at the top of the stack.
-/// This helper reverses to `[s0, s1, s2, s3]`.
-#[inline(always)]
-fn get_word_le<P: Processor>(processor: &mut P, start_idx: usize) -> Word {
-    let mut word = processor.stack().get_word(start_idx);
-    word.reverse();
-    word
-}
-
-/// Sets a word on the stack in LE order (word[0] goes to top position).
-///
-/// This writes `word[i]` to `stack.set(start_idx + i)`, so word[0] ends up at the top.
-#[inline(always)]
-fn set_word_le<P: Processor>(processor: &mut P, start_idx: usize, word: &Word) {
-    for (i, &value) in word.iter().enumerate() {
-        processor.stack().set(start_idx + i, value);
-    }
-}
-
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
@@ -72,10 +48,14 @@ pub(super) fn op_hperm<P: Processor>(
 
     // Apply RPO permutation
     let (addr, output_state) = processor.hasher().permute(input_state);
-    // Write result back: stack.set(i) = state[i]
-    for (i, &value) in output_state.iter().enumerate() {
-        processor.stack().set(i, value);
-    }
+
+    // Write result back to stack (state[0] at top).
+    let r0: Word = output_state[0..4].try_into().expect("r0 slice has length 4");
+    let r1: Word = output_state[4..8].try_into().expect("r1 slice has length 4");
+    let cap: Word = output_state[8..12].try_into().expect("cap slice has length 4");
+    processor.stack().set_word(0, &r0);
+    processor.stack().set_word(4, &r1);
+    processor.stack().set_word(8, &cap);
 
     tracer.record_hasher_permute(input_state, output_state);
     P::HelperRegisters::op_hperm_registers(addr)
@@ -111,11 +91,10 @@ pub(super) fn op_mpverify<P: Processor>(
     let clk = processor.system().clk();
 
     // Read node, depth, index, and root from the stack.
-    // `get_word()` returns [s3,s2,s1,s0] (BE), but we need LE order for Merkle operations.
-    let node = get_word_le(processor, 0);
+    let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
-    let root = get_word_le(processor, 6);
+    let root = processor.stack().get_word(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
     let path = processor
@@ -175,12 +154,12 @@ pub(super) fn op_mrupdate<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let clk = processor.system().clk();
 
-    // Read old node value, depth, index, tree root and new node values from the stack (LE order).
-    let old_value = get_word_le(processor, 0);
+    // Read old node value, depth, index, tree root and new node values from the stack.
+    let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
-    let claimed_old_root = get_word_le(processor, 6);
-    let new_value = get_word_le(processor, 10);
+    let claimed_old_root = processor.stack().get_word(6);
+    let new_value = processor.stack().get_word(10);
 
     // update the node at the specified index in the Merkle tree specified by the old root, and
     // get a Merkle path to it. The length of the returned path is expected to match the
@@ -223,8 +202,8 @@ pub(super) fn op_mrupdate<P: Processor>(
         new_root,
     );
 
-    // Replace the old node value with computed new root (LE order).
-    set_word_le(processor, 0, &new_root);
+    // Replace the old node value with computed new root.
+    processor.stack().set_word(0, &new_root);
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
 }
@@ -523,16 +502,10 @@ pub(super) fn op_log_precompile<P: Processor>(
     // Update the processor's precompile sponge capacity
     processor.set_precompile_transcript_state(cap_next);
 
-    // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...] in LSB-first order
-    for (i, v) in r0.as_elements().iter().enumerate() {
-        processor.stack().set(i, *v);
-    }
-    for (i, v) in r1.as_elements().iter().enumerate() {
-        processor.stack().set(4 + i, *v);
-    }
-    for (i, v) in cap_next.as_elements().iter().enumerate() {
-        processor.stack().set(8 + i, *v);
-    }
+    // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
+    processor.stack().set_word(0, &r0);
+    processor.stack().set_word(4, &r1);
+    processor.stack().set_word(8, &cap_next);
 
     // Record the hasher permutation for trace generation
     tracer.record_hasher_permute(hasher_state, output_state);
@@ -591,7 +564,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
         .map_err(ExecutionError::MemoryError)?;
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
-    // Get rate (keystream) from stack[0..7] in LE order (stack[0] = rate[0])
+    // Get rate (keystream) from stack[0..7]
     let rate: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
 
     // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
@@ -625,7 +598,6 @@ pub(super) fn op_crypto_stream<P: Processor>(
     tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
-    // Word 1 goes to stack[0..3], word 2 goes to stack[4..7] (LE order)
     processor.stack().set(0, ciphertext_word1[0]);
     processor.stack().set(1, ciphertext_word1[1]);
     processor.stack().set(2, ciphertext_word1[2]);

@@ -131,8 +131,8 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let output = test.execute().unwrap();
         let stack = output.stack_outputs();
 
-        let commitment = stack.get_stack_word_le(0).unwrap();
-        let tag = stack.get_stack_word_le(4).unwrap();
+        let commitment = stack.get_stack_word(0).unwrap();
+        let tag = stack.get_stack_word(4).unwrap();
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
 
         let verifier_commitment =
@@ -210,7 +210,7 @@ impl EventHandler for EddsaSignatureHandler {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
         // Position 0 has the event ID, so pk_commitment starts at position 1
-        let provided_pk_rpo = process.get_stack_word_le(1);
+        let provided_pk_rpo = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
@@ -225,7 +225,7 @@ impl EventHandler for EddsaSignatureHandler {
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)
-        let message = process.get_stack_word_le(5);
+        let message = process.get_stack_word(5);
         let calldata = eddsa_sign(&secret_key, message);
 
         // Use extend_stack to make elements available in order: pk first, then sig

@@ -64,8 +64,8 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     use miden_core::utils::Deserializable;
 
-    let pub_key = process.get_stack_word_le(1);
-    let msg = process.get_stack_word_le(5);
+    let pub_key = process.get_stack_word(1);
+    let msg = process.get_stack_word(5);
 
     let pk_sk_felts = process
         .advice_provider()

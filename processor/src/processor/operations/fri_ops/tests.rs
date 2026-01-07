@@ -53,8 +53,8 @@ proptest! {
         f_pos in any::<u64>(),
         // Domain segment (0-3)
         d_seg in 0u64..4,
-        // Power of domain generator
-        poe in any::<u64>(),
+        // Power of domain generator (must be non-zero to avoid InvalidFriDomainGenerator)
+        poe in 1u64..=u64::MAX,
         // Alpha challenge
         alpha_0 in any::<u64>(),
         alpha_1 in any::<u64>(),
@@ -146,11 +146,11 @@ proptest! {
         prop_assert_eq!(stack[13], tmp1_base[1], "tmp1[1] at position 2");
         prop_assert_eq!(stack[12], tmp1_base[0], "tmp1[0] at position 3");
 
-        // Check domain segment flags
-        prop_assert_eq!(stack[11], ds[3], "ds[3] at position 4");
-        prop_assert_eq!(stack[10], ds[2], "ds[2] at position 5");
-        prop_assert_eq!(stack[9], ds[1], "ds[1] at position 6");
-        prop_assert_eq!(stack[8], ds[0], "ds[0] at position 7");
+        // Check domain segment flags: ds[0] at position 4, ds[3] at position 7
+        prop_assert_eq!(stack[11], ds[0], "ds[0] at position 4");
+        prop_assert_eq!(stack[10], ds[1], "ds[1] at position 5");
+        prop_assert_eq!(stack[9], ds[2], "ds[2] at position 6");
+        prop_assert_eq!(stack[8], ds[3], "ds[3] at position 7");
 
         // Check poe^2, f_tau, layer_ptr+8, poe^4, f_pos
         prop_assert_eq!(stack[7], poe2, "poe^2 at position 8");

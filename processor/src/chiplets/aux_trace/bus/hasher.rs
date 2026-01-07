@@ -221,7 +221,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     // Read helper registers
     let addr = main_trace.helper_register(HELPER_ADDR_IDX, row);
 
-    // Input state [COMM, TAG, CAP_PREV] in LE sponge order [RATE0, RATE1, CAP]
+    // Input state [COMM, TAG, CAP_PREV] in sponge order [RATE0, RATE1, CAP]
     // Helper registers store capacity in sequential order [e0, e1, e2, e3]
     let cap_prev = Word::from([
         main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
@@ -237,7 +237,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     // Internal RPO state is [RATE0, RATE1, CAPACITY] = [COMM, TAG, CAP_PREV]
     let state_input = [comm, tag, cap_prev];
 
-    // Output state [R0, R1, CAP_NEXT] in LE sponge order
+    // Output state [R0, R1, CAP_NEXT] in sponge order
     let r0 = read_stack_word(main_trace, STACK_R0_RANGE.start, row + 1);
     let r1 = read_stack_word(main_trace, STACK_R1_RANGE.start, row + 1);
     let cap_next = read_stack_word(main_trace, STACK_CAP_NEXT_RANGE.start, row + 1);
@@ -284,7 +284,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     let node_index = main_trace.stack_element(5, row);
     let merkle_tree_root = read_stack_word(main_trace, 6, row);
 
-    // Build input state with node at RATE1 (indices 4..8) in LE order
+    // Build input state with node at RATE1 (indices 4..8)
     let mut node_state = [ZERO; hasher::STATE_WIDTH];
     node_state[4..8].copy_from_slice(node_value.as_elements());
 
@@ -296,7 +296,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
         source: "mpverify input",
     };
 
-    // Build output state with root at RATE1 (indices 4..8) in LE order
+    // Build output state with root at RATE1 (indices 4..8)
     let mut root_state = [ZERO; hasher::STATE_WIDTH];
     root_state[4..8].copy_from_slice(merkle_tree_root.as_elements());
 
@@ -335,7 +335,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     let new_node_value = read_stack_word(main_trace, 10, row);
     let new_root = read_stack_word(main_trace, 0, row + 1);
 
-    // Build old node input state with value at RATE1 (indices 4..8) in LE order
+    // Build old node input state with value at RATE1 (indices 4..8)
     let mut old_node_state = [ZERO; hasher::STATE_WIDTH];
     old_node_state[4..8].copy_from_slice(old_node_value.as_elements());
 
@@ -347,7 +347,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate input_old",
     };
 
-    // Build old root output state with root at RATE1 (indices 4..8) in LE order
+    // Build old root output state with root at RATE1 (indices 4..8)
     let mut old_root_state = [ZERO; hasher::STATE_WIDTH];
     old_root_state[4..8].copy_from_slice(old_root.as_elements());
 
@@ -359,7 +359,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate output_old",
     };
 
-    // Build new node input state with value at RATE1 (indices 4..8) in LE order
+    // Build new node input state with value at RATE1 (indices 4..8)
     let mut new_node_state = [ZERO; hasher::STATE_WIDTH];
     new_node_state[4..8].copy_from_slice(new_node_value.as_elements());
 
@@ -371,7 +371,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate input_new",
     };
 
-    // Build new root output state with root at RATE1 (indices 4..8) in LE order
+    // Build new root output state with root at RATE1 (indices 4..8)
     let mut new_root_state = [ZERO; hasher::STATE_WIDTH];
     new_root_state[4..8].copy_from_slice(new_root.as_elements());
 

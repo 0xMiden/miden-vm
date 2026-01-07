@@ -40,8 +40,8 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
     // Stack at emit: [event_id, KEY, ROOT, ...] where KEY and ROOT are structural words.
-    let key = process.get_stack_word_le(1);
-    let root = process.get_stack_word_le(5);
+    let key = process.get_stack_word(1);
+    let root = process.get_stack_word(5);
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth

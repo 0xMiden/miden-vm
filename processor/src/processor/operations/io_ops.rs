@@ -51,11 +51,8 @@ pub(super) fn op_advpopw<P: Processor>(
         .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
     tracer.record_advice_pop_stack_word(word);
 
-    // Set elements individually so that word[0] goes to stack position 0 (top),
-    // word[1] to position 1, etc. This loads the structural word directly.
-    for (i, &value) in word.iter().enumerate() {
-        processor.stack().set(i, value);
-    }
+    // Set word on stack (word[0] at top).
+    processor.stack().set_word(0, &word);
 
     Ok(())
 }
@@ -91,10 +88,8 @@ pub(super) fn op_mloadw<P: Processor>(
         .map_err(ExecutionError::MemoryError)?;
     tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
 
-    // Set elements in LE order: word[0] goes to stack position 0 (top).
-    for (i, &value) in word.iter().enumerate() {
-        processor.stack().set(i, value);
-    }
+    // Set word on stack (word[0] at top).
+    processor.stack().set_word(0, &word);
 
     Ok(())
 }
@@ -117,7 +112,6 @@ pub(super) fn op_mstorew<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let addr = processor.stack().get(0);
-    // Get word in LE order: stack position i -> word[i]
     // Address is at position 0, so word starts at position 1
     let word = [
         processor.stack().get(1),
@@ -264,12 +258,8 @@ pub(super) fn op_mstream<P: Processor>(
 
     // Replace the stack elements with the elements from memory (in stack order). The word at
     // address `addr` is at the top of the stack.
-    for (i, &mem_value) in words[0].iter().enumerate() {
-        processor.stack().set(i, mem_value);
-    }
-    for (i, &mem_value) in words[1].iter().enumerate() {
-        processor.stack().set(4 + i, mem_value);
-    }
+    processor.stack().set_word(0, &words[0]);
+    processor.stack().set_word(4, &words[1]);
 
     // increment the address by 8 (2 words)
     processor.stack().set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
@@ -339,15 +329,10 @@ pub(super) fn op_pipe<P: Processor>(
         processor.system().clk(),
     );
 
-    // replace the elements on the stack with the word elements (in stack order)
-    // Set elements individually so that word[i] goes to the corresponding stack position.
-    // words[0] goes to top positions (0-3), words[1] goes to second positions (4-7)
-    for (i, &adv_value) in words[0].iter().enumerate() {
-        processor.stack().set(i, adv_value);
-    }
-    for (i, &adv_value) in words[1].iter().enumerate() {
-        processor.stack().set(4 + i, adv_value);
-    }
+    // Replace the elements on the stack with the word elements (in stack order).
+    // words[0] goes to top positions (0-3), words[1] goes to positions (4-7).
+    processor.stack().set_word(0, &words[0]);
+    processor.stack().set_word(4, &words[1]);
 
     // increment the address by 8 (2 words)
     processor.stack().set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
