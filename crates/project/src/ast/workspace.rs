@@ -11,11 +11,13 @@ use super::{
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct WorkspaceTable {
     /// The relative paths of all workspace members
+    #[cfg_attr(feature = "serde", serde(default))]
     pub members: Vec<Span<Uri>>,
     /// The contents of the `[workspace.package]` table
+    #[cfg_attr(feature = "serde", serde(default))]
     pub package: PackageDetail,
     /// The contents of the `[workspace]` table that are shared with `[package]`
-    #[cfg_attr(feature = "serde", serde(flatten))]
+    #[cfg_attr(feature = "serde", serde(flatten, default))]
     pub config: PackageConfig,
 }
 
@@ -102,12 +104,14 @@ impl SetSourceId for WorkspaceFile {
 impl Validate for WorkspaceFile {
     fn validate(&self, source: Arc<SourceFile>) -> Result<(), Report> {
         // Validate that none of the package detail fields try to inherit from a workspace
-        if matches!(self.workspace.package.version.inner(), MaybeInherit::Inherit) {
-            return Err(ProjectFileError::NotAWorkspace {
-                source_file: source,
-                span: self.workspace.package.version.span(),
+        if let Some(span) = self.workspace.package.version.as_ref().and_then(|v| {
+            if matches!(v.inner(), MaybeInherit::Inherit) {
+                Some(v.span())
+            } else {
+                None
             }
-            .into());
+        }) {
+            return Err(ProjectFileError::NotAWorkspace { source_file: source, span }.into());
         }
 
         if let Some(description) = self.workspace.package.description.as_ref()

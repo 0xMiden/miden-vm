@@ -114,6 +114,7 @@ impl Package {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Box<Self>, Report> {
+        use core::num::NonZeroU32;
         use miden_assembly_syntax::Path as MasmPath;
 
         let manifest_path = Path::new(source.uri().path());
@@ -125,12 +126,26 @@ impl Package {
 
         let package_ast = ast::PackageFile::parse(source.clone())?;
 
-        let version = package_ast.package.detail.version.as_ref();
+        let Some(version) = package_ast.package.detail.version.as_ref() else {
+            let one = NonZeroU32::new(1).unwrap();
+            let span = source
+                .line_column_to_span(one.into(), one.into())
+                .unwrap_or(source.source_span());
+            return Err(ProjectFileError::MissingVersion { source_file: source, span }.into());
+        };
         let version = match version.inner() {
             MaybeInherit::Value(value) => Span::new(version.span(), value.clone()),
             MaybeInherit::Inherit => match workspace {
                 Some(workspace) => {
-                    workspace.workspace.package.version.as_ref().map(|v| v.unwrap_value().clone())
+                    if let Some(version) = workspace.workspace.package.version.as_ref() {
+                        version.as_ref().map(|inherit| inherit.unwrap_value().clone())
+                    } else {
+                        return Err(ProjectFileError::MissingWorkspaceVersion {
+                            source_file: source,
+                            span: version.span(),
+                        }
+                        .into());
+                    }
                 },
                 None => {
                     return Err(ProjectFileError::NotAWorkspace {
