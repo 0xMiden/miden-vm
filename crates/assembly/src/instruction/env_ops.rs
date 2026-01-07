@@ -40,6 +40,20 @@ where
     imms.iter().for_each(|imm| push_felt(block_builder, (*imm).into()));
 }
 
+/// Appends `PUSH` operations to the basic block to push a Word constant onto the stack in
+/// little-endian order.
+///
+/// The elements are pushed in reverse order (Word[3], Word[2], Word[1], Word[0]) so that
+/// Word[0] ends up on top of the stack (low element at lowest address / on top).
+///
+/// After this operation, calling `get_stack_word_le(0)` will return the original Word.
+pub fn push_word(word: &[Felt; 4], block_builder: &mut BasicBlockBuilder) {
+    // Push in reverse order so Word[0] ends up on top
+    for felt in word.iter().rev() {
+        push_felt(block_builder, *felt);
+    }
+}
+
 /// Appends `PUSH` operations to the basic block using the [Felt]s obtained from the Word value
 /// using the provided range.
 ///

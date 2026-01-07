@@ -414,7 +414,7 @@ mod tests {
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x6998a9e7f13f7e81edcabdbc895ec0141f8ce3e7abd061f1370852c082a028fa",
+            "exec.0xb2af53f979eb2122a245f95a7c447b4fa7d2f6061a2306fb507035d6d524fc3a",
             instruction
         );
     }

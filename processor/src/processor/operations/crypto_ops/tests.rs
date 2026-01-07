@@ -30,7 +30,7 @@ const ALPHA_ADDR: u64 = 1000;
 proptest! {
     #[test]
     fn test_op_hperm(
-        // Input state: 12 elements for the hasher state
+        // Input state: 12 elements for the hasher state (positions 0-11)
         s0 in any::<u64>(),
         s1 in any::<u64>(),
         s2 in any::<u64>(),
@@ -74,23 +74,22 @@ proptest! {
         let mut tracer = NoopTracer;
 
         // Compute expected result
-        // The input state is read from stack_top()[4..16]
-        // stack_top()[4] = position 11 = s11, stack_top()[15] = position 0 = s0
-        // So input_state = [s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0]
+        // input_state[i] = stack.get(i)
+        // So input_state = [s0, s1, s2, ..., s11]
         let expected_state = {
             let mut expected_state = [
-                Felt::new(s11),
-                Felt::new(s10),
-                Felt::new(s9),
-                Felt::new(s8),
-                Felt::new(s7),
-                Felt::new(s6),
-                Felt::new(s5),
-                Felt::new(s4),
-                Felt::new(s3),
-                Felt::new(s2),
-                Felt::new(s1),
                 Felt::new(s0),
+                Felt::new(s1),
+                Felt::new(s2),
+                Felt::new(s3),
+                Felt::new(s4),
+                Felt::new(s5),
+                Felt::new(s6),
+                Felt::new(s7),
+                Felt::new(s8),
+                Felt::new(s9),
+                Felt::new(s10),
+                Felt::new(s11),
             ];
             apply_permutation(&mut expected_state);
 
@@ -104,19 +103,19 @@ proptest! {
         // Check the result
         let stack = processor.stack_top();
 
-        // The output state is written directly to stack_top()[4..16]
-        // output_state[0] -> stack_top()[4], output_state[11] -> stack_top()[15]
+        // output_state[i] -> stack.set(i)
+        // stack_top() returns [pos15, ..., pos0] so we need to check stack[15-i]
         for i in 0..STATE_WIDTH {
             prop_assert_eq!(
-                stack[4 + i],
+                stack[15 - i],
                 expected_state[i],
-                "mismatch at stack_top()[{}] (expected_state[{}])",
-                4 + i,
+                "mismatch at position {} (expected_state[{}])",
+                i,
                 i
             );
         }
 
-        // Check that positions 12-15 (stack_top()[0..4]) are NOT affected
+        // Check that positions 12-15 are NOT affected
         prop_assert_eq!(stack[3], Felt::new(s12), "s12 at position 12");
         prop_assert_eq!(stack[2], Felt::new(s13), "s13 at position 13");
         prop_assert_eq!(stack[1], Felt::new(s14), "s14 at position 14");
@@ -159,24 +158,24 @@ proptest! {
         let dst_addr: u64 = 2000;
 
         // Build the initial stack state
-        // Stack layout (top first): [r7, r6, r5, r4, r3, r2, r1, r0, c3, c2, c1, c0, src_ptr, dst_ptr, 0, 0]
+        // Stack layout (top first, LE order): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
         let stack_inputs = [
             ZERO,                    // position 15 (bottom)
             ZERO,                    // position 14
             Felt::new(dst_addr),     // position 13 (dst_ptr)
             Felt::new(src_addr),     // position 12 (src_ptr)
-            Felt::new(c0),           // position 11
-            Felt::new(c1),           // position 10
-            Felt::new(c2),           // position 9
-            Felt::new(c3),           // position 8
-            Felt::new(r0),           // position 7
-            Felt::new(r1),           // position 6
-            Felt::new(r2),           // position 5
-            Felt::new(r3),           // position 4
-            Felt::new(r4),           // position 3
-            Felt::new(r5),           // position 2
-            Felt::new(r6),           // position 1
-            Felt::new(r7),           // position 0 (top)
+            Felt::new(c3),           // position 11
+            Felt::new(c2),           // position 10
+            Felt::new(c1),           // position 9
+            Felt::new(c0),           // position 8
+            Felt::new(r7),           // position 7
+            Felt::new(r6),           // position 6
+            Felt::new(r5),           // position 5
+            Felt::new(r4),           // position 4
+            Felt::new(r3),           // position 3
+            Felt::new(r2),           // position 2
+            Felt::new(r1),           // position 1
+            Felt::new(r0),           // position 0 (top)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -239,22 +238,22 @@ proptest! {
         // Check stack state
         let stack = processor.stack_top();
 
-        // Stack[0..7] should be updated with ciphertext (in stack order)
-        // Word 2 (cipher2) goes to stack[0..3], word 1 (cipher1) goes to stack[4..7]
-        prop_assert_eq!(stack[15], expected_cipher2[3], "cipher2[3] at position 0");
-        prop_assert_eq!(stack[14], expected_cipher2[2], "cipher2[2] at position 1");
-        prop_assert_eq!(stack[13], expected_cipher2[1], "cipher2[1] at position 2");
-        prop_assert_eq!(stack[12], expected_cipher2[0], "cipher2[0] at position 3");
-        prop_assert_eq!(stack[11], expected_cipher1[3], "cipher1[3] at position 4");
-        prop_assert_eq!(stack[10], expected_cipher1[2], "cipher1[2] at position 5");
-        prop_assert_eq!(stack[9], expected_cipher1[1], "cipher1[1] at position 6");
-        prop_assert_eq!(stack[8], expected_cipher1[0], "cipher1[0] at position 7");
+        // Stack[0..7] should be updated with ciphertext (in LE order)
+        // Word 1 (cipher1) goes to stack[0..3], word 2 (cipher2) goes to stack[4..7]
+        prop_assert_eq!(stack[15], expected_cipher1[0], "cipher1[0] at position 0");
+        prop_assert_eq!(stack[14], expected_cipher1[1], "cipher1[1] at position 1");
+        prop_assert_eq!(stack[13], expected_cipher1[2], "cipher1[2] at position 2");
+        prop_assert_eq!(stack[12], expected_cipher1[3], "cipher1[3] at position 3");
+        prop_assert_eq!(stack[11], expected_cipher2[0], "cipher2[0] at position 4");
+        prop_assert_eq!(stack[10], expected_cipher2[1], "cipher2[1] at position 5");
+        prop_assert_eq!(stack[9], expected_cipher2[2], "cipher2[2] at position 6");
+        prop_assert_eq!(stack[8], expected_cipher2[3], "cipher2[3] at position 7");
 
-        // Capacity should be unchanged
-        prop_assert_eq!(stack[7], Felt::new(c3), "c3 at position 8");
-        prop_assert_eq!(stack[6], Felt::new(c2), "c2 at position 9");
-        prop_assert_eq!(stack[5], Felt::new(c1), "c1 at position 10");
-        prop_assert_eq!(stack[4], Felt::new(c0), "c0 at position 11");
+        // Capacity should be unchanged (LE order: c0 at position 8)
+        prop_assert_eq!(stack[7], Felt::new(c0), "c0 at position 8");
+        prop_assert_eq!(stack[6], Felt::new(c1), "c1 at position 9");
+        prop_assert_eq!(stack[5], Felt::new(c2), "c2 at position 10");
+        prop_assert_eq!(stack[4], Felt::new(c3), "c3 at position 11");
 
         // Pointers should be incremented by 8
         prop_assert_eq!(stack[3], Felt::new(src_addr + 8), "src_ptr incremented");
@@ -290,29 +289,29 @@ proptest! {
         acc_0 in any::<u64>(),
         acc_1 in any::<u64>(),
     ) {
-        // Build the initial stack state
-        // Stack layout (top first): [c7, c6, c5, c4, c3, c2, c1, c0, s8, s9, s10, s11, s12, alpha_addr, acc1, acc0]
-        // Position 0 (top) = c7, position 7 = c0, position 13 = alpha_addr, position 14 = acc1, position 15 = acc0
+        // Build the initial stack state (low index coefficient at lower position)
+        // Stack layout (top first): [c0, c1, c2, c3, c4, c5, c6, c7, s8, s9, s10, s11, s12, alpha_addr, acc0, acc1]
+        // Position 0 (top) = c0, position 7 = c7, position 13 = alpha_addr, position 14 = acc0, position 15 = acc1
         //
         // FastProcessor::new expects elements in "reverse" order: first element goes to bottom, last to top.
-        // So we pass [acc0, acc1, alpha_addr, s12, s11, s10, s9, s8, c0, c1, c2, c3, c4, c5, c6, c7]
+        // So we pass [acc1, acc0, alpha_addr, s12, s11, s10, s9, s8, c7, c6, c5, c4, c3, c2, c1, c0]
         let stack_inputs = [
-            Felt::new(acc_0),       // position 15 (bottom)
-            Felt::new(acc_1),       // position 14
+            Felt::new(acc_1),       // position 15 (bottom, acc high)
+            Felt::new(acc_0),       // position 14 (acc low)
             Felt::new(ALPHA_ADDR),  // position 13
             Felt::new(s12),         // position 12
             Felt::new(s11),         // position 11
             Felt::new(s10),         // position 10
             Felt::new(s9),          // position 9
             Felt::new(s8),          // position 8
-            Felt::new(c0),          // position 7
-            Felt::new(c1),          // position 6
-            Felt::new(c2),          // position 5
-            Felt::new(c3),          // position 4
-            Felt::new(c4),          // position 3
-            Felt::new(c5),          // position 2
-            Felt::new(c6),          // position 1
-            Felt::new(c7),          // position 0 (top)
+            Felt::new(c7),          // position 7
+            Felt::new(c6),          // position 6
+            Felt::new(c5),          // position 5
+            Felt::new(c4),          // position 4
+            Felt::new(c3),          // position 3
+            Felt::new(c2),          // position 2
+            Felt::new(c1),          // position 1
+            Felt::new(c0),          // position 0 (top)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -350,28 +349,30 @@ proptest! {
         let c6_q = QuadFelt::from(Felt::new(c6));
         let c7_q = QuadFelt::from(Felt::new(c7));
 
-        // Level 1: tmp0 = (acc * alpha + c0) * alpha + c1
+        // Horner evaluation: P(α) = c0*α⁷ + c1*α⁶ + c2*α⁵ + c3*α⁴ + c4*α³ + c5*α² + c6*α + c7
+        // c0 (at stack position 0) has highest degree, c7 (at stack position 7) is constant term
+        // Level 1: tmp0 = (acc * α + c₀) * α + c₁
         let tmp0 = (acc_old * alpha + c0_q) * alpha + c1_q;
 
-        // Level 2: tmp1 = ((tmp0 * alpha + c2) * alpha + c3) * alpha + c4
+        // Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
         let tmp1 = ((tmp0 * alpha + c2_q) * alpha + c3_q) * alpha + c4_q;
 
-        // Level 3: acc' = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7
+        // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
         let acc_new = ((tmp1 * alpha + c5_q) * alpha + c6_q) * alpha + c7_q;
 
         // Check stack state using stack_top()
         // stack_top() returns a slice of 16 elements where index 15 = top, index 0 = bottom
         let stack = processor.stack_top();
 
-        // Check that the top 8 stack elements (coefficients) were NOT affected
-        prop_assert_eq!(stack[15], Felt::new(c7), "c7 at position 0 (top)");
-        prop_assert_eq!(stack[14], Felt::new(c6), "c6 at position 1");
-        prop_assert_eq!(stack[13], Felt::new(c5), "c5 at position 2");
-        prop_assert_eq!(stack[12], Felt::new(c4), "c4 at position 3");
-        prop_assert_eq!(stack[11], Felt::new(c3), "c3 at position 4");
-        prop_assert_eq!(stack[10], Felt::new(c2), "c2 at position 5");
-        prop_assert_eq!(stack[9], Felt::new(c1), "c1 at position 6");
-        prop_assert_eq!(stack[8], Felt::new(c0), "c0 at position 7");
+        // Check that the top 8 stack elements (coefficients) were NOT affected (LE: c0 at top)
+        prop_assert_eq!(stack[15], Felt::new(c0), "c0 at position 0 (top)");
+        prop_assert_eq!(stack[14], Felt::new(c1), "c1 at position 1");
+        prop_assert_eq!(stack[13], Felt::new(c2), "c2 at position 2");
+        prop_assert_eq!(stack[12], Felt::new(c3), "c3 at position 3");
+        prop_assert_eq!(stack[11], Felt::new(c4), "c4 at position 4");
+        prop_assert_eq!(stack[10], Felt::new(c5), "c5 at position 5");
+        prop_assert_eq!(stack[9], Felt::new(c6), "c6 at position 6");
+        prop_assert_eq!(stack[8], Felt::new(c7), "c7 at position 7");
 
         // Check that middle stack elements were NOT affected
         prop_assert_eq!(stack[7], Felt::new(s8), "s8 at position 8");
@@ -383,10 +384,10 @@ proptest! {
         // Check that alpha_addr was NOT affected
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
-        // Check that the accumulator was updated correctly
+        // Check that the accumulator was updated correctly (LE: low at lower position)
         let acc_new_base = acc_new.as_basis_coefficients_slice();
-        prop_assert_eq!(stack[1], acc_new_base[1], "acc_high at position 14");
-        prop_assert_eq!(stack[0], acc_new_base[0], "acc_low at position 15");
+        prop_assert_eq!(stack[1], acc_new_base[0], "acc_low at position 14");
+        prop_assert_eq!(stack[0], acc_new_base[1], "acc_high at position 15");
     }
 
     #[test]
@@ -413,30 +414,30 @@ proptest! {
         acc_0 in any::<u64>(),
         acc_1 in any::<u64>(),
     ) {
-        // Build the initial stack state
-        // Stack layout from get_coeff_as_quad_ext_elements:
-        // Position 0 (top) = c0_1, position 1 = c0_0
-        // Position 2 = c1_1, position 3 = c1_0
-        // Position 4 = c2_1, position 5 = c2_0
-        // Position 6 = c3_1, position 7 = c3_0
-        // Position 13 = alpha_addr, position 14 = acc1, position 15 = acc0
+        // Build the initial stack state (low coefficient at lower position)
+        // Stack layout for extension field coefficients:
+        // Position 0 (top) = c0_0 (low), position 1 = c0_1 (high)
+        // Position 2 = c1_0 (low), position 3 = c1_1 (high)
+        // Position 4 = c2_0 (low), position 5 = c2_1 (high)
+        // Position 6 = c3_0 (low), position 7 = c3_1 (high)
+        // Position 13 = alpha_addr, position 14 = acc0 (low), position 15 = acc1 (high)
         let stack_inputs = [
-            Felt::new(acc_0),       // position 15 (bottom)
-            Felt::new(acc_1),       // position 14
+            Felt::new(acc_1),       // position 15 (bottom, high)
+            Felt::new(acc_0),       // position 14 (low)
             Felt::new(ALPHA_ADDR),  // position 13
             Felt::new(s12),         // position 12
             Felt::new(s11),         // position 11
             Felt::new(s10),         // position 10
             Felt::new(s9),          // position 9
             Felt::new(s8),          // position 8
-            Felt::new(c3_0),        // position 7
-            Felt::new(c3_1),        // position 6
-            Felt::new(c2_0),        // position 5
-            Felt::new(c2_1),        // position 4
-            Felt::new(c1_0),        // position 3
-            Felt::new(c1_1),        // position 2
-            Felt::new(c0_0),        // position 1
-            Felt::new(c0_1),        // position 0 (top)
+            Felt::new(c3_1),        // position 7 (c3 high)
+            Felt::new(c3_0),        // position 6 (c3 low)
+            Felt::new(c2_1),        // position 5 (c2 high)
+            Felt::new(c2_0),        // position 4 (c2 low)
+            Felt::new(c1_1),        // position 3 (c1 high)
+            Felt::new(c1_0),        // position 2 (c1 low)
+            Felt::new(c0_1),        // position 1 (c0 high)
+            Felt::new(c0_0),        // position 0 (top, c0 low)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -469,22 +470,24 @@ proptest! {
 
         let coefficients = [c0, c1, c2, c3];
 
-        // acc_tmp = coefficients.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc)
-        let acc_tmp = coefficients.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
-        let acc_new = coefficients.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
+        // Horner evaluation: P(α) = c0*α³ + c1*α² + c2*α + c3
+        // c0 (at stack positions 0,1) has highest degree, c3 (at stack positions 6,7) is constant term
+        // acc_tmp = coef.iter().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc)
+        let acc_tmp = coefficients.iter().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
+        let acc_new = coefficients.iter().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
 
         // Check stack state using stack_top()
         let stack = processor.stack_top();
 
-        // Check that the top 8 stack elements (coefficients) were NOT affected
-        prop_assert_eq!(stack[15], Felt::new(c0_1), "c0_1 at position 0 (top)");
-        prop_assert_eq!(stack[14], Felt::new(c0_0), "c0_0 at position 1");
-        prop_assert_eq!(stack[13], Felt::new(c1_1), "c1_1 at position 2");
-        prop_assert_eq!(stack[12], Felt::new(c1_0), "c1_0 at position 3");
-        prop_assert_eq!(stack[11], Felt::new(c2_1), "c2_1 at position 4");
-        prop_assert_eq!(stack[10], Felt::new(c2_0), "c2_0 at position 5");
-        prop_assert_eq!(stack[9], Felt::new(c3_1), "c3_1 at position 6");
-        prop_assert_eq!(stack[8], Felt::new(c3_0), "c3_0 at position 7");
+        // Check that the top 8 stack elements (coefficients) were NOT affected (LE: low at lower position)
+        prop_assert_eq!(stack[15], Felt::new(c0_0), "c0_0 at position 0 (top, low)");
+        prop_assert_eq!(stack[14], Felt::new(c0_1), "c0_1 at position 1 (high)");
+        prop_assert_eq!(stack[13], Felt::new(c1_0), "c1_0 at position 2 (low)");
+        prop_assert_eq!(stack[12], Felt::new(c1_1), "c1_1 at position 3 (high)");
+        prop_assert_eq!(stack[11], Felt::new(c2_0), "c2_0 at position 4 (low)");
+        prop_assert_eq!(stack[10], Felt::new(c2_1), "c2_1 at position 5 (high)");
+        prop_assert_eq!(stack[9], Felt::new(c3_0), "c3_0 at position 6 (low)");
+        prop_assert_eq!(stack[8], Felt::new(c3_1), "c3_1 at position 7 (high)");
 
         // Check that middle stack elements were NOT affected
         prop_assert_eq!(stack[7], Felt::new(s8), "s8 at position 8");
@@ -496,10 +499,10 @@ proptest! {
         // Check that alpha_addr was NOT affected
         prop_assert_eq!(stack[2], Felt::new(ALPHA_ADDR), "alpha_addr at position 13");
 
-        // Check that the accumulator was updated correctly
+        // Check that the accumulator was updated correctly (LE: low at lower position)
         let acc_new_base = acc_new.as_basis_coefficients_slice();
-        prop_assert_eq!(stack[1], acc_new_base[1], "acc_high at position 14");
-        prop_assert_eq!(stack[0], acc_new_base[0], "acc_low at position 15");
+        prop_assert_eq!(stack[1], acc_new_base[0], "acc_low at position 14");
+        prop_assert_eq!(stack[0], acc_new_base[1], "acc_high at position 15");
     }
 }
 
@@ -542,7 +545,8 @@ proptest! {
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
         // Build the initial stack state
-        // Stack layout (top first): [node[3], node[2], node[1], node[0], depth, index, root[3], root[2], root[1], root[0], ...]
+        // word[0] at lowest position (closest to top)
+        // Stack layout (top first): [node[0], node[1], node[2], node[3], depth, index, root[0], root[1], root[2], root[3], ...]
         let stack_inputs = [
             ZERO,                  // position 15 (bottom)
             ZERO,                  // position 14
@@ -550,16 +554,16 @@ proptest! {
             ZERO,                  // position 12
             ZERO,                  // position 11
             ZERO,                  // position 10
-            root[0],               // position 9
-            root[1],               // position 8
-            root[2],               // position 7
-            root[3],               // position 6
+            root[3],               // position 9 (root[3] - LE: highest position)
+            root[2],               // position 8
+            root[1],               // position 7
+            root[0],               // position 6 (root[0] - LE: lowest position)
             Felt::new(leaf_idx),   // position 5
             Felt::new(depth),      // position 4
-            node[0],               // position 3
-            node[1],               // position 2
-            node[2],               // position 1
-            node[3],               // position 0 (top)
+            node[3],               // position 3 (node[3] - LE: highest position)
+            node[2],               // position 2
+            node[1],               // position 1
+            node[0],               // position 0 (top, node[0] - LE: lowest position)
         ];
         let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let mut tracer = NoopTracer;
@@ -573,21 +577,21 @@ proptest! {
         // The stack should remain unchanged after verification
         let stack = processor.stack_top();
 
-        // Check node value (top of stack)
-        prop_assert_eq!(stack[15], node[3], "node[3] at position 0");
-        prop_assert_eq!(stack[14], node[2], "node[2] at position 1");
-        prop_assert_eq!(stack[13], node[1], "node[1] at position 2");
-        prop_assert_eq!(stack[12], node[0], "node[0] at position 3");
+        // Check node value (top of stack) - LE: node[0] at position 0 (stack[15])
+        prop_assert_eq!(stack[15], node[0], "node[0] at position 0");
+        prop_assert_eq!(stack[14], node[1], "node[1] at position 1");
+        prop_assert_eq!(stack[13], node[2], "node[2] at position 2");
+        prop_assert_eq!(stack[12], node[3], "node[3] at position 3");
 
         // Check depth and index
         prop_assert_eq!(stack[11], Felt::new(depth), "depth at position 4");
         prop_assert_eq!(stack[10], Felt::new(leaf_idx), "index at position 5");
 
-        // Check root value
-        prop_assert_eq!(stack[9], root[3], "root[3] at position 6");
-        prop_assert_eq!(stack[8], root[2], "root[2] at position 7");
-        prop_assert_eq!(stack[7], root[1], "root[1] at position 8");
-        prop_assert_eq!(stack[6], root[0], "root[0] at position 9");
+        // Check root value - LE: root[0] at position 6 (stack[9])
+        prop_assert_eq!(stack[9], root[0], "root[0] at position 6");
+        prop_assert_eq!(stack[8], root[1], "root[1] at position 7");
+        prop_assert_eq!(stack[7], root[2], "root[2] at position 8");
+        prop_assert_eq!(stack[6], root[3], "root[3] at position 9");
     }
 
     /// Tests Merkle root update operation.
@@ -635,25 +639,26 @@ proptest! {
         let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
         // Build the initial stack state
+        // word[0] at lowest position (closest to top)
         // Stack layout (top first):
-        // [old_node[3..0], depth, index, old_root[3..0], new_node[3..0], ...]
+        // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
         let stack_inputs = [
             ZERO,                     // position 15 (bottom)
             ZERO,                     // position 14
-            new_leaf[0],              // position 13
-            new_leaf[1],              // position 12
-            new_leaf[2],              // position 11
-            new_leaf[3],              // position 10
-            old_root[0],              // position 9
-            old_root[1],              // position 8
-            old_root[2],              // position 7
-            old_root[3],              // position 6
+            new_leaf[3],              // position 13 (new_leaf[3] - LE: highest position)
+            new_leaf[2],              // position 12
+            new_leaf[1],              // position 11
+            new_leaf[0],              // position 10 (new_leaf[0] - LE: lowest position)
+            old_root[3],              // position 9 (old_root[3] - LE: highest position)
+            old_root[2],              // position 8
+            old_root[1],              // position 7
+            old_root[0],              // position 6 (old_root[0] - LE: lowest position)
             Felt::new(leaf_idx),      // position 5
             Felt::new(depth),         // position 4
-            old_node[0],              // position 3
-            old_node[1],              // position 2
-            old_node[2],              // position 1
-            old_node[3],              // position 0 (top)
+            old_node[3],              // position 3 (old_node[3] - LE: highest position)
+            old_node[2],              // position 2
+            old_node[1],              // position 1
+            old_node[0],              // position 0 (top, old_node[0] - LE: lowest position)
         ];
         let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let mut tracer = NoopTracer;
@@ -666,27 +671,27 @@ proptest! {
         // Check the result
         let stack = processor.stack_top();
 
-        // The old node value should be replaced with the new root
-        prop_assert_eq!(stack[15], expected_new_root[3], "new_root[3] at position 0");
-        prop_assert_eq!(stack[14], expected_new_root[2], "new_root[2] at position 1");
-        prop_assert_eq!(stack[13], expected_new_root[1], "new_root[1] at position 2");
-        prop_assert_eq!(stack[12], expected_new_root[0], "new_root[0] at position 3");
+        // The old node value should be replaced with the new root (LE: [0] at position 0)
+        prop_assert_eq!(stack[15], expected_new_root[0], "new_root[0] at position 0");
+        prop_assert_eq!(stack[14], expected_new_root[1], "new_root[1] at position 1");
+        prop_assert_eq!(stack[13], expected_new_root[2], "new_root[2] at position 2");
+        prop_assert_eq!(stack[12], expected_new_root[3], "new_root[3] at position 3");
 
         // Check depth and index remain unchanged
         prop_assert_eq!(stack[11], Felt::new(depth), "depth at position 4");
         prop_assert_eq!(stack[10], Felt::new(leaf_idx), "index at position 5");
 
-        // Check old root remains unchanged
-        prop_assert_eq!(stack[9], old_root[3], "old_root[3] at position 6");
-        prop_assert_eq!(stack[8], old_root[2], "old_root[2] at position 7");
-        prop_assert_eq!(stack[7], old_root[1], "old_root[1] at position 8");
-        prop_assert_eq!(stack[6], old_root[0], "old_root[0] at position 9");
+        // Check old root remains unchanged (LE: [0] at position 6)
+        prop_assert_eq!(stack[9], old_root[0], "old_root[0] at position 6");
+        prop_assert_eq!(stack[8], old_root[1], "old_root[1] at position 7");
+        prop_assert_eq!(stack[7], old_root[2], "old_root[2] at position 8");
+        prop_assert_eq!(stack[6], old_root[3], "old_root[3] at position 9");
 
-        // Check new leaf remains unchanged
-        prop_assert_eq!(stack[5], new_leaf[3], "new_leaf[3] at position 10");
-        prop_assert_eq!(stack[4], new_leaf[2], "new_leaf[2] at position 11");
-        prop_assert_eq!(stack[3], new_leaf[1], "new_leaf[1] at position 12");
-        prop_assert_eq!(stack[2], new_leaf[0], "new_leaf[0] at position 13");
+        // Check new leaf remains unchanged (LE: [0] at position 10)
+        prop_assert_eq!(stack[5], new_leaf[0], "new_leaf[0] at position 10");
+        prop_assert_eq!(stack[4], new_leaf[1], "new_leaf[1] at position 11");
+        prop_assert_eq!(stack[3], new_leaf[2], "new_leaf[2] at position 12");
+        prop_assert_eq!(stack[2], new_leaf[3], "new_leaf[3] at position 13");
 
         // make sure both Merkle trees are still in the advice provider
         assert!(processor.advice.has_merkle_root(tree.root()));
@@ -738,25 +743,26 @@ fn test_op_mrupdate_merge_subtree() {
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
     // Build the initial stack state
+    // word[0] at lowest position (closest to top)
     // Stack layout (top first):
-    // [old_node[3..0], depth, index, old_root[3..0], new_node[3..0], ...]
+    // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
     let stack_inputs = [
         ZERO,                    // position 15 (bottom)
         ZERO,                    // position 14
-        target_node[0],          // position 13
-        target_node[1],          // position 12
-        target_node[2],          // position 11
-        target_node[3],          // position 10
-        replaced_root[0],        // position 9
-        replaced_root[1],        // position 8
-        replaced_root[2],        // position 7
-        replaced_root[3],        // position 6
+        target_node[3],          // position 13 (target_node[3] - LE: highest position)
+        target_node[2],          // position 12
+        target_node[1],          // position 11
+        target_node[0],          // position 10 (target_node[0] - LE: lowest position)
+        replaced_root[3],        // position 9 (replaced_root[3] - LE: highest position)
+        replaced_root[2],        // position 8
+        replaced_root[1],        // position 7
+        replaced_root[0],        // position 6 (replaced_root[0] - LE: lowest position)
         Felt::new(target_index), // position 5
         Felt::new(target_depth), // position 4
-        replaced_node[0],        // position 3
-        replaced_node[1],        // position 2
-        replaced_node[2],        // position 1
-        replaced_node[3],        // position 0 (top)
+        replaced_node[3],        // position 3 (replaced_node[3] - LE: highest position)
+        replaced_node[2],        // position 2
+        replaced_node[1],        // position 1
+        replaced_node[0],        // position 0 (top, replaced_node[0] - LE: lowest position)
     ];
     let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
     let mut tracer = NoopTracer;
@@ -769,27 +775,27 @@ fn test_op_mrupdate_merge_subtree() {
     // Check the result
     let stack = processor.stack_top();
 
-    // The old node value should be replaced with the expected new root
-    assert_eq!(stack[15], expected_root[3], "expected_root[3] at position 0");
-    assert_eq!(stack[14], expected_root[2], "expected_root[2] at position 1");
-    assert_eq!(stack[13], expected_root[1], "expected_root[1] at position 2");
-    assert_eq!(stack[12], expected_root[0], "expected_root[0] at position 3");
+    // The old node value should be replaced with the expected new root (LE: [0] at position 0)
+    assert_eq!(stack[15], expected_root[0], "expected_root[0] at position 0");
+    assert_eq!(stack[14], expected_root[1], "expected_root[1] at position 1");
+    assert_eq!(stack[13], expected_root[2], "expected_root[2] at position 2");
+    assert_eq!(stack[12], expected_root[3], "expected_root[3] at position 3");
 
     // Check depth and index remain unchanged
     assert_eq!(stack[11], Felt::new(target_depth), "depth at position 4");
     assert_eq!(stack[10], Felt::new(target_index), "index at position 5");
 
-    // Check old root remains unchanged
-    assert_eq!(stack[9], replaced_root[3], "replaced_root[3] at position 6");
-    assert_eq!(stack[8], replaced_root[2], "replaced_root[2] at position 7");
-    assert_eq!(stack[7], replaced_root[1], "replaced_root[1] at position 8");
-    assert_eq!(stack[6], replaced_root[0], "replaced_root[0] at position 9");
+    // Check old root remains unchanged (LE: [0] at position 6)
+    assert_eq!(stack[9], replaced_root[0], "replaced_root[0] at position 6");
+    assert_eq!(stack[8], replaced_root[1], "replaced_root[1] at position 7");
+    assert_eq!(stack[7], replaced_root[2], "replaced_root[2] at position 8");
+    assert_eq!(stack[6], replaced_root[3], "replaced_root[3] at position 9");
 
-    // Check target node remains unchanged
-    assert_eq!(stack[5], target_node[3], "target_node[3] at position 10");
-    assert_eq!(stack[4], target_node[2], "target_node[2] at position 11");
-    assert_eq!(stack[3], target_node[1], "target_node[1] at position 12");
-    assert_eq!(stack[2], target_node[0], "target_node[0] at position 13");
+    // Check target node remains unchanged (LE: [0] at position 10)
+    assert_eq!(stack[5], target_node[0], "target_node[0] at position 10");
+    assert_eq!(stack[4], target_node[1], "target_node[1] at position 11");
+    assert_eq!(stack[3], target_node[2], "target_node[2] at position 12");
+    assert_eq!(stack[2], target_node[3], "target_node[3] at position 13");
 
     // assert the expected root now exists in the advice provider
     assert!(processor.advice.has_merkle_root(expected_root));

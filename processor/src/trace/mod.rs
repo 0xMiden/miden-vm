@@ -13,7 +13,7 @@ use miden_air::{
 };
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    field::ExtensionField,
+    field::{ExtensionField, PrimeField64},
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
     utils::ColMatrix,
@@ -230,7 +230,7 @@ impl ExecutionTrace {
             self.main_trace.read_row_into(i, &mut row);
             std::println!(
                 "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_int()).collect::<Vec<_>>()
+                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
             );
         }
     }

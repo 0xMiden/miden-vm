@@ -70,8 +70,8 @@ impl EventHandler for KeccakPrecompile {
         let preimage = KeccakPreimage::new(input_bytes);
         let digest = preimage.digest();
 
-        // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order
-        let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
+        // Extend the stack with the digest [h_0, ..., h_7] for consumption via adv_pipe
+        let advice_stack_extension = AdviceMutation::extend_stack_for_adv_pipe(digest.0);
 
         // Store the precompile data for deferred verification.
         let precompile_request_extension =

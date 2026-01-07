@@ -1,6 +1,8 @@
-use miden_core::{Felt, chiplets::hasher::apply_permutation, utils::ToElements};
+use miden_core::{
+    Felt, chiplets::hasher::apply_permutation, field::PrimeField64, utils::ToElements,
+};
 use miden_processor::{AdviceError, ExecutionError, RowIndex};
-use miden_utils_testing::{PrimeField64, expect_exec_error_matches};
+use miden_utils_testing::expect_exec_error_matches;
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 
@@ -45,10 +47,11 @@ fn adv_push_invalid() {
 
 #[test]
 fn adv_loadw() {
+    // adv_loadw loads the structural word directly (no built-in reversal).
+    // Use reversew afterward if canonical order is needed.
     let asm_op = "adv_loadw";
     let advice_stack = [1, 2, 3, 4];
-    let mut final_stack = advice_stack;
-    final_stack.reverse();
+    let final_stack = advice_stack; // No reversal - structural order
 
     let test = build_op_test!(asm_op, &[8, 7, 6, 5], &advice_stack);
     test.expect_stack(&final_stack);
@@ -87,13 +90,13 @@ fn adv_pipe() {
 
     // the state is built by replacing the values on the top of the stack with the top 8 values
     // from the head of the advice stack (i.e. values 1 through 8). Thus, the first 8 elements on
-    // the stack will be 1-8 in stack order (stack[0] = 8), and the remaining 4 are untouched
+    // the stack will be 1-8 in stack order (stack[0] = 1), and the remaining 4 are untouched
     // (i.e., 9, 10, 11, 12).
     let state: [Felt; 12] =
-        [12_u64, 11, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8].to_elements().try_into().unwrap();
+        [12_u64, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1].to_elements().try_into().unwrap();
 
     // to get the final state of the stack, reverse the above state and push the expected address
-    // to the end (the address will be 2 since 0 + 2 = 2).
+    // to the end (the address will be 8 since 0 + 8 = 8).
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
     final_stack.reverse();
     final_stack.push(8);
@@ -118,13 +121,9 @@ fn adv_pipe_with_hperm() {
 
     let advice_stack = [1, 2, 3, 4, 5, 6, 7, 8];
 
-    // the state of the hasher is the first 12 elements of the stack (in reverse order). the state
-    // is built by replacing the values on the top of the stack with the top 8 values from the head
-    // of the advice stack (i.e. values 1 through 8). Thus, the first 8 elements on the stack will
-    // be 1-8 in stack order (stack[0] = 8), and the remaining 4 are untouched (i.e., 9, 10, 11,
-    // 12).
+    // the state of the hasher is the first 12 elements of the stack.
     let mut state: [Felt; 12] =
-        [12_u64, 11, 10, 9, 1, 2, 3, 4, 5, 6, 7, 8].to_elements().try_into().unwrap();
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
     // apply a hash permutation to the state
     apply_permutation(&mut state);
@@ -132,7 +131,6 @@ fn adv_pipe_with_hperm() {
     // to get the final state of the stack, reverse the hasher state and push the expected address
     // to the end (the address will be 2 since 0 + 2 = 2).
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
-    final_stack.reverse();
     final_stack.push(8);
 
     let test = build_test!(source, &[], &advice_stack);

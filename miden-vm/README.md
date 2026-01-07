@@ -113,7 +113,7 @@ let (outputs, proof) = prove_sync(
 .unwrap();
 
 // the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_int());
+assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 ```
 
 ### Verifying program execution
@@ -212,7 +212,7 @@ let (outputs, proof) = miden_vm::prove_sync(
 let stack = outputs.stack_truncated(1);
 
 // the output should be the 50th Fibonacci number
-assert_eq!(12586269025, stack[0].as_int());
+assert_eq!(12586269025, stack[0].as_canonical_u64());
 ```
 
 Above, we used public inputs to initialize the stack rather than using `push` operations. This makes the program a bit simpler, and also allows us to run the program from arbitrary starting points without changing program hash.

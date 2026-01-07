@@ -38,6 +38,33 @@ impl AdviceMutation {
         Self::ExtendStack { values: Vec::from_iter(iter) }
     }
 
+    /// Extends the advice stack with elements that will later be consumed via `adv_push.*`.
+    ///
+    /// `adv_push` loads elements one-by-one, so the last element popped from the advice
+    /// stack ends up on top of the operand stack. To keep the logical word order consistent,
+    /// reverse the provided sequence before storing it.
+    pub fn extend_stack_for_adv_push(iter: impl IntoIterator<Item = Felt>) -> Self {
+        let mut values: Vec<Felt> = iter.into_iter().collect();
+        values.reverse();
+        Self::ExtendStack { values }
+    }
+
+    /// Extends the advice stack with elements that will later be consumed via `adv_pipe`.
+    ///
+    /// `adv_pipe` pops 8 elements (2 words) from the advice stack and places them into
+    /// the top 8 positions of the operand stack, preserving order. No reversal is needed.
+    ///
+    /// The slice length must be a multiple of 8 (double-word aligned).
+    pub fn extend_stack_for_adv_pipe(iter: impl IntoIterator<Item = Felt>) -> Self {
+        let values: Vec<Felt> = iter.into_iter().collect();
+        debug_assert!(
+            values.len().is_multiple_of(8),
+            "extend_stack_for_adv_pipe requires length to be a multiple of 8, got {}",
+            values.len()
+        );
+        Self::ExtendStack { values }
+    }
+
     pub fn extend_map(other: AdviceMap) -> Self {
         Self::ExtendMap { other }
     }

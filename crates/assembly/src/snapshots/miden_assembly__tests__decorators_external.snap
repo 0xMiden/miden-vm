@@ -12,7 +12,7 @@ begin
             noop
             trace(0)
         end
-        external.0xe776df8dc02329acc43a09fe8e510b44a87dfd876e375ad383891470ece4f6de
+        external.0x6bbb0f95917723cbf2502c446b529ae6edd1072fb0fd6a5c85290583c1dcdd4a
     end
     trace(1)
 end

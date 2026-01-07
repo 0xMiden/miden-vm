@@ -17,22 +17,23 @@ end
 #! Performs addition of two unsigned 64 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [overflowing_flag, c_hi, c_lo, ...], where c = (a + b) % 2^64
-#! This takes 6 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [overflow, c_lo, c_hi, ...], where c = (a + b) % 2^64
+#! This takes 7 cycles.
 pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
-    swap
-    movup.3
-    u32overflowing_add
-    movup.3
-    movup.3
-    u32overflowing_add3
+    movup.2             # => [a_lo, b_lo, b_hi, a_hi]
+    u32overflowing_add  # => [carry, sum_lo, b_hi, a_hi]
+    movup.2             # => [b_hi, carry, sum_lo, a_hi]
+    movup.3             # => [a_hi, b_hi, carry, sum_lo]
+    u32overflowing_add3 # => [overflow, sum_hi, sum_lo]
+    movup.2             # => [sum_lo, overflow, sum_hi]
+    swap                # => [overflow, sum_lo, sum_hi]
 end
 
 #! Performs addition of two unsigned 64 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a + b) % 2^64
-#! This takes 7 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a + b) % 2^64
+#! This takes 8 cycles.
 pub proc wrapping_add(b: u64, a: u64) -> u64
     exec.overflowing_add
     drop
@@ -43,38 +44,43 @@ end
 #! Performs subtraction of two unsigned 64 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a - b) % 2^64
-#! This takes 10 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a - b) % 2^64
+#! This takes 11 cycles.
 pub proc wrapping_sub(b: u64, a: u64) -> u64
-    movup.3
-    movup.2
-    u32overflowing_sub
-    movup.3
-    movup.3
-    u32overflowing_sub
-    drop
-    swap
-    u32overflowing_sub
-    drop
+    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
+    movup.2             # => [b_lo, a_lo, a_hi, b_hi]
+    u32overflowing_sub  # => [borrow_lo, c_lo, a_hi, b_hi] (a_lo - b_lo)
+    movup.2             # => [a_hi, borrow_lo, c_lo, b_hi]
+    movup.3             # => [b_hi, a_hi, borrow_lo, c_lo]
+    u32overflowing_sub  # => [borrow_hi, diff_hi, borrow_lo, c_lo] (a_hi - b_hi)
+    drop                # => [diff_hi, borrow_lo, c_lo]
+    swap                # => [borrow_lo, diff_hi, c_lo]
+    u32overflowing_sub  # => [borrow2, c_hi, c_lo] (diff_hi - borrow_lo)
+    drop                # => [c_hi, c_lo]
+    swap                # => [c_lo, c_hi]
 end
 
 #! Performs subtraction of two unsigned 64 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [underflowing_flag, c_hi, c_lo, ...], where c = (a - b) % 2^64
-#! This takes 11 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [underflow, c_lo, c_hi, ...], where c = (a - b) % 2^64
+#! This takes 15 cycles.
 pub proc overflowing_sub(b: u64, a: u64) -> (i1, u64)
-    movup.3
-    movup.2
-    u32overflowing_sub
-    movup.3
-    movup.3
-    u32overflowing_sub
-    swap
-    movup.2
-    u32overflowing_sub
-    movup.2
-    or
+    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
+    movup.2             # => [b_lo, a_lo, a_hi, b_hi]
+    u32overflowing_sub  # => [borrow_lo, c_lo, a_hi, b_hi] (a_lo - b_lo)
+    movup.2             # => [a_hi, borrow_lo, c_lo, b_hi]
+    movup.3             # => [b_hi, a_hi, borrow_lo, c_lo]
+    u32overflowing_sub  # => [borrow_hi, diff_hi, borrow_lo, c_lo] (a_hi - b_hi)
+    swap                # => [diff_hi, borrow_hi, borrow_lo, c_lo]
+    movup.2             # => [borrow_lo, diff_hi, borrow_hi, c_lo]
+    u32overflowing_sub  # => [borrow2, c_hi, borrow_hi, c_lo] (diff_hi - borrow_lo)
+    movup.2             # => [borrow_hi, borrow2, c_hi, c_lo]
+    or                  # => [underflow, c_hi, c_lo]
+    movup.2             # => [c_lo, underflow, c_hi]
+    swap                # => [underflow, c_lo, c_hi]
 end
 
 # ===== MULTIPLICATION ============================================================================
@@ -82,46 +88,80 @@ end
 #! Performs multiplication of two unsigned 64 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = (a * b) % 2^64
-#! This takes 11 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a * b) % 2^64
+#! This takes 15 cycles.
 pub proc wrapping_mul(b: u64, a: u64) -> u64
-    dup.3
-    dup.2
-    u32overflowing_mul
-    movup.4
-    movup.4
-    u32overflowing_madd
-    drop
-    movup.3
-    movup.3
-    u32overflowing_madd
-    drop
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
+    dup.2               # => [a_lo, b_lo, b_hi, a_lo, a_hi]
+    dup.1               # => [b_lo, a_lo, b_lo, b_hi, a_lo, a_hi]
+    u32overflowing_mul  # => [p0_lo, p0_hi, b_lo, b_hi, a_lo, a_hi]
+    swap                # => [p0_hi, p0_lo, b_lo, b_hi, a_lo, a_hi]
+    movup.3             # => [b_hi, p0_hi, p0_lo, b_lo, a_lo, a_hi]
+    movup.4             # => [a_lo, b_hi, p0_hi, p0_lo, b_lo, a_hi]
+    u32overflowing_madd # => [t1_lo, t1_hi, p0_lo, b_lo, a_hi]
+    swap                # => [t1_hi, t1_lo, p0_lo, b_lo, a_hi]
+    drop                # => [t1_lo, p0_lo, b_lo, a_hi]
+    movup.2             # => [b_lo, t1_lo, p0_lo, a_hi]
+    movup.3             # => [a_hi, b_lo, t1_lo, p0_lo]
+    u32overflowing_madd # => [t2_lo, t2_hi, p0_lo]
+    swap                # => [t2_hi, t2_lo, p0_lo]
+    drop                # => [t2_lo, p0_lo]
+    swap                # => [p0_lo, t2_lo] = [c_lo, c_hi]
 end
 
 #! Performs multiplication of two unsigned 64 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_mid_hi, c_mid_lo, c_lo, ...], where c = (a * b) % 2^64
-#! This takes 18 cycles.
-pub proc overflowing_mul(b: u64, a: u64) -> (i1, u64)
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
+#! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
+#! This takes 22 cycles.
+pub proc overflowing_mul(b: u64, a: u64) -> u128
+    # Convert LE inputs to BE-like format for the core algorithm.
+    # Since multiplication is commutative, swapping a and b is fine.
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
+    reversew
+    # => [a_hi, a_lo, b_hi, b_lo, ...] (effectively [x_hi, x_lo, y_hi, y_lo] for x*y)
+
+    # Core 128-bit multiplication algorithm (operates on BE limb order)
     dup.3
     dup.2
+    # => [x_lo, y_lo, x_hi, x_lo, y_hi, y_lo, ...]
     u32overflowing_mul
+    # => [p0_lo, p0_hi, x_hi, x_lo, y_hi, y_lo, ...]
+    swap
+    # => [p0_hi, p0_lo, x_hi, x_lo, y_hi, y_lo, ...]
     dup.4
     movup.4
+    # => [x_lo, y_hi, p0_hi, p0_lo, x_hi, y_hi, y_lo, ...]
     u32overflowing_madd
-    swap
+    # => [t1_lo, t1_hi, p0_lo, x_hi, y_hi, y_lo, ...] where t1 = y_hi * x_lo + p0_hi
     movup.5
     dup.4
+    # => [y_hi, y_lo, t1_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
     u32overflowing_madd
+    # => [t2_lo, t2_hi, t1_hi, p0_lo, x_hi, y_hi, ...] where t2 = y_lo * y_hi + t1_lo
+    swap
+    # => [t2_hi, t2_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
     movup.5
     movup.5
+    # => [y_hi, x_hi, t2_hi, t2_lo, t1_hi, p0_lo, ...]
     u32overflowing_madd
+    # => [t3_lo, t3_hi, t2_lo, t1_hi, p0_lo, ...] where t3 = x_hi * y_hi + t2_hi
+    swap
+    # => [t3_hi, t3_lo, t2_lo, t1_hi, p0_lo, ...]
     movup.3
     movup.2
+    # => [t3_lo, t1_hi, t3_hi, t2_lo, p0_lo, ...]
     u32overflowing_add
+    # => [carry, sum, t3_hi, t2_lo, p0_lo, ...] where sum = (t3_lo + t1_hi) mod 2^32
     movup.2
+    # => [t3_hi, carry, sum, t2_lo, p0_lo, ...]
     add
+    # => [c_hi, c_mid_hi, c_mid_lo, c_lo, ...] (BE order)
+
+    # Convert BE output to LE
+    reversew
+    # => [c_lo, c_mid_lo, c_mid_hi, c_hi, ...]
 end
 
 # ===== COMPARISONS ===============================================================================
@@ -129,46 +169,80 @@ end
 #! Performs less-than comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
-#! This takes 11 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
+#! This takes 12 cycles.
 pub proc lt(b: u64, a: u64) -> i1
-    movup.3
+    # Swap to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
+    # Computes a < b, which is true iff:
+    # - a_hi < b_hi, OR
+    # - a_hi == b_hi AND a_lo < b_lo
     movup.2
+    # => [b_lo, a_lo, a_hi, b_hi, ...]
     u32overflowing_sub
+    # => [borrow_lo, diff_lo, a_hi, b_hi, ...] where diff_lo = a_lo - b_lo
     movdn.3
+    # => [diff_lo, a_hi, b_hi, borrow_lo, ...]
     drop
-    u32overflowing_sub
+    # => [a_hi, b_hi, borrow_lo, ...]
     swap
+    # => [b_hi, a_hi, borrow_lo, ...]
+    u32overflowing_sub
+    # => [borrow_hi, diff_hi, borrow_lo, ...] where diff_hi = a_hi - b_hi
+    swap
+    # => [diff_hi, borrow_hi, borrow_lo, ...]
     eq.0
+    # => [diff_hi==0, borrow_hi, borrow_lo, ...]
     movup.2
+    # => [borrow_lo, diff_hi==0, borrow_hi, ...]
     and
+    # => [(diff_hi==0 AND borrow_lo), borrow_hi, ...]
     or
+    # => [result, ...] where result = borrow_hi OR (diff_hi==0 AND borrow_lo)
 end
 
 #! Performs greater-than comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
-#! This takes 11 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
+#! This takes 13 cycles.
 pub proc gt(b: u64, a: u64) -> i1
+    # Swap to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
+    # Computes a > b, which is equivalent to b < a, true iff:
+    # - b_hi < a_hi, OR
+    # - b_hi == a_hi AND b_lo < a_lo
     movup.2
-    u32overflowing_sub
-    movup.2
-    movup.3
-    u32overflowing_sub
+    # => [b_lo, a_lo, a_hi, b_hi, ...]
     swap
+    # => [a_lo, b_lo, a_hi, b_hi, ...]
+    u32overflowing_sub
+    # => [borrow_lo, diff_lo, a_hi, b_hi, ...] where diff_lo = b_lo - a_lo
+    movdn.3
+    # => [diff_lo, a_hi, b_hi, borrow_lo, ...]
     drop
-    movup.2
+    # => [a_hi, b_hi, borrow_lo, ...]
+    u32overflowing_sub
+    # => [borrow_hi, diff_hi, borrow_lo, ...] where diff_hi = b_hi - a_hi
+    swap
+    # => [diff_hi, borrow_hi, borrow_lo, ...]
     eq.0
+    # => [diff_hi==0, borrow_hi, borrow_lo, ...]
+    movup.2
+    # => [borrow_lo, diff_hi==0, borrow_hi, ...]
     and
+    # => [(diff_hi==0 AND borrow_lo), borrow_hi, ...]
     or
+    # => [result, ...] where result = borrow_hi OR (diff_hi==0 AND borrow_lo)
 end
 
 #! Performs less-than-or-equal comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a <= b, and 0 otherwise.
-#! This takes 12 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a <= b, and 0 otherwise.
+#! This takes 14 cycles.
 pub proc lte(b: u64, a: u64) -> i1
     exec.gt
     not
@@ -177,8 +251,8 @@ end
 #! Performs greater-than-or-equal comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a >= b, and 0 otherwise.
-#! This takes 12 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a >= b, and 0 otherwise.
+#! This takes 13 cycles.
 pub proc gte(b: u64, a: u64) -> i1
     exec.lt
     not
@@ -187,49 +261,50 @@ end
 #! Performs equality comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
-#! This takes 6 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
+#! This takes 5 cycles.
 pub proc eq(b: u64, a: u64) -> i1
-    movup.2
-    eq
-    swap
-    movup.2
-    eq
-    and
+    movup.2     # => [a_lo, b_lo, b_hi, a_hi]
+    eq          # => [a_lo==b_lo, b_hi, a_hi]
+    swap.2      # => [a_hi, b_hi, a_lo==b_lo]
+    eq          # => [a_hi==b_hi, a_lo==b_lo]
+    and         # => [result]
 end
 
 #! Performs inequality comparison of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
-#! This takes 6 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
+#! This takes 5 cycles.
 pub proc neq(b: u64, a: u64) -> i1
-    movup.2
-    neq
-    swap
-    movup.2
-    neq
-    or
+    movup.2     # => [a_lo, b_lo, b_hi, a_hi]
+    neq         # => [a_lo!=b_lo, b_hi, a_hi]
+    swap.2      # => [a_hi, b_hi, a_lo!=b_lo]
+    neq         # => [a_hi!=b_hi, a_lo!=b_lo]
+    or          # => [result]
 end
 
 #! Performs comparison to zero of an unsigned 64 bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [a_hi, a_lo, ...] -> [c, ...], where c = 1 when a == 0, and 0 otherwise.
+#! [a_lo, a_hi, ...] -> [c, ...], where c = 1 when a == 0, and 0 otherwise.
 #! This takes 4 cycles.
-pub proc eqz(b: u64, a: u64) -> i1
-    eq.0
-    swap
-    eq.0
-    and
+pub proc eqz(a: u64) -> i1
+    eq.0        # => [a_lo==0, a_hi]
+    swap        # => [a_hi, a_lo==0]
+    eq.0        # => [a_hi==0, a_lo==0]
+    and         # => [result]
 end
 
-#! Compares two unsigned 64 bit integers and drop the larger one from the stack.
+#! Compares two unsigned 64 bit integers and drops the larger one from the stack.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a < b, and b otherwise.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = min(a, b).
 #! This takes 23 cycles.
 pub proc min(b: u64, a: u64) -> u64
+    # Swap to get [a_lo, a_hi, b_lo, b_hi] for comparison
+    movup.3 movup.3
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
     dupw
     exec.gt
     movup.4
@@ -240,12 +315,15 @@ pub proc min(b: u64, a: u64) -> u64
     cdrop
 end
 
-#! Compares two unsigned 64 bit integers and drop the smaller one from the stack.
+#! Compares two unsigned 64 bit integers and drops the smaller one from the stack.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a when a > b, and b otherwise.
-#! This takes 23 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = max(a, b).
+#! This takes 24 cycles.
 pub proc max(b: u64, a: u64) -> u64
+    # Swap to get [a_lo, a_hi, b_lo, b_hi] for comparison
+    movup.3 movup.3
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
     dupw
     exec.lt
     movup.4
@@ -263,56 +341,159 @@ const U64_DIV_EVENT = event("miden::core::math::u64::u64_div")
 #! Performs division of two unsigned 64 bit integers discarding the remainder.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a // b
-#! This takes 54 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a // b
+#! This takes 56 cycles.
 pub proc div(b: u64, a: u64) -> u64
-    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3
+    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # We verify: a = q * b + r, where q is quotient, r is remainder
+    # Output: [q_lo, q_hi, ...]
 
-    adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    emit.U64_DIV_EVENT
+    # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
 
-    dup.3               # multiply quotient by the divisor and make sure the resulting value
-    dup.2               # fits into 2 32-bit limbs
+    adv_push.2
+    # Pops from advice: first q_hi, then q_lo, pushes them
+    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
+
+    #==========================================================================
+    # MULTIPLICATION BLOCK: Compute prod = q * b (must fit in 64 bits)
+    #==========================================================================
+    # q * b = (q_hi * 2^32 + q_lo) * (b_hi * 2^32 + b_lo)
+    #       = q_hi * b_hi * 2^64 + q_hi * b_lo * 2^32 + q_lo * b_hi * 2^32 + q_lo * b_lo
+    # For this to fit in 64 bits, q_hi * b_hi must be 0.
+
+    # Step 1: Compute q_lo * b_lo
+    dup.4
+    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.1
+    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_mul
-    dup.4
-    dup.4
+    # outputs [lo, hi]: prod1 = q_lo * b_lo
+    # => [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    # Step 2: Compute q_lo * b_hi + p1_hi (must have hi=0)
+    dup.7
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.3
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_madd
+    # outputs [lo, hi]: p2 = q_lo * b_hi + p1_hi
+    # => [p2_lo, p2_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     eq.0
     assert
-    dup.5
-    dup.3
+    # p2_hi must be 0; Stack: [p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    # Step 3: Compute q_hi * b_lo + p2_lo (must have hi=0)
+    dup.6
+    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.4
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_madd
+    # outputs [lo, hi]: p3 = q_hi * b_lo + p2_lo
+    # => [p3_lo, p3_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     eq.0
     assert
+    # p3_hi must be 0; Stack: [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    # Step 4: Check q_hi * b_hi = 0
+    dup.7
+    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     dup.4
-    dup.3
+    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     mul
     eq.0
     assert
+    # => [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # Now: prod_hi = p3_lo, prod_lo = p1_lo
+    # So: prod = prod_hi * 2^32 + prod_lo = q * b
 
-    adv_push.2          # pop the remainder from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    #==========================================================================
+    # REMAINDER BLOCK: Get remainder and verify b > r
+    #==========================================================================
+    adv_push.2
+    # Pops from advice: first r_hi, then r_lo
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
 
-    movup.7             # make sure the divisor is greater than the remainder. this also consumes
-    movup.7             # the divisor
+    movup.8
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_hi, ...]
+    movup.9
+    # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
+    # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     dup.3
+    # => [r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     dup.3
-    exec.gt
+    # => [r_lo, r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [b_hi, r_lo, r_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [b_lo, b_hi, r_lo, r_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    exec.lt
+    # Computes (r_lo, r_hi) < (b_lo, b_hi), i.e., r < b, consumes both pairs
+    # => [1, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     assert
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
 
-    swap                # add remainder to the previous result; this also consumes the remainder
+    #==========================================================================
+    # VERIFICATION BLOCK: Check prod + r = a
+    #==========================================================================
+    # We need to verify: prod_hi * 2^32 + prod_lo + r_hi * 2^32 + r_lo = a_hi * 2^32 + a_lo
+    # Which means:
+    #   sum_lo = (prod_lo + r_lo) mod 2^32
+    #   carry_lo = (prod_lo + r_lo) >> 32
+    #   sum_hi = prod_hi + r_hi + carry_lo
+    # And we check: sum_lo == a_lo, sum_hi == a_hi
+
+    # Current stack: [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+
     movup.3
+    # => [prod_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add
+    # outputs [carry, sum]: computes prod_lo + r_lo
+    # => [carry_lo, sum_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
+    # => [sum_lo, carry_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
+
+    # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
+    # Rearrange to get [carry_lo, prod_hi, r_hi] for u32overflowing_add3
     movup.3
+    # => [prod_hi, sum_lo, carry_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     movup.3
+    # => [r_hi, prod_hi, sum_lo, carry_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
+    # => [prod_hi, r_hi, sum_lo, carry_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [carry_lo, prod_hi, r_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add3
+    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # => [carry_hi, sum_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
     eq.0
     assert
+    # carry_hi must be 0 for result to fit in 64 bits
+    # => [sum_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
 
-    movup.4             # make sure the result we got is equal to the dividend
+    # Verify sum_hi == a_hi
+    movup.5
+    # => [a_hi, sum_hi, sum_lo, q_lo, q_hi, a_lo, ...]
     assert_eq
+    # => [sum_lo, q_lo, q_hi, a_lo, ...]
+
+    # Verify sum_lo == a_lo
     movup.3
-    assert_eq           # quotient remains on the stack
+    # => [a_lo, sum_lo, q_lo, q_hi, ...]
+    assert_eq
+    # => [q_lo, q_hi, ...]
 end
 
 # ===== MODULO OPERATION ==========================================================================
@@ -320,56 +501,144 @@ end
 #! Performs modulo operation of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a % b
-#! This takes 54 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a % b
+#! This takes 56 cycles.
 pub proc mod(b: u64, a: u64) -> u64
-    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3
+    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # We verify: a = q * b + r, where q is quotient, r is remainder
+    # Output: [r_lo, r_hi, ...] (remainder only)
 
-    adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    emit.U64_DIV_EVENT
+    # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
 
-    dup.3               # multiply quotient by the divisor and make sure the resulting value
-    dup.2               # fits into 2 32-bit limbs
+    adv_push.2
+    # Pops from advice: first q_hi, then q_lo, pushes them
+    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
+
+    #==========================================================================
+    # MULTIPLICATION BLOCK: Compute prod = q * b (must fit in 64 bits)
+    #==========================================================================
+    # Same structure as div but q is consumed (not needed in output)
+
+    dup.4
+    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.1
+    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_mul
-    dup.4
-    movup.4
-    u32overflowing_madd
-    eq.0
-    assert
-    dup.4
-    dup.3
-    u32overflowing_madd
-    eq.0
-    assert
-    dup.3
+    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    dup.7
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     movup.3
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32overflowing_madd
+    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p2_hi, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    eq.0
+    assert
+    # => [p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    dup.5
+    # => [b_lo, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.3
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32overflowing_madd
+    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p3_hi, p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    eq.0
+    assert
+    # => [p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # prod_hi = p3_lo, prod_lo = p1_lo
+
+    dup.6
+    # => [b_hi, p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    movup.3
+    # => [q_hi, b_hi, p3_lo, p1_lo, a_lo, a_hi, b_lo, b_hi, ...]
     mul
     eq.0
     assert
+    # => [prod_hi, prod_lo, a_lo, a_hi, b_lo, b_hi, ...]
 
-    adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    #==========================================================================
+    # REMAINDER BLOCK: Get remainder and verify b > r
+    #==========================================================================
+    adv_push.2
+    # Pops from advice: first r_hi, then r_lo
+    # => [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
 
-    movup.5             # make sure the divisor is greater than the remainder. this also consumes
-    movup.5             # the divisor
+    movup.6
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, b_hi, ...]
+    movup.7
+    # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
+    swap
+    # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     dup.3
+    # => [r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     dup.3
-    exec.gt
+    # => [r_lo, r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
+    movup.3
+    # => [b_hi, r_lo, r_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
+    movup.3
+    # => [b_lo, b_hi, r_lo, r_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
+    exec.lt
+    # Computes r < b, consumes both pairs
+    # => [1, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     assert
+    # => [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
 
-    dup.1               # add remainder to the previous result
+    #==========================================================================
+    # VERIFICATION BLOCK: Check prod + r = a
+    #==========================================================================
+    # We need: sum_lo = (prod_lo + r_lo) mod 2^32, sum_hi = prod_hi + r_hi + carry_lo
+    # And verify: sum_lo == a_lo, sum_hi == a_hi
+    # We also need to keep r_lo, r_hi on the stack for output
+
+    # Current stack: [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
+
+    # Duplicate r_lo for the add (we'll need it in output)
+    dup.0
+    # => [r_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     movup.4
+    # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
     u32overflowing_add
-    movup.4
+    # outputs [carry, sum]: computes prod_lo + r_lo
+    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
+
+    # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
+    # Duplicate r_hi for the add (we'll need it in output)
     dup.3
+    # => [r_hi, carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
+    movup.5
+    # => [prod_hi, r_hi, carry_lo, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
+    movup.2
+    # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     u32overflowing_add3
+    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     eq.0
     assert
+    # => [sum_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
 
-    movup.4             # make sure the result we got is equal to the dividend
+    # Verify sum_hi == a_hi
+    movup.5
+    # => [a_hi, sum_hi, sum_lo, r_lo, r_hi, a_lo, ...]
     assert_eq
+    # => [sum_lo, r_lo, r_hi, a_lo, ...]
+
+    # Verify sum_lo == a_lo
     movup.3
-    assert_eq           # remainder remains on the stack
+    # => [a_lo, sum_lo, r_lo, r_hi, ...]
+    assert_eq
+    # => [r_lo, r_hi, ...]
 end
 
 # ===== DIVMOD OPERATION ==========================================================================
@@ -377,56 +646,150 @@ end
 #! Performs divmod operation of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [r_hi, r_lo, q_hi, q_lo ...], where r = a % b, q = a / b
-#! This takes 54 cycles.
-pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
-    emit.U64_DIV_EVENT  # push the quotient and the remainder onto the advice stack
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [q_lo, q_hi, r_lo, r_hi, ...], where q = a / b, r = a % b.
+#! This takes 56 cycles.
+pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
+    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
+    movup.3 movup.3
+    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # We verify: a = q * b + r, where q is quotient, r is remainder
+    # Output: [q_lo, q_hi, r_lo, r_hi, ...]
 
-    adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    emit.U64_DIV_EVENT
+    # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
+    # => [a_lo, a_hi, b_lo, b_hi, ...]
 
-    dup.3               # multiply quotient by the divisor and make sure the resulting value
-    dup.2               # fits into 2 32-bit limbs
+    adv_push.2
+    # Pops from advice: first q_hi, then q_lo, pushes them
+    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
+
+    #==========================================================================
+    # MULTIPLICATION BLOCK: Compute prod = q * b (must fit in 64 bits)
+    #==========================================================================
+    # Same as div procedure
+
+    dup.4
+    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.1
+    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_mul
-    dup.4
-    dup.4
+    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    dup.7
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.3
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_madd
+    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     eq.0
     assert
-    dup.5
-    dup.3
+    # => [p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+
+    dup.6
+    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.4
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     u32overflowing_madd
+    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    swap
+    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     eq.0
     assert
+    # => [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # prod_hi = p3_lo, prod_lo = p1_lo
+
+    dup.7
+    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     dup.4
-    dup.3
+    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     mul
     eq.0
     assert
+    # => [prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
 
-    adv_push.2          # pop the quotient from the advice stack and assert it consists of
-    u32assert2          # 32-bit limbs
+    #==========================================================================
+    # REMAINDER BLOCK: Get remainder and verify b > r
+    #==========================================================================
+    adv_push.2
+    # Pops from advice: first r_hi, then r_lo
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    u32assert2
 
-    movup.7             # make sure the divisor is greater than the remainder. this also consumes
-    movup.7             # the divisor
+    movup.8
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_hi, ...]
+    movup.9
+    # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
+    # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     dup.3
+    # => [r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     dup.3
-    exec.gt
+    # => [r_lo, r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [b_hi, r_lo, r_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [b_lo, b_hi, r_lo, r_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    exec.lt
+    # Computes r < b, consumes both pairs
+    # => [1, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     assert
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
 
-    dup.1               # add remainder to the previous result
+    #==========================================================================
+    # VERIFICATION BLOCK: Check prod + r = a
+    #==========================================================================
+    # We need: sum_lo = (prod_lo + r_lo) mod 2^32, sum_hi = prod_hi + r_hi + carry_lo
+    # And verify: sum_lo == a_lo, sum_hi == a_hi
+    # We also need to keep r_lo, r_hi on the stack for output
+
+    # Current stack: [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
+
+    # Duplicate r_lo for the add (we'll need it in output)
+    dup.0
+    # => [r_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     movup.4
+    # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add
-    movup.4
+    # outputs [carry, sum]: computes prod_lo + r_lo
+    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
+
+    # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
+    # Duplicate r_hi for the add (we'll need it in output)
     dup.3
+    # => [r_hi, carry_lo, sum_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.5
+    # => [prod_hi, r_hi, carry_lo, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
+    movup.2
+    # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add3
+    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     eq.0
     assert
+    # => [sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
-    movup.6             # make sure the result we got is equal to the dividend
+    # Verify sum_hi == a_hi
+    movup.7
+    # => [a_hi, sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, ...]
     assert_eq
+    # => [sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, ...]
+
+    # Verify sum_lo == a_lo
     movup.5
-    assert_eq           # remainder remains on the stack
+    # => [a_lo, sum_lo, r_lo, r_hi, q_lo, q_hi, ...]
+    assert_eq
+    # => [r_lo, r_hi, q_lo, q_hi, ...]
+
+    # Reorder to [q_lo, q_hi, r_lo, r_hi]
+    movup.3
+    # => [q_hi, r_lo, r_hi, q_lo, ...]
+    movup.3
+    # => [q_lo, q_hi, r_lo, r_hi, ...]
 end
 
 # ===== BITWISE OPERATIONS ========================================================================
@@ -434,185 +797,432 @@ end
 #! Performs bitwise AND of two unsigned 64-bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a AND b.
-#! This takes 6 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a AND b.
+#! This takes 5 cycles.
 pub proc and(b: u64, a: u64) -> u64
-    swap
-    movup.3
-    u32and
-    swap
-    movup.2
-    u32and
+    movup.2     # => [a_lo, b_lo, b_hi, a_hi]
+    u32and      # => [c_lo, b_hi, a_hi]
+    swap.2      # => [a_hi, b_hi, c_lo]
+    u32and      # => [c_hi, c_lo]
+    swap        # => [c_lo, c_hi]
 end
 
 #! Performs bitwise OR of two unsigned 64 bit integers.
-#! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a OR b.
-#! This takes 16 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a OR b.
+#! This takes 5 cycles.
 pub proc or(b: u64, a: u64) -> u64
-    swap
-    movup.3
-    u32or
-    swap
-    movup.2
-    u32or
+    movup.2     # => [a_lo, b_lo, b_hi, a_hi]
+    u32or       # => [c_lo, b_hi, a_hi]
+    swap.2      # => [a_hi, b_hi, c_lo]
+    u32or       # => [c_hi, c_lo]
+    swap        # => [c_lo, c_hi]
 end
 
 #! Performs bitwise XOR of two unsigned 64 bit integers.
-#! The input values are assumed to be represented using 32 bit limbs, fails if they are not.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_hi, b_lo, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a XOR b.
-#! This takes 6 cycles.
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a XOR b.
+#! This takes 5 cycles.
 pub proc xor(b: u64, a: u64) -> u64
-    swap
-    movup.3
-    u32xor
-    swap
-    movup.2
-    u32xor
+    movup.2     # => [a_lo, b_lo, b_hi, a_hi]
+    u32xor      # => [c_lo, b_hi, a_hi]
+    swap.2      # => [a_hi, b_hi, c_lo]
+    u32xor      # => [c_hi, c_lo]
+    swap        # => [c_lo, c_hi]
 end
 
-#! Performs left shift of one unsigned 64-bit integer using the pow2 operation.
-#! The input value to be shifted is assumed to be represented using 32 bit limbs.
-#! The shift value should be in the range [0, 64), otherwise it will result in an
-#! error.
+#! Performs left shift of one unsigned 64-bit integer.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
-#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
-#! This takes 28 cycles.
-pub proc shl(b: u64, a: u64) -> u64
-    pow2
-    u32split
+#! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a << n) mod 2^64.
+#! This takes 21 cycles.
+pub proc shl(n: u32, a: u64) -> u64
+    pow2            # [2^n, a_lo, a_hi]
+    u32split        # [pow_lo, pow_hi, a_lo, a_hi]
+    movup.2         # [a_lo, pow_lo, pow_hi, a_hi]
+    movup.3         # [a_hi, a_lo, pow_lo, pow_hi]
+    swap            # [a_lo, a_hi, pow_lo, pow_hi]
     exec.wrapping_mul
 end
 
-
-#! Performs right shift of one unsigned 64-bit integer using the pow2 operation.
-#! The input value to be shifted is assumed to be represented using 32 bit limbs.
-#! The shift value should be in the range [0, 64), otherwise it will result in an
-#! error.
+#! Performs right shift of one unsigned 64-bit integer.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The shift value n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
-#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a >> b.
+#! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >> n.
 #! This takes 44 cycles.
-pub proc shr(b: u64, a: u64) -> u64
-    pow2
-    u32split
+pub proc shr(n: u32, a: u64) -> u64
+    # ==========================================================================
+    # RIGHT SHIFT: Computes a >> n where a is 64-bit and n is shift amount
+    # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
+    # Output: [c_lo, c_hi, ...] where c = a >> n
+    # ==========================================================================
 
+    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
+    movup.2     # [a_hi, n, a_lo]
+    swap        # [n, a_hi, a_lo]
+
+    # --- STEP 1: Compute 2^n and split into hi/lo ---
+    pow2
+    # [2^b, a_hi, a_lo, ...]
+
+    u32split swap
+    # [pow_hi, pow_lo, a_hi, a_lo, ...]
+    # For b=0: pow_hi=0, pow_lo=1
+    # For b=1: pow_hi=0, pow_lo=2
+    # For b=32: pow_hi=1, pow_lo=0
+
+    # --- STEP 2: Compute divisor = pow_hi + pow_lo ---
     dup.1
+    # [pow_lo, pow_hi, pow_lo, a_hi, a_lo, ...]
+
     add
+    # [pow_hi+pow_lo, pow_lo, a_hi, a_lo, ...]
+    # For b=0: divisor=1, pow_lo=1
+    # For b=1: divisor=2, pow_lo=2
+
+    # --- STEP 3: First division - a_hi / divisor ---
     movup.2
+    # [a_hi, pow_hi+pow_lo, pow_lo, a_lo, ...]
     swap
+    # [pow_hi+pow_lo, a_hi, pow_lo, a_lo, ...]
+    # u32divmod: [divisor, dividend, ...] -> [quotient, remainder, ...]
     u32divmod
+    # [quot1, rem1, pow_lo, a_lo, ...]
+    # quot1 = a_hi / divisor
+    # rem1 = a_hi % divisor
+
+    # --- STEP 4: Rearrange for second division ---
     movup.3
+    # [a_lo, quot1, rem1, pow_lo, ...]
+
     movup.3
+    # [pow_lo, a_lo, quot1, rem1, ...]
+
+    # --- STEP 5: Handle division by zero case (when pow_lo=0) ---
     dup
+    # [pow_lo, pow_lo, a_lo, quot1, rem1, ...]
+
     eq.0
+    # [is_zero, pow_lo, a_lo, quot1, rem1, ...]
+    # is_zero = 1 if pow_lo==0, else 0
+
+    # We want: adjusted_divisor = pow_lo - is_zero
+    # This gives pow_lo when pow_lo>0, or -1 (0xFFFFFFFF) when pow_lo=0
+    # u32overflowing_sub computes second - top = pow_lo - is_zero
     u32overflowing_sub
+    # Computes: pow_lo - is_zero
+    # [borrow, adjusted_div, a_lo, quot1, rem1, ...]
+    # For pow_lo=1, is_zero=0: adjusted_div=1, borrow=0
+    # For pow_lo=2, is_zero=0: adjusted_div=2, borrow=0
+    # For pow_lo=0, is_zero=1: adjusted_div=0xFFFFFFFF, borrow=1
+
     not
+    # [!borrow, adjusted_div, a_lo, quot1, rem1, ...]
+    # !borrow = 1 when no underflow (normal case), 0 when underflow (b>=32 case)
+
     movdn.4
+    # [adjusted_div, a_lo, quot1, rem1, !borrow, ...]
+
     dup
+    # [adjusted_div, adjusted_div, a_lo, quot1, rem1, !borrow, ...]
+
     movdn.4
+    # [adjusted_div, a_lo, quot1, rem1, adjusted_div, !borrow, ...]
+
+    # --- STEP 6: Second division - a_lo / adjusted_div ---
+    # => [adjusted_div, a_lo, quot1, rem1, adjusted_div, !borrow, ...]
+    # u32divmod: [divisor, dividend, ...] -> [quotient, remainder, ...]
     u32divmod
-    drop
+    # [quot2, rem2, quot1, rem1, adjusted_div, !borrow, ...]
+    # quot2 = a_lo / adjusted_div
+    # rem2 = a_lo % adjusted_div
+
+    swap drop
+    # [quot2, quot1, rem1, adjusted_div, !borrow, ...]
+
+    # --- STEP 7: Compute multiplier = (!borrow * 2^32) / adjusted_div ---
     push.4294967296
+    # [2^32, quot2, quot1, rem1, adjusted_div, !borrow, ...]
+
     dup.5
+    # [!borrow, 2^32, quot2, quot1, rem1, adjusted_div, !borrow, ...]
+
     mul
+    # [!borrow*2^32, quot2, quot1, rem1, adjusted_div, !borrow, ...]
+    # This is 2^32 when !borrow=1 (normal case), 0 when !borrow=0
+
     movup.4
+    # [adjusted_div, !borrow*2^32, quot2, quot1, rem1, !borrow, ...]
+
     div
-    movup.2
+    # [multiplier, quot2, quot1, rem1, !borrow, ...]
+    # multiplier = (!borrow * 2^32) / adjusted_div
+
+    # --- STEP 8: Compute c_lo = rem1 * multiplier + quot2 ---
+    movup.3
+    # [rem1, multiplier, quot2, quot1, !borrow, ...]
+
     mul
+    # [rem1*multiplier, quot2, quot1, !borrow, ...]
+
     add
+    # [c_lo, quot1, !borrow, ...]
+    # c_lo = rem1 * multiplier + quot2
+
+    # --- STEP 9: Conditional swap to get final result ---
     movup.2
+    # [!borrow, c_lo, quot1, ...]
+
     cswap
+    # If !borrow=1 (normal case): swap c_lo and quot1 -> [quot1, c_lo, ...]
+    # If !borrow=0 (b>=32 case): no swap -> [c_lo, quot1, ...]
+    # Result in BE format: [c_hi, c_lo, ...]
+
+    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
+    swap
 end
 
-#! Performs left rotation of one unsigned 64-bit integer using the pow2 operation.
-#! The input value to be shifted is assumed to be represented using 32 bit limbs.
-#! The shift value should be in the range [0, 64), otherwise it will result in an
-#! error.
+#! Performs left rotation of one unsigned 64-bit integer.
+#! The input value to be rotated is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
-#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
+#! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a <<< n (rotate left).
 #! This takes 35 cycles.
-pub proc rotl(b: u64, a: u64) -> u64
+pub proc rotl(n: u32, a: u64) -> u64
+    # ==========================================================================
+    # LEFT ROTATION: Computes a <<< n (rotate left by n bits)
+    # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
+    # Output: [c_lo, c_hi, ...] where c = a <<< n
+    # ==========================================================================
+
+    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
+    movup.2     # [a_hi, n, a_lo]
+    swap        # [n, a_hi, a_lo]
+
+    # --- STEP 1: Compute swap_flag = (31 - n) borrow, i.e., n > 31 ---
     push.31
+    # [31, b, a_hi, a_lo, ...]
+
     dup.1
+    # [b, 31, b, a_hi, a_lo, ...]
     u32overflowing_sub
+    # Computes: 31 - b
+    # [borrow, diff, b, a_hi, a_lo, ...]
+    # borrow = 1 if b > 31, else 0
+
     swap
+    # [diff, borrow, b, a_hi, a_lo, ...]
+
     drop
+    # [borrow, b, a_hi, a_lo, ...]
+    # borrow indicates if b > 31 (swap_flag)
+
     movdn.3
+    # [b, a_hi, a_lo, borrow, ...]
 
-    # Shift the low limb.
+    # --- STEP 2: Compute shift_amt = b & 31 and 2^shift_amt ---
     push.31
+    # [31, b, a_hi, a_lo, borrow, ...]
+
     u32and
+    # [b&31, a_hi, a_lo, borrow, ...]
+    # shift_amt = b mod 32
+
     pow2
+    # [2^shift_amt, a_hi, a_lo, borrow, ...]
+
     dup
+    # [2^shift_amt, 2^shift_amt, a_hi, a_lo, borrow, ...]
+
     movup.3
+    # [a_lo, 2^shift_amt, 2^shift_amt, a_hi, borrow, ...]
+
+    # --- STEP 3: Shift the low limb: a_lo * 2^shift_amt ---
     u32overflowing_mul
+    # outputs [lo, hi]: lo = (a_lo * 2^shift_amt) mod 2^32, hi = overflow
+    # [lo1, hi1, 2^shift_amt, a_hi, borrow, ...]
 
-    # Shift the high limb.
-    movup.3
-    movup.3
-    u32overflowing_madd
-
-    # Carry the overflow shift to the low bits.
-    movup.2
-    add
     swap
+    # [hi1, lo1, 2^shift_amt, a_hi, borrow, ...]
 
-    # Conditionally select the limb order based on whether it's shifting by > 31 or not.
+    # --- STEP 4: Shift the high limb: a_hi * 2^shift_amt + hi1 ---
+    movup.3
+    # [a_hi, hi1, lo1, 2^shift_amt, borrow, ...]
+
+    movup.3
+    # [2^shift_amt, a_hi, hi1, lo1, borrow, ...]
+
+    # u32overflowing_madd: computes top * second + third
+    # Input: [2^shift_amt, a_hi, hi1, ...]
+    # Computes: 2^shift_amt * a_hi + hi1
+    # outputs [lo, hi]
+    u32overflowing_madd
+    # [lo2, hi2, lo1, borrow, ...]
+    # lo2 = (a_hi * 2^shift_amt + hi1) mod 2^32
+    # hi2 = overflow (bits that wrap around)
+
+    swap
+    # [hi2, lo2, lo1, borrow, ...]
+
+    # --- STEP 5: Carry the overflow to the low bits ---
+    # c_lo = lo1 + hi2 (the overflow wraps to low bits in rotation)
     movup.2
+    # [lo1, hi2, lo2, borrow, ...]
+
+    add
+    # [c_lo, lo2, borrow, ...]
+    # c_lo = lo1 + hi2
+
+    swap
+    # [lo2, c_lo, borrow, ...]
+    # lo2 becomes c_hi
+
+    # --- STEP 6: Conditionally swap based on b > 31 ---
+    movup.2
+    # [borrow, lo2, c_lo, ...]
+    # borrow = 1 if b > 31
+
     cswap
+    # If borrow=1 (b>31): swap -> [c_lo, lo2, ...]
+    # If borrow=0 (b<=31): no swap -> [lo2, c_lo, ...]
+    # Result in BE format: [c_hi, c_lo, ...]
+
+    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
+    swap
 end
 
-#! Performs right rotation of one unsigned 64-bit integer using the pow2 operation.
-#! The input value to be shifted is assumed to be represented using 32 bit limbs.
-#! The shift value should be in the range [0, 64), otherwise it will result in an
-#! error.
+#! Performs right rotation of one unsigned 64-bit integer.
+#! The input value to be rotated is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The rotation amount n should be in the range [0, 64), otherwise it will result in an error.
 #! Stack transition looks as follows:
-#! [b, a_hi, a_lo, ...] -> [c_hi, c_lo, ...], where c = a << b mod 2^64.
+#! [n, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a >>> n (rotate right).
 #! This takes 44 cycles.
-pub proc rotr(b: u64, a: u64) -> u64
+pub proc rotr(n: u32, a: u64) -> u64
+    # ==========================================================================
+    # RIGHT ROTATION: Computes a >>> n (rotate right by n bits)
+    # Input:  [n, a_lo, a_hi, ...] where a = a_hi * 2^32 + a_lo
+    # Output: [c_lo, c_hi, ...] where c = a >>> n
+    #
+    # Strategy: Rotate right by n = left rotate by (64 - n)
+    #           For n in [0,64), we compute left shift by (32 - (n&31))
+    #           and conditionally swap limbs based on n < 32
+    # ==========================================================================
+
+    # Convert LE to internal BE format: [n, a_lo, a_hi] -> [n, a_hi, a_lo]
+    movup.2     # [a_hi, n, a_lo]
+    swap        # [n, a_hi, a_lo]
+
+    # --- STEP 1: Compute swap_flag = (n < 32) ---
     push.31
+    # [31, b, a_hi, a_lo, ...]
+
     dup.1
+    # [b, 31, b, a_hi, a_lo, ...]
+
     u32lt
+    # [b<32, b, a_hi, a_lo, ...]
+    # flag = 1 if b < 32, else 0
+
     movdn.3
+    # [b, a_hi, a_lo, flag, ...]
 
-    # Shift the low limb left by 32-b.
+    # --- STEP 2: Compute complement shift amount = 32 - (b & 31) ---
     push.31
+    # [31, b, a_hi, a_lo, flag, ...]
+
     u32and
+    # [b&31, a_hi, a_lo, flag, ...]
+    # shift_amt = b mod 32
+
     push.32
+    # [32, b&31, a_hi, a_lo, flag, ...]
+
     swap
+    # [b&31, 32, a_hi, a_lo, flag, ...]
     u32wrapping_sub
+    # [32-(b&31), a_hi, a_lo, flag, ...]
+    # complement_shift = 32 - (b mod 32)
+
     pow2
+    # [2^complement_shift, a_hi, a_lo, flag, ...]
+
     dup
-    movup.3
-    mul
-    u32split
+    # [2^complement_shift, 2^complement_shift, a_hi, a_lo, flag, ...]
 
-    # Shift the high limb left by 32-b.
     movup.3
-    movup.3
+    # [a_lo, 2^complement_shift, 2^complement_shift, a_hi, flag, ...]
+
+    # --- STEP 3: Left shift low limb by complement amount ---
     mul
+    # [a_lo * 2^complement_shift, 2^complement_shift, a_hi, flag, ...]
+    # This is a full field multiplication
+
+    u32split swap
+    # [hi1, lo1, 2^complement_shift, a_hi, flag, ...]
+    # hi1 = overflow bits (shift into high)
+    # lo1 = remaining bits
+
+    # --- STEP 4: Left shift high limb by complement amount and add overflow ---
+    movup.3
+    # [a_hi, hi1, lo1, 2^complement_shift, flag, ...]
+
+    movup.3
+    # [2^complement_shift, a_hi, hi1, lo1, flag, ...]
+
+    mul
+    # [a_hi * 2^complement_shift, hi1, lo1, flag, ...]
+
     add
-    u32split
+    # [(a_hi * 2^complement_shift) + hi1, lo1, flag, ...]
+    # This combines the shifted high limb with overflow from low
 
-    # Carry the overflow shift to the low bits.
+    u32split swap
+    # [hi2, lo2, lo1, flag, ...]
+    # hi2 = overflow bits (wrap around to low)
+    # lo2 = new high limb value
+
+    # --- STEP 5: Carry the overflow to the low bits ---
     movup.2
+    # [lo1, hi2, lo2, flag, ...]
+
     add
+    # [lo1 + hi2, lo2, flag, ...]
+    # c_lo = lo1 + hi2 (overflow wraps to low bits)
+
     swap
+    # [lo2, c_lo, flag, ...]
+    # lo2 = c_hi
 
-    # Conditionally select the limb order based on whether it's shifting by > 31 or not.
+    # --- STEP 6: Conditionally swap based on b < 32 ---
     movup.2
+    # [flag, lo2, c_lo, ...]
+    # flag = 1 if b < 32
+
     not
+    # [!flag, lo2, c_lo, ...]
+    # !flag = 1 if b >= 32
+
     cswap
+    # If !flag=1 (b>=32): swap -> [c_lo, lo2, ...]
+    # If !flag=0 (b<32): no swap -> [lo2, c_lo, ...]
+    # Result in BE format: [c_hi, c_lo, ...]
+
+    # Convert BE output to LE: [c_hi, c_lo] -> [c_lo, c_hi]
+    swap
 end
 
 #! Counts the number of leading zeros of one unsigned 64-bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [n_hi, n_lo, ...] -> [clz, ...], where clz is a number of leading zeros of value n.
+#! [n_lo, n_hi, ...] -> [clz, ...], where clz is the number of leading zeros of value n.
 #! This takes 48 cycles.
 pub proc clz(n: u64) -> u8
+    # Input: [n_lo, n_hi, ...]
+    swap        # [n_hi, n_lo, ...]
     dup.0
     eq.0
 
@@ -630,10 +1240,10 @@ end
 #! Counts the number of trailing zeros of one unsigned 64-bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [n_hi, n_lo, ...] -> [ctz, ...], where ctz is a number of trailing zeros of value n.
+#! [n_lo, n_hi, ...] -> [ctz, ...], where ctz is the number of trailing zeros of value n.
 #! This takes 41 cycles.
 pub proc ctz(n: u64) -> u8
-    swap
+    # Input: [n_lo, n_hi, ...]
     dup.0
     eq.0
 
@@ -651,9 +1261,11 @@ end
 #! Counts the number of leading ones of one unsigned 64-bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [n_hi, n_lo, ...] -> [clo, ...], where clo is a number of leading ones of value n.
+#! [n_lo, n_hi, ...] -> [clo, ...], where clo is the number of leading ones of value n.
 #! This takes 47 cycles.
 pub proc clo(n: u64) -> u8
+    # Input: [n_lo, n_hi, ...]
+    swap        # [n_hi, n_lo, ...]
     dup.0
     eq.4294967295
 
@@ -671,10 +1283,10 @@ end
 #! Counts the number of trailing ones of one unsigned 64-bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [n_hi, n_lo, ...] -> [cto, ...], where cto is a number of trailing ones of value n.
+#! [n_lo, n_hi, ...] -> [cto, ...], where cto is the number of trailing ones of value n.
 #! This takes 40 cycles.
 pub proc cto(n: u64) -> u8
-    swap
+    # Input: [n_lo, n_hi, ...]
     dup.0
     eq.4294967295
 
@@ -685,6 +1297,6 @@ pub proc cto(n: u64) -> u8
     else
         swap
         drop
-        u32cto # ctz(n_lo)
+        u32cto # cto(n_lo)
     end
 end

@@ -1,8 +1,9 @@
 use miden_air::trace::RowIndex;
-use miden_core::{Word, assert_matches};
+use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing};
 use miden_processor::{ContextId, DefaultHost, ExecutionError, Program, fast::FastProcessor};
 use miden_utils_testing::{
-    Felt, ONE, ZERO, build_expected_hash, build_expected_perm, felt_slice_to_ints,
+    AdviceStackBuilder, Felt, ONE, ZERO, build_expected_hash, build_expected_perm,
+    felt_slice_to_ints,
 };
 
 #[test]
@@ -188,7 +189,7 @@ fn test_pipe_double_words_to_memory() {
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
     let mut expected_stack =
-        felt_slice_to_ints(&build_expected_perm(&[0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
+        felt_slice_to_ints(&build_expected_perm(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]));
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,
@@ -272,10 +273,11 @@ fn test_pipe_preimage_to_memory() {
     );
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&build_expected_hash(data));
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     build_test!(three_words, operand_stack, &advice_stack).expect_stack_and_memory(
         &[1012],
         mem_addr,
@@ -298,11 +300,13 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack[0] += 1; // corrupt the expected hash
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut corrupted_hash = build_expected_hash(data);
+    corrupted_hash[0] += Felt::ONE; // corrupt the expected hash
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&corrupted_hash);
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     let res = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert!(res.is_err());
 }
@@ -325,10 +329,11 @@ fn test_pipe_double_words_preimage_to_memory() {
     );
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&build_expected_hash(data));
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     build_test!(four_words, operand_stack, &advice_stack).expect_stack_and_memory(
         &[mem_addr + (4u64 * 4u64)],
         mem_addr as u32,
@@ -351,11 +356,13 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack[0] += 1; // corrupt the expected hash
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut corrupted_hash = build_expected_hash(data);
+    corrupted_hash[0] += Felt::ONE; // corrupt the expected hash
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&corrupted_hash);
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
     assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }
@@ -375,10 +382,11 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_push(&build_expected_hash(data));
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
 }

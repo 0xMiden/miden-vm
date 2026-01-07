@@ -161,9 +161,9 @@ fn build_trace(
 /// Validate the hasher trace output by the hperm operation. The full hasher trace is tested in
 /// the Hasher module, so this just tests the ChipletsTrace selectors and the initial columns
 /// of the hasher trace.
+#[allow(clippy::needless_range_loop)]
 fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // The selectors should match the hasher selectors
-    #[expect(clippy::needless_range_loop)]
     for row in start..end {
         // The selectors should match the selectors for the hasher segment
         assert_eq!(ZERO, trace[0][row]);

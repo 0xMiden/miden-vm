@@ -28,7 +28,8 @@ pub use miden_core::{
 };
 use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, BaseHost, ContextId, ExecutionError, ExecutionTrace, ProcessState,
+    AdviceInputs, AdviceProvider, AdviceStackBuilder, BaseHost, ContextId, ExecutionError,
+    ExecutionTrace, ProcessState,
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, EventHandler, Program,
@@ -603,13 +604,7 @@ impl Test {
 
 /// Appends a Word to an operand stack Vec.
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    target.extend(word.iter().map(Felt::as_int));
-}
-
-/// Add a Word to the bottom of the operand stack Vec.
-pub fn prepend_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    // Actual insertion happens when this iterator is dropped.
-    let _iterator = target.splice(0..0, word.iter().map(Felt::as_canonical_u64));
+    target.extend(word.iter().map(Felt::as_canonical_u64));
 }
 
 /// Converts a slice of Felts into a vector of u64 values.
@@ -632,28 +627,32 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
 
 /// Given a hasher state, perform one permutation.
 ///
-/// The values of `values` should be:
-/// - 0..4 the capacity
-/// - 4..12 the rate
-///
-/// Return the result of the permutation in stack order.
+/// This helper reconstructs that state, applies a permutation, and returns the resulting
+/// `[RATE0',RATE1',CAP']` back in stack order.
 pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
-    let mut expected = [ZERO; STATE_WIDTH];
-    for (&value, result) in values.iter().zip(expected.iter_mut()) {
-        *result = Felt::new(value);
-    }
-    apply_permutation(&mut expected);
-    expected.reverse();
+    assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
 
-    expected
+    // Reconstruct the internal RPO state from the initial stack:
+    // stack[0..12] = [v0, ..., v11]
+    // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
+    let mut state = [ZERO; STATE_WIDTH];
+    for i in 0..STATE_WIDTH {
+        state[i] = Felt::new(values[i]);
+    }
+
+    // Apply the permutation
+    apply_permutation(&mut state);
+
+    // Map internal state back to stack layout [RATE0', RATE1', CAP']
+    let mut out = [ZERO; STATE_WIDTH];
+    out[..STATE_WIDTH].copy_from_slice(&state[..STATE_WIDTH]);
+
+    out
 }
 
 pub fn build_expected_hash(values: &[u64]) -> [Felt; 4] {
     let digest = hash_elements(&values.iter().map(|&v| Felt::new(v)).collect::<Vec<_>>());
-    let mut expected: [Felt; 4] = digest.into();
-    expected.reverse();
-
-    expected
+    digest.into()
 }
 
 // Generates the MASM code which pushes the input values during the execution of the program.

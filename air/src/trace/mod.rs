@@ -76,31 +76,38 @@ pub mod log_precompile {
 
     // STACK LAYOUT (TOP OF STACK)
     // --------------------------------------------------------------------------------------------
-    // After executing `log_precompile`, the top 12 stack elements contain `[R1, R0, CAP_NEXT]`
-    // (each a 4-element word) in big-endian order.
+    // After executing `log_precompile`, the top 12 stack elements contain `[R0, R1, CAP_NEXT]`
+    // in LE (structural) order.
 
-    pub const STACK_R1_BASE: usize = 0;
-    pub const STACK_R1_RANGE: Range<usize> = range(STACK_R1_BASE, DIGEST_LEN);
-
-    pub const STACK_R0_BASE: usize = STACK_R1_RANGE.end;
+    pub const STACK_R0_BASE: usize = 0;
     pub const STACK_R0_RANGE: Range<usize> = range(STACK_R0_BASE, DIGEST_LEN);
 
-    pub const STACK_CAP_NEXT_BASE: usize = STACK_R0_RANGE.end;
+    pub const STACK_R1_BASE: usize = STACK_R0_RANGE.end;
+    pub const STACK_R1_RANGE: Range<usize> = range(STACK_R1_BASE, DIGEST_LEN);
+
+    pub const STACK_CAP_NEXT_BASE: usize = STACK_R1_RANGE.end;
     pub const STACK_CAP_NEXT_RANGE: Range<usize> = range(STACK_CAP_NEXT_BASE, CAPACITY_LEN);
 
     /// Stack range containing `COMM` prior to executing `log_precompile`.
-    pub const STACK_COMM_RANGE: Range<usize> = STACK_R1_RANGE;
+    pub const STACK_COMM_RANGE: Range<usize> = STACK_R0_RANGE;
     /// Stack range containing `TAG` prior to executing `log_precompile`.
-    pub const STACK_TAG_RANGE: Range<usize> = STACK_R0_RANGE;
+    pub const STACK_TAG_RANGE: Range<usize> = STACK_R1_RANGE;
 
     // HASHER STATE LAYOUT
     // --------------------------------------------------------------------------------------------
-    // The hasher permutation uses a 12-element state. For `log_precompile` the state is interpreted
-    // differently for the input (`[CAP_PREV, TAG, COMM]`) and output (`[CAP_NEXT, R0, R1]`) words.
+    // The hasher permutation uses a 12-element state. With LE layout, the state is interpreted
+    // as [RATE0, RATE1, CAPACITY]:
+    // - RATE0 occupies the first 4 lanes (0..4),
+    // - RATE1 occupies the next 4 lanes (4..8),
+    // - CAPACITY occupies the last 4 lanes (8..12).
+    //
+    // For `log_precompile` this corresponds to:
+    // - input state words:  [COMM, TAG, CAP_PREV]
+    // - output state words: [R0,   R1,  CAP_NEXT]
 
-    pub const STATE_CAP_RANGE: Range<usize> = range(0, CAPACITY_LEN);
-    pub const STATE_RATE_0_RANGE: Range<usize> = range(STATE_CAP_RANGE.end, DIGEST_LEN);
+    pub const STATE_RATE_0_RANGE: Range<usize> = range(0, DIGEST_LEN);
     pub const STATE_RATE_1_RANGE: Range<usize> = range(STATE_RATE_0_RANGE.end, DIGEST_LEN);
+    pub const STATE_CAP_RANGE: Range<usize> = range(STATE_RATE_1_RANGE.end, CAPACITY_LEN);
 }
 
 // Range check trace

@@ -44,11 +44,9 @@ impl EventHandler for Sha512Precompile {
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;
         let preimage = Sha512Preimage::new(input_bytes);
         let digest = preimage.digest();
-        let mut rev = digest.0;
-        rev.reverse();
 
         Ok(vec![
-            AdviceMutation::extend_stack(rev),
+            AdviceMutation::extend_stack_for_adv_pipe(digest.0),
             AdviceMutation::extend_precompile_requests([preimage.into()]),
         ])
     }

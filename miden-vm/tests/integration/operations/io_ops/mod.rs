@@ -63,19 +63,19 @@ fn mem_stream_pipe() {
 
     // --- assert that the hashed output values are correct ---------------------------------------
     // compute the expected result of hashing the elements in the advice stack inputs.
+    // Rate words come first in state, then capacity:
+    // state = [rate1_0-3, rate2_4-7, capacity_8-11]
     let mut state: [Felt; 12] =
-        [0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8].to_elements().try_into().unwrap();
+        [1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0].to_elements().try_into().unwrap();
     apply_permutation(&mut state);
 
-    // to get the final state of the stack, take the middle 4 elements of the hashed state, reverse
-    // them, and then duplicate them (since we expect the outputs of adv_pipe and mem_stream to be
-    // equal).
-    let mut final_stack = state[4..8]
+    // The MASM code keeps state[4..8] (rate word 2) after the stack manipulation:
+    // dropw swapw dropw movup.4 drop
+    let final_stack: Vec<u64> = state[4..8]
         .iter()
         .chain(state[4..8].iter())
         .map(|&v| v.as_canonical_u64())
-        .collect::<Vec<u64>>();
-    final_stack.reverse();
+        .collect();
 
     test.expect_stack(&final_stack);
 }

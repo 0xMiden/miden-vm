@@ -318,8 +318,9 @@ fn test_debug_adv_stack() {
             debug.adv_stack.10
 
             padw adv_loadw
-            # => [5, 6, 7, 8, 4, 3, 2, 1, 0]
-            debug.adv_stack # => [4, 3, 2, 1, 0]
+            # adv_loadw loads structural word (no reversal needed)
+            # => [8, 7, 6, 5, 4, 3, 2, 1, 0]
+            debug.adv_stack # => [4, 3, 2, 1]
             debug.stack.9
             push.[8, 7, 6, 5] assert_eqw
             # => [4, 3, 2, 1, 0]
@@ -389,10 +390,10 @@ fn test_debug_adv_stack() {
     ├── 2: 2
     └── 3: 1
     Stack state in interval [0, 8] before step 10:
-    ├── 0: 5
-    ├── 1: 6
-    ├── 2: 7
-    ├── 3: 8
+    ├── 0: 8
+    ├── 1: 7
+    ├── 2: 6
+    ├── 3: 5
     ├── 4: 4
     ├── 5: 3
     ├── 6: 2

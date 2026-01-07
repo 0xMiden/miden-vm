@@ -344,9 +344,12 @@ fn test_op_expacc() {
 #[test]
 fn test_op_ext2mul() {
     // initialize the stack with random values
+    // Low coefficient closer to top
     let [a0, a1, b0, b1] = [rand_value::<Felt>(); 4];
 
-    let mut processor = FastProcessor::new(&[a0, a1, b0, b1]);
+    // For LE, stack should be [b0, b1, a0, a1] with b0 on top
+    // FastProcessor::new expects bottom-first, so pass [a1, a0, b1, b0]
+    let mut processor = FastProcessor::new(&[a1, a0, b1, b0]);
 
     // multiply the top two extension field elements
     op_ext2mul(&mut processor);
@@ -354,7 +357,8 @@ fn test_op_ext2mul() {
     let b = QuadFelt::new_complex(b0, b1);
     let product = b * a;
     let c = product.as_basis_coefficients_slice();
-    let expected = build_expected(&[b1, b0, c[1], c[0]]);
+    // LE output: [b0, b1, c0, c1] with b0 on top
+    let expected = build_expected(&[b0, b1, c[0], c[1]]);
 
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
     assert_eq!(expected, processor.stack_top());

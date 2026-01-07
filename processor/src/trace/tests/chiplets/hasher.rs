@@ -6,10 +6,10 @@ use miden_air::trace::{
     chiplets::{
         HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, HASHER_TRACE_OFFSET,
         hasher::{
-            CAPACITY_DOMAIN_IDX, CAPACITY_LEN, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState,
-            LINEAR_HASH, LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW,
-            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RETURN_HASH,
-            RETURN_HASH_LABEL, RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
+            CAPACITY_DOMAIN_IDX, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState, LINEAR_HASH,
+            LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW, MR_UPDATE_NEW_LABEL,
+            MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH, RETURN_HASH_LABEL,
+            RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
         },
     },
     decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
@@ -22,6 +22,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
 };
+use miden_utils_testing::stack;
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
@@ -351,11 +352,15 @@ pub fn b_chip_permutation() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
+    // Stack inputs are reversed: last element ends up at top of stack (s0)
     let stack = vec![8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8];
     let trace = build_trace_from_program(&program, &stack);
 
+    // The actual stack has reversed order: [8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8]
+    // where s0=8 (top), s1=7, ..., s11=8 (first input element)
     let mut hperm_state: [Felt; STATE_WIDTH] = stack
         .iter()
+        .rev()
         .map(|v| Felt::new(*v))
         .collect::<Vec<_>>()
         .try_into()
@@ -464,13 +469,12 @@ pub fn b_chip_log_precompile() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    // Stack inputs are specified deepest-first: [1,2,3,4,5,6,7,8]. The VM reverses them at
-    // initialization, so the live stack holds [8,7,6,5,4,3,2,1] with 8 on top. Because
-    // `stack.get_word` collects elements in reverse order from the stack slots (i.e.,
-    // [stack[3], stack[2], stack[1], stack[0]]), `COMM` is read as
-    // [5,6,7,8] from stack slots 0-3 and `TAG` as [1,2,3,4] from slots 4-7.
-    let stack = vec![1, 2, 3, 4, 5, 6, 7, 8];
-    let trace = build_trace_from_program(&program, &stack);
+    // Runtime stack layout: [COMM(5,6,7,8), TAG(1,2,3,4)] with comm[0]=5 on top
+    let comm_word: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
+    let tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
+    // stack! takes elements in runtime order (first = top) and handles reversal
+    let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
+    let trace = build_trace_from_program(&program, &stack_inputs);
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -499,14 +503,12 @@ pub fn b_chip_log_precompile() {
     // at cycle 1 log_precompile is executed and the initialization and result of the hash are both
     // requested by the stack.
 
-    // Build the input state: [CAP_PREV, TAG, COMM]
+    // Build the input state in LE sponge order: [COMM, TAG, CAP_PREV] = [RATE0, RATE1, CAP]
     // CAP_PREV comes from helper registers and defaults to [0,0,0,0].
-    // TAG = [1,2,3,4] is drawn via `stack.get_word(4)`.
-    // COMM = [5,6,7,8] is drawn via `stack.get_word(0)`.
-    let log_pc_state = init_state_from_words(
-        &[Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into(),
-        &[Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into(),
-    );
+    // COMM = [5,6,7,8] is at stack positions 0-3.
+    // TAG = [1,2,3,4] is at stack positions 4-7.
+    // init_state_from_words(w1, w2) puts w1 at RATE0 and w2 at RATE1.
+    let log_pc_state = init_state_from_words(&comm_word, &tag_word);
 
     let log_pc_init = build_expected(
         &alphas,
@@ -585,19 +587,15 @@ fn b_chip_mpverify() {
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(&leaves).unwrap();
 
-    let stack_inputs = [
-        tree.root()[0].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[3].as_canonical_u64(),
-        index as u64,
-        tree.depth() as u64,
-        leaves[index][0].as_canonical_u64(),
-        leaves[index][1].as_canonical_u64(),
-        leaves[index][2].as_canonical_u64(),
-        leaves[index][3].as_canonical_u64(),
-    ];
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
+    // Build runtime stack layout: [node(0-3), depth(4), index(5), root(6-9)]
+    // Element 0 (node[0]) is on top of stack
+    let mut runtime_stack = Vec::new();
+    runtime_stack.extend_from_slice(&word_to_ints(leaves[index]));
+    runtime_stack.push(tree.depth() as u64);
+    runtime_stack.push(index as u64);
+    runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
+    runtime_stack.reverse();
+    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -633,10 +631,7 @@ fn b_chip_mpverify() {
     let path = tree
         .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
         .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(
-        &[path[0][0], path[0][1], path[0][2], path[0][3]].into(),
-        &[leaves[index][0], leaves[index][1], leaves[index][2], leaves[index][3]].into(),
-    );
+    let mp_state = init_state_from_words(&path[0], &leaves[index]);
     let mp_init = build_expected(
         &alphas,
         MP_VERIFY_LABEL,
@@ -649,24 +644,12 @@ fn b_chip_mpverify() {
     expected *= mp_init.inverse();
 
     let mp_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
+    let mut result_state = [ZERO; STATE_WIDTH];
+    result_state[4..8].copy_from_slice(tree.root().as_elements());
     let mp_result = build_expected(
         &alphas,
         RETURN_HASH_LABEL,
-        // for the return hash, only the state digest matters, and it should match the root
-        [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            tree.root()[0],
-            tree.root()[1],
-            tree.root()[2],
-            tree.root()[3],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        result_state,
         [ZERO; STATE_WIDTH],
         Felt::new(mp_verify_complete as u64),
         Felt::new(index as u64 >> tree.depth()),
@@ -730,23 +713,16 @@ fn b_chip_mrupdate() {
 
     let new_leaf_value = leaves[0];
 
-    let stack_inputs = [
-        new_leaf_value[0].as_canonical_u64(),
-        new_leaf_value[1].as_canonical_u64(),
-        new_leaf_value[2].as_canonical_u64(),
-        new_leaf_value[3].as_canonical_u64(),
-        old_root[0].as_canonical_u64(),
-        old_root[1].as_canonical_u64(),
-        old_root[2].as_canonical_u64(),
-        old_root[3].as_canonical_u64(),
-        index as u64,
-        tree.depth() as u64,
-        old_leaf_value[0].as_canonical_u64(),
-        old_leaf_value[1].as_canonical_u64(),
-        old_leaf_value[2].as_canonical_u64(),
-        old_leaf_value[3].as_canonical_u64(),
-    ];
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs).unwrap();
+    // Build runtime stack layout: [old_leaf(0-3), depth(4), index(5), old_root(6-9),
+    // new_leaf(10-13)]. Element 0 (old_leaf[0]) is on top of stack.
+    let mut runtime_stack = Vec::new();
+    runtime_stack.extend_from_slice(&word_to_ints(old_leaf_value));
+    runtime_stack.push(tree.depth() as u64);
+    runtime_stack.push(index as u64);
+    runtime_stack.extend_from_slice(&word_to_ints(old_root));
+    runtime_stack.extend_from_slice(&word_to_ints(new_leaf_value));
+    runtime_stack.reverse();
+    let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
@@ -779,10 +755,7 @@ fn b_chip_mrupdate() {
     let path = tree
         .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
         .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(
-        &[path[0][0], path[0][1], path[0][2], path[0][3]].into(),
-        &[leaves[index][0], leaves[index][1], leaves[index][2], leaves[index][3]].into(),
-    );
+    let mp_state = init_state_from_words(&path[0], &leaves[index]);
     let mp_init_old = build_expected(
         &alphas,
         MR_UPDATE_OLD_LABEL,
@@ -795,24 +768,12 @@ fn b_chip_mrupdate() {
     expected *= mp_init_old.inverse();
 
     let mp_old_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
+    let mut result_state_old = [ZERO; STATE_WIDTH];
+    result_state_old[4..8].copy_from_slice(tree.root().as_elements());
     let mp_result_old = build_expected(
         &alphas,
         RETURN_HASH_LABEL,
-        // for the return hash, only the state digest matters, and it should match the root
-        [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            tree.root()[0],
-            tree.root()[1],
-            tree.root()[2],
-            tree.root()[3],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        result_state_old,
         [ZERO; STATE_WIDTH],
         Felt::new(mp_old_verify_complete as u64),
         Felt::new(index as u64 >> tree.depth()),
@@ -830,10 +791,7 @@ fn b_chip_mrupdate() {
     let path = tree
         .get_path(NodeIndex::new(tree.depth(), index as u64).unwrap())
         .expect("failed to get Merkle tree path");
-    let mp_state = init_state_from_words(
-        &[path[0][0], path[0][1], path[0][2], path[0][3]].into(),
-        &[new_leaf_value[0], new_leaf_value[1], new_leaf_value[2], new_leaf_value[3]].into(),
-    );
+    let mp_state = init_state_from_words(&path[0], &new_leaf_value);
 
     let mp_new_verify_complete = mp_old_verify_complete + (tree.depth() as usize) * HASH_CYCLE_LEN;
     let mp_init_new = build_expected(
@@ -848,24 +806,12 @@ fn b_chip_mrupdate() {
     // request the initialization of the second Merkle path verification
     expected *= mp_init_new.inverse();
 
+    let mut result_state_new = [ZERO; STATE_WIDTH];
+    result_state_new[4..8].copy_from_slice(new_root.as_elements());
     let mp_result_new = build_expected(
         &alphas,
         RETURN_HASH_LABEL,
-        // for the return hash, only the state digest matters, and it should match the root
-        [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            new_root[0],
-            new_root[1],
-            new_root[2],
-            new_root[3],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        result_state_new,
         [ZERO; STATE_WIDTH],
         Felt::new(mp_new_verify_complete as u64),
         Felt::new(index as u64 >> tree.depth()),
@@ -951,8 +897,9 @@ fn build_expected(
         // include the entire state (words a, b, c)
         value += build_value(&alphas[4..16], &state);
     } else if label == LINEAR_HASH_LABEL {
-        // include the next rate elements
-        value += build_value(&alphas[8..16], &next_state[CAPACITY_LEN..]);
+        // Include the next absorbed rate portion of the state (RATE0 || RATE1).
+        // With LE sponge layout [RATE0, RATE1, CAP], rate is at indices 0..8.
+        value += build_value(&alphas[8..16], &next_state[0..RATE_LEN]);
     } else if label == RETURN_HASH_LABEL {
         // include the digest (word b)
         value += build_value(&alphas[8..12], &state[DIGEST_RANGE]);
@@ -963,8 +910,10 @@ fn build_expected(
                 || label == MR_UPDATE_OLD_LABEL
         );
         let bit = index.as_canonical_u64() & 1;
-        let left_word = build_value(&alphas[8..12], &state[DIGEST_RANGE]);
-        let right_word = build_value(&alphas[8..12], &state[DIGEST_RANGE.end..]);
+        // For Merkle operations, RATE0 and RATE1 hold the two child digests.
+        // With LE sponge layout [RATE0, RATE1, CAP], they are at indices 0..4 and 4..8.
+        let left_word = build_value(&alphas[8..12], &state[0..4]);
+        let right_word = build_value(&alphas[8..12], &state[4..8]);
 
         value += Felt::new(1 - bit) * left_word + Felt::new(bit) * right_word;
     }
@@ -988,12 +937,12 @@ fn build_expected_from_trace(trace: &ExecutionTrace, alphas: &[Felt], row: RowIn
 
     let cycle_row = addr_to_cycle_row(addr);
 
+    // Trace is already in sponge order [RATE0, RATE1, CAP]
     let mut state = [ZERO; STATE_WIDTH];
     let mut next_state = [ZERO; STATE_WIDTH];
     for (i, col_idx) in HASHER_STATE_COL_RANGE.enumerate() {
         state[i] = trace.main_trace.get_column(col_idx)[row];
         if cycle_row == 7 && label == LINEAR_HASH_LABEL {
-            // fill the next state with the elements being absorbed.
             next_state[i] = trace.main_trace.get_column(col_idx)[row + 1];
         }
     }
@@ -1044,10 +993,11 @@ fn fill_state_from_decoder_with_domain(
 }
 
 /// Populates the provided HasherState with the state stored in the decoder's execution trace at the
-/// specified row.
+/// specified row. The decoder stores the 8 rate elements which go at sponge indices 0..8.
 fn fill_state_from_decoder(trace: &ExecutionTrace, state: &mut HasherState, row: RowIndex) {
     for (i, col_idx) in DECODER_HASHER_STATE_RANGE.enumerate() {
-        state[CAPACITY_LEN + i] = trace.main_trace.get_column(col_idx)[row];
+        // In sponge order [RATE0, RATE1, CAP], rate is at indices 0..8
+        state[i] = trace.main_trace.get_column(col_idx)[row];
     }
 }
 
@@ -1096,4 +1046,14 @@ fn init_leaves(values: &[u64]) -> Vec<Word> {
 /// Initializes a Merkle tree leaf with the specified value.
 fn init_leaf(value: u64) -> Word {
     [Felt::new(value), ZERO, ZERO, ZERO].into()
+}
+
+/// Converts a Word to stack input values (u64 array) in element order.
+fn word_to_ints(w: Word) -> [u64; 4] {
+    [
+        w[0].as_canonical_u64(),
+        w[1].as_canonical_u64(),
+        w[2].as_canonical_u64(),
+        w[3].as_canonical_u64(),
+    ]
 }

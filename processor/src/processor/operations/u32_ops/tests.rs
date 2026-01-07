@@ -22,7 +22,8 @@ proptest! {
         let lo = (a as u32) as u64;
 
         let _ = op_u32split(&mut processor, &mut tracer).unwrap();
-        let expected = build_expected(&[hi, lo]);
+        // Output: [lo, hi] - lo on top
+        let expected = build_expected(&[lo, hi]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 
@@ -35,7 +36,8 @@ proptest! {
         let lo = (b as u32) as u64;
 
         let _ = op_u32split(&mut processor, &mut tracer).unwrap();
-        let expected = build_expected(&[hi, lo, a]);
+        // Output: [lo, hi, ...] - lo on top
+        let expected = build_expected(&[lo, hi, a]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 }
@@ -162,7 +164,8 @@ proptest! {
         let lo = (result as u32) as u64;
 
         let _ = op_u32mul(&mut processor, &(), &mut tracer).unwrap();
-        let expected = build_expected(&[hi, lo, c as u64, d as u64]);
+        // Output: [lo, hi, ...] - lo on top
+        let expected = build_expected(&[lo, hi, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 
@@ -181,7 +184,8 @@ proptest! {
         let lo = (result as u32) as u64;
 
         let _ = op_u32madd(&mut processor, &(), &mut tracer).unwrap();
-        let expected = build_expected(&[hi, lo, d as u64]);
+        // Output: [lo, hi, ...] - lo on top
+        let expected = build_expected(&[lo, hi, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 
@@ -200,7 +204,8 @@ proptest! {
         let r = b % a;
 
         let _ = op_u32div(&mut processor, &(), &mut tracer).unwrap();
-        let expected = build_expected(&[r as u64, q as u64, c as u64, d as u64]);
+        // Output: [quotient, remainder, ...] - quotient on top
+        let expected = build_expected(&[q as u64, r as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 }

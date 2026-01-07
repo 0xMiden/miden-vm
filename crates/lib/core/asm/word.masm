@@ -1,21 +1,9 @@
 # ===== WORD FUNCTIONS ==========================================================================
 
-#! Reverses order of the first four elements on the stack
-#!
-#! Note: This functionality is also available as the `reversew` instruction
-#!
-#! Inputs:  [a, b, c, d, ...]
-#! Outputs: [d, c, b, a, ...]
-#!
-#! Cycles: 3
-pub proc reverse(input: word) -> word
-    reversew
-end
-
 # CONVERSION UTILITIES
 #! Writes the components of a word to memory as eight u32 limbs in little-endian order.
 #!
-#! Inputs:  [w3, w2, w1, w0, out_ptr, ...]
+#! Inputs:  [w0, w1, w2, w3, out_ptr, ...]
 #! Outputs: [...]
 #!
 #! Where:
@@ -25,23 +13,20 @@ end
 #!
 #! Cycles: 8 * (split + store pair) ~= 176
 pub proc store_word_u32s_le
-    reversew
-    # => [w0, w1, w2, w3, out_ptr, ...]
-
-    u32split
+    u32split swap
     # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
 
-    movup.2 u32split
+    movup.2 u32split swap
     # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
 
     # Store w0 and w1 limbs, then drop them from the stack
     dup.6 mem_storew_be dropw
     # => [w2, w3, out_ptr, ...]
 
-    u32split
+    u32split swap
     # => [w2_hi, w2_lo, w3, out_ptr, ...]
 
-    movup.2 u32split
+    movup.2 u32split swap
     # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
 
     # Store w2 and w3 limbs at out_ptr+4
@@ -99,8 +84,8 @@ end
 #!     let mut cont = true;
 #!
 #!     for i in (0..4).rev() {
-#!         let gt = word1[i].as_int() > word2[i].as_int();
-#!         let eq = word1[i].as_int() == word2[i].as_int();
+#!         let gt = word1[i].as_canonical_u64() > word2[i].as_canonical_u64();
+#!         let eq = word1[i].as_canonical_u64() == word2[i].as_canonical_u64();
 #!         result |= gt & cont;
 #!         cont &= eq;
 #!     }

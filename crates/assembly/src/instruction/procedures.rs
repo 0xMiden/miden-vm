@@ -100,9 +100,11 @@ impl Assembler {
         mast_root: Word,
         block_builder: &mut BasicBlockBuilder,
     ) -> Result<(), Report> {
-        // Create an array with `Push` operations containing root elements
+        // Create an array with `Push` operations containing root elements.
+        // Push in reverse order so that mast_root[0] ends up on top.
         let ops = mast_root
             .iter()
+            .rev()
             .map(|elem| Operation::Push(*elem))
             .collect::<SmallVec<[_; 4]>>();
         block_builder.push_ops(ops);

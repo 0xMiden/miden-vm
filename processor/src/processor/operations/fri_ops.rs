@@ -60,13 +60,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let prev_value = {
         let pe1 = processor.stack().get(11);
         let pe0 = processor.stack().get(12);
-        QuadFelt::new_complex(pe0, pe1)
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [pe0, pe1][i])
     };
     // the verifier challenge for the current layer
     let alpha = {
         let a1 = processor.stack().get(13);
         let a0 = processor.stack().get(14);
-        QuadFelt::new_complex(a0, a1)
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [a0, a1][i])
     };
     // the memory address of the current layer
     let layer_ptr = processor.stack().get(15);
@@ -123,14 +123,14 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// value in the folded domain.
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v4, v5, v6, v7] = processor.stack().get_word(0).into();
-    let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
+    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
-        QuadFelt::new_complex(v0, v1),
-        QuadFelt::new_complex(v2, v3),
-        QuadFelt::new_complex(v4, v5),
-        QuadFelt::new_complex(v6, v7),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v0, v1][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v2, v3][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v4, v5][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v6, v7][i]),
     ]
 }
 

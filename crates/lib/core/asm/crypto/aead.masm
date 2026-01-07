@@ -25,12 +25,12 @@ const AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
 #! This procedure sets up the initial RPO state for AEAD operations. The key and nonce
 #! are absorbed into the capacity and rate portions of the sponge.
 #!
-#! Input: [nonce(4), key(4), ...]
+#! Input: [key(4), nonce(4), ...]
 #! Output: [rate(8), capacity(4), ...]
 #!
 #! Where:
-#! - nonce is a 4-element (1 word) nonce/IV value
 #! - key is a 4-element (1 word) key
+#! - nonce is a 4-element (1 word) nonce/IV value
 #! - rate(8) will contain the initial keystream
 #! - capacity(4) constains the capacity portion of the state
 proc init_state
@@ -57,8 +57,8 @@ end
 #! Output: [AD_padding(8), capacity(4), ...]
 #!
 #! Stack layout on input:
-#! - rate(8) = [r7, r6, r5, r4, r3, r2, r1, r0]
-#! - capacity(4) = [c3, c2, c1, c0]
+#! - rate(8) = [r0, r1, r2, r3, r4, r5, r6, r7]   # top-of-stack is r0
+#! - capacity(4) = [c0, c1, c2, c3]              # top-of-stack is c0
 #!
 #! This procedure replaces the rate with the AD padding block and increments the first
 #! capacity element (domain separation).
@@ -68,13 +68,13 @@ proc process_ad
     # => [capacity(4), ...]
 
     # Increment first capacity element for domain separation
-    movup.3 add.1 movdn.3
+    add.1
     # => [capacity'(4), ...]  where capacity'[0] = capacity[0] + 1
 
     # Push AD padding block [1,0,0,0,0,0,0,0] onto stack
     # Note: stack order is reversed, so we push [0,0,0,0] then [1,0,0,0]
-    push.1.0.0.0  # First word [1,0,0,0]
     padw          # Second word [0,0,0,0] (padw pushes 4 zeros)
+    push.0.0.0.1  # First word [1,0,0,0]
     # => [AD_padding(8), capacity'(4), ...]
 end
 
@@ -86,12 +86,12 @@ end
 #! This, however, requires the plaintext length to be a multiple of 8. This assumption is made
 #! both in this procedure as well as in the decryption procedure.
 #!
-#! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+#! Input: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
 #! Output: [tag(4), ...]
 #!
 #! Where:
-#! - nonce is the initialization vector (4 elements)
 #! - key is the encryption key (4 elements)
+#! - nonce is the initialization vector (4 elements)
 #! - src_ptr points to plaintext in memory (must be word-aligned)
 #! - dst_ptr points to where ciphertext will be written (must be word-aligned)
 #! - num_blocks is the number of 8-element plaintext data blocks (NO padding included)
@@ -127,7 +127,7 @@ end
 #! - n = number of field elements encrypted (includes the final padding block)
 #! - For num_blocks data blocks: n = 8 * (num_blocks + 1)
 pub proc encrypt
-    # Stack: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+    # Stack: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
 
     # Input validation note: This procedure does not validate num_blocks or alignment.
     # Alignment errors are caught by the VM memory subsystem. Incorrect num_blocks
@@ -180,11 +180,11 @@ pub proc encrypt
     # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
     # Write first word [1,0,0,0] to dst_ptr_final
-    push.1.0.0.0
+    push.0.0.0.1
     # => [1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
     dup.4
     # => [dst_ptr_final, 1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
-    mem_storew_be dropw
+    mem_storew_le dropw
     # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
     # Write second word [0,0,0,0] to dst_ptr_final + 4
@@ -192,7 +192,7 @@ pub proc encrypt
     # => [0, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
     movup.4 add.4
     # => [dst_ptr_final+4, 0, 0, 0, 0, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
-    mem_storew_be dropw
+    mem_storew_le dropw
     # => [rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
     # Encrypt the padding block using crypto_stream
@@ -232,12 +232,12 @@ end
 #! 6. Compares computed tag with tag from memory at src_ptr + (num_blocks + 1) * 8
 #! 7. Halts execution with assertion failure if tags don't match
 #!
-#! Input: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+#! Input: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
 #! Output: [] (empty stack on success, halts on failure)
 #!
 #! Where:
-#! - nonce is the initialization vector (4 elements)
 #! - key is the decryption key (4 elements)
+#! - nonce is the initialization vector (4 elements)
 #! - src_ptr points to ciphertext + encrypted_padding + tag in memory (word-aligned)
 #! - dst_ptr points to where plaintext will be written (word-aligned)
 #! - num_blocks is the number of 8-element plaintext data blocks (NO padding)
@@ -354,7 +354,7 @@ pub proc decrypt
     # Verify computed tag matches expected tag from ciphertext
     padw            # Prepare stack for loading expected tag
     movup.8         # Get tag_ptr
-    mem_loadw_be    # Load expected tag from memory
+    mem_loadw_le    # Load expected tag from memory
     # => [expected_tag(4), computed_tag(4), ...]
 
     eqw assert.err="AEAD tag mismatch"

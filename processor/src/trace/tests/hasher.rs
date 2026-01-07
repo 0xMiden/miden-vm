@@ -2,12 +2,13 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, MainTrace, chiplets::hasher::P1_COL_IDX};
 use miden_core::{
+    Word,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{ExtensionField, Field},
 };
 use rstest::rstest;
 
-use super::{Felt, ONE, Operation, Word, ZERO, build_trace_from_ops_with_inputs, rand_array};
+use super::{Felt, ONE, Operation, ZERO, build_trace_from_ops_with_inputs, rand_array};
 use crate::{AdviceInputs, PrimeField64, StackInputs};
 
 // SIBLING TABLE TESTS
@@ -165,7 +166,8 @@ fn init_leaf(value: u64) -> Word {
 }
 
 fn append_word(target: &mut Vec<u64>, word: Word) {
-    word.iter().rev().for_each(|v| target.push(v.as_canonical_u64()));
+    // word[0] is at stack top, so no reversal needed.
+    word.iter().for_each(|v| target.push(v.as_canonical_u64()));
 }
 
 /// Describes a single entry in the sibling table which consists of a tuple `(index, node)` where

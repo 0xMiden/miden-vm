@@ -1,5 +1,4 @@
 use miden::core::sys
-use miden::core::word
 use miden::core::crypto::hashes::rpo256
 
 # ENCODING CONVENTIONS
@@ -50,8 +49,8 @@ end
 @locals(8)
 pub proc hash
     # Store [INPUT_LO, INPUT_HI] in local memory
-    exec.word::reverse loc_storew_be.0 dropw
-    exec.word::reverse loc_storew_be.4 dropw
+    loc_storew_le.0 dropw
+    loc_storew_le.4 dropw
 
     push.32 locaddr.0
     # => [ptr, 32]
@@ -71,10 +70,10 @@ end
 @locals(16)
 pub proc merge
     # Store [INPUT_L_LO, INPUT_L_HI, INPUT_R_LO, INPUT_R_HI] in local memory
-    exec.word::reverse loc_storew_be.0 dropw
-    exec.word::reverse loc_storew_be.4 dropw
-    exec.word::reverse loc_storew_be.8 dropw
-    exec.word::reverse loc_storew_be.12 dropw
+    loc_storew_le.0 dropw
+    loc_storew_le.4 dropw
+    loc_storew_le.8 dropw
+    loc_storew_le.12 dropw
 
     push.64 locaddr.0
     # => [ptr, 64]
@@ -99,6 +98,7 @@ end
 #! - COMM: the calldata commitment `Rpo256(Rpo256(INPUT_U32[..]) || Rpo256(DIGEST_U32[..]))` consumed by `log_precompile`
 #! - TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0] encodes the precompile identifier and the byte length as metadata
 #! - DIGEST_U32[8] = [d_0, ..., d_7] = Keccak256(INPUT_U8[len_bytes])
+@locals(8)
 pub proc hash_bytes_impl
     emit.KECCAK_HASH_BYTES_EVENT
     # => [ptr, len_bytes, ...]
@@ -107,29 +107,34 @@ pub proc hash_bytes_impl
     dup.1 add.3 u32shr.2 swap
     # => [ptr, len_u32, len_bytes, ...]
 
-    exec.rpo256::hash_elements
-    # => [COMM_INPUT, len_bytes, ...]
+    # Load digest from advice stack (8 u32 limbs) and write to digest_ptr = locaddr.0
+    # simultaneously compute COMM_DIGEST = Rpo(DIGEST[0..8])
+    locaddr.0
+    exec.rpo256::init_no_padding
+    # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
+    adv_pipe
+    exec.rpo256::permute
+    exec.rpo256::squeeze_digest
+    # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
 
-    # Prepare TAG = [0, 0, len_bytes, KECCAK_HASH_BYTES_EVENT]
-    push.KECCAK_HASH_BYTES_EVENT movup.5 push.0.0 swapw
-    # => [COMM_INPUT, TAG, ...]
+    movup.4 drop
+    # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
 
-    # Load digest from advice stack
-    adv_push.8
-    # => [DIGEST_U32[8], COMM_INPUT, TAG, ...]
+    # Compute COMM_INPUT = rpo::hash_elements(ptr, len_u32)
+    movup.5 movup.5 exec.rpo256::hash_elements
+    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
 
-    # Compute COMM_DIGEST = Rpo256(DIGEST_U32[8])
-    dupw.1 dupw.1 reversedw exec.rpo256::merge
-    # => [COMM_DIGEST, DIGEST_U32[8], COMM_INPUT, TAG, ...]
-
-    movupw.3 swapw
-    # => [COMM_DIGEST, COMM_INPUT, DIGEST_U32[8], TAG, ...]
-
-    # Compute COMM = Rpo256(COMM_INPUT || COMM_DIGEST)
+    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
     exec.rpo256::merge
-    # => [COMM, DIGEST_U32[8], TAG, ...]
+    # => [COMM, len_bytes, ...]
 
-    # Reorder stack
-    movupw.3 swapw
+    # Prepare TAG = [KECCAK_HASH_BYTES_EVENT, len_bytes, 0, 0]
+    push.0.0 movup.6 push.KECCAK_HASH_BYTES_EVENT swapw
+    # => [COMM, TAG, ...]
+
+    # Reload digest limbs from locals
+    padw loc_loadw_le.4
+    padw loc_loadw_le.0
+    swapdw
     # => [COMM, TAG, DIGEST_U32[8], ...]
 end

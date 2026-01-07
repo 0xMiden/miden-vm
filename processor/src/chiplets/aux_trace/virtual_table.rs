@@ -149,7 +149,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
+            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
+            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -157,7 +158,8 @@ where
                 + alphas[14] * sibling[2]
                 + alphas[15] * sibling[3]
         } else {
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
+            // Node is right child at RATE1, sibling is left child at RATE0
+            let sibling = &main_trace.chiplet_hasher_state(row)[..DIGEST_RANGE.start];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -169,7 +171,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
+            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -177,7 +180,8 @@ where
                 + alphas[14] * sibling[2]
                 + alphas[15] * sibling[3]
         } else {
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
+            // Node is right child at RATE1, sibling is left child at RATE0
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[..DIGEST_RANGE.start];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -206,7 +210,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE.end..];
+            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
+            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -214,7 +219,8 @@ where
                 + alphas[14] * sibling[2]
                 + alphas[15] * sibling[3]
         } else {
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
+            // Node is right child at RATE1, sibling is left child at RATE0
+            let sibling = &main_trace.chiplet_hasher_state(row)[..DIGEST_RANGE.start];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -226,7 +232,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE.end..];
+            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -234,7 +241,8 @@ where
                 + alphas[14] * sibling[2]
                 + alphas[15] * sibling[3]
         } else {
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
+            // Node is right child at RATE1, sibling is left child at RATE0
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[..DIGEST_RANGE.start];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -312,12 +320,13 @@ fn build_log_precompile_capacity_insert<E: ExtensionField<Felt>>(
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
 ) -> E {
-    // The next transcript state was written in the next row as a Word at index 11..8 (reversed)
+    // The next transcript state was written in the next row as a Word at
+    // `STACK_CAP_NEXT_RANGE.start..STACK_CAP_NEXT_RANGE.end` in element order.
     let state: PrecompileTranscriptState = [
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.start, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.start + 1, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.start + 2, row + 1),
+        main_trace.stack_element(STACK_CAP_NEXT_RANGE.start + 3, row + 1),
     ]
     .into();
 

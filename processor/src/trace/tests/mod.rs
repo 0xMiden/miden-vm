@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Kernel, ONE, Operation, Program, Word, ZERO,
+    Kernel, ONE, Operation, Program, ZERO,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_utils_testing::rand::rand_array;

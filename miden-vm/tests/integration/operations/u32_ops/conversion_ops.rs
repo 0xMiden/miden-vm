@@ -233,12 +233,13 @@ fn u32split() {
     let asm_op = "u32split";
 
     // --- low bits set, no high bits set ---------------------------------------------------------
+    // u32split now outputs [lo, hi] in LE order with lo on top
     let test = build_op_test!(asm_op, &[1]);
-    test.expect_stack(&[0, 1]);
+    test.expect_stack(&[1, 0]);
 
     // --- high bits set, no low bits set ---------------------------------------------------------
     let test = build_op_test!(asm_op, &[U32_BOUND]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
 
     // --- high bits and low bits set -------------------------------------------------------------
     let test = build_op_test!(asm_op, &[U32_BOUND + 1]);
@@ -251,7 +252,7 @@ fn u32split() {
     let expected_lo = b % U32_BOUND;
 
     let test = build_op_test!(asm_op, &[a, b]);
-    test.expect_stack(&[expected_hi, expected_lo, a]);
+    test.expect_stack(&[expected_lo, expected_hi, a]);
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - CONVERSIONS AND TESTS
@@ -325,11 +326,12 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus must be applied first
+        // u32split outputs [lo, hi] in LE order with lo on top
         let felt_value = value % Felt::ORDER_U64;
-        let expected_b = felt_value >> 32;
-        let expected_c = felt_value as u32 as u64;
+        let expected_hi = felt_value >> 32;
+        let expected_lo = felt_value as u32 as u64;
 
         let test = build_op_test!(asm_op, &[value, value]);
-        test.prop_expect_stack(&[expected_b, expected_c, value])?;
+        test.prop_expect_stack(&[expected_lo, expected_hi, value])?;
     }
 }

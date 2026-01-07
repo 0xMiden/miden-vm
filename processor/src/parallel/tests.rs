@@ -18,22 +18,48 @@ use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::Fast
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
-/// The procedure that DYN and DYNCALL will call in the tests below. Its digest needs to be put on
-/// the stack before the call.
-const DYN_TARGET_PROC_HASH: &[Felt] = &[
-    Felt::new(10995436151082118190),
-    Felt::new(776663942277617877),
-    Felt::new(3177713792132750309),
-    Felt::new(10407898805173442467),
-];
+/// Returns the procedure hash that DYN and DYNCALL will call, in reverse order for stack inputs.
+/// The digest is computed dynamically from the target basic block (single SWAP operation).
+///
+/// The elements are reversed because FastProcessor::new() reverses stack inputs, so to end up with
+/// `[d0, d1, d2, d3]` on the stack (correct order for LE MStoreW), we pass `[d3, d2, d1, d0]`.
+fn dyn_target_proc_hash() -> &'static [Felt] {
+    use std::sync::LazyLock;
+    static HASH: LazyLock<Vec<Felt>> = LazyLock::new(|| {
+        // Build the same target basic block as in dyn_program/dyncall_program
+        let mut forest = MastForest::new();
+        let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        // Reverse for stack input (FastProcessor::new reverses inputs)
+        forest.get_node_by_id(target).unwrap().digest().iter().rev().copied().collect()
+    });
+    HASH.as_slice()
+}
 
-/// The digest of a procedure available to be called via an EXTERNAL node.
-const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
-    Felt::new(9552974201798903089),
-    Felt::new(993192251238261044),
-    Felt::new(1885027269046469428),
-    Felt::new(8558115384207742312),
-]);
+/// Returns the digest of the external library procedure (double SWAP), computed dynamically.
+/// This matches the procedure created by `create_simple_library()`.
+fn external_lib_proc_digest() -> Word {
+    use std::sync::LazyLock;
+    static DIGEST: LazyLock<Word> = LazyLock::new(|| {
+        let mut forest = MastForest::new();
+        let swap_block =
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut forest)
+                .unwrap();
+        forest.get_node_by_id(swap_block).unwrap().digest()
+    });
+    *DIGEST
+}
+
+/// Returns the external library procedure digest elements in reverse order for stack inputs.
+/// The reversal is needed because FastProcessor::new() reverses stack inputs.
+fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
+    use std::sync::LazyLock;
+    static HASH: LazyLock<Vec<Felt>> =
+        LazyLock::new(|| external_lib_proc_digest().iter().rev().copied().collect());
+    HASH.as_slice()
+}
 
 /// This test verifies that the trace generated when executing a program in multiple fragments (for
 /// all possible fragment boundaries) is identical to the trace generated when executing the same
@@ -220,7 +246,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyn_program(), 12, DYN_TARGET_PROC_HASH)]
+#[case(dyn_program(), 12, dyn_target_proc_hash())]
 // Case 23: DYN END
 //  0: JOIN
 //  1:   BLOCK
@@ -231,7 +257,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyn_program(), 16, DYN_TARGET_PROC_HASH)]
+#[case(dyn_program(), 16, dyn_target_proc_hash())]
 // Case 24: DYNCALL START
 //  0: JOIN
 //  1:   BLOCK
@@ -242,7 +268,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyncall_program(), 12, DYN_TARGET_PROC_HASH)]
+#[case(dyncall_program(), 12, dyn_target_proc_hash())]
 // Case 25: DYNCALL END
 //  0: JOIN
 //  1:   BLOCK
@@ -253,7 +279,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyncall_program(), 16, DYN_TARGET_PROC_HASH)]
+#[case(dyncall_program(), 16, dyn_target_proc_hash())]
 // Case 26: EXTERNAL NODE
 //  0: JOIN
 //  1:   BLOCK PAD DROP END
@@ -273,7 +299,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 17:   END
 // 18: END
 // 19: HALT
-#[case(dyn_program(), 12, EXTERNAL_LIB_PROC_DIGEST.as_elements())]
+#[case(dyn_program(), 12, external_lib_proc_hash_for_stack())]
 fn test_trace_generation_at_fragment_boundaries(
     testname: String,
     #[case] program: Program,
@@ -589,7 +615,7 @@ fn basic_block_program_multiple_batches() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_le drop drop drop drop push(40) noop noop)
 ///     (dyn)
 /// )
 fn dyn_program() -> Program {
@@ -621,8 +647,7 @@ fn dyn_program() -> Program {
     };
     program.make_root(root_join_node);
 
-    // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
-    // the program (stored in `DYN_TARGET_PROC_HASH`).
+    // Add the procedure that DYN will call. Its digest is computed by dyn_target_proc_hash().
     let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
         .add_to_forest(&mut program)
         .unwrap();
@@ -632,7 +657,7 @@ fn dyn_program() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_le drop drop drop drop push(40) noop noop)
 ///     (dyncall)
 /// )
 fn dyncall_program() -> Program {
@@ -664,8 +689,7 @@ fn dyncall_program() -> Program {
     };
     program.make_root(root_join_node);
 
-    // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
-    // the program (stored in `DYN_TARGET_PROC_HASH`).
+    // Add the procedure that DYNCALL will call. Its digest is computed by dyn_target_proc_hash().
     let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
         .add_to_forest(&mut program)
         .unwrap();
@@ -689,7 +713,7 @@ fn external_program() -> Program {
                 .add_to_forest(&mut program)
                 .unwrap();
 
-        let external_node = ExternalNodeBuilder::new(EXTERNAL_LIB_PROC_DIGEST)
+        let external_node = ExternalNodeBuilder::new(external_lib_proc_digest())
             .add_to_forest(&mut program)
             .unwrap();
 

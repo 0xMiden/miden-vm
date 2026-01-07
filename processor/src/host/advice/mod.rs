@@ -1,4 +1,7 @@
-use alloc::{collections::btree_map::Entry, vec::Vec};
+use alloc::{
+    collections::{VecDeque, btree_map::Entry},
+    vec::Vec,
+};
 
 use miden_core::{
     AdviceMap, Felt, Word,
@@ -7,7 +10,7 @@ use miden_core::{
 };
 
 mod inputs;
-pub use inputs::AdviceInputs;
+pub use inputs::{AdviceInputs, AdviceStackBuilder};
 
 mod errors;
 pub use errors::AdviceError;
@@ -43,7 +46,7 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 /// its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
-    stack: Vec<Felt>,
+    stack: VecDeque<Felt>,
     map: AdviceMap,
     store: MerkleStore,
     pc_requests: Vec<PrecompileRequest>,
@@ -84,7 +87,7 @@ impl AdviceProvider {
     /// # Errors
     /// Returns an error if the advice stack is empty.
     pub fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
-        self.stack.pop().ok_or(AdviceError::StackReadFailed)
+        self.stack.pop_front().ok_or(AdviceError::StackReadFailed)
     }
 
     /// Pops a word (4 elements) from the advice stack and returns it.
@@ -99,13 +102,12 @@ impl AdviceProvider {
             return Err(AdviceError::StackReadFailed);
         }
 
-        let idx = self.stack.len() - 4;
-        let result =
-            [self.stack[idx + 3], self.stack[idx + 2], self.stack[idx + 1], self.stack[idx]];
+        let w0 = self.stack.pop_front().expect("checked len");
+        let w1 = self.stack.pop_front().expect("checked len");
+        let w2 = self.stack.pop_front().expect("checked len");
+        let w3 = self.stack.pop_front().expect("checked len");
 
-        self.stack.truncate(idx);
-
-        Ok(result.into())
+        Ok(Word::new([w0, w1, w2, w3]))
     }
 
     /// Pops a double word (8 elements) from the advice stack and returns them.
@@ -125,12 +127,14 @@ impl AdviceProvider {
 
     /// Pushes a single value onto the advice stack.
     pub fn push_stack(&mut self, value: Felt) {
-        self.stack.push(value)
+        self.stack.push_front(value)
     }
 
     /// Pushes a word (4 elements) onto the stack.
     pub fn push_stack_word(&mut self, word: &Word) {
-        self.stack.extend(word.iter().rev())
+        for &value in word.iter().rev() {
+            self.stack.push_front(value);
+        }
     }
 
     /// Fetches a list of elements under the specified key from the advice map and pushes them onto
@@ -165,45 +169,43 @@ impl AdviceProvider {
         include_len: bool,
         pad_to: u8,
     ) -> Result<(), AdviceError> {
-        // get the advice map value
-        let map_value = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
+        let values = self.map.get(&key).ok_or(AdviceError::MapKeyNotFound { key })?;
 
         // if pad_to was provided (not equal 0), push some zeros to the advice stack so that the
         // final (padded) elements list length will be the next multiple of pad_to
         if pad_to != 0 {
-            let num_pad_elements =
-                map_value.len().next_multiple_of(pad_to as usize) - map_value.len();
-            self.stack.extend(core::iter::repeat_n(Felt::default(), num_pad_elements));
+            let num_pad_elements = values.len().next_multiple_of(pad_to as usize) - values.len();
+            for _ in 0..num_pad_elements {
+                self.stack.push_front(Felt::default());
+            }
         }
 
-        // push the reversed map_value list and its initial length to the advice stack
-        self.stack.extend(map_value.iter().rev());
+        // Treat map values as already canonical sequences of FELTs.
+        // The advice stack is LIFO; extend in reverse so that the first element of `values`
+        // becomes the first element returned by a subsequent `adv_push.*`.
+        for &value in values.iter().rev() {
+            self.stack.push_front(value);
+        }
         if include_len {
-            // Note: we assume map_value.len() fits within the field modulus. This is always true
-            // in practice since the field modulus (2^64 - 2^32 + 1) is much larger than any
-            // practical vector length that could fit in memory.
-            self.stack.push(Felt::from(map_value.len() as u64));
+            self.stack.push_front(Felt::new(values.len() as u64));
         }
-
         Ok(())
     }
 
-    /// Returns the current stack.
-    ///
-    /// The element at the top of the stack is in last position of the returned slice.
-    pub fn stack(&self) -> &[Felt] {
-        &self.stack
+    /// Returns the current stack as a vector ordered from top (index 0) to bottom.
+    pub fn stack(&self) -> Vec<Felt> {
+        self.stack.iter().copied().collect()
     }
 
     /// Extends the stack with the given elements.
-    ///
-    /// Elements are added to the top of the stack i.e. last element of this iterator is the first
-    /// element popped.
     pub fn extend_stack<I>(&mut self, iter: I)
     where
         I: IntoIterator<Item = Felt>,
     {
-        self.stack.extend(iter);
+        let values: Vec<Felt> = iter.into_iter().collect();
+        for value in values.into_iter().rev() {
+            self.stack.push_front(value);
+        }
     }
 
     // ADVICE MAP
@@ -406,26 +408,24 @@ impl AdviceProvider {
 
     /// Extends the contents of this instance with the contents of an `AdviceInputs`.
     pub fn extend_from_inputs(&mut self, inputs: &AdviceInputs) -> Result<(), AdviceError> {
-        self.extend_stack(inputs.stack.iter().cloned().rev());
+        self.extend_stack(inputs.stack.iter().cloned());
         self.extend_merkle_store(inputs.store.inner_nodes());
         self.extend_map(&inputs.map)
     }
 
     /// Consumes `self` and return its parts (stack, map, store, precompile_requests).
     ///
-    /// Note that the order of the stack is such that the element at the top of the stack is at the
-    /// end of the returned vector.
+    /// The returned stack vector is ordered from top (index 0) to bottom.
     pub fn into_parts(self) -> (Vec<Felt>, AdviceMap, MerkleStore, Vec<PrecompileRequest>) {
-        (self.stack, self.map, self.store, self.pc_requests)
+        (self.stack.into_iter().collect(), self.map, self.store, self.pc_requests)
     }
 }
 
 impl From<AdviceInputs> for AdviceProvider {
     fn from(inputs: AdviceInputs) -> Self {
-        let AdviceInputs { mut stack, map, store } = inputs;
-        stack.reverse();
+        let AdviceInputs { stack, map, store } = inputs;
         Self {
-            stack,
+            stack: VecDeque::from(stack),
             map,
             store,
             pc_requests: Vec::new(),
