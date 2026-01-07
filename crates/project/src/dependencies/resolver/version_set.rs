@@ -5,7 +5,8 @@ use miden_core::{LexicographicWord, Word};
 use pubgrub::VersionSet as _;
 use smallvec::{SmallVec, smallvec};
 
-use super::{pubgrub_compat::SemverPubgrub, *};
+use super::pubgrub_compat::SemverPubgrub;
+use crate::{SemVer, Version, VersionReq, VersionRequirement};
 
 /// This type is an implementation detail of the dependency resolver provided by
 /// [`super::PackageIndex`].
