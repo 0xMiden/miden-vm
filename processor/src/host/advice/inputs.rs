@@ -101,8 +101,8 @@ impl AdviceInputs {
 ///
 /// ```ignore
 /// let advice = AdviceStackBuilder::new()
-///     .push_slice_adv_push_n(&[a, b, c])  // Consumed first by adv_push.3
-///     .push_word_adv_loadw(word)           // Consumed second by adv_loadw
+///     .push_for_adv_push(&[a, b, c])  // Consumed first by adv_push.3
+///     .push_for_adv_loadw(word)       // Consumed second by adv_loadw
 ///     .build();
 /// ```
 #[derive(Clone, Debug, Default)]
@@ -139,6 +139,7 @@ impl AdviceStackBuilder {
     /// Adds elements for consumption by `adv_push.n` instructions.
     ///
     /// After `adv_push.n`, the operand stack will have `slice[0]` on top.
+    /// The slice length determines n (e.g., 4-element slice → `adv_push.4`).
     ///
     /// # How it works
     ///
@@ -152,17 +153,34 @@ impl AdviceStackBuilder {
     /// # Example
     ///
     /// ```ignore
-    /// builder.push_slice_adv_push_n(&[a, b, c]);
+    /// builder.push_for_adv_push(&[a, b, c]);
     /// // MASM: adv_push.3
     /// // Result: operand stack = [a, b, c, ...] with a on top
     /// ```
-    pub fn push_slice_adv_push_n(mut self, slice: &[Felt]) -> Self {
+    pub fn push_for_adv_push(&mut self, slice: &[Felt]) -> &mut Self {
         // Reverse the slice: we want slice[0] to be popped last (ending up on top of operand stack)
         // So we add elements in reverse order to the back of our stack
         for elem in slice.iter().rev() {
             self.stack.push_back(*elem);
         }
         self
+    }
+
+    /// Adds a word for consumption by `adv_push.4`.
+    ///
+    /// After `adv_push.4`, the operand stack will have `word[0]` on top.
+    /// This is a convenience wrapper around [`push_for_adv_push`] for Word types.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// builder.push_word_for_adv_push(merkle_root);
+    /// // MASM: adv_push.4
+    /// // Result: operand stack = [root[0], root[1], root[2], root[3], ...]
+    /// ```
+    pub fn push_word_for_adv_push(&mut self, word: Word) -> &mut Self {
+        let arr: [Felt; 4] = word.into();
+        self.push_for_adv_push(&arr)
     }
 
     /// Adds a word for consumption by `padw adv_loadw`.
@@ -182,11 +200,11 @@ impl AdviceStackBuilder {
     /// # Example
     ///
     /// ```ignore
-    /// builder.push_word_adv_loadw([w0, w1, w2, w3].into());
+    /// builder.push_for_adv_loadw([w0, w1, w2, w3].into());
     /// // MASM: padw adv_loadw reversew
     /// // Result: operand stack = [w3, w2, w1, w0, ...] with w3 on top (canonical LE order)
     /// ```
-    pub fn push_word_adv_loadw(mut self, word: Word) -> Self {
+    pub fn push_for_adv_loadw(&mut self, word: Word) -> &mut Self {
         // Push elements without reversal. adv_loadw loads the structural word directly,
         // so a `reversew` is needed afterward to get canonical order on the operand stack.
         for elem in word.iter() {
@@ -195,37 +213,10 @@ impl AdviceStackBuilder {
         self
     }
 
-    /// Adds a double-word (8 elements) for consumption by `adv_pipe`.
-    ///
-    /// After `adv_pipe`, the elements are consumed with `dword[0]` first.
-    ///
-    /// # How it works
-    ///
-    /// `adv_pipe` uses `pop_stack_dword()` which internally calls `pop_stack_word()` twice.
-    /// The internal reversals mean we do NOT reverse the input.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// builder.push_dword_adv_pipe([word0, word1]);
-    /// // MASM: adv_pipe
-    /// // Result: elements consumed in order [word0[0], word0[1], ..., word1[3]]
-    /// ```
-    pub fn push_dword_adv_pipe(mut self, dword: [Word; 2]) -> Self {
-        // Add all 8 elements as-is (no reversal needed) to the back of the stack
-        // word0 elements first, then word1 elements
-        for elem in dword[0].iter() {
-            self.stack.push_back(*elem);
-        }
-        for elem in dword[1].iter() {
-            self.stack.push_back(*elem);
-        }
-        self
-    }
-
-    /// Adds a slice for sequential consumption by multiple `adv_pipe` operations.
+    /// Adds elements for sequential consumption by `adv_pipe` operations.
     ///
     /// Elements are consumed in order: `slice[0..8]` first, then `slice[8..16]`, etc.
+    /// No reversal is applied.
     ///
     /// # Panics
     ///
@@ -234,14 +225,14 @@ impl AdviceStackBuilder {
     /// # Example
     ///
     /// ```ignore
-    /// builder.push_slice_adv_pipe(&elements); // elements.len() must be multiple of 8
+    /// builder.push_for_adv_pipe(&elements); // elements.len() must be multiple of 8
     /// // MASM: multiple adv_pipe calls
     /// // Result: elements consumed in order [elements[0], elements[1], ...]
     /// ```
-    pub fn push_slice_adv_pipe(mut self, slice: &[Felt]) -> Self {
+    pub fn push_for_adv_pipe(&mut self, slice: &[Felt]) -> &mut Self {
         assert!(
             slice.len().is_multiple_of(8),
-            "push_slice_adv_pipe requires slice length to be a multiple of 8, got {}",
+            "push_for_adv_pipe requires slice length to be a multiple of 8, got {}",
             slice.len()
         );
 
@@ -286,17 +277,20 @@ impl AdviceStackBuilder {
         self.stack.into_iter().collect()
     }
 
-    /// Adds a word for consumption by `adv_push.4`.
+    /// Extends the advice stack with u64 values converted to Felt (no reversal).
     ///
-    /// After `adv_push.4`, the operand stack will have `word[0]` on top.
-    /// This is a convenience wrapper around `push_slice_adv_push_n`.
-    pub fn push_word_for_adv_push4(&mut self, word: &Word) {
-        // adv_push.4 pops 4 elements one-by-one. We need word[0] to end up on top.
-        // push_slice_adv_push_n handles the reversal, so we use the same logic.
-        let arr: [Felt; 4] = (*word).into();
-        for elem in arr.iter().rev() {
-            self.stack.push_back(*elem);
-        }
+    /// This is a convenience method for test data that is typically specified as u64.
+    /// Elements are consumed in FIFO order: first element = first consumed.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// builder.push_u64_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    /// // Elements consumed in order: 1, 2, 3, 4, 5, 6, 7, 8
+    /// ```
+    pub fn push_u64_slice(&mut self, values: &[u64]) -> &mut Self {
+        self.stack.extend(values.iter().map(|&v| Felt::new(v)));
+        self
     }
 }
 
@@ -359,14 +353,16 @@ mod tests {
     // --------------------------------------------------------------------------------------------
 
     #[test]
-    fn test_builder_push_slice_adv_push_n() {
-        // push_slice_adv_push_n reverses the slice
+    fn test_builder_push_for_adv_push() {
+        // push_for_adv_push reverses the slice
         // Input: [a, b, c] -> Builder stack: [c, b, a] (c on top)
         let a = Felt::new(1);
         let b = Felt::new(2);
         let c = Felt::new(3);
 
-        let advice = AdviceStackBuilder::new().push_slice_adv_push_n(&[a, b, c]).build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_push(&[a, b, c]);
+        let advice = builder.build();
 
         // Builder stack is [c, b, a] with c on top (index 0)
         // This becomes AdviceInputs.stack = [c, b, a]
@@ -374,57 +370,49 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_push_word_adv_loadw() {
-        // push_word_adv_loadw does NOT reverse
+    fn test_builder_push_for_adv_loadw() {
+        // push_for_adv_loadw does NOT reverse
         // Input: [w0, w1, w2, w3] -> Builder stack: [w0, w1, w2, w3] (w0 on top)
         let word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
 
-        let advice = AdviceStackBuilder::new().push_word_adv_loadw(word).build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_loadw(word);
+        let advice = builder.build();
 
         // Builder stack is [w0, w1, w2, w3] with w0 on top
         assert_eq!(advice.stack, vec![Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     }
 
     #[test]
-    fn test_builder_push_dword_adv_pipe() {
-        // push_dword_adv_pipe does NOT reverse
-        let word0: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
-        let word1: Word = [Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)].into();
-
-        let advice = AdviceStackBuilder::new().push_dword_adv_pipe([word0, word1]).build();
-
-        // Builder stack is [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
-        assert_eq!(
-            advice.stack,
-            vec![
-                Felt::new(1),
-                Felt::new(2),
-                Felt::new(3),
-                Felt::new(4),
-                Felt::new(5),
-                Felt::new(6),
-                Felt::new(7),
-                Felt::new(8)
-            ]
-        );
-    }
-
-    #[test]
-    fn test_builder_push_slice_adv_pipe() {
-        // push_slice_adv_pipe does NOT reverse (but requires 8-alignment)
+    fn test_builder_push_for_adv_pipe() {
+        // push_for_adv_pipe does NOT reverse (but requires 8-alignment)
         let slice: Vec<Felt> = (1..=8).map(Felt::new).collect();
 
-        let advice = AdviceStackBuilder::new().push_slice_adv_pipe(&slice).build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_pipe(&slice);
+        let advice = builder.build();
 
         assert_eq!(advice.stack, slice);
     }
 
     #[test]
-    #[should_panic(expected = "push_slice_adv_pipe requires slice length to be a multiple of 8")]
-    fn test_builder_push_slice_adv_pipe_panics_on_misalignment() {
+    #[should_panic(expected = "push_for_adv_pipe requires slice length to be a multiple of 8")]
+    fn test_builder_push_for_adv_pipe_panics_on_misalignment() {
         let slice: Vec<Felt> = (1..=7).map(Felt::new).collect();
 
-        AdviceStackBuilder::new().push_slice_adv_pipe(&slice).build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_pipe(&slice);
+        builder.build();
+    }
+
+    #[test]
+    fn test_builder_push_u64_slice() {
+        // push_u64_slice converts u64 to Felt without reversal
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_u64_slice(&[1, 2, 3, 4]);
+        let advice = builder.build();
+
+        assert_eq!(advice.stack, vec![Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     }
 
     #[test]
@@ -436,10 +424,10 @@ mod tests {
         let c = Felt::new(3);
         let word: Word = [Felt::new(10), Felt::new(20), Felt::new(30), Felt::new(40)].into();
 
-        let advice = AdviceStackBuilder::new()
-            .push_slice_adv_push_n(&[a, b, c])  // Consumed first
-            .push_word_adv_loadw(word)           // Consumed second
-            .build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_push(&[a, b, c]); // Consumed first
+        builder.push_for_adv_loadw(word); // Consumed second
+        let advice = builder.build();
 
         // Builder stack: [c, b, a, w0, w1, w2, w3]
         // (c on top from reversed [a,b,c], then word below)
@@ -450,15 +438,15 @@ mod tests {
     }
 
     #[test]
-    fn test_builder_multiple_push_slice_adv_push_n() {
+    fn test_builder_multiple_push_for_adv_push() {
         // Multiple calls should maintain top-first ordering
         let first = [Felt::new(1), Felt::new(2)];
         let second = [Felt::new(3), Felt::new(4)];
 
-        let advice = AdviceStackBuilder::new()
-            .push_slice_adv_push_n(&first)   // Consumed first
-            .push_slice_adv_push_n(&second)  // Consumed second
-            .build();
+        let mut builder = AdviceStackBuilder::new();
+        builder.push_for_adv_push(&first); // Consumed first
+        builder.push_for_adv_push(&second); // Consumed second
+        let advice = builder.build();
 
         // First call: [2, 1] (reversed)
         // Second call prepends: [4, 3, 2, 1] -> but wait, second is consumed AFTER first

@@ -68,7 +68,9 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_tree = MerkleTree::new(init_merkle_leaves(leaves))?;
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
-    let advice_stack = word_to_advice_stack_order(&merkle_root);
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_word_for_adv_push(merkle_root);
+    let advice_stack = builder.build_vec_u64();
 
     for pos in 0..(leaves.len() as u64) {
         let source = format!(
@@ -113,8 +115,10 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree1.inner_nodes());
     merkle_store.extend(merkle_tree2.inner_nodes());
 
-    let mut advice_stack = word_to_advice_stack_order(&merkle_root1);
-    advice_stack.extend(word_to_advice_stack_order(&merkle_root2));
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_word_for_adv_push(merkle_root1);
+    builder.push_word_for_adv_push(merkle_root2);
+    let advice_stack = builder.build_vec_u64();
 
     let examples = [
         // absolute_pos, leaf
@@ -176,7 +180,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     let stack = word_to_ints(&merkle_root3);
 
     // Test case for single element MMR
-    let advice_stack = word_to_advice_stack_order(&merkle_root3);
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_word_for_adv_push(merkle_root3);
+    let advice_stack = builder.build_vec_u64();
     let source = format!(
         "
         use miden::core::collections::mmr
@@ -196,9 +202,11 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
     test.expect_stack(&stack);
 
     // Test case for the single element tree in a MMR with multiple trees
-    let mut advice_stack = word_to_advice_stack_order(&merkle_root1);
-    advice_stack.extend(word_to_advice_stack_order(&merkle_root2));
-    advice_stack.extend(word_to_advice_stack_order(&merkle_root3));
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_word_for_adv_push(merkle_root1);
+    builder.push_word_for_adv_push(merkle_root2);
+    builder.push_word_for_adv_push(merkle_root3);
+    let advice_stack = builder.build_vec_u64();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
         "
@@ -769,10 +777,4 @@ fn digests_to_ints(digests: &[Word]) -> Vec<u64> {
 fn word_to_ints(word: &Word) -> Vec<u64> {
     let arr: [Felt; WORD_SIZE] = (*word).into();
     arr.iter().map(|v| v.as_canonical_u64()).collect()
-}
-
-fn word_to_advice_stack_order(word: &Word) -> Vec<u64> {
-    let mut builder = AdviceStackBuilder::new();
-    builder.push_word_for_adv_push4(word);
-    builder.into_u64_vec()
 }

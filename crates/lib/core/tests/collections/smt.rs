@@ -794,8 +794,8 @@ fn build_leaf_advice_value(entries: &[(Word, Word)]) -> Vec<Felt> {
 
     let mut builder = AdviceStackBuilder::new();
     for (key, value) in entries {
-        builder = builder.push_word_adv_loadw(*key);
-        builder = builder.push_word_adv_loadw(*value);
+        builder.push_for_adv_loadw(*key);
+        builder.push_for_adv_loadw(*value);
     }
     builder.into_elements()
 }
