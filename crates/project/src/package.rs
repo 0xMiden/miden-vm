@@ -1,14 +1,12 @@
-use alloc::format;
-
-use miden_assembly_syntax::debuginfo::Spanned;
-
-use crate::{
-    ast::{ProjectFileError, WorkspaceFile, parsing::MaybeInherit},
-    *,
-};
+#[cfg(feature = "std")]
+use std::{boxed::Box, path::Path};
 
 #[cfg(feature = "std")]
-use std::path::Path;
+use miden_assembly_syntax::debuginfo::Spanned;
+
+#[cfg(feature = "std")]
+use crate::ast::{ProjectFileError, WorkspaceFile, parsing::MaybeInherit};
+use crate::*;
 
 /// The representation of an individual package in a Miden project
 #[derive(Debug)]
@@ -114,7 +112,9 @@ impl Package {
         source: Arc<SourceFile>,
         workspace: Option<&WorkspaceFile>,
     ) -> Result<Box<Self>, Report> {
+        use alloc::format;
         use core::num::NonZeroU32;
+
         use miden_assembly_syntax::Path as MasmPath;
 
         let manifest_path = Path::new(source.uri().path());

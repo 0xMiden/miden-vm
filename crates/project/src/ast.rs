@@ -4,24 +4,12 @@
 //! The AST is used for parsing and rendering the TOML representation, but after validation and
 //! resolution of inherited properties, the AST is translated to a simpler structure that does not
 //! need to represent the complexity of the on-disk format.
-#![expect(unused_assignments)]
 mod dependency;
 mod package;
 pub(crate) mod parsing;
 mod profile;
 mod target;
 mod workspace;
-
-pub use self::{
-    dependency::DependencySpec,
-    package::{PackageConfig, PackageDetail, PackageFile},
-    profile::Profile,
-    target::Target,
-    workspace::WorkspaceFile,
-};
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
 
 use alloc::{
     boxed::Box,
@@ -32,6 +20,16 @@ use alloc::{
     vec::Vec,
 };
 
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+pub use self::{
+    dependency::DependencySpec,
+    package::{PackageConfig, PackageDetail, PackageFile},
+    profile::Profile,
+    target::Target,
+    workspace::WorkspaceFile,
+};
 use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, miette};
 
 /// Represents all possible variants of `miden-project.toml`
@@ -83,6 +81,7 @@ impl MidenProject {
 }
 
 /// An internal error type used when parsing a `miden-project.toml` file.
+#[allow(dead_code)] // Different feature combinations may produce dead variants
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub(crate) enum ProjectFileError {
     #[error("unable to parse project manifest: {message}")]

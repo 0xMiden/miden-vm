@@ -1,6 +1,5 @@
-use core::borrow::Borrow;
-
 use alloc::collections::BTreeMap;
+use core::borrow::Borrow;
 
 use pubgrub::VersionSet as _;
 
@@ -29,7 +28,7 @@ pub type PackageRequirements = BTreeMap<PackageId, VersionSet>;
 /// * A guarantee that indexed packages actually exist or that their sources/MAST can be obtained
 ///
 /// It is up to downstream consumers of the index to construct it and populate it with packages
-/// known to them, such that packages selected by [`PackageIndex::resolve`] can be resolved to
+/// known to them, such that packages selected by [`PackageResolver::resolve`] can be resolved to
 /// relevant artifacts, e.g. an assembled package, Miden project sources, etc.
 #[derive(Default)]
 pub struct PackageIndex {
@@ -83,9 +82,9 @@ impl PackageIndex {
     ///   * If the entry in the index does not have an associated package digest, but one was given
     ///     with `version`, then update the entry in the index to reflect the more precise version
     ///     data.
-    ///   * If the entry in the index has an associated package digest, but `version` does not,
-    ///     then ignore the insertion entirely, in order to preserve the dependencies that were
-    ///     recorded with the more precise version.
+    ///   * If the entry in the index has an associated package digest, but `version` does not, then
+    ///     ignore the insertion entirely, in order to preserve the dependencies that were recorded
+    ///     with the more precise version.
     ///
     /// In effect, this method ensures that we only expand or refine the index.
     fn insert_or_refine(&mut self, name: PackageId, version: Version, deps: PackageRequirements) {
