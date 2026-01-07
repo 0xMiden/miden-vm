@@ -1535,7 +1535,6 @@ dependencies = [
 name = "miden-project"
 version = "0.22.0"
 dependencies = [
- "either",
  "miden-assembly-syntax",
  "miden-core",
  "miden-test-serde-macros",
