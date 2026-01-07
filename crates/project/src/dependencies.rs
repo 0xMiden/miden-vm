@@ -180,8 +180,10 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
     }
 }
 
+#[cfg(feature = "std")]
 impl DependencyVersionScheme {
-    #[cfg(feature = "std")]
+    /// Parse a dependency spec into [DependencyVersionScheme], taking into account workspace
+    /// context.
     pub fn try_from_in_workspace(
         spec: Span<&crate::ast::DependencySpec>,
         workspace: &crate::ast::WorkspaceFile,

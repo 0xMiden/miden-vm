@@ -21,6 +21,7 @@ pub struct Profile {
 }
 
 impl Default for Profile {
+    /// Constructs the default 'dev' profile in a debug-friendly configuration
     fn default() -> Self {
         Self {
             name: Span::unknown("dev".to_string().into_boxed_str().into()),
