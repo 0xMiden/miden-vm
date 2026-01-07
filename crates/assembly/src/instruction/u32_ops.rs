@@ -402,18 +402,12 @@ fn handle_arithmetic_operation(
 ) {
     if let Some(imm) = imm {
         push_u32_value(block_builder, imm);
-        // For U32sub with stack [a, ...], after push we have [imm, a, ...].
-        // U32sub computes second - top = a - imm, which is what we want.
-        // No swap needed.
     }
 
     block_builder.push_op(op);
 
     // in the wrapping mode, drop overflow/carry bits
     if matches!(op_mode, U32OpMode::Wrapping) {
-        // U32mul outputs [lo, hi] where lo is on top, so swap before drop to keep lo
-        // U32add outputs [carry, sum] where carry is on top, so just drop to keep sum
-        // U32sub outputs [borrow, diff] where borrow is on top, so just drop to keep diff
         if matches!(op, U32mul) {
             block_builder.push_ops([Swap, Drop]);
         } else {

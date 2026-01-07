@@ -45,9 +45,10 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
+    // K[0] is used as the leaf index
     let node = process
         .advice_provider()
-        .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
+        .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[0])
         .map_err(|err| SmtPeekError::AdviceProviderError {
             message: format!("Failed to get tree node: {}", err),
         })?;

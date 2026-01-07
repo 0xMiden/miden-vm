@@ -164,7 +164,6 @@ impl Assembler {
             Instruction::Ext2Inv => ext2_ops::ext2_inv(block_builder)?,
 
             // ----- u32 manipulation -------------------------------------------------------------
-            // U32split outputs [lo, hi], drop lo to check if hi==0 (value fits in u32)
             Instruction::U32Test => block_builder.push_ops([Dup0, U32split, Drop, Eqz]),
             Instruction::U32TestW => u32_ops::u32testw(block_builder),
             Instruction::U32Assert => block_builder.push_ops([Pad, U32assert2(ZERO), Drop]),
@@ -183,7 +182,6 @@ impl Assembler {
                 u32_ops::u32assertw(block_builder, error_code)
             },
 
-            // U32split outputs [lo, hi], swap to [hi, lo] then drop hi to keep lo (u32 part)
             Instruction::U32Cast => block_builder.push_ops([U32split, Swap, Drop]),
             Instruction::U32Split => block_builder.push_op(U32split),
 
@@ -400,7 +398,6 @@ impl Assembler {
                 span,
             )?,
             Instruction::MemLoadWBe => {
-                // MLoadW loads in LE order (mem[addr]→top), so we reverse to get BE
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
                 push_reversew(block_builder);
             },
@@ -408,7 +405,6 @@ impl Assembler {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
             },
             Instruction::MemLoadWBeImm(v) => {
-                // MLoadW loads in LE order (mem[addr]→top), so we reverse to get BE
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
@@ -436,7 +432,6 @@ impl Assembler {
                 span,
             )?,
             Instruction::LocLoadWBe(v) => {
-                // MLoadW loads in LE order (mem[addr]→top), so we reverse to get BE
                 let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 mem_ops::mem_read(
                     block_builder,
@@ -469,7 +464,6 @@ impl Assembler {
                 span,
             )?,
             Instruction::MemStoreWBe => {
-                // MStoreW stores in LE order (top→lowest addr), so we reverse to get BE
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);
                 block_builder.push_op(MovUp4);
@@ -478,7 +472,6 @@ impl Assembler {
             },
             Instruction::MemStoreWLe => block_builder.push_ops([MStoreW]),
             Instruction::MemStoreWBeImm(v) => {
-                // MStoreW stores in LE order (top→lowest addr), so we reverse to get BE
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(
                     block_builder,
@@ -507,7 +500,6 @@ impl Assembler {
                 span,
             )?,
             Instruction::LocStoreWBe(v) => {
-                // MStoreW stores in LE order (top→lowest addr), so we reverse to get BE
                 let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?;

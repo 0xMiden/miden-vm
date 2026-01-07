@@ -47,7 +47,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a - b) % 2^64
 #! This takes 11 cycles.
 pub proc wrapping_sub(b: u64, a: u64) -> u64
-    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
     movup.2             # => [b_lo, a_lo, a_hi, b_hi]
     u32overflowing_sub  # => [borrow_lo, c_lo, a_hi, b_hi] (a_lo - b_lo)
@@ -67,7 +66,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [underflow, c_lo, c_hi, ...], where c = (a - b) % 2^64
 #! This takes 15 cycles.
 pub proc overflowing_sub(b: u64, a: u64) -> (i1, u64)
-    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3     # => [a_lo, a_hi, b_lo, b_hi]
     movup.2             # => [b_lo, a_lo, a_hi, b_hi]
     u32overflowing_sub  # => [borrow_lo, c_lo, a_hi, b_hi] (a_lo - b_lo)
@@ -91,7 +89,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a * b) % 2^64
 #! This takes 15 cycles.
 pub proc wrapping_mul(b: u64, a: u64) -> u64
-    # => [b_lo, b_hi, a_lo, a_hi, ...]
     dup.2               # => [a_lo, b_lo, b_hi, a_lo, a_hi]
     dup.1               # => [b_lo, a_lo, b_lo, b_hi, a_lo, a_hi]
     u32overflowing_mul  # => [p0_lo, p0_hi, b_lo, b_hi, a_lo, a_hi]
@@ -116,8 +113,6 @@ end
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
 #! This takes 22 cycles.
 pub proc overflowing_mul(b: u64, a: u64) -> u128
-    # Convert LE inputs to BE-like format for the core algorithm.
-    # Since multiplication is commutative, swapping a and b is fine.
     # => [b_lo, b_hi, a_lo, a_hi, ...]
     reversew
     # => [a_hi, a_lo, b_hi, b_lo, ...] (effectively [x_hi, x_lo, y_hi, y_lo] for x*y)
@@ -172,7 +167,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
 #! This takes 12 cycles.
 pub proc lt(b: u64, a: u64) -> i1
-    # Swap to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
     # Computes a < b, which is true iff:
@@ -208,7 +202,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
 #! This takes 13 cycles.
 pub proc gt(b: u64, a: u64) -> i1
-    # Swap to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
     # Computes a > b, which is equivalent to b < a, true iff:
@@ -302,7 +295,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = min(a, b).
 #! This takes 23 cycles.
 pub proc min(b: u64, a: u64) -> u64
-    # Swap to get [a_lo, a_hi, b_lo, b_hi] for comparison
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
     dupw
@@ -321,7 +313,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = max(a, b).
 #! This takes 24 cycles.
 pub proc max(b: u64, a: u64) -> u64
-    # Swap to get [a_lo, a_hi, b_lo, b_hi] for comparison
     movup.3 movup.3
     # => [a_lo, a_hi, b_lo, b_hi, ...]
     dupw
@@ -344,7 +335,6 @@ const U64_DIV_EVENT = event("miden::core::math::u64::u64_div")
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a // b
 #! This takes 56 cycles.
 pub proc div(b: u64, a: u64) -> u64
-    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3
     # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
@@ -504,7 +494,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a % b
 #! This takes 56 cycles.
 pub proc mod(b: u64, a: u64) -> u64
-    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3
     # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
@@ -649,7 +638,6 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [q_lo, q_hi, r_lo, r_hi, ...], where q = a / b, r = a % b.
 #! This takes 56 cycles.
 pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
-    # Swap operands to get [a_lo, a_hi, b_lo, b_hi] for internal computation
     movup.3 movup.3
     # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder

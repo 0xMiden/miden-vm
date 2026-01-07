@@ -717,7 +717,7 @@ proptest! {
         let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
         let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
 
-        // Build extension field coefficients: chunks of 2, LE format [low, high]
+        // Build extension field coefficients: chunks of 2 [low, high]
         // Horner: P(α) = c0*α^3 + c1*α^2 + c2*α + c3
         let acc_new = inputs[0..8]
             .chunks(2)

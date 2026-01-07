@@ -33,7 +33,7 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
         let mut operand_stack: Vec<u64> = Default::default();
         prepend_word_le(&mut operand_stack, rhs);
         prepend_word_le(&mut operand_stack, lhs);
-        // => [RHS, LHS] in LE format (word[0] on top)
+        // => [RHS, LHS] (word[0] on top)
 
         let expected = u64::from(valid_ords.contains(&expected_cmp));
 

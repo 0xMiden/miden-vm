@@ -23,7 +23,7 @@ fn wrapping_add() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -46,7 +46,7 @@ fn wrapping_add_le() {
     let (b1, b0) = split_u64(b); // (hi, lo)
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi, ...] -> [c_lo, c_hi, ...]
+    // [a_lo, a_hi, b_lo, b_hi, ...] -> [c_lo, c_hi, ...]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -68,7 +68,7 @@ fn overflowing_add() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [overflow_flag, c_lo, c_hi]
+    // [a_lo, a_hi, b_lo, b_hi] -> [overflow_flag, c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[0, c0, c1]);
@@ -84,29 +84,6 @@ fn overflowing_add() {
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[1, c0, c1]);
-}
-
-#[test]
-fn overflowing_add_le_layout() {
-    // Use small limb values so overflow flag is known and we can reason about limbs.
-    let a: u64 = 0x0000_0001_0000_0001;
-    let b: u64 = 0x0000_0002_0000_0003;
-    let (c, flag) = a.overflowing_add(b);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::overflowing_add
-        end";
-
-    let (a1, a0) = split_u64(a); // (hi, lo)
-    let (b1, b0) = split_u64(b); // (hi, lo)
-    let (c1, c0) = split_u64(c);
-
-    // LE format: [a_lo, a_hi, b_lo, b_hi, ...] -> [overflow_flag, c_lo, c_hi, ...]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[flag as u64, c0, c1]);
 }
 
 // SUBTRACTION
@@ -128,30 +105,7 @@ fn wrapping_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [c_lo, c_hi]
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
-fn checked_wrapping_sub_le_layout() {
-    // Choose concrete values so we can reason about limbs explicitly.
-    let a: u64 = 0x0000_0002_0000_0005; // hi = 2, lo = 5
-    let b: u64 = 0x0000_0001_0000_0003; // hi = 1, lo = 3
-    let c = a.wrapping_sub(b);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::wrapping_sub
-        end";
-
-    let (a1, a0) = split_u64(a); // (hi, lo)
-    let (b1, b0) = split_u64(b); // (hi, lo)
-    let (c1, c0) = split_u64(c);
-
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [c_lo, c_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [c_lo, c_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -173,7 +127,7 @@ fn overflowing_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [borrow, c_lo, c_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [borrow, c_lo, c_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[flag as u64, c0, c1]);
@@ -228,7 +182,7 @@ fn wrapping_mul() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -253,7 +207,7 @@ fn overflowing_mul() {
     let (b1, b0) = split_u64(b);
     let (c3, c2, c1, c0) = split_u128(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c0, c1, c2, c3]
+    // [a_lo, a_hi, b_lo, b_hi] -> [c0, c1, c2, c3]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1, c2, c3]);
@@ -274,73 +228,6 @@ fn overflowing_mul() {
     test.expect_stack(&[c0, c1, c2, c3]);
 }
 
-#[test]
-fn checked_wrapping_mul_le_layout() {
-    let a: u64 = 3;
-    let b: u64 = 5;
-    let c = a.wrapping_mul(b);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::wrapping_mul
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
-fn checked_overflowing_sub_le_layout() {
-    let a: u64 = 5;
-    let b: u64 = 7;
-    let (c, flag) = a.overflowing_sub(b);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::overflowing_sub
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [underflow_flag, c_lo,
-    // c_hi]
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[flag as u64, c0, c1]);
-}
-
-#[test]
-fn checked_overflowing_mul_le_layout() {
-    let a: u64 = 0x0000_0001_0000_0002;
-    let b: u64 = 0x0000_0003_0000_0004;
-    let c = (a as u128).wrapping_mul(b as u128);
-    let (c3, c2, c1, c0) = split_u128(c);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::overflowing_mul
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-
-    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_mid_lo, c_mid_hi, c_hi]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1, c2, c3]);
-}
-
 // COMPARISONS
 // ------------------------------------------------------------------------------------------------
 
@@ -353,7 +240,7 @@ fn unchecked_lt() {
             exec.u64::lt
         end";
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
@@ -365,27 +252,6 @@ fn unchecked_lt() {
 }
 
 #[test]
-fn checked_lt_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::lt
-        end";
-
-    // a = 1, b = 2 => 1 < 2
-    let a: u64 = 1;
-    let b: u64 = 2;
-    let c = (a < b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_lte() {
     let source = "
         use miden::core::math::u64
@@ -393,7 +259,7 @@ fn unchecked_lte() {
             exec.u64::lte
         end";
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a <= b
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a <= b
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
@@ -414,26 +280,6 @@ fn unchecked_lte() {
 }
 
 #[test]
-fn checked_lte_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::lte
-        end";
-
-    let a: u64 = 3;
-    let b: u64 = 5;
-    let c = (a <= b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a <= b
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_gt() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
@@ -442,7 +288,7 @@ fn unchecked_gt() {
             exec.u64::gt
         end";
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
@@ -454,26 +300,6 @@ fn unchecked_gt() {
 }
 
 #[test]
-fn checked_gt_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::gt
-        end";
-
-    let a: u64 = 7;
-    let b: u64 = 4;
-    let c = (a > b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_gte() {
     let source = "
         use miden::core::math::u64
@@ -481,7 +307,7 @@ fn unchecked_gte() {
             exec.u64::gte
         end";
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a >= b
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a >= b
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
@@ -502,26 +328,6 @@ fn unchecked_gte() {
 }
 
 #[test]
-fn checked_gte_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::gte
-        end";
-
-    let a: u64 = 5;
-    let b: u64 = 5;
-    let c = (a >= b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a >= b
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_min() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
@@ -530,7 +336,7 @@ fn unchecked_min() {
             exec.u64::min
         end";
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [min_lo, min_hi]
+    // [a_lo, a_hi, b_lo, b_hi] -> [min_lo, min_hi]
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0, 0]);
 
@@ -542,27 +348,6 @@ fn unchecked_min() {
 }
 
 #[test]
-fn unchecked_min_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::min
-        end";
-
-    let a: u64 = 1;
-    let b: u64 = 2;
-    let c = cmp::min(a, b);
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
 fn unchecked_max() {
     // test a few manual cases; randomized tests are done using proptest
     let source = "
@@ -571,7 +356,7 @@ fn unchecked_max() {
             exec.u64::max
         end";
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [max_lo, max_hi]
+    // [a_lo, a_hi, b_lo, b_hi] -> [max_lo, max_hi]
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0, 0]);
 
@@ -583,27 +368,6 @@ fn unchecked_max() {
 }
 
 #[test]
-fn unchecked_max_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::max
-        end";
-
-    let a: u64 = 1;
-    let b: u64 = 2;
-    let c = cmp::max(a, b);
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
 fn unchecked_eq() {
     let source = "
         use miden::core::math::u64
@@ -611,7 +375,7 @@ fn unchecked_eq() {
             exec.u64::eq
         end";
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [flag]
+    // [a_lo, a_hi, b_lo, b_hi] -> [flag]
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
@@ -632,25 +396,6 @@ fn unchecked_eq() {
 }
 
 #[test]
-fn unchecked_eq_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::eq
-        end";
-
-    let a: u64 = 5;
-    let b: u64 = 5;
-    let c = (a == b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_neq() {
     let source = "
         use miden::core::math::u64
@@ -658,7 +403,7 @@ fn unchecked_neq() {
             exec.u64::neq
         end";
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [flag]
+    // [a_lo, a_hi, b_lo, b_hi] -> [flag]
     // a = 0, b = 0
     build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
@@ -679,25 +424,6 @@ fn unchecked_neq() {
 }
 
 #[test]
-fn unchecked_neq_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::neq
-        end";
-
-    let a: u64 = 3;
-    let b: u64 = 7;
-    let c = (a != b) as u64;
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c]);
-}
-
-#[test]
 fn unchecked_eqz() {
     let source = "
         use miden::core::math::u64
@@ -705,7 +431,7 @@ fn unchecked_eqz() {
             exec.u64::eqz
         end";
 
-    // LE format: [a_lo, a_hi] -> [flag]
+    // [a_lo, a_hi] -> [flag]
     // a = 0
     build_test!(source, &stack![0, 0]).expect_stack(&[1]);
 
@@ -720,25 +446,13 @@ fn unchecked_eqz() {
     build_test!(source, &stack![a0, a1]).expect_stack(&[c]);
 }
 
-#[test]
-fn unchecked_eqz_le_layout() {
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::eqz
-        end";
-
-    build_test!(source, &stack![0, 0]).expect_stack(&[1]);
-    build_test!(source, &stack![1, 0]).expect_stack(&[0]);
-}
-
 // DIVISION
 // ------------------------------------------------------------------------------------------------
 
 #[test]
 fn advice_push_u64div() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses LE format: [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [a_lo, a_hi, b_lo, b_hi] from top
     let source =
         format!("begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.4 movupw.2 dropw end");
 
@@ -761,7 +475,7 @@ fn advice_push_u64div() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    // LE format: stack from top [a_lo, a_hi, b_lo, b_hi]
+    // stack from top [a_lo, a_hi, b_lo, b_hi]
     let input_stack = stack![a_lo, a_hi, b_lo, b_hi];
     let test = build_test!(source, &input_stack);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
@@ -773,43 +487,9 @@ fn advice_push_u64div() {
 }
 
 #[test]
-fn advice_push_u64div_repeat() {
-    // Verify the LE format by computing 100 / 3 = 33 remainder 1
-    // This tests non-trivial values to confirm correct limb ordering
-    let source =
-        format!("begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.4 movupw.2 dropw end");
-
-    // a = 100, b = 3
-    // q = 33, r = 1
-    let a: u64 = 100;
-    let a_hi: u64 = 0;
-    let a_lo: u64 = a;
-
-    let b: u64 = 3;
-    let b_hi: u64 = 0;
-    let b_lo: u64 = b;
-
-    let q: u64 = a / b; // 33
-    let q_hi: u64 = 0;
-    let q_lo: u64 = q;
-
-    let r: u64 = a % b; // 1
-    let r_hi: u64 = 0;
-    let r_lo: u64 = r;
-
-    // adv_push.4 reverses: operand gets [r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi]
-    let expected: Vec<u64> = vec![r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi];
-
-    // LE format: stack from top [a_lo, a_hi, b_lo, b_hi]
-    let input_stack = stack![a_lo, a_hi, b_lo, b_hi];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&expected);
-}
-
-#[test]
 fn advice_push_u64div_two_pushes() {
     // Test that two separate adv_push.2 calls work correctly (like the div procedure uses)
-    // Uses LE format: [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [a_lo, a_hi, b_lo, b_hi] from top
     let source = format!(
         "begin
             emit.event(\"{U64_DIV_EVENT_NAME}\")
@@ -834,7 +514,7 @@ fn advice_push_u64div_two_pushes() {
 #[test]
 fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses LE format: [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [a_lo, a_hi, b_lo, b_hi] from top
     let source = format!(
         "
     proc foo
@@ -867,7 +547,7 @@ fn advice_push_u64div_local_procedure() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    // LE format: stack from top [a_lo, a_hi, b_lo, b_hi]
+    // stack from top [a_lo, a_hi, b_lo, b_hi]
     let input_stack = stack![a_lo, a_hi, b_lo, b_hi];
     let test = build_test!(source, &input_stack);
     // LE output: advice stack has [q_hi, q_lo, r_hi, r_lo] (q_hi on top)
@@ -879,7 +559,7 @@ fn advice_push_u64div_local_procedure() {
 
 #[test]
 fn advice_push_u64div_conditional_execution() {
-    // Uses LE format: [a_lo, a_hi, b_lo, b_hi] from top after eq consumes condition
+    // Uses [a_lo, a_hi, b_lo, b_hi] from top after eq consumes condition
     // Test case: a = 8, b = 4, so q = 2, r = 0
     let source = format!(
         "
@@ -898,7 +578,7 @@ fn advice_push_u64div_conditional_execution() {
 
     // if branch: a=8 (lo=8, hi=0), b=4 (lo=4, hi=0), condition values 1, 1
     // Stack from top before eq: [cond1=1, cond2=1, a_lo=8, a_hi=0, b_lo=4, b_hi=0]
-    // After eq (1==1 → true): [a_lo=8, a_hi=0, b_lo=4, b_hi=0] - LE format
+    // After eq (1==1 → true): [a_lo=8, a_hi=0, b_lo=4, b_hi=0]
     // Input array (bottom to top): [0, 4, 0, 8, 1, 1]
     let test = build_test!(&source, &[0, 4, 0, 8, 1, 1]);
     // Handler advice stack has [q_hi, q_lo, r_hi, r_lo] (q_hi on top)
@@ -931,7 +611,7 @@ fn unchecked_div() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -942,28 +622,6 @@ fn unchecked_div() {
     let input_stack = stack![b0, 0, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[d0, d1]);
-}
-
-#[test]
-fn unchecked_div_le_layout() {
-    let a: u64 = 123;
-    let b: u64 = 10;
-    let c = a / b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::div
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
 }
 
 /// The `U64Div` event handler is susceptible to crashing the processor if we don't ensure that the
@@ -980,7 +638,7 @@ fn ensure_div_doesnt_crash() {
     let (dividend_hi, dividend_lo) = (0, 1);
     let (divisor_hi, divisor_lo) = (u32::MAX as u64, u32::MAX as u64 + 1);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b
     let input_stack = stack![divisor_lo, divisor_hi, dividend_lo, dividend_hi];
     let test = build_test!(source, &input_stack);
     let err = test.execute();
@@ -1041,7 +699,7 @@ fn unchecked_mod() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -1052,28 +710,6 @@ fn unchecked_mod() {
     let input_stack = stack![b0, 0, a0, a1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[d0, d1]);
-}
-
-#[test]
-fn unchecked_mod_le_layout() {
-    let a: u64 = 123;
-    let b: u64 = 10;
-    let c = a % b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::mod
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
 }
 
 // DIVMOD OPERATION
@@ -1097,32 +733,7 @@ fn unchecked_divmod() {
     let (q1, q0) = split_u64(q);
     let (r1, r0) = split_u64(r);
 
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
-    // r_lo, r_hi]
-    let input_stack = stack![b0, b1, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[q0, q1, r0, r1]);
-}
-
-#[test]
-fn unchecked_divmod_le_layout() {
-    let a: u64 = 123;
-    let b: u64 = 10;
-    let q = a / b;
-    let r = a % b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::divmod
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (q1, q0) = split_u64(q);
-    let (r1, r0) = split_u64(r);
-
-    // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
     // r_lo, r_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
@@ -1148,28 +759,7 @@ fn checked_and() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
-fn checked_and_le_layout() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
-    let c = a & b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::and
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -1217,28 +807,7 @@ fn checked_or() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
-fn checked_or_le_layout() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
-    let c = a | b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::or
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -1286,28 +855,7 @@ fn checked_xor() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
-    let input_stack = stack![a0, a1, b0, b1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
-fn checked_xor_le_layout() {
-    let a: u64 = rand_value();
-    let b: u64 = rand_value();
-    let c = a ^ b;
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::xor
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (b1, b0) = split_u64(b);
-    let (c1, c0) = split_u64(c);
-
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
     let input_stack = stack![a0, a1, b0, b1];
     let test = build_test!(source, &input_stack);
     test.expect_stack(&[c0, c1]);
@@ -1347,7 +895,7 @@ fn unchecked_shl() {
             exec.u64::shl
         end";
 
-    // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
@@ -1391,27 +939,6 @@ fn unchecked_shl() {
 }
 
 #[test]
-fn unchecked_shl_le_layout() {
-    let a: u64 = 0x0000_0001_0000_0002;
-    let n: u32 = 5;
-    let c = a.wrapping_shl(n);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::shl
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (c1, c0) = split_u64(c);
-
-    // [n, a_lo, a_hi] -> [c_lo, c_hi]
-    let input_stack = stack![n as u64, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
 fn unchecked_shr() {
     let source = "
         use miden::core::math::u64
@@ -1419,7 +946,7 @@ fn unchecked_shr() {
             exec.u64::shr
         end";
 
-    // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
@@ -1471,27 +998,6 @@ fn unchecked_shr() {
 }
 
 #[test]
-fn unchecked_shr_le_layout() {
-    let a: u64 = 0x0000_0004_0000_0000;
-    let n: u32 = 3;
-    let c = a.wrapping_shr(n);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::shr
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (c1, c0) = split_u64(c);
-
-    // [n, a_lo, a_hi] -> [c_lo, c_hi]
-    let input_stack = stack![n as u64, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
 fn unchecked_rotl() {
     let source = "
         use miden::core::math::u64
@@ -1499,7 +1005,7 @@ fn unchecked_rotl() {
             exec.u64::rotl
         end";
 
-    // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
@@ -1540,27 +1046,6 @@ fn unchecked_rotl() {
     let (c1, c0) = split_u64(c);
 
     build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
-}
-
-#[test]
-fn unchecked_rotl_le_layout() {
-    let a: u64 = 0x0000_0001_0000_0002;
-    let n: u32 = 7;
-    let c = a.rotate_left(n);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::rotl
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (c1, c0) = split_u64(c);
-
-    // [n, a_lo, a_hi] -> [c_lo, c_hi]
-    let input_stack = stack![n as u64, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -1571,7 +1056,7 @@ fn unchecked_rotr() {
             exec.u64::rotr
         end";
 
-    // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
@@ -1615,27 +1100,6 @@ fn unchecked_rotr() {
 }
 
 #[test]
-fn unchecked_rotr_le_layout() {
-    let a: u64 = 0x0000_0001_0000_0002;
-    let n: u32 = 7;
-    let c = a.rotate_right(n);
-
-    let source = "
-        use miden::core::math::u64
-        begin
-            exec.u64::rotr
-        end";
-
-    let (a1, a0) = split_u64(a);
-    let (c1, c0) = split_u64(c);
-
-    // [n, a_lo, a_hi] -> [c_lo, c_hi]
-    let input_stack = stack![n as u64, a0, a1];
-    let test = build_test!(source, &input_stack);
-    test.expect_stack(&[c0, c1]);
-}
-
-#[test]
 fn clz() {
     let source = "
     use miden::core::math::u64
@@ -1643,7 +1107,7 @@ fn clz() {
         exec.u64::clz
     end";
 
-    // LE format: [a_lo, a_hi] -> [count]
+    // [a_lo, a_hi] -> [count]
     // Note: clz operates on the conceptual u64, so hi limb is checked first
     // 0x0000_0000_0000_0000 -> 64 leading zeros
     build_test!(source, &stack![0, 0]).expect_stack(&[64]);
@@ -1663,22 +1127,6 @@ fn clz() {
 }
 
 #[test]
-fn clz_le_layout() {
-    let a: u64 = 0x0000_0001_0000_0000;
-    let c = a.leading_zeros() as u64;
-
-    let source = "
-    use miden::core::math::u64
-    begin
-        exec.u64::clz
-    end";
-
-    let (a1, a0) = split_u64(a);
-    let input_stack = stack![a0, a1];
-    build_test!(source, &input_stack).expect_stack(&[c]);
-}
-
-#[test]
 fn ctz() {
     let source = "
     use miden::core::math::u64
@@ -1686,7 +1134,7 @@ fn ctz() {
         exec.u64::ctz
     end";
 
-    // LE format: [a_lo, a_hi] -> [count]
+    // [a_lo, a_hi] -> [count]
     // Note: ctz operates on the conceptual u64, so lo limb is checked first
     // 0x0000_0000_0000_0000 -> 64 trailing zeros
     build_test!(source, &stack![0, 0]).expect_stack(&[64]);
@@ -1705,22 +1153,6 @@ fn ctz() {
 }
 
 #[test]
-fn ctz_le_layout() {
-    let a: u64 = 0x0000_0000_0000_1000;
-    let c = a.trailing_zeros() as u64;
-
-    let source = "
-    use miden::core::math::u64
-    begin
-        exec.u64::ctz
-    end";
-
-    let (a1, a0) = split_u64(a);
-    let input_stack = stack![a0, a1];
-    build_test!(source, &input_stack).expect_stack(&[c]);
-}
-
-#[test]
 fn clo() {
     let source = "
     use miden::core::math::u64
@@ -1728,7 +1160,7 @@ fn clo() {
         exec.u64::clo
     end";
 
-    // LE format: [a_lo, a_hi] -> [count]
+    // [a_lo, a_hi] -> [count]
     // Note: clo operates on the conceptual u64, so hi limb is checked first
     // 0xffff_ffff_ffff_ffff -> 64 leading ones
     build_test!(source, &stack![4294967295, 4294967295]).expect_stack(&[64]);
@@ -1747,22 +1179,6 @@ fn clo() {
 }
 
 #[test]
-fn clo_le_layout() {
-    let a: u64 = !0u64; // all ones
-    let c = a.leading_ones() as u64;
-
-    let source = "
-    use miden::core::math::u64
-    begin
-        exec.u64::clo
-    end";
-
-    let (a1, a0) = split_u64(a);
-    let input_stack = stack![a0, a1];
-    build_test!(source, &input_stack).expect_stack(&[c]);
-}
-
-#[test]
 fn cto() {
     let source = "
     use miden::core::math::u64
@@ -1770,7 +1186,7 @@ fn cto() {
         exec.u64::cto
     end";
 
-    // LE format: [a_lo, a_hi] -> [count]
+    // [a_lo, a_hi] -> [count]
     // Note: cto operates on the conceptual u64, so lo limb is checked first
     // 0xffff_ffff_ffff_ffff -> 64 trailing ones
     build_test!(source, &stack![4294967295, 4294967295]).expect_stack(&[64]);
@@ -1786,22 +1202,6 @@ fn cto() {
     // 255 = 0xff -> trailing ones = 8
     build_test!(source, &stack![255, 0]).expect_stack(&[8]);
     build_test!(source, &stack![255, 255]).expect_stack(&[8]);
-}
-
-#[test]
-fn cto_le_layout() {
-    let a: u64 = !0u64; // all ones
-    let c = a.trailing_ones() as u64;
-
-    let source = "
-    use miden::core::math::u64
-    begin
-        exec.u64::cto
-    end";
-
-    let (a1, a0) = split_u64(a);
-    let input_stack = stack![a0, a1];
-    build_test!(source, &input_stack).expect_stack(&[c]);
 }
 
 // RANDOMIZED TESTS
@@ -1821,7 +1221,7 @@ proptest! {
                 exec.u64::lt
             end";
 
-        // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
         build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c])?;
     }
 
@@ -1838,7 +1238,7 @@ proptest! {
                 exec.u64::gt
             end";
 
-        // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
         build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c])?;
     }
 
@@ -1855,7 +1255,7 @@ proptest! {
                 exec.u64::min
             end";
 
-        // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![a0, a1, b0, b1]).prop_expect_stack(&[c0, c1])?;
     }
 
@@ -1872,7 +1272,7 @@ proptest! {
                 exec.u64::max
             end";
 
-        // LE format: [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![a0, a1, b0, b1]).prop_expect_stack(&[c0, c1])?;
     }
 
@@ -1891,7 +1291,7 @@ proptest! {
                 exec.u64::div
             end";
 
-        // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
         build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c0, c1])?;
     }
 
@@ -1910,7 +1310,7 @@ proptest! {
                 exec.u64::mod
             end";
 
-        // WASM convention: [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
         build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c0, c1])?;
     }
 
@@ -1928,7 +1328,7 @@ proptest! {
             exec.u64::shl
         end";
 
-        // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
@@ -1946,7 +1346,7 @@ proptest! {
             exec.u64::shr
         end";
 
-        // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
@@ -1964,7 +1364,7 @@ proptest! {
             exec.u64::rotl
         end";
 
-        // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
@@ -1982,7 +1382,7 @@ proptest! {
             exec.u64::rotr
         end";
 
-        // LE format: [n, a_lo, a_hi] -> [c_lo, c_hi]
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
         build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
@@ -1998,7 +1398,7 @@ proptest! {
                 exec.u64::clz
             end";
 
-        // LE format: [a_lo, a_hi] -> [count]
+        // [a_lo, a_hi] -> [count]
         build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
@@ -2014,7 +1414,7 @@ proptest! {
                 exec.u64::ctz
             end";
 
-        // LE format: [a_lo, a_hi] -> [count]
+        // [a_lo, a_hi] -> [count]
         build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
@@ -2030,7 +1430,7 @@ proptest! {
                 exec.u64::clo
             end";
 
-        // LE format: [a_lo, a_hi] -> [count]
+        // [a_lo, a_hi] -> [count]
         build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
@@ -2046,7 +1446,7 @@ proptest! {
                 exec.u64::cto
             end";
 
-        // LE format: [a_lo, a_hi] -> [count]
+        // [a_lo, a_hi] -> [count]
         build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 }

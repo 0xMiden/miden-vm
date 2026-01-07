@@ -15,20 +15,20 @@ const fn word(e0: u64, e1: u64, e2: u64, e3: u64) -> Word {
 const LEAVES: [(Word, Word); 2] = [
     (
         word(101, 102, 103, 104),
-        // Most significant Felt differs from previous
+        // K[0] (leaf index element) differs, so maps to different leaf
         word(1_u64, 2_u64, 3_u64, 4_u64),
     ),
     (word(105, 106, 107, 108), word(5_u64, 6_u64, 7_u64, 8_u64)),
 ];
 
-/// Unlike the above `LEAVES`, these leaves use the same value for their most-significant felts, to
-/// test leaves with multiple pairs.
+/// Unlike the above `LEAVES`, these leaves use the same value for their leaf index element (K[0]),
+/// to test leaves with multiple pairs.
 const LEAVES_MULTI: [(Word, Word); 3] = [
-    (word(101, 102, 103, 69420), word(0x1, 0x2, 0x3, 0x4)),
-    // Most significant felt does NOT differ from previous.
-    (word(201, 202, 203, 69420), word(0xb, 0xc, 0xd, 0xe)),
+    (word(69420, 102, 103, 104), word(0x1, 0x2, 0x3, 0x4)),
+    // K[0] does NOT differ from previous - same leaf.
+    (word(69420, 202, 203, 204), word(0xb, 0xc, 0xd, 0xe)),
     // A key in the same leaf, but with no corresponding value.
-    (word(301, 302, 303, 69420), EMPTY_WORD),
+    (word(69420, 302, 303, 304), EMPTY_WORD),
 ];
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf
@@ -283,18 +283,18 @@ fn test_set_advice_map_single_key() {
 /// (i.e. removing a value that's already empty)
 #[test]
 fn test_set_empty_key_in_non_empty_leaf() {
-    let key_mse = Felt::new(42);
+    let leaf_idx = Felt::new(42);
 
     let leaves: [(Word, Word); 1] = [(
-        Word::new([Felt::new(101), Felt::new(102), Felt::new(103), key_mse]),
+        Word::new([leaf_idx, Felt::new(102), Felt::new(103), Felt::new(104)]),
         Word::new([Felt::new(1_u64), Felt::new(2_u64), Felt::new(3_u64), Felt::new(4_u64)]),
     )];
 
     let mut smt = build_smt_from_pairs(&leaves);
 
-    // This key has same most significant element as key in the existing leaf, so will map to that
-    // leaf
-    let new_key = Word::new([Felt::new(1), Felt::new(12), Felt::new(3), key_mse]);
+    // This key has same K[0] (leaf index element) as key in the existing leaf, so will map to
+    // the same leaf
+    let new_key = Word::new([leaf_idx, Felt::new(12), Felt::new(3), Felt::new(4)]);
 
     let source = "
     use miden::core::collections::smt
@@ -392,13 +392,13 @@ fn test_smt_set_in_multi() {
         expect_insertion(&smt, key, value);
     }
 
-    const K0: Word = word(101, 102, 103, 420);
+    const K0: Word = word(420, 102, 103, 104);
     const V0: Word = word(555, 666, 777, 888);
 
-    const K1: Word = word(901, 902, 903, 420);
+    const K1: Word = word(420, 902, 903, 904);
     const V1: Word = word(122, 133, 144, 155);
 
-    const K: Word = word(505, 506, 507, 420);
+    const K: Word = word(420, 506, 507, 508);
     const V: Word = word(555, 566, 577, 588);
 
     // Try inserting right in the middle.
@@ -434,13 +434,13 @@ fn test_smt_set_replace_in_multi() {
         end
     ";
 
-    const K0: Word = word(101, 102, 103, 420);
+    const K0: Word = word(420, 102, 103, 104);
     const V0: Word = word(555, 666, 777, 888);
 
-    const K1: Word = word(901, 902, 903, 420);
+    const K1: Word = word(420, 902, 903, 904);
     const V1: Word = word(122, 133, 144, 155);
 
-    const K2: Word = word(505, 506, 507, 420);
+    const K2: Word = word(420, 506, 507, 508);
     const V2: Word = word(555, 566, 577, 588);
 
     // Try setting K0 to V2.
@@ -496,10 +496,10 @@ fn test_smt_set_multi_to_single() {
             .expect_stack(&expected_output);
     }
 
-    const K0: Word = word(101, 102, 103, 420);
+    const K0: Word = word(420, 102, 103, 104);
     const V0: Word = word(555, 666, 777, 888);
 
-    const K1: Word = word(201, 202, 203, 420);
+    const K1: Word = word(420, 202, 203, 204);
     const V1: Word = word(122, 133, 144, 155);
 
     let smt = build_smt_from_pairs(&[(K0, V0), (K1, V1)]);
@@ -541,13 +541,13 @@ fn test_smt_set_remove_in_multi() {
             .expect_stack(&expected_output);
     }
 
-    const K0: Word = word(101, 102, 103, 420);
+    const K0: Word = word(420, 102, 103, 104);
     const V0: Word = word(555, 666, 777, 888);
 
-    const K1: Word = word(201, 202, 203, 420);
+    const K1: Word = word(420, 202, 203, 204);
     const V1: Word = word(122, 133, 144, 155);
 
-    const K2: Word = word(301, 302, 303, 420);
+    const K2: Word = word(420, 302, 303, 304);
     const V2: Word = word(51, 52, 53, 54);
 
     let all_pairs = [(K0, V0), (K1, V1), (K2, V2)];
@@ -769,7 +769,7 @@ fn random_u64(seed: &mut u64) -> u64 {
 // ================================================================================================
 
 fn push_word_le(stack: &mut Vec<u64>, word: &Word) {
-    // Words should be pushed so that word[0] ends up on top of the stack (LE format).
+    // Words should be pushed so that word[0] ends up on top of the stack.
     // StackInputs::try_from_ints reverses the input vec, so we need to reverse here first.
     let mut reversed = *word;
     reversed.reverse();
