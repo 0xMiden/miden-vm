@@ -31,26 +31,36 @@ impl SetSourceId for PackageTable {
 }
 
 /// Package properties which may be inherited from a parent workspace
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageDetail {
     /// The semantic version assigned to this package
-    pub version: Span<MaybeInherit<SemVer>>,
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
+    pub version: Option<Span<MaybeInherit<SemVer>>>,
     /// An (optional) brief description of this project
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub description: Option<Span<MaybeInherit<Arc<str>>>>,
+    /// Custom metadata which can be used by third-party/downstream tooling
+    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
+    pub metadata: MetadataSet,
 }
 
 impl SetSourceId for PackageDetail {
     fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { version, description: _ } = self;
-        version.set_source_id(source_id);
+        let Self { version, description, metadata } = self;
+        if let Some(version) = version.as_mut() {
+            version.set_source_id(source_id);
+        }
+        if let Some(description) = description.as_mut() {
+            description.set_source_id(source_id);
+        }
+        metadata.set_source_id(source_id);
     }
 }
 
 /// Package configuration which can be defined at both the workspace and package level
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(deny_unknown_fields))]
 pub struct PackageConfig {
@@ -67,17 +77,13 @@ pub struct PackageConfig {
     /// Linter configuration/overrides for this package/workspace
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
     pub lints: MetadataSet,
-    /// Custom metadata which can be used by third-party/downstream tooling
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Map::is_empty"))]
-    pub metadata: MetadataSet,
 }
 
 impl SetSourceId for PackageConfig {
     fn set_source_id(&mut self, source_id: SourceId) {
-        let Self { dependencies, lints, metadata } = self;
+        let Self { dependencies, lints } = self;
         dependencies.set_source_id(source_id);
         lints.set_source_id(source_id);
-        metadata.set_source_id(source_id);
     }
 }
 
