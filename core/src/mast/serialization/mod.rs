@@ -100,6 +100,7 @@ impl Serializable for MastForest {
 
         // decorator & node counts
         target.write_usize(self.nodes.len());
+        // Expected to be used in #2504. Remove if this issue is resolved without using.
         target.write_usize(self.debug_info.num_decorators());
 
         // roots
@@ -145,6 +146,7 @@ impl Deserializable for MastForest {
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
+        // Expected to be used in #2504. Remove if this issue is resolved without using.
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
