@@ -16,11 +16,11 @@ use crate::{SemVer, Version, VersionReq, VersionRequirement};
 /// of the set.
 ///
 /// * The empty set is represented as a range that cannot contain any version
-/// * The complete (aka "full") set is represented as an unbounded range with
-///   an empty content digest filter, equivalent to the semantic versioning constraint `*`
+/// * The complete (aka "full") set is represented as an unbounded range with an empty content
+///   digest filter, equivalent to the semantic versioning constraint `*`
 /// * Set intersection is performed by finding the overlap in the ranges of the two sets, and then
-///   if either set has a content digest filter, only permitting content digests that are present
-///   in both sets
+///   if either set has a content digest filter, only permitting content digests that are present in
+///   both sets
 /// * Set complement is performed by negating the range of versions included in the set. The
 ///   resulting set will always have an empty content digest filter.
 /// * Set containment for a version `v` is determined as follows:

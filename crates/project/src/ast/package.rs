@@ -3,12 +3,11 @@ use alloc::collections::BTreeMap;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, TargetType, Uri};
-
 use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
+use crate::{Map, MetadataSet, RelatedLabel, SemVer, SourceId, Span, TargetType, Uri};
 
 /// Represents the contents of the `[package]` table
 #[derive(Debug, Clone)]
@@ -128,8 +127,8 @@ impl PackageFile {
     /// If successful, the contents of the manifest are semantically valid, with the following
     /// caveats:
     ///
-    /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is up to
-    ///   the caller to compute the concrete property values and validate them at that point.
+    /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
+    ///   up to the caller to compute the concrete property values and validate them at that point.
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
         use parsing::{SetSourceId, Validate};
 
