@@ -307,7 +307,7 @@ impl OpToDecoratorIds {
         }
 
         // Node pointers must be valid indices into op_indptr
-        let max_node_ptr = self.op_indptr_for_dec_ids.len().saturating_sub(1);
+        let max_node_ptr = self.op_indptr_for_dec_ids.len() - 1;
         if *node_slice.last().unwrap() > max_node_ptr {
             return Err(format!(
                 "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
