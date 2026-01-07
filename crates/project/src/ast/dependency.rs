@@ -1,6 +1,5 @@
-use crate::{SourceId, Span, Uri, VersionRequirement};
-
 use super::{parsing::SetSourceId, *};
+use crate::{SourceId, Span, Uri, VersionRequirement};
 
 /// Represents information about a project dependency needed to resolve it to a Miden package
 #[derive(Debug, Clone)]

@@ -255,7 +255,8 @@ impl SemverPubgrub {
     ///
     /// The `versions` iterator must be sorted.
     /// Functionally equivalent to `versions.map(|v| self.contains(v))`.
-    /// Except it runs in `O(size_of_range + len_of_versions)` not `O(size_of_range * len_of_versions)`
+    /// Except it runs in `O(size_of_range + len_of_versions)` not `O(size_of_range *
+    /// len_of_versions)`
     pub fn contains_many<'s, I, BV>(&'s self, versions: I) -> impl Iterator<Item = bool> + 's
     where
         I: Iterator<Item = BV> + Clone + 's,
@@ -279,10 +280,12 @@ impl SemverPubgrub {
     ///
     /// For every one of the Versions provided in versions the existing range and
     /// the simplified range will agree on whether it is contained.
-    /// The simplified version may include or exclude versions that are not in versions as the implementation wishes.
-    /// For example:
-    ///  - If all the versions are contained in the original than the range will be simplified to `full`.
-    ///  - If none of the versions are contained in the original than the range will be simplified to `empty`.
+    /// The simplified version may include or exclude versions that are not in versions as the
+    /// implementation wishes. For example:
+    ///  - If all the versions are contained in the original than the range will be simplified to
+    ///    `full`.
+    ///  - If none of the versions are contained in the original than the range will be simplified
+    ///    to `empty`.
     ///
     /// If versions are not sorted the correctness of this function is not guaranteed.
     pub fn simplify<'v, I, BV>(&self, versions: I) -> Self
@@ -791,9 +794,10 @@ pub(crate) fn simplified_bounds_to_normal(
 
 #[cfg(test)]
 mod test {
+    use std::{collections::HashSet, dbg, eprintln, format, ops::RangeBounds};
+
     use super::*;
     use crate::semver;
-    use std::{collections::HashSet, dbg, eprintln, format, ops::RangeBounds};
 
     const OPS: &[&str] = &["^", "~", "=", "<", ">", "<=", ">="];
 
@@ -945,7 +949,8 @@ mod test {
         let reqs = vers.clone().map(|v| SemverPubgrub::singleton(v.clone()));
         for pver in &reqs {
             pver.as_singleton().unwrap();
-            // Singletons can only match one thing so they definitely only match one compatibility range.
+            // Singletons can only match one thing so they definitely only match one compatibility
+            // range.
             pver.only_one_compatibility_range().unwrap();
         }
 
