@@ -87,16 +87,7 @@ pub fn build_trace(
     let mut core_trace_columns = generate_core_trace_columns(core_trace_contexts, fragment_size);
 
     // Calculate trace length
-    let core_trace_len = {
-        let core_trace_len: usize = core_trace_columns[0].len();
-
-        // We need to do a "- 1" here to be consistent with Process::execute(), which
-        // has a bug that causes it to not always insert a HALT row at the end of execution,
-        // documented in [#1383](https://github.com/0xMiden/miden-vm/issues/1383). We correctly insert a HALT row
-        // when generating the core trace fragments, so this "- 1" accounts for that extra row.
-        // We should remove this "- 1" once Process::execute() is fixed or removed entirely.
-        core_trace_len - 1
-    };
+    let core_trace_len = core_trace_columns[0].len();
 
     // Get the number of rows for the range checker
     let range_table_len = range_checker.get_number_range_checker_rows();

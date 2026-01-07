@@ -1,3 +1,4 @@
+use miden_core::field::PrimeField64;
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
 
 use super::*;

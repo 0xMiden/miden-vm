@@ -154,7 +154,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     };
 
     let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
+        .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(
@@ -225,7 +225,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     };
 
     let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host, DEFAULT_CORE_TRACE_FRAGMENT_SIZE)
+        .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(

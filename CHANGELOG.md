@@ -4,6 +4,14 @@
 
 #### Enhancements
 
+- Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
+
+#### Fixes
+
+- `FastProcessor` now correctly returns an error if the maximum number of cycles was exceeded during execution ([#2537](https://github.com/0xMiden/miden-vm/pull/2537))
+- `FastProcessor` now correctly only executes `trace` decorators when tracing is enabled (with `ExecutionOptions`) ([#2539](https://github.com/0xMiden/miden-vm/pull/2539))
+- Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484))
+
 #### Changes
 
 - Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
@@ -17,6 +25,10 @@
 - [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
 - [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
+- Added validation of `core_trace_fragment_size` in `ExecutionOptions` ([#2528](https://github.com/0xMiden/miden-vm/pull/2528)).
+
+## 0.20.2 (TBD)
+- Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
 
 ## 0.20.1 (2025-12-14)
 

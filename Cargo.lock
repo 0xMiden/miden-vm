@@ -890,11 +890,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
 dependencies = [
  "cfg-if",
- "js-sys",
  "libc",
  "r-efi",
  "wasip2",
- "wasm-bindgen",
 ]
 
 [[package]]
@@ -1312,7 +1310,8 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.20.1"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#0343d62397fc56112c265e62d40a0fd6ae0f5b71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5faabb0c18b902bc08e0af0375ecd96252939492ab138f0fc94c112a8dcb40e3"
 dependencies = [
  "blake3",
  "cc",
@@ -1349,7 +1348,8 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.20.1"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#0343d62397fc56112c265e62d40a0fd6ae0f5b71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7565cb2457f722c5125428c1293f2e6fd8a5873c495f05a4bc9c02c6a19a853"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1460,8 +1460,6 @@ name = "miden-prover"
 version = "0.21.0"
 dependencies = [
  "bincode",
- "getrandom 0.2.16",
- "getrandom 0.3.4",
  "miden-air",
  "miden-core",
  "miden-crypto",
@@ -1469,7 +1467,6 @@ dependencies = [
  "miden-processor",
  "p3-matrix",
  "p3-merkle-tree",
- "rand",
  "serde",
  "tokio",
  "tracing",
@@ -1478,7 +1475,8 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.20.1"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#0343d62397fc56112c265e62d40a0fd6ae0f5b71"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1b99de56b2a1dcac1caf76e7906721ec2ea212d7ddb32dcb7dc135602bbac27"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",

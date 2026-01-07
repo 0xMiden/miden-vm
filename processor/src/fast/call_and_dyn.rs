@@ -43,7 +43,7 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, current_node_id, host);
+        let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
 
         let callee_hash = current_forest[call_node.callee()].digest();
 
@@ -81,7 +81,7 @@ impl FastProcessor {
         continuation_stack.push_start_node(call_node.callee());
 
         // Corresponds to the CALL or SYSCALL operation added to the trace.
-        self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+        self.increment_clk(tracer, stopper)
     }
 
     /// Executes the finish phase of a Call node.
@@ -107,7 +107,7 @@ impl FastProcessor {
         // so we prefix it with underscore to indicate this intentional unused state
         // and suppress warnings in feature combinations that include `no_err_ctx`.
         let _call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, node_id, host);
+        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // when returning from a function call or a syscall, restore the
         // context of the
         // system registers and the operand stack to what it was prior
@@ -115,8 +115,8 @@ impl FastProcessor {
         self.restore_context(tracer, &err_ctx)?;
 
         // Corresponds to the row inserted for the END operation added to the trace.
-        self.increment_clk(tracer, stopper).map_break(|_| {
-            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(node_id)))
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
@@ -147,7 +147,7 @@ impl FastProcessor {
         // added to the trace.
         let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
-        let err_ctx = err_ctx!(&current_forest, current_node_id, host);
+        let err_ctx = err_ctx!(&current_forest, current_node_id, host, self.in_debug_mode());
 
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
@@ -226,7 +226,7 @@ impl FastProcessor {
 
         // Increment the clock, corresponding to the row inserted for the DYN or DYNCALL operation
         // added to the trace.
-        self.increment_clk(tracer, stopper).map_break(BreakReason::stopped)
+        self.increment_clk(tracer, stopper)
     }
 
     /// Executes the finish phase of a Dyn node.
@@ -248,7 +248,7 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, node_id, host);
+        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // For dyncall, restore the context.
         if dyn_node.is_dyncall() {
             self.restore_context(tracer, &err_ctx)?;
@@ -256,8 +256,8 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the END operation added to
         // the trace.
-        self.increment_clk(tracer, stopper).map_break(|_| {
-            BreakReason::Stopped(Some(Continuation::AfterExitDecorators(node_id)))
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)

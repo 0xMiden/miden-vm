@@ -1,7 +1,11 @@
+#[cfg(test)]
+use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
+#[cfg(test)]
+use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{Felt, trace::RowIndex};
+use miden_air::{ExecutionOptions, Felt, trace::RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -127,49 +131,64 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Whether to enable debug statements and tracing.
-    in_debug_mode: bool,
+    /// Options for execution, including but not limited to whether debug or tracing is enabled,
+    /// the size of core trace fragments during execution, etc.
+    options: ExecutionOptions,
 
     /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
     /// sponge).
     pc_transcript: PrecompileTranscript,
+
+    /// Tracks decorator retrieval calls for testing.
+    #[cfg(test)]
+    pub decorator_retrieval_count: Rc<Cell<usize>>,
 }
 
 impl FastProcessor {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
-    /// Creates a new `FastProcessor` instance with the given stack inputs.
+    /// Creates a new `FastProcessor` instance with the given stack inputs, where debug and tracing
+    /// are disabled.
     ///
     /// # Panics
     /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
     pub fn new(stack_inputs: &[Felt]) -> Self {
-        Self::initialize(stack_inputs, AdviceInputs::default(), false)
+        Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs.
+    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where debug
+    /// and tracing are disabled.
     ///
     /// # Panics
     /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
     pub fn new_with_advice_inputs(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
-        Self::initialize(stack_inputs, advice_inputs, false)
+        Self::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance, set to debug mode, with the given stack
-    /// and advice inputs.
+    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where
+    /// debugging and tracing are enabled.
     ///
     /// # Panics
     /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
     pub fn new_debug(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
-        Self::initialize(stack_inputs, advice_inputs, true)
+        Self::new_with_options(
+            stack_inputs,
+            advice_inputs,
+            ExecutionOptions::default().with_debugging(true).with_tracing(),
+        )
     }
 
-    /// Generic constructor unifying the above public ones.
+    /// Most general constructor unifying all the other ones.
     ///
     /// The stack inputs are expected to be stored in reverse order. For example, if `stack_inputs =
     /// [1,2,3]`, then the stack will be initialized as `[3,2,1,0,0,...]`, with `3` being on
     /// top.
-    fn initialize(stack_inputs: &[Felt], advice_inputs: AdviceInputs, in_debug_mode: bool) -> Self {
+    pub fn new_with_options(
+        stack_inputs: &[Felt],
+        advice_inputs: AdviceInputs,
+        options: ExecutionOptions,
+    ) -> Self {
         assert!(stack_inputs.len() <= MIN_STACK_DEPTH);
 
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
@@ -196,8 +215,10 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
-            in_debug_mode,
+            options,
             pc_transcript: PrecompileTranscript::new(),
+            #[cfg(test)]
+            decorator_retrieval_count: Rc::new(Cell::new(0)),
         }
     }
 
@@ -219,6 +240,27 @@ impl FastProcessor {
 
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Returns whether the processor is executing in debug mode.
+    #[inline(always)]
+    pub fn in_debug_mode(&self) -> bool {
+        self.options.enable_debugging()
+    }
+
+    /// Returns true if decorators should be executed.
+    ///
+    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
+    /// enabled (for trace decorators).
+    #[inline(always)]
+    fn should_execute_decorators(&self) -> bool {
+        self.in_debug_mode() || self.options.enable_tracing()
+    }
+
+    #[cfg(test)]
+    #[inline(always)]
+    fn record_decorator_retrieval(&self) {
+        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
+    }
 
     /// Returns the size of the stack.
     #[inline(always)]
@@ -344,9 +386,8 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-        fragment_size: usize,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        let mut tracer = ExecutionTracer::new(fragment_size);
+        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
         // Pass the final precompile transcript from execution output to the trace generation
@@ -676,6 +717,13 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> ControlFlow<BreakReason> {
+        if !self.should_execute_decorators() {
+            return ControlFlow::Continue(());
+        }
+
+        #[cfg(test)]
+        self.record_decorator_retrieval();
+
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
@@ -694,6 +742,13 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> ControlFlow<BreakReason> {
+        if !self.in_debug_mode() {
+            return ControlFlow::Continue(());
+        }
+
+        #[cfg(test)]
+        self.record_decorator_retrieval();
+
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("internal error: node id {node_id} not found in current forest");
@@ -713,7 +768,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
-                if self.in_debug_mode {
+                if self.in_debug_mode() {
                     let clk = self.clk;
                     let process = &mut self.state();
                     if let Err(err) = host.on_debug(process, options) {
@@ -727,12 +782,14 @@ impl FastProcessor {
                 // do nothing
             },
             Decorator::Trace(id) => {
-                let clk = self.clk;
-                let process = &mut self.state();
-                if let Err(err) = host.on_trace(process, *id) {
-                    return ControlFlow::Break(BreakReason::Err(
-                        ExecutionError::TraceHandlerError { clk, trace_id: *id, err },
-                    ));
+                if self.options.enable_tracing() {
+                    let clk = self.clk;
+                    let process = &mut self.state();
+                    if let Err(err) = host.on_trace(process, *id) {
+                        return ControlFlow::Break(BreakReason::Err(
+                            ExecutionError::TraceHandlerError { clk, trace_id: *id, err },
+                        ));
+                    }
                 }
             },
         };
@@ -743,18 +800,36 @@ impl FastProcessor {
     // ----------------------------------------------------------------------------------------------
 
     /// Increments the clock by 1.
+    ///
+    /// To provide a continuation in case the execution is stopped, use
+    /// [Self::increment_clk_with_continuation()].
     #[inline(always)]
     pub(crate) fn increment_clk(
         &mut self,
         tracer: &mut impl Tracer,
         stopper: &impl Stopper,
-    ) -> ControlFlow<()> {
+    ) -> ControlFlow<BreakReason> {
+        self.increment_clk_with_continuation(tracer, stopper, || None)
+    }
+
+    /// Increments the clock by 1, and provides a closure to compute a continuation in case the
+    /// execution is stopped.
+    pub(crate) fn increment_clk_with_continuation(
+        &mut self,
+        tracer: &mut impl Tracer,
+        stopper: &impl Stopper,
+        continuation: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason> {
         self.clk += 1_u32;
 
         tracer.increment_clk();
 
-        if stopper.should_stop(self) {
-            ControlFlow::Break(())
+        if self.clk >= self.options.max_cycles() as usize {
+            ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
+                self.options.max_cycles(),
+            )))
+        } else if stopper.should_stop(self) {
+            ControlFlow::Break(BreakReason::Stopped(continuation()))
         } else {
             ControlFlow::Continue(())
         }
@@ -948,7 +1023,6 @@ impl FastProcessor {
         self,
         program: &Program,
         host: &mut impl AsyncHost,
-        fragment_size: usize,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
@@ -963,7 +1037,7 @@ impl FastProcessor {
             Err(_) => {
                 // No runtime exists - create one and use it
                 let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(self.execute_for_trace(program, host, fragment_size))
+                rt.block_on(self.execute_for_trace(program, host))
             },
         }
     }

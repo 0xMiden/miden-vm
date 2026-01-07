@@ -6,7 +6,7 @@ use miden_utils_testing::rand::rand_value;
 
 use super::{
     super::utils::build_span_with_respan_ops, AdviceInputs, ExecutionTrace, Felt, ONE, Operation,
-    ZERO, build_trace_from_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
+    Word, ZERO, build_trace_from_ops, build_trace_from_ops_with_inputs, build_trace_from_program,
     init_state_from_words, rand_array,
 };
 

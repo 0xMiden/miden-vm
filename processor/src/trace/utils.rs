@@ -6,8 +6,7 @@ use miden_core::field::ExtensionField;
 #[cfg(test)]
 use miden_core::{Operation, utils::ToElements};
 
-use super::Felt;
-use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
+use crate::{Felt, chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 
 // TRACE FRAGMENT
 // ================================================================================================
@@ -15,12 +14,18 @@ use crate::{chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 /// TODO: add docs
 pub struct TraceFragment<'a> {
     data: Vec<&'a mut [Felt]>,
+    num_rows: usize,
 }
 
 impl<'a> TraceFragment<'a> {
-    /// Creates a new TraceFragment with its data allocated to the specified capacity.
-    pub fn new(capacity: usize) -> Self {
-        TraceFragment { data: Vec::with_capacity(capacity) }
+    /// Creates a new [TraceFragment] with the expected number of columns and rows.
+    ///
+    /// The memory needed to hold the trace fragment data is not allocated during construction.
+    pub fn new(num_columns: usize, num_rows: usize) -> Self {
+        TraceFragment {
+            data: Vec::with_capacity(num_columns),
+            num_rows,
+        }
     }
 
     // PUBLIC ACCESSORS
@@ -33,7 +38,7 @@ impl<'a> TraceFragment<'a> {
 
     /// Returns the number of rows in this execution trace fragment.
     pub fn len(&self) -> usize {
-        self.data[0].len()
+        self.num_rows
     }
 
     // DATA MUTATORS
@@ -50,11 +55,12 @@ impl<'a> TraceFragment<'a> {
         self.data.iter_mut()
     }
 
-    /// Adds a new column to this fragment by pushing a mutable slice with the first `len`
-    /// elements of the provided column. Returns the rest of the provided column as a separate
-    /// mutable slice.
-    pub fn push_column_slice(&mut self, column: &'a mut [Felt], len: usize) -> &'a mut [Felt] {
-        let (column_fragment, rest) = column.split_at_mut(len);
+    /// Adds a new column to this fragment by pushing a mutable slice with the first `self.len()`
+    /// elements of the provided column.
+    ///
+    /// Returns the rest of the provided column as a separate mutable slice.
+    pub fn push_column_slice(&mut self, column: &'a mut [Felt]) -> &'a mut [Felt] {
+        let (column_fragment, rest) = column.split_at_mut(self.num_rows);
         self.data.push(column_fragment);
         rest
     }
@@ -64,11 +70,14 @@ impl<'a> TraceFragment<'a> {
 
     #[cfg(test)]
     pub fn trace_to_fragment(trace: &'a mut [Vec<Felt>]) -> Self {
+        assert!(!trace.is_empty(), "expected trace to have at least one column");
         let mut data = Vec::new();
         for column in trace.iter_mut() {
             data.push(column.as_mut_slice());
         }
-        Self { data }
+
+        let num_rows = data[0].len();
+        Self { data, num_rows }
     }
 }
 
@@ -134,6 +143,9 @@ impl TraceLenSummary {
         (self.padded_trace_len() - self.trace_len()) * 100 / self.padded_trace_len()
     }
 }
+
+// CHIPLET LENGTHS
+// ================================================================================================
 
 /// Contains trace lengths of all chilplets: hash, bitwise, memory and kernel ROM trace
 /// lengths.

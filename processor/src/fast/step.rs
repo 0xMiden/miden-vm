@@ -85,10 +85,3 @@ pub enum BreakReason {
     /// step in `FastProcessor::execute_impl()` should be returned.
     Stopped(Option<Continuation>),
 }
-
-impl BreakReason {
-    #[inline(always)]
-    pub fn stopped(_: ()) -> Self {
-        Self::Stopped(None)
-    }
-}

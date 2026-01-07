@@ -33,7 +33,6 @@ fn create_debug_test_program() -> Program {
 
 /// Test that verifies decorators only execute in debug mode
 #[test]
-#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode() {
     // Test implementation to verify decorators only execute in debug mode
 
@@ -107,7 +106,8 @@ fn test_decorators_only_execute_in_debug_mode() {
             &mut self,
             process: &ProcessState<'_>,
         ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-            async { <Self as SyncHost>::on_event(self, process) }
+            let result = <Self as SyncHost>::on_event(self, process);
+            async { result }
         }
     }
 
@@ -136,7 +136,6 @@ fn test_decorators_only_execute_in_debug_mode() {
 
 /// Test that verifies decorators do NOT execute when debug mode is OFF
 #[test]
-#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode_off() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
@@ -165,7 +164,6 @@ fn test_decorators_only_execute_in_debug_mode_off() {
 
 /// Test that verifies decorators DO execute when debug mode is ON
 #[test]
-#[ignore = "issue #2479"]
 fn test_decorators_only_execute_in_debug_mode_on() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
@@ -196,7 +194,6 @@ fn test_decorators_only_execute_in_debug_mode_on() {
 /// Test that demonstrates the zero overhead principle by comparing execution
 /// with debug mode on vs off for a more complex program
 #[test]
-#[ignore = "issue #2479"]
 fn test_zero_overhead_when_debug_off() {
     // Create a more complex program with multiple decorators
     let mut mast_forest = MastForest::new();

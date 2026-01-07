@@ -259,11 +259,11 @@ impl Chiplets {
         trace[4][padding_start..].fill(ONE);
 
         // allocate fragments to be filled with the respective execution traces of each chiplet
-        let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH);
-        let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH);
-        let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH);
-        let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH);
-        let mut kernel_rom_fragment = TraceFragment::new(CHIPLETS_WIDTH);
+        let mut hasher_fragment = TraceFragment::new(CHIPLETS_WIDTH, hasher.trace_len());
+        let mut bitwise_fragment = TraceFragment::new(CHIPLETS_WIDTH, bitwise.trace_len());
+        let mut memory_fragment = TraceFragment::new(CHIPLETS_WIDTH, memory.trace_len());
+        let mut ace_fragment = TraceFragment::new(CHIPLETS_WIDTH, ace.trace_len());
+        let mut kernel_rom_fragment = TraceFragment::new(CHIPLETS_WIDTH, kernel_rom.trace_len());
 
         // add the hasher, bitwise, memory, ACE, and kernel ROM segments to their respective
         // fragments so they can be filled with the chiplet traces
@@ -271,49 +271,49 @@ impl Chiplets {
             match column_num {
                 1 => {
                     // column 1 is relevant only for the hasher
-                    hasher_fragment.push_column_slice(column, hasher.trace_len());
+                    hasher_fragment.push_column_slice(column);
                 },
                 2 => {
                     // column 2 is relevant to the hasher and to bitwise chiplet
-                    let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
-                    bitwise_fragment.push_column_slice(rest, bitwise.trace_len());
+                    let rest = hasher_fragment.push_column_slice(column);
+                    bitwise_fragment.push_column_slice(rest);
                 },
                 3 => {
                     // column 3 is relevant for hasher, bitwise, and memory chiplets
-                    let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
-                    let rest = bitwise_fragment.push_column_slice(rest, bitwise.trace_len());
-                    memory_fragment.push_column_slice(rest, memory.trace_len());
+                    let rest = hasher_fragment.push_column_slice(column);
+                    let rest = bitwise_fragment.push_column_slice(rest);
+                    memory_fragment.push_column_slice(rest);
                 },
                 4 | 10..=14 => {
                     // columns 4 - 10 to 14 are relevant for hasher, bitwise, memory chiplets and
                     // ace chiplet
-                    let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
-                    let rest = bitwise_fragment.push_column_slice(rest, bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
-                    ace_fragment.push_column_slice(rest, ace.trace_len());
+                    let rest = hasher_fragment.push_column_slice(column);
+                    let rest = bitwise_fragment.push_column_slice(rest);
+                    let rest = memory_fragment.push_column_slice(rest);
+                    ace_fragment.push_column_slice(rest);
                 },
                 5..=9 => {
                     // columns 5 - 9 are relevant to all chiplets
-                    let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
-                    let rest = bitwise_fragment.push_column_slice(rest, bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
-                    let rest = ace_fragment.push_column_slice(rest, ace.trace_len());
-                    kernel_rom_fragment.push_column_slice(rest, kernel_rom.trace_len());
+                    let rest = hasher_fragment.push_column_slice(column);
+                    let rest = bitwise_fragment.push_column_slice(rest);
+                    let rest = memory_fragment.push_column_slice(rest);
+                    let rest = ace_fragment.push_column_slice(rest);
+                    kernel_rom_fragment.push_column_slice(rest);
                 },
                 15 | 16 => {
                     // columns 15 and 16 are relevant only for the hasher, memory and ace chiplets
-                    let rest = hasher_fragment.push_column_slice(column, hasher.trace_len());
+                    let rest = hasher_fragment.push_column_slice(column);
                     // skip bitwise chiplet
                     let (_, rest) = rest.split_at_mut(bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
-                    ace_fragment.push_column_slice(rest, ace.trace_len());
+                    let rest = memory_fragment.push_column_slice(rest);
+                    ace_fragment.push_column_slice(rest);
                 },
                 17 => {
                     // column 17 is relevant only for the memory chiplet
                     // skip the hasher and bitwise chiplets
                     let (_, rest) = column.split_at_mut(hasher.trace_len() + bitwise.trace_len());
-                    let rest = memory_fragment.push_column_slice(rest, memory.trace_len());
-                    ace_fragment.push_column_slice(rest, ace.trace_len());
+                    let rest = memory_fragment.push_column_slice(rest);
+                    ace_fragment.push_column_slice(rest);
                 },
                 18 | 19 => {
                     // column 18 and 19 are relevant only for the ACE chiplet
@@ -321,7 +321,7 @@ impl Chiplets {
                     let (_, rest) = column.split_at_mut(
                         hasher.trace_len() + bitwise.trace_len() + memory.trace_len(),
                     );
-                    ace_fragment.push_column_slice(rest, ace.trace_len());
+                    ace_fragment.push_column_slice(rest);
                 },
                 _ => panic!("invalid column index"),
             }

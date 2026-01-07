@@ -19,6 +19,7 @@ use crate::{
 
 // CONSTANTS
 // ================================================================================================
+
 const SIMPLE_SMT_DEPTH: u8 = u64::BITS as u8;
 
 // MERKLE DATA
@@ -303,6 +304,9 @@ impl InputFile {
     }
 }
 
+// TESTS
+// ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -403,6 +407,17 @@ mod tests {
         // Too short hex (less than 64 chars after 0x)
         let result = InputFile::parse_word("0x123");
         assert!(result.is_err());
+
+        // Hex string longer than 64 characters after 0x
+        let too_long =
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let result = InputFile::parse_word(too_long);
+        assert!(result.is_err());
+
+        // Invalid hex characters
+        let invalid_chars = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdeg";
+        let result = InputFile::parse_word(invalid_chars);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -415,5 +430,55 @@ mod tests {
         let word = result.unwrap();
         let zero_word = Word::from([ZERO; 4]);
         assert_ne!(word, zero_word);
+    }
+
+    #[test]
+    fn test_parse_stack_inputs_large_numbers() {
+        // Test with felt modulus - 1 (should succeed)
+        let felt_modulus_minus_one = Felt::ORDER_U64 - 1;
+        let inputs2 = InputFile {
+            operand_stack: vec![felt_modulus_minus_one.to_string()],
+            advice_stack: None,
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result2 = inputs2.parse_stack_inputs();
+        assert!(result2.is_ok());
+
+        // Test with felt modulus (should fail)
+        let felt_modulus = Felt::ORDER_U64;
+        let inputs3 = InputFile {
+            operand_stack: vec![felt_modulus.to_string()],
+            advice_stack: None,
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result3 = inputs3.parse_stack_inputs();
+        assert!(result3.is_err());
+    }
+
+    #[test]
+    fn test_parse_advice_stack_large_numbers() {
+        // Test with felt modulus - 1 (should succeed)
+        let felt_modulus_minus_one = Felt::ORDER_U64 - 1;
+        let inputs2 = InputFile {
+            operand_stack: Vec::new(),
+            advice_stack: Some(vec![felt_modulus_minus_one.to_string()]),
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result2 = inputs2.parse_advice_inputs();
+        assert!(result2.is_ok());
+
+        // Test with felt modulus (should fail)
+        let felt_modulus = Felt::ORDER_U64;
+        let inputs = InputFile {
+            operand_stack: Vec::new(),
+            advice_stack: Some(vec![felt_modulus.to_string()]),
+            advice_map: None,
+            merkle_store: None,
+        };
+        let result = inputs.parse_advice_inputs();
+        assert!(result.is_err());
     }
 }

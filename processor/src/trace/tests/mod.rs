@@ -7,7 +7,10 @@ use miden_core::{
 use miden_utils_testing::rand::rand_array;
 
 use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt};
-use crate::{AdviceInputs, DefaultHost, StackInputs, fast::FastProcessor, parallel::build_trace};
+use crate::{
+    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs, fast::FastProcessor,
+    parallel::build_trace,
+};
 
 mod chiplets;
 mod decoder;
@@ -27,10 +30,15 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(&stack_inputs);
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(program, &mut host, TEST_TRACE_FRAGMENT_SIZE)
-        .unwrap();
+    let processor = FastProcessor::new_with_options(
+        &stack_inputs,
+        AdviceInputs::default(),
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(program, &mut host).unwrap();
 
     build_trace(execution_output, trace_generation_context, program.hash(), Kernel::default())
 }
@@ -72,10 +80,15 @@ pub fn build_trace_from_ops_with_inputs(
     let stack_values: Vec<Felt> = stack_inputs.iter().rev().copied().collect();
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new_with_advice_inputs(&stack_values, advice_inputs);
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host, TEST_TRACE_FRAGMENT_SIZE)
-        .unwrap();
+    let processor = FastProcessor::new_with_options(
+        &stack_values,
+        advice_inputs,
+        ExecutionOptions::default()
+            .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
+            .unwrap(),
+    );
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
     build_trace(execution_output, trace_generation_context, program.hash(), Kernel::default())
 }

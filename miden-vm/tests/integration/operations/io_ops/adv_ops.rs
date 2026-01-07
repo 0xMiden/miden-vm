@@ -2,7 +2,7 @@ use miden_core::{
     Felt, chiplets::hasher::apply_permutation, field::PrimeField64, utils::ToElements,
 };
 use miden_processor::{AdviceError, ExecutionError, RowIndex};
-use miden_utils_testing::expect_exec_error_matches;
+use miden_utils_testing::{PrimeField64, expect_exec_error_matches};
 
 use super::{TRUNCATE_STACK_PROC, build_op_test, build_test};
 

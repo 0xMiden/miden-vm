@@ -167,7 +167,7 @@ impl MastForest {
     ///
     /// This method modifies the forest in-place, removing all decorator information
     /// including operation-indexed decorators, before-enter decorators, after-exit
-    /// decorators, and error codes.
+    /// decorators, and error codes while keeping the CSR structure valid.
     ///
     /// # Examples
     ///
@@ -179,8 +179,7 @@ impl MastForest {
     /// forest.strip_decorators(); // forest is now stripped
     /// ```
     pub fn strip_decorators(&mut self) {
-        // Clear all debug info (decorators and error codes)
-        self.debug_info.clear();
+        self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.
@@ -647,6 +646,29 @@ impl MastForest {
         // we use u64 as keys for the map
         self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
         code
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Procedure name methods
+impl MastForest {
+    /// Returns the procedure name for the given MAST root digest, if present.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.debug_info.procedure_name(digest)
+    }
+
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
+        self.debug_info.procedure_names()
+    }
+
+    /// Inserts a procedure name for the given MAST root digest.
+    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
+        assert!(
+            self.find_procedure_root(digest).is_some(),
+            "attempted to insert procedure name for digest that is not a procedure root"
+        );
+        self.debug_info.insert_procedure_name(digest, name);
     }
 }
 
