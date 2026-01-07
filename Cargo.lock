@@ -1470,7 +1470,6 @@ dependencies = [
 name = "miden-project"
 version = "0.21.0"
 dependencies = [
- "either",
  "miden-assembly-syntax",
  "miden-core",
  "miden-test-serde-macros",
