@@ -7,8 +7,6 @@ use miden_core::{
     chiplets::hasher::STATE_WIDTH,
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     mast::MastForest,
-    stack::MIN_STACK_DEPTH,
-    utils::range,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};

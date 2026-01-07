@@ -17,7 +17,7 @@ use miden_utils_testing::{
     expect_exec_error_matches,
     proptest::proptest,
     prove_sync,
-    rand::rand_value,
+    rand::random_word,
 };
 use rand::{Rng, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;

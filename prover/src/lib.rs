@@ -65,9 +65,8 @@ pub async fn prove(
         *options.execution_options(),
     );
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace(program, host, options.execution_options().core_trace_fragment_size())
-        .await?;
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace(program, host).await?;
 
     let trace = build_trace(
         execution_output,

@@ -4,7 +4,7 @@ use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::MerkleStore,
     errors::InputError,
-    field::QuotientMap,
+    field::{PrimeField64, QuotientMap},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

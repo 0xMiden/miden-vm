@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
-assertion_line: 274
 expression: fast_stack_outputs
 ---
 StackOutputs {
@@ -19,7 +18,7 @@ StackOutputs {
         5,
         4,
         40,
-        28868,
-        107780,
+        2747156,
+        1061548,
     ],
 }

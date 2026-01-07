@@ -176,10 +176,9 @@ pub async fn execute(
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let stack_inputs: Vec<Felt> = stack_inputs.into_iter().rev().collect();
-    let processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace(program, host, options.core_trace_fragment_size())
-        .await?;
+    let processor = FastProcessor::new_with_options(&stack_inputs, advice_inputs, options);
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace(program, host).await?;
 
     let trace = build_trace(
         execution_output,
