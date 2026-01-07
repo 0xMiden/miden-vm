@@ -13,8 +13,8 @@ my-kernel = { path = "../multi_target/userspace" }
 inherits = "dev"
 network = "local"
 
-[package.metadata.network.local]
-endpoint = "tcp://127.0.0.1"
-
 [lints.miden]
 unused = "error"
+
+[package.metadata.network.local]
+endpoint = "tcp://127.0.0.1"
