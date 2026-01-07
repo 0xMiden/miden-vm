@@ -404,7 +404,9 @@ pub proc diff_mod_M
     u32split swap
     #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
 
-    # 3) Add the two u64-s (convert BE to LE, add, convert output back to BE)
+    # 3) Add the two u64-s
+    # reversew converts [BE, BE] to [LE, LE] for u64::overflowing_add (1 cycle)
+    # movup.2 swap converts LE output to BE for mod_12289 (2 cycles)
     reversew
     exec.u64::overflowing_add
     movup.2 swap
