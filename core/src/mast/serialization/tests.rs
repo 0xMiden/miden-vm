@@ -570,14 +570,16 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     use crate::utils::SliceReader;
     let mut reader = SliceReader::new(&serialized);
 
-    let _: [u8; 8] = reader.read_array().unwrap(); // magic + version
+    let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
     let _node_count: usize = reader.read().unwrap();
     let _decorator_count: usize = reader.read().unwrap();
     let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
     let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
-    // Calculate offset to MastNodeInfo
-    let node_info_offset = 5 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+    // Calculate offset to MastNodeInfo:
+    // magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
+    // roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data
+    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
 
     // Corrupt the ops_offset field with an out-of-bounds value
     let block_discriminant: u64 = 3;
@@ -876,6 +878,161 @@ fn test_batched_construction_preserves_structure() {
 // PROPTEST-BASED ROUND-TRIP SERIALIZATION TESTS
 // ================================================================================================
 
+/// Test that the new header format is backward compatible (flags=0x00).
+#[test]
+fn test_header_backward_compatible() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    // Check header structure: MAST (4 bytes) + flags (1 byte) + version (3 bytes)
+    assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
+    assert_eq!(&bytes[5..8], &[0, 0, 1], "Version should be [0, 0, 1]");
+}
+
+/// Test that stripped serialization produces smaller output than full serialization.
+#[test]
+fn test_stripped_serialization_smaller_than_full() {
+    let mut forest = MastForest::new();
+
+    // Add decorators
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Add procedure name for more debug info
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_proc".into());
+
+    let full_bytes = forest.to_bytes();
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    assert!(
+        stripped_bytes.len() < full_bytes.len(),
+        "Stripped ({} bytes) should be smaller than full ({} bytes)",
+        stripped_bytes.len(),
+        full_bytes.len()
+    );
+}
+
+/// Test that stripped serialization round-trips correctly with empty DebugInfo.
+#[test]
+fn test_stripped_serialization_roundtrip() {
+    let mut forest = MastForest::new();
+
+    // Add decorators
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Add procedure name and error code
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_proc".into());
+    let _ = forest.register_error("test error".into());
+
+    // Serialize stripped
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Deserialize
+    let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+
+    // Verify structure is preserved
+    assert_eq!(forest.num_nodes(), restored.num_nodes());
+    assert_eq!(forest.procedure_roots().len(), restored.procedure_roots().len());
+
+    // Verify debug info is empty
+    assert!(
+        restored.debug_info.is_empty(),
+        "DebugInfo should be empty after stripped roundtrip"
+    );
+    assert_eq!(restored.decorators().len(), 0);
+    assert_eq!(restored.procedure_name(&digest), None);
+}
+
+/// Test that stripped serialization sets the correct header flags.
+#[test]
+fn test_stripped_header_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Check header structure
+    assert_eq!(&stripped_bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(stripped_bytes[4], 0x01, "Flags should be 0x01 for stripped serialization");
+    assert_eq!(&stripped_bytes[5..8], &[0, 0, 1], "Version should be [0, 0, 1]");
+}
+
+/// Test that node digests are preserved in stripped serialization.
+#[test]
+fn test_stripped_preserves_digests() {
+    let mut forest = MastForest::new();
+
+    let decorator_id = forest.add_decorator(Decorator::Trace(1)).unwrap();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join_id);
+
+    // Capture original digests
+    let original_digests: Vec<_> = forest.nodes().iter().map(|n| n.digest()).collect();
+
+    // Stripped roundtrip
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+
+    // Verify digests match
+    let restored_digests: Vec<_> = restored.nodes().iter().map(|n| n.digest()).collect();
+    assert_eq!(original_digests, restored_digests, "Node digests should be preserved");
+}
+
+/// Test that deserialization rejects unknown flags.
+#[test]
+fn test_deserialize_rejects_unknown_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+
+    // Set an unknown flag (bit 1)
+    bytes[4] = 0x02;
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("reserved") || msg.contains("flags")
+    );
+}
+
 mod proptests {
     use proptest::{prelude::*, strategy::Just};
 
@@ -1117,6 +1274,55 @@ mod proptests {
                     "Decorator content should match"
                 );
             }
+        }
+
+        /// Property test: stripped serialization should preserve node structure
+        #[test]
+        fn proptest_stripped_roundtrip(
+            forest in any_with::<MastForest>(MastForestParams {
+                decorators: 10,
+                blocks: 1..=5,
+                max_joins: 3,
+                max_splits: 2,
+                max_loops: 2,
+                max_calls: 2,
+                max_syscalls: 0,
+                max_externals: 1,
+                max_dyns: 1,
+            })
+        ) {
+            // Stripped serialization
+            let mut stripped_bytes = Vec::new();
+            forest.write_stripped(&mut stripped_bytes);
+
+            // Deserialize
+            let restored = MastForest::read_from_bytes(&stripped_bytes)
+                .expect("Stripped deserialization should succeed");
+
+            // Verify node count matches
+            prop_assert_eq!(
+                forest.num_nodes(),
+                restored.num_nodes(),
+                "Node count should match"
+            );
+
+            // Verify all node digests match
+            for (idx, original) in forest.nodes().iter().enumerate() {
+                let node_id = crate::mast::MastNodeId::new_unchecked(idx as u32);
+                let restored_node = &restored[node_id];
+
+                prop_assert_eq!(
+                    original.digest(),
+                    restored_node.digest(),
+                    "Node {:?} digest mismatch", node_id
+                );
+            }
+
+            // Verify debug info is empty
+            prop_assert!(
+                restored.debug_info.is_empty(),
+                "DebugInfo should be empty after stripped roundtrip"
+            );
         }
     }
 }

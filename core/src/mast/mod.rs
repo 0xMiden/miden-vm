@@ -443,6 +443,39 @@ impl MastForest {
     pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
         &mut self.advice_map
     }
+
+    // SERIALIZATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Serializes this MastForest without debug information.
+    ///
+    /// This produces a smaller output by omitting decorators, error codes, and procedure names.
+    /// The resulting bytes can be deserialized with the standard [`Deserializable`] impl,
+    /// which auto-detects the format and creates an empty [`DebugInfo`].
+    ///
+    /// Use this for production builds where debug info is not needed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use miden_core::{mast::MastForest, utils::Serializable};
+    ///
+    /// let forest = MastForest::new();
+    ///
+    /// // Full serialization (with debug info)
+    /// let full_bytes = forest.to_bytes();
+    ///
+    /// // Stripped serialization (without debug info)
+    /// let mut stripped_bytes = Vec::new();
+    /// forest.write_stripped(&mut stripped_bytes);
+    ///
+    /// // Both can be deserialized the same way
+    /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+    /// ```
+    pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
+        use serialization::StrippedMastForest;
+        StrippedMastForest(self).write_into(target);
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
