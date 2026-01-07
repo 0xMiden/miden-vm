@@ -12,7 +12,9 @@ use super::{
 pub struct WorkspaceTable {
     /// The relative paths of all workspace members
     pub members: Vec<Span<Uri>>,
+    /// The contents of the `[workspace.package]` table
     pub package: PackageDetail,
+    /// The contents of the `[workspace]` table that are shared with `[package]`
     #[cfg_attr(feature = "serde", serde(flatten))]
     pub config: PackageConfig,
 }
@@ -34,8 +36,9 @@ pub struct WorkspaceFile {
     /// The source file this was parsed from, if applicable/known
     #[cfg_attr(feature = "serde", serde(skip, default))]
     pub source_file: Option<Arc<SourceFile>>,
+    /// The contents of the `[workspace]` table
     pub workspace: WorkspaceTable,
-    /// The set of build profiles defined in this file
+    /// The contents of the `[profile]` table
     #[cfg_attr(
         feature = "serde",
         serde(
