@@ -327,18 +327,9 @@ impl OpToDecoratorIds {
     pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
         use crate::utils::Serializable;
 
-        // Serialize decorator_ids (DecoratorId serializes as u32)
         self.decorator_ids.write_into(target);
-
-        // Serialize indptr arrays as u32. These are indices into u32-bounded arrays,
-        // so any value > u32::MAX would be invalid.
-        let op_indptr_u32: Vec<u32> =
-            self.op_indptr_for_dec_ids.iter().map(|&idx| idx as u32).collect();
-        op_indptr_u32.write_into(target);
-
-        let node_indptr_u32: Vec<u32> =
-            self.node_indptr_for_op_idx.iter().map(|&idx| idx as u32).collect();
-        node_indptr_u32.write_into(target);
+        self.op_indptr_for_dec_ids.write_into(target);
+        self.node_indptr_for_op_idx.write_into(target);
     }
 
     /// Deserialize OpToDecoratorIds from the source reader.
@@ -348,29 +339,15 @@ impl OpToDecoratorIds {
     ) -> Result<Self, crate::utils::DeserializationError> {
         use crate::utils::{Deserializable, DeserializationError};
 
-        // Deserialize decorator_ids (DecoratorId deserializes from u32)
         let decorator_ids: Vec<DecoratorId> = Deserializable::read_from(source)?;
+        let op_indptr_for_dec_ids: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_op_idx: IndexVec<MastNodeId, usize> =
+            Deserializable::read_from(source)?;
 
-        // Deserialize indptr arrays from u32. These are indices into u32-bounded arrays,
-        // so any value > u32::MAX would be invalid.
-        let op_indptr_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let op_indptr_for_dec_ids: Vec<usize> =
-            op_indptr_u32.into_iter().map(|idx| idx as usize).collect();
+        let result =
+            Self::from_components(decorator_ids, op_indptr_for_dec_ids, node_indptr_for_op_idx)
+                .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
 
-        let node_indptr_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let node_indptr_for_op_idx: Vec<usize> =
-            node_indptr_u32.into_iter().map(|idx| idx as usize).collect();
-
-        // Build the structure
-        let result = Self::from_components(
-            decorator_ids,
-            op_indptr_for_dec_ids,
-            IndexVec::try_from(node_indptr_for_op_idx)
-                .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?,
-        )
-        .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-
-        // Validate CSR structure (including decorator ID bounds)
         result.validate_csr(decorator_count).map_err(|e| {
             DeserializationError::InvalidValue(format!("OpToDecoratorIds validation failed: {e}"))
         })?;

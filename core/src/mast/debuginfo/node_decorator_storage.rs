@@ -321,19 +321,10 @@ impl NodeToDecoratorIds {
     pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
         use crate::utils::Serializable;
 
-        // Serialize decorator vectors (DecoratorId serializes as u32)
         self.before_enter_decorators.write_into(target);
         self.after_exit_decorators.write_into(target);
-
-        // Serialize indptr arrays as u32. These are indices into u32-bounded arrays,
-        // so any value > u32::MAX would be invalid.
-        let before_indptr_u32: Vec<u32> =
-            self.node_indptr_for_before.iter().map(|&idx| idx as u32).collect();
-        before_indptr_u32.write_into(target);
-
-        let after_indptr_u32: Vec<u32> =
-            self.node_indptr_for_after.iter().map(|&idx| idx as u32).collect();
-        after_indptr_u32.write_into(target);
+        self.node_indptr_for_before.write_into(target);
+        self.node_indptr_for_after.write_into(target);
     }
 
     /// Read this CSR structure from a source, validating decorator IDs against decorator_count.
@@ -343,23 +334,12 @@ impl NodeToDecoratorIds {
     ) -> Result<Self, crate::utils::DeserializationError> {
         use crate::utils::Deserializable;
 
-        // Deserialize decorator vectors (DecoratorId deserializes from u32)
         let before_enter_decorators: Vec<DecoratorId> = Deserializable::read_from(source)?;
         let after_exit_decorators: Vec<DecoratorId> = Deserializable::read_from(source)?;
 
-        // Deserialize indptr arrays from u32. These are indices into u32-bounded arrays,
-        // so any value > u32::MAX would be invalid.
-        let before_indptr_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let node_indptr_for_before = IndexVec::try_from(
-            before_indptr_u32.into_iter().map(|idx| idx as usize).collect::<Vec<_>>(),
-        )
-        .map_err(|e| crate::utils::DeserializationError::InvalidValue(e.to_string()))?;
-
-        let after_indptr_u32: Vec<u32> = Deserializable::read_from(source)?;
-        let node_indptr_for_after = IndexVec::try_from(
-            after_indptr_u32.into_iter().map(|idx| idx as usize).collect::<Vec<_>>(),
-        )
-        .map_err(|e| crate::utils::DeserializationError::InvalidValue(e.to_string()))?;
+        let node_indptr_for_before: IndexVec<MastNodeId, usize> =
+            Deserializable::read_from(source)?;
+        let node_indptr_for_after: IndexVec<MastNodeId, usize> = Deserializable::read_from(source)?;
 
         let result = Self::from_components(
             before_enter_decorators,
@@ -369,7 +349,6 @@ impl NodeToDecoratorIds {
         )
         .map_err(|e| crate::utils::DeserializationError::InvalidValue(e.to_string()))?;
 
-        // Validate CSR structure (including decorator ID bounds)
         result.validate_csr(decorator_count).map_err(|e| {
             crate::utils::DeserializationError::InvalidValue(format!(
                 "NodeToDecoratorIds validation failed: {e}"
