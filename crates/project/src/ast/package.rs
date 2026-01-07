@@ -1,4 +1,4 @@
-use alloc::{borrow::Cow, collections::BTreeMap};
+use alloc::collections::BTreeMap;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -114,83 +114,8 @@ pub struct PackageFile {
     pub profiles: Vec<Profile>,
 }
 
-impl PackageFile {
-    /// Returns the name of this project.
-    ///
-    /// The project name also doubles as the default namespace for any build targets that use it.
-    pub fn name(&self) -> &str {
-        self.package.name.inner()
-    }
-
-    /// Returns the semantic version of this project.
-    pub fn version(&self) -> &Span<MaybeInherit<SemVer>> {
-        &self.package.detail.version
-    }
-
-    /// Returns the optional project description
-    pub fn description(&self) -> Option<Span<&MaybeInherit<Arc<str>>>> {
-        self.package.detail.description.as_ref().map(|spanned| spanned.as_ref())
-    }
-
-    /// Returns the package metadata table for this project
-    pub fn metadata(&self) -> &MetadataSet {
-        &self.config.metadata
-    }
-
-    /// Returns the available lint configuration table(s) for this project
-    pub fn lints(&self) -> &MetadataSet {
-        &self.config.lints
-    }
-
-    /// Returns the build profile configuration for this project
-    pub fn profiles(&self) -> &[Profile] {
-        &self.profiles
-    }
-
-    /// Returns the build profile `name`, if defined
-    pub fn profile(&self, name: impl AsRef<str>) -> Option<&Profile> {
-        let name = name.as_ref();
-        self.profiles.iter().find(|p| p.name.inner().as_ref() == name)
-    }
-
-    /// Get an iterator over the build targets defined by this project manifest
-    ///
-    /// It is guaranteed that, after parsing, the following properties hold:
-    ///
-    /// * There is only ever one kernel target, if any.
-    /// * All targets have a unique namespace
-    /// * No more than one target will use the default namespace for its target kind
-    pub fn targets(&self) -> impl Iterator<Item = Span<&Target>> {
-        self.targets.iter().map(Span::as_ref)
-    }
-
-    /// Get the default build target for this project.
-    ///
-    /// If there are any targets defined, this returns the first target defined in the
-    /// `miden-project.toml`.
-    ///
-    /// If there are no targets defined, this returns a generated library target which uses the
-    /// project name as the namespace, and expects there to be a `mod.masm` in the project
-    /// directory (i.e. it assumes a default Miden Assembly project layout).
-    pub fn default_target(&self) -> Cow<'_, Target> {
-        if self.targets.is_empty() {
-            Cow::Owned(Target {
-                kind: TargetType::Library,
-                namespace: Some(self.package.name.clone()),
-                path: Some(Span::unknown(Uri::new("mod.masm"))),
-            })
-        } else {
-            Cow::Borrowed(self.targets[0].inner())
-        }
-    }
-
-    /// Returns true if this project has at least one dependency
-    pub fn has_dependencies(&self) -> bool {
-        !self.config.dependencies.is_empty()
-    }
-}
-
 /// Parsing
+#[cfg(feature = "serde")]
 impl PackageFile {
     /// Parse a [PackageFile] from the provided TOML source file, generally `miden-project.toml`
     ///
@@ -199,7 +124,6 @@ impl PackageFile {
     ///
     /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is up to
     ///   the caller to compute the concrete property values and validate them at that point.
-    #[cfg(feature = "serde")]
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
         use parsing::{SetSourceId, Validate};
 
@@ -262,7 +186,7 @@ impl Validate for PackageFile {
 
         // Validate the project
         // 1. Package name must be a valid identifier
-        ast::Ident::validate(self.name()).map_err(|err| {
+        ast::Ident::validate(&self.package.name).map_err(|err| {
             Report::from(ProjectFileError::InvalidProjectName {
                 source_file: source.clone(),
                 label: Label::new(self.package.name.span(), err.to_string()),
@@ -275,7 +199,7 @@ impl Validate for PackageFile {
         let mut target_paths = BTreeMap::<Span<Uri>, Option<TargetConflictError>>::default();
         let mut target_namespaces =
             BTreeMap::<Span<Arc<str>>, Option<TargetConflictError>>::default();
-        for target in self.targets() {
+        for target in self.targets.iter() {
             use alloc::collections::btree_map::Entry;
 
             // 2a. Check for conflicting paths
@@ -325,7 +249,8 @@ impl Validate for PackageFile {
                 TargetType::Executable => ast::Path::ABSOLUTE_EXEC_PATH,
                 _ => self.package.name.inner(),
             };
-            let target_ns = target.namespace().unwrap_or_else(|| Arc::from(default_ns));
+            let target_ns =
+                target.namespace.as_deref().cloned().unwrap_or_else(|| Arc::from(default_ns));
 
             // 2c. Check for namespace validity
             if let Err(err) = ast::Path::validate(&target_ns) {

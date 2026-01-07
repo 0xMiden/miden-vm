@@ -6,6 +6,10 @@ use crate::*;
 #[cfg(feature = "std")]
 use std::{boxed::Box, path::Path};
 
+/// Represents a Miden project workspace.
+///
+/// Workspaces are comprised of one or more sub-projects that define the member packages of the
+/// workspace.
 #[derive(Debug)]
 pub struct Workspace {
     /// The file path of the workspace manifest, if applicable.
@@ -30,8 +34,10 @@ impl Workspace {
 }
 
 /// Parsing
+#[cfg(all(feature = "std", feature = "serde"))]
 impl Workspace {
-    #[cfg(all(feature = "std", feature = "serde"))]
+    /// Load a [Workspace] from `source`, using the provided `source_manager` when loading the
+    /// sources of workspace members.
     pub fn load(
         source: Arc<SourceFile>,
         source_manager: &dyn SourceManager,

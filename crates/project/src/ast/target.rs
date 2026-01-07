@@ -15,20 +15,6 @@ pub struct Target {
 }
 
 impl Target {
-    /// Get the type of package produced by this target
-    pub const fn kind(&self) -> &TargetType {
-        &self.kind
-    }
-
-    /// Get the optional namespace override for modules parsed from this target
-    ///
-    /// If not provided, the namespace will be inferred from the basename of the directory
-    /// containing `path`. As this is not always desirable, setting this option explicitly is
-    /// recommended.
-    pub fn namespace(&self) -> Option<Arc<str>> {
-        self.namespace.as_ref().map(|ns| ns.inner().clone())
-    }
-
     /// Get the relative path from the project manifest to the root source file for this target
     pub fn path(&self) -> Uri {
         self.path.as_ref().map(|p| p.inner().clone()).unwrap_or(Uri::new("mod.masm"))

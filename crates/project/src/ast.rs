@@ -59,6 +59,7 @@ impl MidenProject {
 }
 
 /// Parsing
+#[cfg(feature = "serde")]
 impl MidenProject {
     /// Parse a [MidenProject] from the provided TOML source file, generally `miden-project.toml`
     ///
@@ -71,7 +72,6 @@ impl MidenProject {
     /// * If parsing an individual project configuration which belongs to a workspace, inherited
     ///   properties from the workspace-level are assumed to exist and be correct. It is up to the
     ///   caller to compute the concrete property values and validate them at that point.
-    #[cfg(feature = "serde")]
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
         use parsing::{SetSourceId, Validate};
 
