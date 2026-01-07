@@ -1,34 +1,33 @@
 //! The serialization format of MastForest is as follows:
 //!
 //! (Metadata)
-//! - MAGIC
-//! - VERSION
+//! - MAGIC (5 bytes)
+//! - VERSION (3 bytes)
 //!
-//! (sections metadata)
-//! - nodes length (`usize`)
-//! - decorator data section offset (`usize`) (not implemented, see issue #1580)
-//! - decorators length (`usize`)
+//! (Counts)
+//! - nodes count (`usize`)
+//! - decorators count (`usize`) - reserved for future use in lazy loading (#2504)
 //!
-//! (procedure roots section)
-//! - procedure roots (`Vec<MastNodeId>`)
+//! (Procedure roots section)
+//! - procedure roots (`Vec<u32>` as MastNodeId values)
 //!
-//! (basic block data section)
-//! - basic block data
+//! (Basic block data section)
+//! - basic block data (padded operations + batch metadata)
 //!
-//! (node info section)
+//! (Node info section)
 //! - MAST node infos (`Vec<MastNodeInfo>`)
 //!
-//! (advice map section)
-//! - Advice map (AdviceMap)
+//! (Advice map section)
+//! - Advice map (`AdviceMap`)
 //!
 //! (DebugInfo section)
-//! - Decorator data
-//! - String table
+//! - Decorator data (raw bytes for decorator payloads)
+//! - String table (deduplicated strings)
 //! - Decorator infos (`Vec<DecoratorInfo>`)
-//! - Error codes map (BTreeMap<u64, String>)
-//! - OpToDecoratorIds CSR (operation-indexed decorators)
-//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators)
-//! - Procedure names map (BTreeMap<Word, String>)
+//! - Error codes map (`BTreeMap<u64, String>`)
+//! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
+//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
+//! - Procedure names map (`BTreeMap<Word, String>`)
 
 use alloc::vec::Vec;
 
@@ -200,10 +199,11 @@ impl Deserializable for MastForest {
             mast_forest
         };
 
-        // Note: validation of deserialized MastForests (e.g., checking that procedure name
+        // Note: Full validation of deserialized MastForests (e.g., checking that procedure name
         // digests correspond to procedure roots) is intentionally not performed here.
-        // Callers should use MastForest::validate() if validation is needed.
-        // See issue #2445 for the plan to address MastForest validation holistically.
+        // The serialized format is expected to come from a trusted source (e.g., the assembler
+        // or a verified package). Callers should use MastForest::validate() if validation of
+        // untrusted input is needed.
 
         Ok(mast_forest)
     }

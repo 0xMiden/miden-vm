@@ -434,7 +434,9 @@ impl Deserializable for DebugInfo {
         // 5. Read NodeToDecoratorIds CSR (dense representation)
         let node_decorator_storage = NodeToDecoratorIds::read_from(source, decorators.len())?;
 
-        // 6. Read procedure names (marked serde(skip) but we deserialize manually)
+        // 6. Read procedure names
+        // Note: Procedure name digests are validated at the MastForest level (in
+        // MastForest::validate) to ensure they reference actual procedures in the forest.
         let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
         let procedure_names: BTreeMap<LexicographicWord, Arc<str>> = procedure_names_raw
             .into_iter()

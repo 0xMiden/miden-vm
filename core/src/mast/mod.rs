@@ -29,7 +29,10 @@ pub use node::{
 
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        hash_string_to_word,
+    },
 };
 
 mod debuginfo;
@@ -986,6 +989,13 @@ impl fmt::Display for DecoratorId {
 impl Serializable for DecoratorId {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into(target)
+    }
+}
+
+impl Deserializable for DecoratorId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
     }
 }
 
