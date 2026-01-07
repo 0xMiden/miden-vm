@@ -40,42 +40,52 @@ pub struct Package {
 
 /// Accessors
 impl Package {
+    /// Get the name of this package
     pub fn name(&self) -> Span<Arc<str>> {
         self.name.clone()
     }
 
+    /// Get the semantic version of this package
     pub fn version(&self) -> Span<&SemVer> {
         self.version.as_ref()
     }
 
+    /// Get the description of this package, if specified
     pub fn description(&self) -> Option<Arc<str>> {
         self.description.clone()
     }
 
+    /// Get the set of dependencies this package requires
     pub fn dependencies(&self) -> &[Dependency] {
         &self.dependencies
     }
 
+    /// Get the number of dependencies this package requires
     pub fn num_dependencies(&self) -> usize {
         self.dependencies.len()
     }
 
+    /// Get a reference to the linter metadata configured for this package
     pub fn lints(&self) -> &MetadataSet {
         &self.lints
     }
 
+    /// Get a reference to the custom metadata configured for this package
     pub fn metadata(&self) -> &MetadataSet {
         &self.metadata
     }
 
+    /// Get a reference to the build profiles configured for this package
     pub fn profiles(&self) -> &[Profile] {
         &self.profiles
     }
 
+    /// Get a reference to the build targets provided by this package
     pub fn targets(&self) -> &[Span<Target>] {
         &self.targets
     }
 
+    /// Get the location of the manifest this package was loaded from, if known/applicable.
     #[cfg(feature = "std")]
     pub fn manifest_path(&self) -> Option<&Path> {
         self.manifest_path.as_deref()
@@ -201,7 +211,7 @@ impl Package {
         }
 
         let package_profiles_start = profiles.len();
-        for ast in package_ast.profiles() {
+        for ast in package_ast.profiles.iter() {
             let ast::Profile {
                 inherits,
                 name,
@@ -275,10 +285,7 @@ impl Package {
                                 source_file: source,
                                 label: Label::new(
                                     dependency.span(),
-                                    format!(
-                                        "'{}' is not a workspace dependency",
-                                        dependency.name()
-                                    ),
+                                    format!("'{}' is not a workspace dependency", &dependency.name),
                                 ),
                             }
                             .into());
