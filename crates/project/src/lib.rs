@@ -23,7 +23,6 @@ pub use self::{
 // Re-exported for consistency
 pub use miden_assembly_syntax::{Word, debuginfo::Uri, semver};
 pub use miden_core::LexicographicWord;
-#[cfg(feature = "serde")]
 pub use toml::Value;
 
 use alloc::{boxed::Box, string::ToString, sync::Arc, vec::Vec};

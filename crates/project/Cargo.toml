@@ -18,7 +18,7 @@ default = ["std", "serde"]
 arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
 std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std"]
-serde = ["dep:serde", "dep:serde-untagged", "dep:toml", "miden-assembly-syntax/serde", "miden-core/serde"]
+serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde"]
 
 [dependencies]
 miden-assembly-syntax.workspace = true
@@ -30,7 +30,7 @@ serde = { workspace = true, optional = true }
 serde-untagged = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
 thiserror.workspace = true
-toml = { version = "0.9", optional = true, default-features = false, features = ["serde", "parse"] }
+toml = { version = "0.9", default-features = false, features = ["serde", "parse"] }
 
 [dev-dependencies]
 miden-core.workspace = true
