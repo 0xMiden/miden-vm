@@ -36,7 +36,7 @@ use crate::{Diagnostic, Label, RelatedError, Report, SourceFile, SourceSpan, mie
 /// Represents all possible variants of `miden-project.toml`
 #[derive(Debug)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-#[cfg_attr(feature = "serde", serde(untagged))]
+#[cfg_attr(feature = "serde", serde(untagged, rename_all = "lowercase"))]
 pub enum MidenProject {
     /// A workspace-level configuration file.
     ///
@@ -73,39 +73,11 @@ impl MidenProject {
     ///   properties from the workspace-level are assumed to exist and be correct. It is up to the
     ///   caller to compute the concrete property values and validate them at that point.
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
-        use parsing::{SetSourceId, Validate};
-
-        let source_id = source.id();
-
-        // Parse the unvalidated project from source
-        let mut project = toml::from_str::<Self>(source.as_str()).map_err(|err| {
-            let span = err
-                .span()
-                .map(|span| {
-                    let start = span.start as u32;
-                    let end = span.end as u32;
-                    SourceSpan::new(source_id, start..end)
-                })
-                .unwrap_or_default();
-            Report::from(ProjectFileError::ParseError {
-                message: err.message().to_string(),
-                source_file: source.clone(),
-                span,
-            })
-        })?;
-
-        match &mut project {
-            Self::Workspace(workspace) => {
-                workspace.set_source_id(source_id);
-                workspace.validate(source)?;
-            },
-            Self::Package(package) => {
-                package.set_source_id(source_id);
-                package.validate(source)?;
-            },
+        if source.as_str().contains("[workspace") {
+            Ok(Self::Workspace(Box::new(WorkspaceFile::parse(source)?)))
+        } else {
+            Ok(Self::Package(Box::new(PackageFile::parse(source)?)))
         }
-
-        Ok(project)
     }
 }
 
@@ -180,5 +152,19 @@ pub(crate) enum ProjectFileError {
         span: SourceSpan,
         #[label]
         prev: SourceSpan,
+    },
+    #[error("missing required field 'version'")]
+    MissingVersion {
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary)]
+        span: SourceSpan,
+    },
+    #[error("workspace does not define 'version'")]
+    MissingWorkspaceVersion {
+        #[source_code]
+        source_file: Arc<SourceFile>,
+        #[label(primary)]
+        span: SourceSpan,
     },
 }
