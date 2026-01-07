@@ -198,15 +198,10 @@ impl Deserializable for MastForest {
             mast_forest
         };
 
-        // Validate that all procedure name digests correspond to procedure roots in the forest
-        for (digest, _) in mast_forest.debug_info.procedure_names() {
-            if mast_forest.find_procedure_root(digest).is_none() {
-                return Err(DeserializationError::InvalidValue(format!(
-                    "procedure name references digest that is not a procedure root: {:?}",
-                    digest
-                )));
-            }
-        }
+        // Note: validation of deserialized MastForests (e.g., checking that procedure name
+        // digests correspond to procedure roots) is intentionally not performed here.
+        // Callers should use MastForest::validate() if validation is needed.
+        // See issue #2445 for the plan to address MastForest validation holistically.
 
         Ok(mast_forest)
     }

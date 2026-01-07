@@ -617,6 +617,7 @@ impl MastForest {
     /// at assembly time rather than dynamically during execution, and adds comprehensive
     /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
+        // Validate basic block batch invariants
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
                 MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
@@ -626,6 +627,14 @@ impl MastForest {
                 })?;
             }
         }
+
+        // Validate that all procedure name digests correspond to procedure roots in the forest
+        for (digest, _) in self.debug_info.procedure_names() {
+            if self.find_procedure_root(digest).is_none() {
+                return Err(MastForestError::InvalidProcedureNameDigest(digest));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1015,6 +1024,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("procedure name references digest that is not a procedure root: {0:?}")]
+    InvalidProcedureNameDigest(Word),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly
