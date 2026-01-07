@@ -50,6 +50,7 @@ FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_vm              := concurrent,executable,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
+FEATURES_project         := resolver
 FEATURES_prover          := concurrent
 FEATURES_core-lib        :=
 FEATURES_verifier        :=

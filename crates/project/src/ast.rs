@@ -4,6 +4,7 @@
 //! The AST is used for parsing and rendering the TOML representation, but after validation and
 //! resolution of inherited properties, the AST is translated to a simpler structure that does not
 //! need to represent the complexity of the on-disk format.
+#![expect(unused_assignments)]
 mod dependency;
 mod package;
 pub(crate) mod parsing;
