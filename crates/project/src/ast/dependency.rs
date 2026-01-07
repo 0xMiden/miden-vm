@@ -10,24 +10,37 @@ pub struct DependencySpec {
     /// The name of the dependency package
     #[cfg_attr(feature = "serde", serde(default, skip))]
     pub name: Span<Arc<str>>,
+    /// The version requirement specified for this dependency
     #[cfg_attr(
         feature = "serde",
         serde(rename = "version", alias = "digest", skip_serializing_if = "Option::is_none")
     )]
     pub version_or_digest: Option<VersionRequirement>,
+    /// Whether or not the version requirement is inherited from the containing workspace
     #[cfg_attr(
         feature = "serde",
         serde(default, skip_serializing_if = "does_not_inherit_from_workspace")
     )]
     pub workspace: bool,
-    #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
-    pub kernel: Option<Span<bool>>,
+    /// If present, specifies the path from which this dependency should be loaded
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub path: Option<Span<Uri>>,
+    /// If present, specifies the URI of the git repository to clone in order to load this
+    /// dependency.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub git: Option<Span<Uri>>,
+    /// If present, specifies the branch of the git repository to checkout when loading this
+    /// dependency from the URI specified by `git`.
+    ///
+    /// NOTE: This field is only valid when specified along with `git`, and may not be used in
+    /// conjunction with `rev`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub branch: Option<Span<Arc<str>>>,
+    /// If present, specifies the revision of the git repository to checkout when loading this
+    /// dependency from the URI specified by `git`.
+    ///
+    /// NOTE: This field is only valid when specified along with `git`, and may not be used in
+    /// conjunction with `branch`.
     #[cfg_attr(feature = "serde", serde(default, skip_serializing_if = "Option::is_none"))]
     pub rev: Option<Span<Arc<str>>>,
 }
@@ -38,11 +51,6 @@ fn does_not_inherit_from_workspace(is_workspace_dependency: &bool) -> bool {
 }
 
 impl DependencySpec {
-    /// Returns the name of the dependency as specified in it's project file
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// Returns the version constraint to apply to this dependency
     pub fn version(&self) -> Option<&VersionRequirement> {
         self.version_or_digest.as_ref()
@@ -51,14 +59,6 @@ impl DependencySpec {
     /// Returns true if this dependency inherits its version requirement from a parent workspace
     pub fn inherits_workspace_version(&self) -> bool {
         self.workspace
-    }
-
-    /// Returns true if the current project requires the kernel target provided by this dependency
-    ///
-    /// If no kernel target is provided by the dependency, and this returns true, it should be
-    /// treated as an error in the project manifest.
-    pub fn requires_kernel_target(&self) -> bool {
-        self.kernel.as_deref().copied().unwrap_or(false)
     }
 
     /// Returns true if this dependency must be resolved using a host-provided resolver
@@ -75,24 +75,6 @@ impl DependencySpec {
     pub fn is_git(&self) -> bool {
         self.git.is_some()
     }
-
-    /// Get the filesystem path at which to look for this dependency.
-    ///
-    /// If `Self::is_git` returns true, then this path specifies the subpath of the cloned
-    /// git repository at which the dependency can be found.
-    pub fn path(&self) -> Option<&Uri> {
-        self.path.as_deref()
-    }
-
-    /// Get the git repository URI to clone when resolving this dependency.
-    pub fn git_repository(&self) -> Option<&Uri> {
-        self.git.as_deref()
-    }
-
-    /// Get the optional git revision to use if this is a git dependency
-    pub fn git_revision(&self) -> Option<&str> {
-        self.rev.as_deref().map(|rev| &**rev)
-    }
 }
 
 impl SetSourceId for DependencySpec {
@@ -100,10 +82,6 @@ impl SetSourceId for DependencySpec {
         self.name.set_source_id(source_id);
         if let Some(version_or_digest) = self.version_or_digest.as_mut() {
             version_or_digest.set_source_id(source_id);
-        }
-
-        if let Some(kernel) = self.kernel.as_mut() {
-            kernel.set_source_id(source_id);
         }
 
         if let Some(path) = self.path.as_mut() {
