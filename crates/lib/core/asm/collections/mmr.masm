@@ -241,8 +241,8 @@ pub proc add
   mul.4 movup.6 add add.4
   # [mmr_end, num_leaves, EL]
 
-  # find how many MMR peaks will be merged (41 cycles)
-  swap exec.u32split_be exec.u64::cto_be
+  # find how many MMR peaks will be merged (42 cycles)
+  swap u32split exec.u64::cto
   # => [num_merges, mmr_end, EL]
 
   # optimization: negate num_merges to use add.1 instead of sub.1 (1 cycles)
@@ -293,8 +293,4 @@ pub proc add
 
   # clean stack (5 cycles)
   dropw drop
-end
-
-proc u32split_be
-  u32split swap
 end

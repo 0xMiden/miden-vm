@@ -623,7 +623,7 @@ fn dyncall_with_syscall_and_caller() {
 fn procref() -> Result<(), Report> {
     let module_source = "
     use miden::core::math::u64
-    pub use u64::overflowing_add_le
+    pub use u64::overflowing_add
 
     @locals(4)
     pub proc foo
@@ -658,7 +658,7 @@ fn procref() -> Result<(), Report> {
     end
 
     begin
-        procref.u64::overflowing_add_le
+        procref.u64::overflowing_add
         push.0
         procref.foo
 

@@ -404,8 +404,10 @@ pub proc diff_mod_M
     u32split swap
     #=> [tmp_hi, tmp_lo, c_hi, c_lo, ...]
 
-    # 3) Add the two u64-s
-    exec.u64::overflowing_add_be
+    # 3) Add the two u64-s (convert BE to LE, add, convert output back to BE)
+    reversew
+    exec.u64::overflowing_add
+    movup.2 swap
     #=> [flag, res_hi, res_lo, ..]
 
     # 4) Handle potential overflow in the u64 addition

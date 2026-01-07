@@ -1,5 +1,3 @@
-use miden::core::math::u64
-
 # ===== WORD FUNCTIONS ==========================================================================
 
 # CONVERSION UTILITIES
@@ -15,20 +13,20 @@ use miden::core::math::u64
 #!
 #! Cycles: 8 * (split + store pair) ~= 176
 pub proc store_word_u32s_le
-    exec.u64::u32split_be
+    u32split swap
     # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
 
-    movup.2 exec.u64::u32split_be
+    movup.2 u32split swap
     # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
 
     # Store w0 and w1 limbs, then drop them from the stack
     dup.6 mem_storew_be dropw
     # => [w2, w3, out_ptr, ...]
 
-    exec.u64::u32split_be
+    u32split swap
     # => [w2_hi, w2_lo, w3, out_ptr, ...]
 
-    movup.2 exec.u64::u32split_be
+    movup.2 u32split swap
     # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
 
     # Store w2 and w3 limbs at out_ptr+4
