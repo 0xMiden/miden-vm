@@ -1538,6 +1538,7 @@ dependencies = [
 name = "miden-utils-indexing"
 version = "0.21.0"
 dependencies = [
+ "miden-crypto",
  "serde",
  "thiserror",
 ]

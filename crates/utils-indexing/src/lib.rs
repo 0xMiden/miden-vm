@@ -145,15 +145,6 @@ impl<I: Idx, T> IndexVec<I, T> {
         self.raw
     }
 
-    /// Create an IndexVec from a raw Vec.
-    ///
-    /// This is useful for deserialization or when reconstructing an IndexVec
-    /// from previously extracted components.
-    #[inline]
-    pub fn from_raw(raw: Vec<T>) -> Self {
-        Self { raw, _m: PhantomData }
-    }
-
     /// Remove an element at the specified index and return it.
     pub fn swap_remove(&mut self, index: usize) -> T {
         self.raw.swap_remove(index)
@@ -313,6 +304,50 @@ impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
+    type Error = IndexedVecError;
+
+    /// Create an IndexVec from a Vec.
+    ///
+    /// Returns an error if the Vec length exceeds u32::MAX.
+    fn try_from(raw: Vec<T>) -> Result<Self, Self::Error> {
+        if raw.len() > u32::MAX as usize {
+            return Err(IndexedVecError::TooManyItems);
+        }
+        Ok(Self { raw, _m: PhantomData })
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
+
+impl<I, T> Serializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_slice().write_into(target);
+    }
+}
+
+impl<I, T> Deserializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let vec: Vec<T> = Deserializable::read_from(source)?;
+        IndexVec::try_from(vec).map_err(|_| {
+            DeserializationError::InvalidValue("IndexVec length exceeds u32::MAX".into())
+        })
     }
 }
 
