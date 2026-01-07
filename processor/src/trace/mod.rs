@@ -13,7 +13,7 @@ use miden_air::{
 };
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
-    field::{ExtensionField, PrimeField64},
+    field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,
     utils::ColMatrix,

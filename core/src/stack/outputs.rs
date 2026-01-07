@@ -77,7 +77,7 @@ impl StackOutputs {
     /// returns the word starting at element index `4`.
     ///
     /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
-    /// and N+3 at position 3. Word[0] corresponds to the top of the stack.
+    /// and N+3 at position 3. `Word[0]` corresponds to the top of the stack.
     pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
         let word_elements: [Felt; WORD_SIZE] = {
             let word_elements: Vec<Felt> =
