@@ -1,12 +1,15 @@
 use core::{fmt, ops::Bound};
 
 #[cfg(feature = "serde")]
+use miden_assembly_syntax::debuginfo::SourceId;
+use miden_assembly_syntax::debuginfo::Span;
+#[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use miden_assembly_syntax::debuginfo::{SourceId, Span};
-
 use super::*;
-use crate::{LexicographicWord, Word, ast::parsing::SetSourceId};
+#[cfg(feature = "serde")]
+use crate::ast::parsing::SetSourceId;
+use crate::{LexicographicWord, Word};
 
 /// Represents a requirement on a specific version (or versions) of a dependency.
 #[derive(Debug, Clone)]
@@ -44,6 +47,7 @@ impl VersionRequirement {
     }
 }
 
+#[cfg(feature = "serde")]
 impl SetSourceId for VersionRequirement {
     fn set_source_id(&mut self, source_id: SourceId) {
         match self {
@@ -149,8 +153,9 @@ impl From<Word> for VersionRequirement {
 /// To determine if the resulting range is empty or not, use `Range::contains` on the resulting
 /// tuple.
 pub(crate) fn bounding_range(req: &VersionReq) -> (Bound<SemVer>, Bound<SemVer>) {
-    use crate::semver::{BuildMetadata, Op, Prerelease};
     use Bound::*;
+
+    use crate::semver::{BuildMetadata, Op, Prerelease};
 
     let mut min = None;
     let mut max = None;

@@ -1,9 +1,8 @@
-use crate::{SourceId, Span, Uri};
-
 use super::{
     parsing::{MaybeInherit, SetSourceId, Validate},
     *,
 };
+use crate::{SourceId, Span, Uri};
 
 /// Represents the contents of the `[workspace]` table
 #[derive(Debug, Clone)]
@@ -60,8 +59,8 @@ impl WorkspaceFile {
     /// If successful, the contents of the manifest are semantically valid, with the following
     /// caveats:
     ///
-    /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is up to
-    ///   the caller to compute the concrete property values and validate them at that point.
+    /// * Inherited properties from the workspace-level are assumed to exist and be correct. It is
+    ///   up to the caller to compute the concrete property values and validate them at that point.
     #[cfg(feature = "serde")]
     pub fn parse(source: Arc<SourceFile>) -> Result<Self, Report> {
         use parsing::{SetSourceId, Validate};

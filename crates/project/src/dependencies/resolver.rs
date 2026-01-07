@@ -5,5 +5,8 @@ mod pubgrub_compat;
 mod version_set;
 
 pub use self::{
-    index::PackageIndex, package_id::PackageId, provider::PackageResolver, version_set::VersionSet,
+    index::PackageIndex,
+    package_id::PackageId,
+    provider::{DependencyResolutionError, PackageResolver},
+    version_set::VersionSet,
 };

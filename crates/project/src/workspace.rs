@@ -1,10 +1,10 @@
+#[cfg(feature = "std")]
+use std::{boxed::Box, path::Path, string::ToString};
+
 #[cfg(all(feature = "std", feature = "serde"))]
 use miden_assembly_syntax::debuginfo::SourceManager;
 
 use crate::*;
-
-#[cfg(feature = "std")]
-use std::{boxed::Box, path::Path};
 
 /// Represents a Miden project workspace.
 ///

@@ -1,11 +1,10 @@
+use alloc::sync::Arc;
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use alloc::sync::Arc;
-
-use crate::{Metadata, SourceId, Span};
-
 use super::parsing::SetSourceId;
+use crate::{Metadata, SourceId, Span};
 
 /// Represents configuration options for a specific build profile, e.g. `release`
 #[derive(Default, Debug, Clone)]

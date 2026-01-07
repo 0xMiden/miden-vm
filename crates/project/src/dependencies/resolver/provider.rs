@@ -9,11 +9,11 @@ use crate::{SemVer, Version};
 
 /// Represents package priorities in the resolver.
 ///
-/// The order of the variants here matters, as the earlier a variant appears, the lower its priority.
-/// The resolver will solve for packages with higher priority before those with lower priority, and
-/// so it is desirable to prioritize packages with a higher chance of conflict and/or more precise
-/// version requirements, as it has a large impact on the performance of the resolver, by
-/// eliminating a lot of versions from the tree.
+/// The order of the variants here matters, as the earlier a variant appears, the lower its
+/// priority. The resolver will solve for packages with higher priority before those with lower
+/// priority, and so it is desirable to prioritize packages with a higher chance of conflict and/or
+/// more precise version requirements, as it has a large impact on the performance of the resolver,
+/// by eliminating a lot of versions from the tree.
 ///
 /// In general, the goal of this prioritization scheme is to guide the resolver so it can make
 /// better selections, and aid in resolving conflicts.
@@ -62,9 +62,9 @@ impl<'a> PackageResolver<'a> {
     /// 1. Ensured that `index` has been seeded with `package`, along with other members of
     ///    `workspace`, and all versions of all packages known to the system that may be referenced
     ///    as dependencies, directly or transitively.
-    /// 2. Verified that `package` is a member of `workspace`. While resolution can still succeed
-    ///    if that isn't the case, it may cause unexpected conflicts or selections to occur due to
-    ///    the special prioritization given to workspace members.
+    /// 2. Verified that `package` is a member of `workspace`. While resolution can still succeed if
+    ///    that isn't the case, it may cause unexpected conflicts or selections to occur due to the
+    ///    special prioritization given to workspace members.
     pub fn for_package_in_workspace(
         package: &'a crate::Package,
         workspace: &'a crate::Workspace,
@@ -366,12 +366,13 @@ impl From<pubgrub::PubGrubError<PackageResolver<'_>>> for DependencyResolutionEr
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use alloc::vec;
 
-    use crate::VersionReq;
     use miden_core::{Word, crypto::hash::Rpo256};
     use pubgrub::{SelectedDependencies, VersionSet as _};
+
+    use super::*;
+    use crate::VersionReq;
 
     fn select<'a>(packages: &[(&str, &str)]) -> SelectedDependencies<PackageResolver<'a>> {
         packages
