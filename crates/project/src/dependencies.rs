@@ -1,9 +1,11 @@
-#![expect(unused_assignments)]
-
 #[cfg(feature = "resolver")]
 mod resolver;
 mod version;
 mod version_requirement;
+
+use alloc::{format, sync::Arc, vec};
+
+use miden_assembly_syntax::debuginfo::Spanned;
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::*;
@@ -11,11 +13,6 @@ pub use self::{
     version::{SemVer, Version, VersionReq},
     version_requirement::VersionRequirement,
 };
-
-use alloc::{format, sync::Arc, vec};
-
-use miden_assembly_syntax::debuginfo::Spanned;
-
 use crate::{Diagnostic, SourceSpan, Span, Uri, miette};
 
 /// Represents a project/package dependency declaration
@@ -81,8 +78,8 @@ pub enum DependencyVersionScheme {
         /// If specified, the version of the referenced project/package _must_ match this version
         /// requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the version
-        /// found in the package/project at the given path.
+        /// If unspecified, the version requirement is presumed to be an exact match for the
+        /// version found in the package/project at the given path.
         version: Option<VersionRequirement>,
     },
     /// Resolve the given Git repository to a Miden project/workspace.
@@ -93,11 +90,11 @@ pub enum DependencyVersionScheme {
         repo: Span<Uri>,
         /// The specific revision to clone.
         revision: Span<GitRevision>,
-        /// If specified, the version declared in the manifest found in the cloned repository _must_
-        /// match this version requirement.
+        /// If specified, the version declared in the manifest found in the cloned repository
+        /// _must_ match this version requirement.
         ///
-        /// If unspecified, the version requirement is presumed to be an exact match for the version
-        /// found in the project manifest of the cloned repo.
+        /// If unspecified, the version requirement is presumed to be an exact match for the
+        /// version found in the project manifest of the cloned repo.
         version: Option<Span<VersionReq>>,
     },
 }
@@ -133,6 +130,7 @@ pub enum InvalidDependencySpecError {
     },
 }
 
+#[cfg(feature = "serde")]
 impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
     type Error = InvalidDependencySpecError;
 
@@ -177,7 +175,7 @@ impl TryFrom<Span<&crate::ast::DependencySpec>> for DependencyVersionScheme {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(all(feature = "std", feature = "serde"))]
 impl DependencyVersionScheme {
     /// Parse a dependency spec into [DependencyVersionScheme], taking into account workspace
     /// context.

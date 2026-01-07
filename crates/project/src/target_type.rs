@@ -1,8 +1,6 @@
 #[cfg(feature = "serde")]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-};
+use alloc::string::String;
+use alloc::{boxed::Box, string::ToString};
 use core::fmt;
 
 #[cfg(feature = "serde")]

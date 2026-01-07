@@ -1,3 +1,4 @@
+use alloc::string::ToString;
 use core::borrow::Borrow;
 
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -16,7 +17,8 @@ pub struct Profile {
     trim_paths: bool,
     /// Custom metadata associated with this profile
     ///
-    /// This is intended for third-party/downstream tooling which need to support per-profile config.
+    /// This is intended for third-party/downstream tooling which need to support per-profile
+    /// config.
     metadata: Metadata,
 }
 

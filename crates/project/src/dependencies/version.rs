@@ -1,8 +1,7 @@
 use core::{borrow::Borrow, fmt, str::FromStr};
 
-use miden_core::{LexicographicWord, Word};
-
 pub use miden_assembly_syntax::semver::{Error as SemVerError, Version as SemVer, VersionReq};
+use miden_core::{LexicographicWord, Word};
 
 use super::VersionRequirement;
 
