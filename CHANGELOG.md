@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.3 (TBD)
+
+- Define and implement Miden project file format ([#2510](https://github.com/0xMiden/miden-vm/pull/2510)).
+
 ## 0.20.2 (2026-01-05)
 
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).

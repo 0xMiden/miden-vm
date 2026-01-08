@@ -32,7 +32,7 @@ WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal,resolver
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
@@ -50,8 +50,10 @@ FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
 FEATURES_miden-vm        := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
+FEATURES_project         := resolver
 FEATURES_prover          := concurrent,metal
-FEATURES_core-lib        :=FEATURES_verifier        :=
+FEATURES_core-lib        :=
+FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
