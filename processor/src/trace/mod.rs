@@ -11,6 +11,8 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
+#[cfg(feature = "std")]
+use miden_core::field::PrimeField64;
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     field::ExtensionField,
@@ -18,8 +20,6 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::ColMatrix,
 };
-#[cfg(feature = "std")]
-use miden_core::field::PrimeField64;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{

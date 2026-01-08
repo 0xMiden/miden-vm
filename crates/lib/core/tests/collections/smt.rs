@@ -15,20 +15,20 @@ const fn word(e0: u64, e1: u64, e2: u64, e3: u64) -> Word {
 const LEAVES: [(Word, Word); 2] = [
     (
         word(101, 102, 103, 104),
-        // K[0] (leaf index element) differs, so maps to different leaf
+        // Most significant Felt differs from previous
         word(1_u64, 2_u64, 3_u64, 4_u64),
     ),
     (word(105, 106, 107, 108), word(5_u64, 6_u64, 7_u64, 8_u64)),
 ];
 
-/// Unlike the above `LEAVES`, these leaves use the same value for their leaf index element (K[0]),
-/// to test leaves with multiple pairs.
+/// Unlike the above `LEAVES`, these leaves use the same value for their most-significant felts, to
+/// test leaves with multiple pairs.
 const LEAVES_MULTI: [(Word, Word); 3] = [
-    (word(69420, 102, 103, 104), word(0x1, 0x2, 0x3, 0x4)),
-    // K[0] does NOT differ from previous - same leaf.
-    (word(69420, 202, 203, 204), word(0xb, 0xc, 0xd, 0xe)),
+    (word(101, 102, 103, 69420), word(0x1, 0x2, 0x3, 0x4)),
+    // Most significant felt does NOT differ from previous.
+    (word(201, 202, 203, 69420), word(0xb, 0xc, 0xd, 0xe)),
     // A key in the same leaf, but with no corresponding value.
-    (word(69420, 302, 303, 304), EMPTY_WORD),
+    (word(301, 302, 303, 69420), EMPTY_WORD),
 ];
 
 /// Tests `get` on every key present in the SMT, as well as an empty leaf

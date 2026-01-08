@@ -237,22 +237,22 @@ fn test_frie2f4() {
     // With d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
     let previous_value = [10_u32.into(), 11_u32.into()];
     let stack_inputs = vec![
-        1_u32.into(),          // idx 0 -> pos 15 (cptr)
-        2_u32.into(),          // idx 1 -> pos 14 (a0)
-        3_u32.into(),          // idx 2 -> pos 13 (a1)
-        4_u32.into(),          // idx 3 -> pos 12 (pe0) - but shifts to 13 after push
-        previous_value[0],     // idx 4 -> pos 11 (pe1) - but shifts to 12 (pe0) after push
-        previous_value[1],     // idx 5 -> pos 10 (poe) - but shifts to 11 (pe1) after push
-        7_u32.into(),          // idx 6 -> pos 9 (d_seg) - but shifts to 10 (poe) after push
-        2_u32.into(),          // idx 7 -> pos 8 (f_pos) - but shifts to 9 (d_seg=2) after push
-        9_u32.into(),          // idx 8 -> pos 7 (v7) - but shifts to 8 (f_pos) after push
-        10_u32.into(),         // idx 9 -> pos 6 (v6) - but shifts to 7 (v7) after push
-        11_u32.into(),         // idx 10 -> pos 5 (v5) - but shifts to 6 (v6) after push
-        previous_value[1],     // idx 11 -> pos 4 - shifts to 5 (v5) after push: must match pe1
-        previous_value[0],     // idx 12 -> pos 3 - shifts to 4 (v4) after push: must match pe0
-        14_u32.into(),         // idx 13 -> pos 2 - shifts to 3 (v3) after push
-        15_u32.into(),         // idx 14 -> pos 1 - shifts to 2 (v2) after push
-        16_u32.into(),         // idx 15 -> pos 0 - shifts to 1 (v1) after push
+        1_u32.into(),      // idx 0 -> pos 15 (cptr)
+        2_u32.into(),      // idx 1 -> pos 14 (a0)
+        3_u32.into(),      // idx 2 -> pos 13 (a1)
+        4_u32.into(),      // idx 3 -> pos 12 (pe0) - but shifts to 13 after push
+        previous_value[0], // idx 4 -> pos 11 (pe1) - but shifts to 12 (pe0) after push
+        previous_value[1], // idx 5 -> pos 10 (poe) - but shifts to 11 (pe1) after push
+        7_u32.into(),      // idx 6 -> pos 9 (d_seg) - but shifts to 10 (poe) after push
+        2_u32.into(),      // idx 7 -> pos 8 (f_pos) - but shifts to 9 (d_seg=2) after push
+        9_u32.into(),      // idx 8 -> pos 7 (v7) - but shifts to 8 (f_pos) after push
+        10_u32.into(),     // idx 9 -> pos 6 (v6) - but shifts to 7 (v7) after push
+        11_u32.into(),     // idx 10 -> pos 5 (v5) - but shifts to 6 (v6) after push
+        previous_value[1], // idx 11 -> pos 4 - shifts to 5 (v5) after push: must match pe1
+        previous_value[0], // idx 12 -> pos 3 - shifts to 4 (v4) after push: must match pe0
+        14_u32.into(),     // idx 13 -> pos 2 - shifts to 3 (v3) after push
+        15_u32.into(),     // idx 14 -> pos 1 - shifts to 2 (v2) after push
+        16_u32.into(),     // idx 15 -> pos 0 - shifts to 1 (v1) after push
     ];
 
     let program =

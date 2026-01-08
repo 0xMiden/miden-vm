@@ -98,6 +98,8 @@ end
 #!
 #! Cycles: 117
 pub proc gt(rhs: word, lhs: word) -> i1
+    # Input words are in LE order (word[0] on top), reverse to BE order (word[3] on top)
+    reversew swapw reversew swapw
     # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
     exec.arrange_words_adjacent
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
@@ -163,6 +165,9 @@ end
 #!
 #! Cycles: 117
 pub proc lt(rhs: word, lhs: word) -> i1
+    # Input words are in LE order (word[0] on top), reverse to BE order (word[3] on top)
+    reversew swapw reversew swapw
+    # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
     exec.arrange_words_adjacent
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 

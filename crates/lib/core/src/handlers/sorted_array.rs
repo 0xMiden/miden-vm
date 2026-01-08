@@ -170,14 +170,14 @@ fn push_lowerbound_result(
 ///
 /// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
 /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
-///   elements (word[2] and word[3]) zeroized, keeping only the most significant half (word[0] and
-///   word[1]) for comparison.
+///   elements (word[0] and word[1]) zeroized, keeping only the most significant half (word[2] and
+///   word[3]) for comparison. (In BE ordering, word[3] is most significant.)
 fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
     match key_size {
         KeySize::Full => LexicographicWord::new(word),
         KeySize::Half => {
-            word[2] = Felt::ZERO;
-            word[3] = Felt::ZERO;
+            word[0] = Felt::ZERO;
+            word[1] = Felt::ZERO;
 
             LexicographicWord::new(word)
         },

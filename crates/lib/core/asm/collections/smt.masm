@@ -42,8 +42,8 @@ pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
     # => [K[0], K[1], K[2], K[3], R[0], R[1], R[2], R[3]]
-    dupw.1 dup.4 push.LEAF_DEPTH
-    # => [depth, K[0], R, K, R]
+    dupw.1 dup.7 push.LEAF_DEPTH
+    # => [depth, K[3], R, K, R]
 
     # Retrieve node value from merkle store
     # (14 cycles)
@@ -145,8 +145,8 @@ end
 pub proc set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
-    movupw.2 dup.8 push.LEAF_DEPTH
-    # => [depth, leaf_index=K[0], R, V, K]
+    movupw.2 dup.11 push.LEAF_DEPTH
+    # => [depth, leaf_index=K[3], R, V, K]
 
     # Push MT node on advice stack, cleanup operand stack, and then
     # push MT node on operand stack (NV)
@@ -340,12 +340,12 @@ proc set_empty_leaf
 
         # Prepare stack: verify that the leaf is actually empty
         # (X cycles)
-        movupw.2 swapw dup.8 movdn.4 push.LEAF_DEPTH movdn.4
-        #=> [V (=ZERO), depth, K[0], R, K, ...]
+        movupw.2 swapw dup.11 movdn.4 push.LEAF_DEPTH movdn.4
+        #=> [V (=ZERO), depth, K[3], R, K, ...]
 
         # (1 cycle)
         mtree_verify
-        #=> [V (=ZERO), depth, K[0], R, K, ...]
+        #=> [V (=ZERO), depth, K[3], R, K, ...]
 
         # Prepare stack for return (X cycles)
         movup.4 drop movup.4 drop movupw.2 dropw
@@ -365,8 +365,8 @@ proc set_empty_leaf
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
-        movupw.2 dup.8 push.LEAF_DEPTH
-        #=> [depth, K[0], R, NV, K]
+        movupw.2 dup.11 push.LEAF_DEPTH
+        #=> [depth, K[3], R, NV, K]
 
         # Insert node in Merkle store (29 cycles)
         mtree_set
@@ -466,8 +466,8 @@ proc insert_single_leaf
 
         # Prepare stack to update Merkle store
         # (X cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[0], R, NV, K, V_in_leaf]
+        movupw.3 dup.11 push.LEAF_DEPTH
+        # => [depth, K[3], R, NV, K, V_in_leaf]
 
         # Update Merkle store (29 cycles)
         mtree_set
@@ -531,8 +531,8 @@ proc insert_single_to_multi_leaf
         loc_storew_le.0 dropw
         # => [K, V_l, V, R]
 
-        # Save K[0], as that is our index `i`.
-        dup movdn.12
+        # Save K[3], as that is our index `i`.
+        dup.3 movdn.12
         # => [K, V_l, V, leaf_index, R]
 
         loc_storew_le.8 dropw
@@ -555,8 +555,8 @@ proc insert_single_to_multi_leaf
         loc_storew_le.8 dropw
         # => [K, V_l, V, R]
 
-        # Save K[0], as that is our index `i`.
-        dup movdn.12
+        # Save K[3], as that is our index `i`.
+        dup.3 movdn.12
         # => [K, V_l, V, leaf_index, R]
 
         loc_storew_le.0 dropw
@@ -626,8 +626,8 @@ proc remove_single_leaf
         # Note that the new node value will be the empty word, so we can use `V`
         # as the node value (since we confirmed that it's `ZERO`)
         # (7 cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[0], R, V, K, V_in_leaf]
+        movupw.3 dup.11 push.LEAF_DEPTH
+        # => [depth, K[3], R, V, K, V_in_leaf]
 
         # (29 cycles)
         mtree_set
@@ -656,8 +656,8 @@ proc remove_single_leaf
         # => [K_in_leaf, K, V_in_leaf, R]
 
         # Prepare stack for mtree_get
-        movupw.3 dup.8 push.LEAF_DEPTH
-        # => [depth, K[0], R, K_in_leaf, K, V_in_leaf]
+        movupw.3 dup.11 push.LEAF_DEPTH
+        # => [depth, K[3], R, K_in_leaf, K, V_in_leaf]
 
         # Retrieve node value (NV) from merkle tree
         mtree_get
@@ -834,8 +834,8 @@ proc insert_into_leaf
     loc_store.1 # end_ptr
     # => [key_ptr, V, K, R]
 
-    # Save K[0], which is the leaf index `i`.
-    dup.5 movdn.9
+    # Save K[3], which is the leaf index `i`.
+    dup.8 movdn.9
     # => [key_ptr, V, K, leaf_index, R]
 
     #
@@ -963,7 +963,7 @@ proc replace_in_multi_leaf
     drop drop
     # => [start_ptr, end_ptr, R, K, V_old]
 
-    dup.6 # K[0]
+    dup.9 # K[3]
     # => [leaf_index, start_ptr, end_ptr, R, K, V_old]
 
     movdn.2
@@ -1036,8 +1036,8 @@ proc remove_in_multi_leaf
     movupw.2
     # => [R, V_old, K]
 
-    # K[0] is the leaf index.
-    dup.8
+    # K[3] is the leaf index.
+    dup.11
     # => [leaf_index, R, V_old, K]
 
     loc_load.3 loc_load.0
