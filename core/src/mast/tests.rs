@@ -238,7 +238,7 @@ fn test_decorator_storage_consistency_with_multiple_blocks() {
 }
 
 #[test]
-fn test_decorator_storage_after_strip_decorators() {
+fn test_decorator_storage_after_clear_debug_info() {
     let mut forest = MastForest::new();
 
     let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
@@ -251,7 +251,7 @@ fn test_decorator_storage_after_strip_decorators() {
     assert_eq!(forest.debug_info.num_decorators(), 2);
     assert_eq!(forest.debug_info.op_decorator_storage().num_decorator_ids(), 2);
 
-    forest.strip_decorators();
+    forest.clear_debug_info();
 
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
@@ -259,27 +259,27 @@ fn test_decorator_storage_after_strip_decorators() {
 }
 
 #[test]
-fn test_strip_decorators_edge_cases() {
+fn test_clear_debug_info_edge_cases() {
     // Empty forest
     let mut forest = MastForest::new();
-    forest.strip_decorators();
+    forest.clear_debug_info();
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 0);
 
-    // Idempotent: stripping twice should be safe
+    // Idempotent: clearing twice should be safe
     let operations = vec![Operation::Push(Felt::new(1)), Operation::Add];
     let block_id = BasicBlockNodeBuilder::new(operations, vec![])
         .add_to_forest(&mut forest)
         .unwrap();
-    forest.strip_decorators();
-    forest.strip_decorators();
+    forest.clear_debug_info();
+    forest.clear_debug_info();
     assert_eq!(forest.debug_info.num_decorators(), 0);
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 1);
     assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
 }
 
 #[test]
-fn test_strip_decorators_multiple_node_types() {
+fn test_clear_debug_info_multiple_node_types() {
     let mut forest = MastForest::new();
     let deco = forest.add_decorator(Decorator::Trace(1)).unwrap();
     let block_id = BasicBlockNodeBuilder::new(
@@ -292,7 +292,7 @@ fn test_strip_decorators_multiple_node_types() {
     JoinNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
     SplitNodeBuilder::new([block_id, block_id]).add_to_forest(&mut forest).unwrap();
 
-    forest.strip_decorators();
+    forest.clear_debug_info();
 
     assert_eq!(forest.debug_info.op_decorator_storage().num_nodes(), 3);
     assert!(forest.decorator_links_for_node(block_id).unwrap().into_iter().next().is_none());
@@ -819,14 +819,14 @@ fn test_mast_forest_compaction_comprehensive() {
     assert!(forest.num_nodes() > 14); // Supporting nodes (children) increase total count
     assert!(!forest.debug_info.is_empty());
 
-    // Action: Strip decorators first, then compact
-    forest.strip_decorators();
+    // Action: Clear debug info first, then compact
+    forest.clear_debug_info();
     let (forest, _root_map) = forest.compact();
 
     // Verify compaction results:
     // - 7 node pairs merged into 7 single nodes
     // - Supporting nodes preserved as they're reachable
-    // - All decorators removed
+    // - All debug info removed
     // - Roots preserved (at least 7, possibly more due to deduplication)
     assert_eq!(forest.num_nodes(), 13); // 7 main nodes + 6 supporting nodes (children)
     assert!(forest.num_procedures() >= 7);
@@ -1126,7 +1126,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
 }
 
 #[test]
-fn test_decorator_stripping_independent() {
+fn test_clear_debug_info_independent() {
     let mut forest = MastForest::new();
 
     // Add some nodes with decorators
@@ -1136,14 +1136,14 @@ fn test_decorator_stripping_independent() {
         .unwrap();
     forest.make_root(node_with_deco);
 
-    // Verify initial state has decorators
+    // Verify initial state has debug info
     assert!(!forest.debug_info.is_empty());
     assert_eq!(forest.decorators().len(), 1);
 
-    // Strip decorators only
-    forest.strip_decorators();
+    // Clear debug info only
+    forest.clear_debug_info();
 
-    // Verify decorators are removed but structure remains
+    // Verify debug info is removed but structure remains
     assert!(forest.debug_info.is_empty());
     assert_eq!(forest.num_nodes(), 1);
     assert_eq!(forest.num_procedures(), 1);
@@ -1220,12 +1220,12 @@ fn test_commitment_caching() {
         "advice_map mutation should not invalidate commitment cache"
     );
 
-    // Test that strip_decorators doesn't invalidate the cache
-    forest.strip_decorators();
+    // Test that clear_debug_info doesn't invalidate the cache
+    forest.clear_debug_info();
     let commitment6 = forest.commitment();
     assert_eq!(
         commitment3, commitment6,
-        "strip_decorators should not invalidate commitment cache"
+        "clear_debug_info should not invalidate commitment cache"
     );
 
     // Test that remove_nodes invalidates the cache

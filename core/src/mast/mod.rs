@@ -166,29 +166,22 @@ impl MastForest {
         id_remappings
     }
 
-    /// Removes all decorators from this MAST forest.
+    /// Clears all [`DebugInfo`] from this forest: decorators, error codes, and procedure names.
     ///
-    /// This method modifies the forest in-place, removing all decorator information
-    /// including operation-indexed decorators, before-enter decorators, after-exit
-    /// decorators, and error codes while keeping the CSR structure valid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let mut forest = MastForest::new();
-    /// // Add decorators and nodes to the forest
-    /// forest.strip_decorators(); // forest is now stripped
     /// ```
-    pub fn strip_decorators(&mut self) {
+    /// # use miden_core::mast::MastForest;
+    /// let mut forest = MastForest::new();
+    /// forest.clear_debug_info();
+    /// assert!(forest.decorators().is_empty());
+    /// ```
+    pub fn clear_debug_info(&mut self) {
         self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.
-    /// The method assumes that decorators have already been stripped if that is desired.
+    /// The method assumes that debug info has already been cleared if that is desired.
     /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
@@ -204,8 +197,8 @@ impl MastForest {
     /// let mut forest = MastForest::new();
     /// // Add nodes to the forest
     ///
-    /// // First strip decorators if needed
-    /// forest.strip_decorators();
+    /// // First clear debug info if needed
+    /// forest.clear_debug_info();
     ///
     /// // Then compact the forest (consumes the original)
     /// let (compacted_forest, root_map) = forest.compact();
