@@ -1,12 +1,11 @@
 //! The serialization format of MastForest is as follows:
 //!
 //! (Metadata)
-//! - MAGIC (5 bytes)
-//! - VERSION (3 bytes)
+//! - MAGIC (4 bytes) + FLAGS (1 byte) + VERSION (3 bytes)
 //!
 //! (Counts)
 //! - nodes count (`usize`)
-//! - decorators count (`usize`) - reserved for future use in lazy loading (#2504)
+//! - decorators count (`usize`) - 0 if stripped, reserved for future use in lazy loading (#2504)
 //!
 //! (Procedure roots section)
 //! - procedure roots (`Vec<u32>` as MastNodeId values)
@@ -20,7 +19,7 @@
 //! (Advice map section)
 //! - Advice map (`AdviceMap`)
 //!
-//! (DebugInfo section)
+//! (DebugInfo section - omitted if FLAGS bit 0 is set)
 //! - Decorator data (raw bytes for decorator payloads)
 //! - String table (deduplicated strings)
 //! - Decorator infos (`Vec<DecoratorInfo>`)
@@ -28,6 +27,12 @@
 //! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
 //! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
 //! - Procedure names map (`BTreeMap<Word, String>`)
+//!
+//! # Stripped Format
+//!
+//! When serializing with [`MastForest::write_stripped`], the FLAGS byte has bit 0 set
+//! and the entire DebugInfo section is omitted. Deserialization auto-detects the format
+//! and creates an empty `DebugInfo` with valid CSR structures when reading stripped files.
 
 use alloc::vec::Vec;
 
@@ -69,8 +74,27 @@ type StringIndex = usize;
 // CONSTANTS
 // ================================================================================================
 
-/// Magic string for detecting that a file is binary-encoded MAST.
-const MAGIC: &[u8; 5] = b"MAST\0";
+/// Magic bytes for detecting that a file is binary-encoded MAST.
+///
+/// The format uses 4 bytes for identification followed by a flags byte:
+/// - Bytes 0-3: `b"MAST"` - Magic identifier
+/// - Byte 4: Flags byte (see [`FLAG_STRIPPED`] and [`FLAGS_RESERVED_MASK`] constants)
+///
+/// This design repurposes the original null terminator (`b"MAST\0"`) as a flags byte,
+/// maintaining backward compatibility: old files have flags=0x00 (the null byte),
+/// which means "debug info present".
+const MAGIC: &[u8; 4] = b"MAST";
+
+/// Flag indicating debug info is stripped from the serialized MastForest.
+///
+/// When this bit is set in the flags byte, the DebugInfo section is omitted entirely.
+/// The deserializer will create an empty `DebugInfo` with valid CSR structures.
+const FLAG_STRIPPED: u8 = 0x01;
+
+/// Mask for reserved flag bits that must be zero.
+///
+/// Bits 1-7 are reserved for future use. If any are set, deserialization fails.
+const FLAGS_RESERVED_MASK: u8 = 0xfe;
 
 /// The format version.
 ///
@@ -83,7 +107,7 @@ const MAGIC: &[u8; 5] = b"MAST\0";
 /// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
 ///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
 ///   serialization in CSR format (eliminates per-node decorator sections and round-trip
-///   conversions).
+///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
 const VERSION: [u8; 3] = [0, 0, 1];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
@@ -91,16 +115,28 @@ const VERSION: [u8; 3] = [0, 0, 1];
 
 impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.write_into_with_options(target, false);
+    }
+}
+
+impl MastForest {
+    /// Internal serialization with options.
+    ///
+    /// When `stripped` is true, the DebugInfo section is omitted and the FLAGS byte
+    /// has bit 0 set.
+    fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, stripped: bool) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
-        // magic & version
+        // magic & flags
         target.write_bytes(MAGIC);
+        target.write_u8(if stripped { FLAG_STRIPPED } else { 0x00 });
+
+        // version
         target.write_bytes(&VERSION);
 
-        // decorator & node counts
+        // node & decorator counts
         target.write_usize(self.nodes.len());
-        // Expected to be used in #2504. Remove if this issue is resolved without using.
-        target.write_usize(self.debug_info.num_decorators());
+        target.write_usize(if stripped { 0 } else { self.debug_info.num_decorators() });
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
@@ -132,20 +168,20 @@ impl Serializable for MastForest {
 
         self.advice_map.write_into(target);
 
-        // Serialize DebugInfo directly (includes decorators, error_codes, CSR structures,
-        // and procedure_names)
-        self.debug_info.write_into(target);
+        // Serialize DebugInfo only if not stripped
+        if !stripped {
+            self.debug_info.write_into(target);
+        }
     }
 }
 
 impl Deserializable for MastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_and_validate_magic(source)?;
-        read_and_validate_version(source)?;
+        let flags = read_and_validate_header(source)?;
+        let is_stripped = flags & FLAG_STRIPPED != 0;
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
-        // Expected to be used in #2504. Remove if this issue is resolved without using.
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
@@ -158,9 +194,12 @@ impl Deserializable for MastForest {
 
         let advice_map = AdviceMap::read_from(source)?;
 
-        // Deserialize DebugInfo directly (includes decorators, error_codes, CSR structures,
-        // and procedure_names)
-        let debug_info = super::DebugInfo::read_from(source)?;
+        // Deserialize DebugInfo or create empty one if stripped
+        let debug_info = if is_stripped {
+            super::DebugInfo::empty_for_nodes(node_count)
+        } else {
+            super::DebugInfo::read_from(source)?
+        };
 
         // Constructing MastForest
         let mast_forest = {
@@ -209,27 +248,37 @@ impl Deserializable for MastForest {
     }
 }
 
-fn read_and_validate_magic<R: ByteReader>(source: &mut R) -> Result<[u8; 5], DeserializationError> {
-    let magic: [u8; 5] = source.read_array()?;
+/// Reads and validates the MAST header (magic, flags, version).
+///
+/// Returns the flags byte on success.
+fn read_and_validate_header<R: ByteReader>(source: &mut R) -> Result<u8, DeserializationError> {
+    // Read magic
+    let magic: [u8; 4] = source.read_array()?;
     if magic != *MAGIC {
         return Err(DeserializationError::InvalidValue(format!(
             "Invalid magic bytes. Expected '{:?}', got '{:?}'",
             *MAGIC, magic
         )));
     }
-    Ok(magic)
-}
 
-fn read_and_validate_version<R: ByteReader>(
-    source: &mut R,
-) -> Result<[u8; 3], DeserializationError> {
+    // Read and validate flags
+    let flags: u8 = source.read_u8()?;
+    if flags & FLAGS_RESERVED_MASK != 0 {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
+            flags & FLAGS_RESERVED_MASK
+        )));
+    }
+
+    // Read and validate version
     let version: [u8; 3] = source.read_array()?;
     if version != VERSION {
         return Err(DeserializationError::InvalidValue(format!(
             "Unsupported version. Got '{version:?}', but only '{VERSION:?}' is supported",
         )));
     }
-    Ok(version)
+
+    Ok(flags)
 }
 
 fn node_infos_iter<'a, R>(
@@ -247,4 +296,23 @@ where
         remaining -= 1;
         Some(MastNodeInfo::read_from(source))
     })
+}
+
+// STRIPPED SERIALIZATION
+// ================================================================================================
+
+/// Wrapper for serializing a [`MastForest`] without debug information.
+///
+/// This newtype enables an alternative serialization format that omits the DebugInfo section,
+/// producing smaller output files suitable for production deployment where debug info is not
+/// needed.
+///
+/// The resulting bytes can be deserialized with the standard [`Deserializable`] impl for
+/// [`MastForest`], which auto-detects the format via the flags byte in the header.
+pub(super) struct StrippedMastForest<'a>(pub(super) &'a MastForest);
+
+impl Serializable for StrippedMastForest<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into_with_options(target, true);
+    }
 }
