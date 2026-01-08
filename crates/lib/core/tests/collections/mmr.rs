@@ -69,7 +69,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
     let merkle_root = merkle_tree.root();
     let merkle_store = MerkleStore::from(&merkle_tree);
     let mut builder = AdviceStackBuilder::new();
-    builder.push_word_for_adv_push(merkle_root);
+    builder.push_for_adv_loadw(merkle_root);
     let advice_stack = builder.build_vec_u64();
 
     for pos in 0..(leaves.len() as u64) {
@@ -79,7 +79,7 @@ fn test_mmr_get_single_peak() -> Result<(), MerkleError> {
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
-                adv_push.4 push.1004 mem_storew_le dropw # MMR single peak
+                padw adv_loadw push.1004 mem_storew_le dropw # MMR single peak
 
                 push.1000 push.{pos} exec.mmr::get
 
@@ -116,8 +116,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
     merkle_store.extend(merkle_tree2.inner_nodes());
 
     let mut builder = AdviceStackBuilder::new();
-    builder.push_word_for_adv_push(merkle_root1);
-    builder.push_word_for_adv_push(merkle_root2);
+    builder.push_for_adv_loadw(merkle_root1);
+    builder.push_for_adv_loadw(merkle_root2);
     let advice_stack = builder.build_vec_u64();
 
     let examples = [
@@ -138,8 +138,8 @@ fn test_mmr_get_two_peaks() -> Result<(), MerkleError> {
 
             begin
                 push.{num_leaves} push.1000 mem_store # leaves count
-                adv_push.4 push.1004 mem_storew_le dropw # MMR first peak
-                adv_push.4 push.1008 mem_storew_le dropw # MMR second peak
+                padw adv_loadw push.1004 mem_storew_le dropw # MMR first peak
+                padw adv_loadw push.1008 mem_storew_le dropw # MMR second peak
 
                 push.1000 push.{absolute_pos} exec.mmr::get
 
@@ -181,7 +181,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for single element MMR
     let mut builder = AdviceStackBuilder::new();
-    builder.push_word_for_adv_push(merkle_root3);
+    builder.push_for_adv_loadw(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let source = format!(
         "
@@ -189,7 +189,7 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
-            adv_push.4 push.1004 mem_storew_le dropw # MMR first peak
+            padw adv_loadw push.1004 mem_storew_le dropw # MMR first peak
 
             push.1000 push.{pos} exec.mmr::get
 
@@ -203,9 +203,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
     // Test case for the single element tree in a MMR with multiple trees
     let mut builder = AdviceStackBuilder::new();
-    builder.push_word_for_adv_push(merkle_root1);
-    builder.push_word_for_adv_push(merkle_root2);
-    builder.push_word_for_adv_push(merkle_root3);
+    builder.push_for_adv_loadw(merkle_root1);
+    builder.push_for_adv_loadw(merkle_root2);
+    builder.push_for_adv_loadw(merkle_root3);
     let advice_stack = builder.build_vec_u64();
     let num_leaves = leaves1.len() + leaves2.len() + leaves3.len();
     let source = format!(
@@ -214,9 +214,9 @@ fn test_mmr_tree_with_one_element() -> Result<(), MerkleError> {
 
         begin
             push.{num_leaves} push.1000 mem_store # leaves count
-            adv_push.4 push.1004 mem_storew_le dropw # MMR first peak
-            adv_push.4 push.1008 mem_storew_le dropw # MMR second peak
-            adv_push.4 push.1012 mem_storew_le dropw # MMR third peak
+            padw adv_loadw push.1004 mem_storew_le dropw # MMR first peak
+            padw adv_loadw push.1008 mem_storew_le dropw # MMR second peak
+            padw adv_loadw push.1012 mem_storew_le dropw # MMR third peak
 
             push.1000 push.{pos} exec.mmr::get
 

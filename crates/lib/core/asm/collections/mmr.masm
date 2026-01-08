@@ -131,8 +131,8 @@ pub proc unpack
   # operand_stack => [HASH, mmr_ptr, ...]
   # advice_stack => [NUM_LEAVES, peaks*, ...]
 
-  # load the size from the advice stack (7 cycles)
-  adv_push.4 drop drop drop
+  # load the size from the advice stack (10 cycles)
+  padw adv_loadw movdn.3 drop drop drop
   # operand_stack => [num_leaves, HASH, mmr_ptr, ...]
   # advice_stack => [peaks*, ...]
 

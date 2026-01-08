@@ -15,7 +15,7 @@ use miden::core::crypto::hashes::rpo256
 # Constants
 # ================================================================================================
 
-const AEAD_DECRYPT_EVENT=event("stdlib::crypto::aead::decrypt")
+const AEAD_DECRYPT_EVENT=event("miden::core::crypto::aead::decrypt")
 
 # Procedures
 # ================================================================================================

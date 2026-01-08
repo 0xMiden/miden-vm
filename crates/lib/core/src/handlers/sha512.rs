@@ -46,7 +46,7 @@ impl EventHandler for Sha512Precompile {
         let digest = preimage.digest();
 
         Ok(vec![
-            AdviceMutation::extend_stack_for_adv_pipe(digest.0),
+            AdviceMutation::extend_stack(digest.0),
             AdviceMutation::extend_precompile_requests([preimage.into()]),
         ])
     }

@@ -117,9 +117,9 @@ fn push_lowerbound_result(
 
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
-        return Ok(vec![AdviceMutation::extend_stack_for_adv_push(vec![
-            Felt::from_bool(false),
+        return Ok(vec![AdviceMutation::extend_stack(vec![
             Felt::from(addr_range.end),
+            Felt::from_bool(false),
         ])]);
     }
 
@@ -160,9 +160,9 @@ fn push_lowerbound_result(
         previous_word = word;
     }
 
-    Ok(vec![AdviceMutation::extend_stack_for_adv_push(vec![
-        Felt::from_bool(was_key_found),
+    Ok(vec![AdviceMutation::extend_stack(vec![
         Felt::from(result.unwrap_or(addr_range.end)),
+        Felt::from_bool(was_key_found),
     ])])
 }
 

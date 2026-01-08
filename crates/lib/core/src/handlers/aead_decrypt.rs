@@ -17,7 +17,7 @@ use miden_processor::{AdviceMutation, EventError, ProcessState};
 use crate::handlers::read_memory_region;
 
 /// Qualified event name for the AEAD decrypt event.
-pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::aead::decrypt");
+pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::crypto::aead::decrypt");
 
 /// Event handler for AEAD decryption.
 ///
@@ -140,6 +140,6 @@ mod tests {
 
     #[test]
     fn test_event_name() {
-        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "stdlib::crypto::aead::decrypt");
+        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "miden::core::crypto::aead::decrypt");
     }
 }

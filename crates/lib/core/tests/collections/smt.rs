@@ -217,7 +217,7 @@ fn test_set_advice_map_empty_key() {
         # => [V]
 
         # Push advice map values on stack
-        adv_push.4
+        padw adv_loadw
         # => [V_in_map, V]
 
         # Check for equality of V's
@@ -262,7 +262,7 @@ fn test_set_advice_map_single_key() {
         # => [V]
 
         # Push advice map values on stack
-        adv_push.4
+        padw adv_loadw
         # => [V_in_map, V]
 
         # Check for equality of V's
@@ -568,7 +568,7 @@ fn test_smt_peek() {
 
             begin
                 # get the value
-                exec.smt::peek adv_push.4
+                exec.smt::peek padw adv_loadw
                 # => [VALUE]
 
                 # truncate the stack

@@ -71,7 +71,7 @@ impl EventHandler for KeccakPrecompile {
         let digest = preimage.digest();
 
         // Extend the stack with the digest [h_0, ..., h_7] for consumption via adv_pipe
-        let advice_stack_extension = AdviceMutation::extend_stack_for_adv_pipe(digest.0);
+        let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
         // Store the precompile data for deferred verification.
         let precompile_request_extension =

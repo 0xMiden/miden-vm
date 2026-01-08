@@ -70,7 +70,7 @@ fn advice_push_mapval() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.4
+        padw adv_loadw
         swapw dropw
     end";
 
@@ -80,7 +80,7 @@ fn advice_push_mapval() {
     let stack_key: [u64; 4] = [4, 3, 2, 1];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
-        vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
+        vec![Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
