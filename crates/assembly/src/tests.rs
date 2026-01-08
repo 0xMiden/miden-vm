@@ -3339,9 +3339,9 @@ fn invalid_repeat() -> TestResult {
     // Overflow iter count
     let count: u64 = u32::MAX as u64 + 1;
     let source = source_file!(
-            &context,
-            format!(
-                "\
+        &context,
+        format!(
+            "\
             const CONSTANT = {count}
             begin
                 repeat.CONSTANT
@@ -3349,8 +3349,8 @@ fn invalid_repeat() -> TestResult {
                 end
             end
             "
-            )
-        );
+        )
+    );
     assert_assembler_diagnostic!(
         context,
         source,
