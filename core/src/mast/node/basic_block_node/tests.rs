@@ -1,9 +1,7 @@
 use proptest::prelude::*;
 
 // Import strategy functions from arbitrary.rs
-pub(super) use super::arbitrary::{
-    BasicBlockNodeParams, MastForestParams, op_non_control_sequence_strategy,
-};
+pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
     Decorator, Felt, ONE, Word,
@@ -803,53 +801,92 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
     );
 }
 
-// PROPTERY TESTS WITH ARBITRARY
-// ================================================================================================
+/// Test that BasicBlockNode -> to_builder -> build preserves structure and decorators
+#[test]
+fn test_to_builder_identity() {
+    let ops = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Add,
+        Operation::Mul,
+    ];
+
+    let mut forest = MastForest::new();
+    let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
+    let decorators = vec![(0, deco1), (2, deco2)];
+
+    // Test Owned storage: node -> builder -> node
+    let owned = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .build()
+        .unwrap();
+    let owned_rt = owned.clone().to_builder(&forest).build().unwrap();
+    assert_eq!(owned.op_batches, owned_rt.op_batches);
+    assert_eq!(owned.digest, owned_rt.digest);
+
+    // Test Linked storage: node in forest -> builder -> node
+    let node_id = BasicBlockNodeBuilder::new(ops, decorators)
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let linked = match &forest[node_id] {
+        MastNode::Block(block) => block.clone(),
+        _ => panic!("Expected BasicBlockNode"),
+    };
+    let linked_rt = linked.clone().to_builder(&forest).build().unwrap();
+    assert_eq!(linked.op_batches, linked_rt.op_batches);
+    assert_eq!(linked.digest, linked_rt.digest);
+}
 
 proptest! {
-    /// Property test: All randomly generated BasicBlockNodes should pass validation
+    /// Proptest: verify to_builder identity for arbitrary BasicBlockNodes
     #[test]
-    fn prop_validate_arbitrary_basic_block(
-        // Generate BasicBlockNode with custom parameters to increase test coverage
-        block in any_with::<BasicBlockNode>(BasicBlockNodeParams {
-            max_ops_len: 72,  // Allow larger blocks for more complex batching
-            max_pairs: 5,     // Allow more decorators
-            max_decorator_id_u32: 10,
-        })
-    ) {
-        // All BasicBlockNodes created through the official constructor should pass validation
-        // This property test ensures our validation correctly handles all edge cases
-        // that the official BasicBlockNode::new() function produces
-        prop_assert!(
-            block.validate_batch_invariants().is_ok(),
-            "BasicBlockNode validation failed: {:?}",
-            block.validate_batch_invariants().err()
-        );
-    }
+    fn proptest_to_builder_identity(ops in op_non_control_sequence_strategy(20)) {
+        let mut forest = MastForest::new();
 
-    /// Property test: All randomly generated MastForests should pass validation
-    #[test]
-    fn prop_validate_arbitrary_mast_forest(
-        // Generate MastForest with BasicBlockNodes that should all be valid
-        forest in any_with::<MastForest>(MastForestParams {
-            decorators: 5,
-            blocks: 1..=5,     // Test with multiple blocks
-            max_joins: 2,
-            max_splits: 2,
-            max_loops: 1,
-            max_calls: 2,
-            max_syscalls: 0,   // Avoid syscalls that require kernel setup
-            max_externals: 0,  // Avoid externals with random digests
-            max_dyns: 0,       // Avoid dyn nodes that leave junk on stack
-        })
-    ) {
-        // All MastForests generated through the official Arbitrary implementation
-        // should pass validation since they use BasicBlockNode::new() which enforces
-        // the same invariants we're checking
-        prop_assert!(
-            forest.validate().is_ok(),
-            "MastForest validation failed: {:?}",
-            forest.validate().err()
-        );
+        // Create some decorators
+        let num_decorators = (ops.len() / 3).max(1);
+        let decorator_ids: Vec<_> = (0..num_decorators)
+            .map(|i| forest.add_decorator(Decorator::Trace(i as u32)).unwrap())
+            .collect();
+
+        // Create decorator list with random positions
+        let decorators: Vec<_> = ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 3 == 0)
+            .zip(decorator_ids.iter().cycle())
+            .map(|((idx, _), &dec_id)| (idx, dec_id))
+            .collect();
+
+        // Test with Owned storage
+        let original = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+            .build()
+            .unwrap();
+
+        let builder = original.clone().to_builder(&forest);
+        let roundtrip = builder.build().unwrap();
+
+        prop_assert_eq!(original.op_batches, roundtrip.op_batches);
+        prop_assert_eq!(original.digest, roundtrip.digest);
+
+        // Test with Linked storage
+        let node_id = BasicBlockNodeBuilder::new(ops, decorators)
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let linked_node = match &forest[node_id] {
+            MastNode::Block(block) => block.clone(),
+            _ => panic!("Expected BasicBlockNode"),
+        };
+
+        let builder2 = linked_node.clone().to_builder(&forest);
+        let roundtrip2 = builder2.build().unwrap();
+
+        prop_assert_eq!(linked_node.op_batches, roundtrip2.op_batches);
+        prop_assert_eq!(linked_node.digest, roundtrip2.digest);
     }
 }

@@ -29,7 +29,10 @@ pub use node::{
 
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        hash_string_to_word,
+    },
 };
 
 mod debuginfo;
@@ -617,6 +620,7 @@ impl MastForest {
     /// at assembly time rather than dynamically during execution, and adds comprehensive
     /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
+        // Validate basic block batch invariants
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
                 MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
@@ -626,6 +630,14 @@ impl MastForest {
                 })?;
             }
         }
+
+        // Validate that all procedure name digests correspond to procedure roots in the forest
+        for (digest, _) in self.debug_info.procedure_names() {
+            if self.find_procedure_root(digest).is_none() {
+                return Err(MastForestError::InvalidProcedureNameDigest(digest));
+            }
+        }
+
         Ok(())
     }
 }
@@ -980,6 +992,13 @@ impl Serializable for DecoratorId {
     }
 }
 
+impl Deserializable for DecoratorId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
@@ -1015,6 +1034,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("procedure name references digest that is not a procedure root: {0:?}")]
+    InvalidProcedureNameDigest(Word),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly

@@ -88,27 +88,24 @@ impl MastNodeBuilder {
         }
     }
 
-    /// Add this node to a forest using relaxed validation.
+    /// Adds the node from this builder to the forest without validation, used during
+    /// deserialization.
     ///
-    /// This method is used during deserialization where nodes may reference child nodes
-    /// that haven't been added to the forest yet. The child node IDs have already been
-    /// validated against the expected final node count during the `try_into_mast_node_builder`
-    /// step, so we can safely skip validation here.
-    ///
-    /// Note: This is not part of the `MastForestContributor` trait because it's only
-    /// intended for internal use during deserialization.
+    /// This method bypasses normal validation and directly creates nodes with
+    /// `DecoratorStore::Linked`. It should only be used during deserialization where the forest
+    /// structure is being reconstructed.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
-        forest: &mut MastForest,
+        mast_forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
         match self {
-            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::Call(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::Dyn(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::External(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::Join(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::Loop(builder) => builder.add_to_forest_relaxed(forest),
-            MastNodeBuilder::Split(builder) => builder.add_to_forest_relaxed(forest),
+            MastNodeBuilder::BasicBlock(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::Call(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::Dyn(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::External(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::Join(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::Loop(builder) => builder.add_to_forest_relaxed(mast_forest),
+            MastNodeBuilder::Split(builder) => builder.add_to_forest_relaxed(mast_forest),
         }
     }
 }

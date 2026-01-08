@@ -40,14 +40,22 @@
 //! method, which removes decorators while preserving critical information. This allows
 //! backward compatibility while enabling size optimization for deployment.
 
-use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
-use crate::{LexicographicWord, Word};
+use crate::{
+    LexicographicWord, Word,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -324,6 +332,27 @@ impl DebugInfo {
         self.procedure_names.clear();
     }
 
+    // VALIDATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Validate the integrity of the DebugInfo structure.
+    ///
+    /// This validates:
+    /// - All CSR structures in op_decorator_storage
+    /// - All CSR structures in node_decorator_storage
+    /// - All decorator IDs reference valid decorators
+    pub(super) fn validate(&self) -> Result<(), String> {
+        let decorator_count = self.decorators.len();
+
+        // Validate OpToDecoratorIds CSR
+        self.op_decorator_storage.validate_csr(decorator_count)?;
+
+        // Validate NodeToDecoratorIds CSR
+        self.node_decorator_storage.validate_csr(decorator_count)?;
+
+        Ok(())
+    }
+
     // TEST HELPERS
     // --------------------------------------------------------------------------------------------
 
@@ -331,6 +360,103 @@ impl DebugInfo {
     #[cfg(test)]
     pub(crate) fn op_decorator_storage(&self) -> &OpToDecoratorIds {
         &self.op_decorator_storage
+    }
+}
+
+impl Serializable for DebugInfo {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        use crate::mast::serialization::decorator::DecoratorDataBuilder;
+
+        // 1. Serialize decorators (data, string table, infos)
+        let mut decorator_data_builder = DecoratorDataBuilder::new();
+        for decorator in self.decorators.iter() {
+            decorator_data_builder.add_decorator(decorator);
+        }
+        let (decorator_data, decorator_infos, string_table) = decorator_data_builder.finalize();
+
+        decorator_data.write_into(target);
+        string_table.write_into(target);
+        decorator_infos.write_into(target);
+
+        // 2. Serialize error codes
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> =
+            self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
+        error_codes.write_into(target);
+
+        // 3. Serialize OpToDecoratorIds CSR (dense representation)
+        // Dense representation: serialize indptr arrays as-is (no sparse encoding).
+        // Analysis shows sparse saves <1KB even with 90% empty nodes, not worth complexity.
+        // See measurement: https://gist.github.com/huitseeker/7379e2eecffd7020ae577e986057a400
+        self.op_decorator_storage.write_into(target);
+
+        // 4. Serialize NodeToDecoratorIds CSR (dense representation)
+        self.node_decorator_storage.write_into(target);
+
+        // 5. Serialize procedure names
+        let procedure_names: BTreeMap<Word, String> =
+            self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
+        procedure_names.write_into(target);
+    }
+}
+
+impl Deserializable for DebugInfo {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        use crate::mast::serialization::decorator::DecoratorInfo;
+
+        // 1. Read decorator data and string table
+        let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
+        let string_table: crate::mast::serialization::StringTable =
+            Deserializable::read_from(source)?;
+        let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
+
+        // 2. Reconstruct decorators
+        let mut decorators = IndexVec::new();
+        for decorator_info in decorator_infos {
+            let decorator = decorator_info.try_into_decorator(&string_table, &decorator_data)?;
+            decorators.push(decorator).map_err(|_| {
+                DeserializationError::InvalidValue(
+                    "Failed to add decorator to IndexVec".to_string(),
+                )
+            })?;
+        }
+
+        // 3. Read error codes
+        let error_codes_raw: alloc::collections::BTreeMap<u64, alloc::string::String> =
+            Deserializable::read_from(source)?;
+        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> = error_codes_raw
+            .into_iter()
+            .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
+            .collect();
+
+        // 4. Read OpToDecoratorIds CSR (dense representation)
+        let op_decorator_storage = OpToDecoratorIds::read_from(source, decorators.len())?;
+
+        // 5. Read NodeToDecoratorIds CSR (dense representation)
+        let node_decorator_storage = NodeToDecoratorIds::read_from(source, decorators.len())?;
+
+        // 6. Read procedure names
+        // Note: Procedure name digests are validated at the MastForest level (in
+        // MastForest::validate) to ensure they reference actual procedures in the forest.
+        let procedure_names_raw: BTreeMap<Word, String> = Deserializable::read_from(source)?;
+        let procedure_names: BTreeMap<LexicographicWord, Arc<str>> = procedure_names_raw
+            .into_iter()
+            .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
+            .collect();
+
+        // 7. Construct and validate DebugInfo
+        let debug_info = DebugInfo {
+            decorators,
+            op_decorator_storage,
+            node_decorator_storage,
+            error_codes,
+            procedure_names,
+        };
+
+        debug_info.validate().map_err(|e| {
+            DeserializationError::InvalidValue(format!("DebugInfo validation failed: {}", e))
+        })?;
+
+        Ok(debug_info)
     }
 }
 

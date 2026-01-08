@@ -446,14 +446,11 @@ impl DynNodeBuilder {
     ///
     /// Note: This is not part of the `MastForestContributor` trait because it's only
     /// intended for internal use during deserialization.
-    ///
-    /// For DynNode, this is equivalent to the normal `add_to_forest` since dyn nodes
-    /// don't have child nodes to validate.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        // Use the same digest computation as in build()
+        // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
@@ -462,12 +459,11 @@ impl DynNodeBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
 
+        // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
+        // Note: Decorators are already in forest.debug_info from deserialization
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes

@@ -1,4 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "arbitrary")]
@@ -124,28 +127,22 @@ impl OpToDecoratorIds {
     ///   must be monotonically increasing and within bounds of `op_indptr_for_dec_ids`. The slice
     ///   must not be empty, and the first element must be 0.
     ///
-    /// # Returns
-    /// An error if the internal structure is inconsistent. Common issues that cause errors:
-    /// - Empty `op_indptr_for_dec_ids` or `node_indptr_for_op_idx` vectors
-    /// - Non-zero first element in either pointer array
-    /// - Decreasing pointer values (pointers must be monotonically non-decreasing)
-    /// - Pointer values that exceed the bounds of the arrays they index into
-    /// - Invalid ranges (start > end) in any pointer window
+    /// # Valid Edge Cases
+    /// - All three vectors empty (no nodes, no decorators)
+    /// - Empty decorator vectors with node pointers all zero (nodes exist but have no decorators)
     ///
-    /// # Validation Restrictions
-    /// The following constraints are enforced between components:
-    /// - `op_indptr_for_dec_ids` length must be >= 1 (for the sentinel)
-    /// - `node_indptr_for_op_idx` length must be >= 1 (for the sentinel)
+    /// # Validation Rules
+    /// For non-empty structures:
+    /// - Pointer arrays must start at zero
+    /// - Pointers must be monotonically non-decreasing
     /// - Last value in `op_indptr_for_dec_ids` must be <= `decorator_ids.len()`
-    /// - Last value in `node_indptr_for_op_idx` must be <= `op_indptr_for_dec_ids.len() - 1`
-    /// - Both `op_indptr_for_dec_ids` and `node_indptr_for_op_idx` must be strictly monotonic (each
-    ///   successive value must be >= the previous one)
-    pub(crate) fn from_components(
+    /// - Last value in `node_indptr_for_op_idx` must be < `op_indptr_for_dec_ids.len()`
+    pub(super) fn from_components(
         decorator_ids: Vec<DecoratorId>,
         op_indptr_for_dec_ids: Vec<usize>,
         node_indptr_for_op_idx: IndexVec<MastNodeId, usize>,
     ) -> Result<Self, DecoratorIndexError> {
-        // Empty structures are valid (no nodes, no decorators)
+        // Completely empty structures are valid (no nodes, no decorators)
         if decorator_ids.is_empty()
             && op_indptr_for_dec_ids.is_empty()
             && node_indptr_for_op_idx.is_empty()
@@ -157,8 +154,9 @@ impl OpToDecoratorIds {
             });
         }
 
-        // Nodes but no decorators: empty decorator_ids/op_indptr, node_indptr with all zeros
+        // Nodes with no decorators are valid
         if decorator_ids.is_empty() && op_indptr_for_dec_ids.is_empty() {
+            // All node pointers must be 0
             if node_indptr_for_op_idx.iter().all(|&ptr| ptr == 0) {
                 return Ok(Self {
                     decorator_ids,
@@ -172,6 +170,11 @@ impl OpToDecoratorIds {
 
         // Validate the structure
         if op_indptr_for_dec_ids.is_empty() {
+            return Err(DecoratorIndexError::InternalStructure);
+        }
+
+        // Check that op_indptr_for_dec_ids starts at 0
+        if op_indptr_for_dec_ids[0] != 0 {
             return Err(DecoratorIndexError::InternalStructure);
         }
 
@@ -189,9 +192,16 @@ impl OpToDecoratorIds {
         }
 
         let node_slice = node_indptr_for_op_idx.as_slice();
+
+        // Check that node_indptr_for_op_idx starts at 0
+        if node_slice[0] != 0 {
+            return Err(DecoratorIndexError::InternalStructure);
+        }
+
         let Some(&last_node_ptr) = node_slice.last() else {
             return Err(DecoratorIndexError::InternalStructure);
         };
+        // Node pointers must be valid indices into op_indptr
         if last_node_ptr > op_indptr_for_dec_ids.len() - 1 {
             return Err(DecoratorIndexError::InternalStructure);
         }
@@ -216,8 +226,133 @@ impl OpToDecoratorIds {
         })
     }
 
+    /// Validate CSR structure integrity.
+    ///
+    /// Checks:
+    /// - All decorator IDs are valid (< decorator_count)
+    /// - op_indptr_for_dec_ids is monotonic, starts at 0, ends at decorator_ids.len()
+    /// - node_indptr_for_op_idx is monotonic, starts at 0, ends <= op_indptr_for_dec_ids.len()-1
+    pub(super) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+        // Completely empty structures are valid (no nodes, no decorators)
+        if self.decorator_ids.is_empty()
+            && self.op_indptr_for_dec_ids.is_empty()
+            && self.node_indptr_for_op_idx.is_empty()
+        {
+            return Ok(());
+        }
+
+        // Nodes with no decorators are valid
+        if self.decorator_ids.is_empty() && self.op_indptr_for_dec_ids.is_empty() {
+            // All node pointers must be 0
+            if !self.node_indptr_for_op_idx.iter().all(|&ptr| ptr == 0) {
+                return Err("node pointers must all be 0 when there are no decorators".to_string());
+            }
+            return Ok(());
+        }
+
+        // Validate all decorator IDs
+        for &dec_id in &self.decorator_ids {
+            if dec_id.to_usize() >= decorator_count {
+                return Err(format!(
+                    "Invalid decorator ID {}: exceeds decorator count {}",
+                    dec_id.to_usize(),
+                    decorator_count
+                ));
+            }
+        }
+
+        // Validate op_indptr_for_dec_ids
+        if self.op_indptr_for_dec_ids.is_empty() {
+            return Err("op_indptr_for_dec_ids cannot be empty".to_string());
+        }
+
+        if self.op_indptr_for_dec_ids[0] != 0 {
+            return Err("op_indptr_for_dec_ids must start at 0".to_string());
+        }
+
+        for window in self.op_indptr_for_dec_ids.windows(2) {
+            if window[0] > window[1] {
+                return Err(format!(
+                    "op_indptr_for_dec_ids not monotonic: {} > {}",
+                    window[0], window[1]
+                ));
+            }
+        }
+
+        if *self.op_indptr_for_dec_ids.last().unwrap() != self.decorator_ids.len() {
+            return Err(format!(
+                "op_indptr_for_dec_ids end {} doesn't match decorator_ids length {}",
+                self.op_indptr_for_dec_ids.last().unwrap(),
+                self.decorator_ids.len()
+            ));
+        }
+
+        // Validate node_indptr_for_op_idx
+        let node_slice = self.node_indptr_for_op_idx.as_slice();
+        if node_slice.is_empty() {
+            return Err("node_indptr_for_op_idx cannot be empty".to_string());
+        }
+
+        if node_slice[0] != 0 {
+            return Err("node_indptr_for_op_idx must start at 0".to_string());
+        }
+
+        for window in node_slice.windows(2) {
+            if window[0] > window[1] {
+                return Err(format!(
+                    "node_indptr_for_op_idx not monotonic: {} > {}",
+                    window[0], window[1]
+                ));
+            }
+        }
+
+        // Node pointers must be valid indices into op_indptr
+        let max_node_ptr = self.op_indptr_for_dec_ids.len() - 1;
+        if *node_slice.last().unwrap() > max_node_ptr {
+            return Err(format!(
+                "node_indptr_for_op_idx end {} exceeds op_indptr bounds {}",
+                node_slice.last().unwrap(),
+                max_node_ptr
+            ));
+        }
+
+        Ok(())
+    }
+
     pub fn is_empty(&self) -> bool {
         self.node_indptr_for_op_idx.is_empty()
+    }
+
+    /// Serialize this OpToDecoratorIds into the target writer.
+    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
+        use crate::utils::Serializable;
+
+        self.decorator_ids.write_into(target);
+        self.op_indptr_for_dec_ids.write_into(target);
+        self.node_indptr_for_op_idx.write_into(target);
+    }
+
+    /// Deserialize OpToDecoratorIds from the source reader.
+    pub(super) fn read_from<R: crate::utils::ByteReader>(
+        source: &mut R,
+        decorator_count: usize,
+    ) -> Result<Self, crate::utils::DeserializationError> {
+        use crate::utils::{Deserializable, DeserializationError};
+
+        let decorator_ids: Vec<DecoratorId> = Deserializable::read_from(source)?;
+        let op_indptr_for_dec_ids: Vec<usize> = Deserializable::read_from(source)?;
+        let node_indptr_for_op_idx: IndexVec<MastNodeId, usize> =
+            Deserializable::read_from(source)?;
+
+        let result =
+            Self::from_components(decorator_ids, op_indptr_for_dec_ids, node_indptr_for_op_idx)
+                .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+
+        result.validate_csr(decorator_count).map_err(|e| {
+            DeserializationError::InvalidValue(format!("OpToDecoratorIds validation failed: {e}"))
+        })?;
+
+        Ok(result)
     }
 
     /// Get the number of nodes in this storage.
@@ -284,8 +419,15 @@ impl OpToDecoratorIds {
         }
 
         if decorators_info.is_empty() {
-            // Empty node: no operations at all, just set the end pointer equal to start
-            // This creates a node with an empty operations range
+            // Empty node needs sentinel if it follows decorated nodes
+            // CSR requires all node_indptr values to be valid op_indptr indices.
+            // If op_start == op_indptr.len(), add a sentinel so the pointer stays in bounds.
+            if op_start == self.op_indptr_for_dec_ids.len()
+                && !self.op_indptr_for_dec_ids.is_empty()
+            {
+                self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
+            }
+
             self.node_indptr_for_op_idx
                 .push(op_start)
                 .map_err(|_| DecoratorIndexError::OperationIndex { node, operation: op_start })?;
@@ -304,7 +446,8 @@ impl OpToDecoratorIds {
             // final sentinel for this node
             self.op_indptr_for_dec_ids.push(self.decorator_ids.len());
 
-            // Push end pointer for this node (index of last op pointer)
+            // Push end pointer for this node (index of last op pointer, which is the sentinel)
+            // This is len()-1 because we just pushed the sentinel above
             let end_ops = self.op_indptr_for_dec_ids.len() - 1;
             self.node_indptr_for_op_idx
                 .push(end_ops)
@@ -682,639 +825,4 @@ impl Arbitrary for OpToDecoratorIds {
 }
 
 #[cfg(test)]
-mod tests {
-    use miden_utils_indexing::IndexVec;
-
-    use super::*;
-
-    /// Helper function to create a test DecoratorId
-    fn test_decorator_id(value: u32) -> DecoratorId {
-        DecoratorId(value)
-    }
-
-    /// Helper function to create a test MastNodeId
-    fn test_node_id(value: u32) -> MastNodeId {
-        MastNodeId::new_unchecked(value)
-    }
-
-    /// Helper to create standard test storage with 2 nodes, 3 operations, 6 decorator IDs
-    /// Structure: Node 0: Op 0 -> [0, 1], Op 1 -> [2]; Node 1: Op 0 -> [3, 4, 5]
-    fn create_standard_test_storage() -> OpToDecoratorIds {
-        let decorator_ids = vec![
-            test_decorator_id(0),
-            test_decorator_id(1),
-            test_decorator_id(2),
-            test_decorator_id(3),
-            test_decorator_id(4),
-            test_decorator_id(5),
-        ];
-        let op_indptr_for_dec_ids = vec![0, 2, 3, 6];
-        let mut node_indptr_for_op_idx = IndexVec::new();
-        node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
-        node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
-        node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
-
-        OpToDecoratorIds::from_components(
-            decorator_ids,
-            op_indptr_for_dec_ids,
-            node_indptr_for_op_idx,
-        )
-        .unwrap()
-    }
-
-    #[test]
-    fn test_constructors() {
-        // Test new()
-        let storage = OpToDecoratorIds::new();
-        assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorator_ids(), 0);
-
-        // Test with_capacity()
-        let storage = OpToDecoratorIds::with_capacity(10, 20, 30);
-        assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorator_ids(), 0);
-
-        // Test default()
-        let storage = OpToDecoratorIds::default();
-        assert_eq!(storage.num_nodes(), 0);
-        assert_eq!(storage.num_decorator_ids(), 0);
-    }
-
-    #[test]
-    fn test_from_components_simple() {
-        // Create a simple structure:
-        // Node 0: Op 0 -> [0, 1], Op 1 -> [2]
-        // Node 1: Op 0 -> [3, 4, 5]
-        let storage = create_standard_test_storage();
-
-        assert_eq!(storage.num_nodes(), 2);
-        assert_eq!(storage.num_decorator_ids(), 6);
-    }
-
-    #[test]
-    fn test_from_components_invalid_structure() {
-        // Empty structures are now valid
-        let result = OpToDecoratorIds::from_components(vec![], vec![], IndexVec::new());
-        assert!(result.is_ok());
-
-        // Test with operation pointer exceeding decorator indices
-        let result = OpToDecoratorIds::from_components(
-            vec![test_decorator_id(0)],
-            vec![0, 2], // Points to index 2 but we only have 1 decorator
-            IndexVec::new(),
-        );
-        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
-
-        // Test with non-monotonic operation pointers
-        let result = OpToDecoratorIds::from_components(
-            vec![test_decorator_id(0), test_decorator_id(1)],
-            vec![0, 2, 1], // 2 > 1, should be monotonic
-            IndexVec::new(),
-        );
-        assert_eq!(result, Err(DecoratorIndexError::InternalStructure));
-    }
-
-    #[test]
-    fn test_data_access_methods() {
-        let storage = create_standard_test_storage();
-
-        // Test decorator_ids_for_operation
-        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
-        assert_eq!(decorators, &[test_decorator_id(0), test_decorator_id(1)]);
-
-        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 1).unwrap();
-        assert_eq!(decorators, &[test_decorator_id(2)]);
-
-        let decorators = storage.decorator_ids_for_operation(test_node_id(1), 0).unwrap();
-        assert_eq!(decorators, &[test_decorator_id(3), test_decorator_id(4), test_decorator_id(5)]);
-
-        // Test decorator_ids_for_node
-        let decorators: Vec<_> = storage.decorator_ids_for_node(test_node_id(0)).unwrap().collect();
-        assert_eq!(decorators.len(), 2);
-        assert_eq!(decorators[0], (0, &[test_decorator_id(0), test_decorator_id(1)][..]));
-        assert_eq!(decorators[1], (1, &[test_decorator_id(2)][..]));
-
-        let decorators: Vec<_> = storage.decorator_ids_for_node(test_node_id(1)).unwrap().collect();
-        assert_eq!(decorators.len(), 1);
-        assert_eq!(
-            decorators[0],
-            (0, &[test_decorator_id(3), test_decorator_id(4), test_decorator_id(5)][..])
-        );
-
-        // Test operation_has_decorator_ids
-        assert!(storage.operation_has_decorator_ids(test_node_id(0), 0).unwrap());
-        assert!(storage.operation_has_decorator_ids(test_node_id(0), 1).unwrap());
-        assert!(storage.operation_has_decorator_ids(test_node_id(1), 0).unwrap());
-        assert!(!storage.operation_has_decorator_ids(test_node_id(0), 2).unwrap());
-
-        // Test num_decorator_ids_for_operation
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 1).unwrap(), 1);
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(1), 0).unwrap(), 3);
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 0);
-
-        // Test invalid operation returns empty slice
-        let decorators = storage.decorator_ids_for_operation(test_node_id(0), 2).unwrap();
-        assert_eq!(decorators, &[]);
-    }
-
-    #[test]
-    fn test_empty_nodes_basic_functionality() {
-        // Test 1: Empty nodes created via from_components (original
-        // test_empty_nodes_and_operations)
-        {
-            // Create a structure with empty nodes/operations
-            let decorator_indices = vec![];
-            let op_indptr_for_dec_idx = vec![0, 0, 0]; // 2 operations, both empty
-            let mut node_indptr_for_op_idx = IndexVec::new();
-            node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
-            node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
-
-            let storage = OpToDecoratorIds::from_components(
-                decorator_indices,
-                op_indptr_for_dec_idx,
-                node_indptr_for_op_idx,
-            )
-            .unwrap();
-
-            assert_eq!(storage.num_nodes(), 1);
-            assert_eq!(storage.num_decorator_ids(), 0);
-
-            // Empty decorators
-            let decorators = storage.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
-            assert_eq!(decorators, &[]);
-
-            // Operation has no decorators
-            assert!(!storage.operation_has_decorator_ids(test_node_id(0), 0).unwrap());
-        }
-
-        // Test 2: Empty nodes created via add_decorator_info_for_node (original
-        // test_decorator_ids_for_node_with_empty_nodes)
-        {
-            let mut storage = OpToDecoratorIds::new();
-
-            // Add node 0 with no decorators (empty node)
-            storage.add_decorator_info_for_node(test_node_id(0), vec![]).unwrap();
-
-            // Test 2a: operation_range_for_node should be empty for node with no decorators
-            let range = storage.operation_range_for_node(test_node_id(0));
-            assert!(range.is_ok(), "operation_range_for_node should return Ok for empty node");
-            let range = range.unwrap();
-            assert_eq!(range, 0..0, "Empty node should have empty operations range");
-
-            // Test 2b: decorator_ids_for_node should return an empty iterator
-            let result = storage.decorator_ids_for_node(test_node_id(0));
-            assert!(result.is_ok(), "decorator_ids_for_node should return Ok for empty node");
-            // The iterator should be empty
-            let decorators: Vec<_> = result.unwrap().collect();
-            assert_eq!(decorators, Vec::<(usize, &[DecoratorId])>::new());
-
-            // Test 2c: decorator_links_for_node should return an empty iterator
-            let result = storage.decorator_links_for_node(test_node_id(0));
-            assert!(result.is_ok(), "decorator_links_for_node should return Ok for empty node");
-            let links: Vec<_> = result.unwrap().into_iter().collect();
-            assert_eq!(links, Vec::<(usize, DecoratorId)>::new());
-
-            // Test 2d: Basic access methods on empty node
-            assert_eq!(storage.num_nodes(), 1);
-            assert_eq!(storage.num_decorator_ids(), 0);
-        }
-    }
-
-    #[test]
-    fn test_debug_impl() {
-        let storage = OpToDecoratorIds::new();
-        let debug_str = format!("{:?}", storage);
-        assert!(debug_str.contains("OpToDecoratorIds"));
-    }
-
-    #[test]
-    fn test_clone_and_equality() {
-        let decorator_indices = vec![
-            test_decorator_id(0),
-            test_decorator_id(1),
-            test_decorator_id(2),
-            test_decorator_id(3),
-            test_decorator_id(4),
-            test_decorator_id(5),
-        ];
-        let op_indptr_for_dec_idx = vec![0, 2, 3, 6];
-        let mut node_indptr_for_op_idx = IndexVec::new();
-        node_indptr_for_op_idx.push(0).expect("test setup: IndexVec capacity exceeded");
-        node_indptr_for_op_idx.push(2).expect("test setup: IndexVec capacity exceeded");
-        node_indptr_for_op_idx.push(3).expect("test setup: IndexVec capacity exceeded");
-
-        let storage1 = OpToDecoratorIds::from_components(
-            decorator_indices.clone(),
-            op_indptr_for_dec_idx.clone(),
-            node_indptr_for_op_idx.clone(),
-        )
-        .unwrap();
-
-        let storage2 = storage1.clone();
-        assert_eq!(storage1, storage2);
-
-        // Modify one and ensure they're no longer equal
-        let different_decorators = vec![test_decorator_id(10)];
-        let mut different_node_indptr = IndexVec::new();
-        different_node_indptr.push(0).expect("test setup: IndexVec capacity exceeded");
-        different_node_indptr.push(1).expect("test setup: IndexVec capacity exceeded");
-
-        let storage3 = OpToDecoratorIds::from_components(
-            different_decorators,
-            vec![0, 1],
-            different_node_indptr,
-        )
-        .unwrap();
-
-        assert_ne!(storage1, storage3);
-    }
-
-    #[test]
-    fn test_add_decorator_info_functionality() {
-        // Test 1: Basic multi-node functionality
-        let mut storage = OpToDecoratorIds::new();
-
-        // Add decorators for node 0
-        let decorators_info = vec![
-            (0, test_decorator_id(10)),
-            (0, test_decorator_id(11)),
-            (2, test_decorator_id(12)),
-        ];
-        storage.add_decorator_info_for_node(test_node_id(0), decorators_info).unwrap();
-
-        assert_eq!(storage.num_nodes(), 1);
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 1);
-
-        // Add node 1 with simple decorators
-        storage
-            .add_decorator_info_for_node(test_node_id(1), vec![(0, test_decorator_id(20))])
-            .unwrap();
-        assert_eq!(storage.num_nodes(), 2);
-
-        let node1_op0 = storage.decorator_ids_for_operation(test_node_id(1), 0).unwrap();
-        assert_eq!(node1_op0, &[test_decorator_id(20)]);
-
-        // Test 2: Sequential constraint validation
-        let mut storage2 = OpToDecoratorIds::new();
-        storage2
-            .add_decorator_info_for_node(test_node_id(0), vec![(0, test_decorator_id(10))])
-            .unwrap();
-
-        // Adding node 1 should succeed
-        storage2
-            .add_decorator_info_for_node(test_node_id(1), vec![(0, test_decorator_id(30))])
-            .unwrap();
-        assert_eq!(storage2.num_nodes(), 2);
-
-        // Try to add node 0 again - should fail
-        let result =
-            storage2.add_decorator_info_for_node(test_node_id(0), vec![(0, test_decorator_id(40))]);
-        assert_eq!(result, Err(DecoratorIndexError::NodeIndex(test_node_id(0))));
-
-        // Test 3: Empty input handling (creates empty nodes with no operations)
-        let mut storage3 = OpToDecoratorIds::new();
-        let result = storage3.add_decorator_info_for_node(test_node_id(0), vec![]);
-        assert_eq!(result, Ok(()));
-        assert_eq!(storage3.num_nodes(), 1); // Should create empty node
-
-        // Empty node should have no operations (accessing any operation should return empty)
-        let decorators = storage3.decorator_ids_for_operation(test_node_id(0), 0).unwrap();
-        assert_eq!(decorators, &[]);
-
-        // Should be able to add next node after empty node
-        storage3
-            .add_decorator_info_for_node(test_node_id(1), vec![(0, test_decorator_id(100))])
-            .unwrap();
-        assert_eq!(storage3.num_nodes(), 2);
-
-        // Test 4: Operations with gaps
-        let mut storage4 = OpToDecoratorIds::new();
-        let gap_decorators = vec![
-            (0, test_decorator_id(10)),
-            (0, test_decorator_id(11)), // operation 0 has 2 decorators
-            (3, test_decorator_id(12)), // operation 3 has 1 decorator
-            (4, test_decorator_id(13)), // operation 4 has 1 decorator
-        ];
-        storage4.add_decorator_info_for_node(test_node_id(0), gap_decorators).unwrap();
-
-        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 0).unwrap(), 2);
-        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 1).unwrap(), 0);
-        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 2).unwrap(), 0);
-        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 3).unwrap(), 1);
-        assert_eq!(storage4.num_decorator_ids_for_operation(test_node_id(0), 4).unwrap(), 1);
-
-        // Test accessing operations without decorators returns empty slice
-        let op1_decorators = storage4.decorator_ids_for_operation(test_node_id(0), 1).unwrap();
-        assert_eq!(op1_decorators, &[]);
-
-        // Test 5: Your specific use case - mixed empty and non-empty nodes
-        let mut storage5 = OpToDecoratorIds::new();
-
-        // node 0 with decorators
-        storage5
-            .add_decorator_info_for_node(
-                test_node_id(0),
-                vec![(0, test_decorator_id(1)), (1, test_decorator_id(0))],
-            )
-            .unwrap();
-
-        // node 1 with no decorators (empty)
-        storage5.add_decorator_info_for_node(test_node_id(1), vec![]).unwrap();
-
-        // node 2 with decorators
-        storage5
-            .add_decorator_info_for_node(
-                test_node_id(2),
-                vec![(1, test_decorator_id(1)), (2, test_decorator_id(2))],
-            )
-            .unwrap();
-
-        assert_eq!(storage5.num_nodes(), 3);
-
-        // Verify node 0: op 0 has [1], op 1 has [0]
-        assert_eq!(
-            storage5.decorator_ids_for_operation(test_node_id(0), 0).unwrap(),
-            &[test_decorator_id(1)]
-        );
-        assert_eq!(
-            storage5.decorator_ids_for_operation(test_node_id(0), 1).unwrap(),
-            &[test_decorator_id(0)]
-        );
-
-        // Verify node 1: has no operations at all, any operation access returns empty
-        assert_eq!(storage5.decorator_ids_for_operation(test_node_id(1), 0).unwrap(), &[]);
-
-        // Verify node 2: op 0 has [], op 1 has [1], op 2 has [2]
-        assert_eq!(storage5.decorator_ids_for_operation(test_node_id(2), 0).unwrap(), &[]);
-        assert_eq!(
-            storage5.decorator_ids_for_operation(test_node_id(2), 1).unwrap(),
-            &[test_decorator_id(1)]
-        );
-        assert_eq!(
-            storage5.decorator_ids_for_operation(test_node_id(2), 2).unwrap(),
-            &[test_decorator_id(2)]
-        );
-    }
-
-    #[test]
-    fn test_empty_nodes_edge_cases() {
-        // Test edge cases with empty nodes (nodes with no decorators)
-        // This consolidates test_decorator_ids_for_node_mixed_scenario and
-        // test_decorated_links_overflow_bug
-
-        let mut storage = OpToDecoratorIds::new();
-
-        // Set up mixed scenario: some nodes have decorators, some don't
-        // Node 0: Has decorators
-        storage
-            .add_decorator_info_for_node(
-                test_node_id(0),
-                vec![(0, test_decorator_id(10)), (2, test_decorator_id(20))],
-            )
-            .unwrap();
-
-        // Node 1: Has decorators
-        storage
-            .add_decorator_info_for_node(
-                test_node_id(1),
-                vec![
-                    (0, test_decorator_id(30)),
-                    (0, test_decorator_id(31)),
-                    (3, test_decorator_id(32)),
-                ],
-            )
-            .unwrap();
-
-        // Node 2: No decorators (empty node) - this is the edge case we're testing
-        storage.add_decorator_info_for_node(test_node_id(2), vec![]).unwrap();
-
-        // Test 1: Verify range handling for empty nodes
-        let range0 = storage.operation_range_for_node(test_node_id(0)).unwrap();
-        let range1 = storage.operation_range_for_node(test_node_id(1)).unwrap();
-        let range2 = storage.operation_range_for_node(test_node_id(2)).unwrap();
-
-        // Nodes with decorators should have non-empty ranges
-        assert!(range0.end > range0.start, "Node with decorators should have non-empty range");
-        assert!(range1.end > range1.start, "Node with decorators should have non-empty range");
-
-        // Empty node should have range pointing to the end of op_indptr_for_dec_ids array
-        // This is expected behavior: empty nodes get the range at the end of the array
-        let op_indptr_len = storage.op_indptr_for_dec_ids.len();
-        assert_eq!(
-            range2.start, op_indptr_len,
-            "Empty node should point to end of op_indptr array"
-        );
-        assert_eq!(range2.end, op_indptr_len, "Empty node should have empty range at array end");
-
-        // Test 2: decorator_ids_for_node() should work for empty nodes
-        // This should not panic - the iterator should be empty even though the range points to
-        // array end
-        let result = storage.decorator_ids_for_node(test_node_id(2));
-        assert!(result.is_ok(), "decorator_ids_for_node should work for node with no decorators");
-        let decorators: Vec<_> = result.unwrap().collect();
-        assert_eq!(decorators, Vec::<(usize, &[DecoratorId])>::new());
-
-        // Test 3: decorator_links_for_node() should work for empty nodes (tests overflow bug)
-        // This tests the specific overflow bug in DecoratedLinks iterator
-        let result = storage.decorator_links_for_node(test_node_id(2));
-        assert!(result.is_ok(), "decorator_links_for_node should return Ok for empty node");
-
-        let links = result.unwrap();
-        // This should not panic, even when iterating
-        let collected: Vec<_> = links.into_iter().collect();
-        assert_eq!(collected, Vec::<(usize, DecoratorId)>::new());
-
-        // Test 4: Multiple iterations should work (regression test for iterator reuse)
-        let result2 = storage.decorator_links_for_node(test_node_id(2));
-        assert!(
-            result2.is_ok(),
-            "decorator_links_for_node should work repeatedly for empty node"
-        );
-        let links2 = result2.unwrap();
-        let collected2: Vec<_> = links2.into_iter().collect();
-        assert_eq!(collected2, Vec::<(usize, DecoratorId)>::new());
-
-        // Test 5: Multiple iterations of decorator_ids_for_node should also work
-        let result3 = storage.decorator_ids_for_node(test_node_id(2));
-        assert!(result3.is_ok(), "decorator_ids_for_node should work repeatedly for empty node");
-        let decorators2: Vec<_> = result3.unwrap().collect();
-        assert_eq!(decorators2, Vec::<(usize, &[DecoratorId])>::new());
-    }
-
-    #[test]
-    fn test_decorator_links_for_node_flattened() {
-        let storage = create_standard_test_storage();
-        let n0 = MastNodeId::new_unchecked(0);
-        let flat: Vec<_> = storage.decorator_links_for_node(n0).unwrap().into_iter().collect();
-        // Node 0: Op0 -> [0,1], Op1 -> [2]
-        assert_eq!(flat, vec![(0, DecoratorId(0)), (0, DecoratorId(1)), (1, DecoratorId(2)),]);
-
-        let n1 = MastNodeId::new_unchecked(1);
-        let flat1: Vec<_> = storage.decorator_links_for_node(n1).unwrap().into_iter().collect();
-        // Node 1: Op0 -> [3,4,5]
-        assert_eq!(flat1, vec![(0, DecoratorId(3)), (0, DecoratorId(4)), (0, DecoratorId(5)),]);
-    }
-
-    #[test]
-    /// This test verifies that the CSR encoding described in the OpToDecoratorIds struct
-    /// documentation correctly represents COO data. It also validates all accessor methods
-    /// work as expected. Keep this test in sync with the documentation example (adding nodes
-    /// to this test if you add nodes to the documentation example, and vice versa).
-    fn test_csr_and_coo_produce_same_elements() {
-        // Build a COO representation manually
-        let coo_data = vec![
-            // Node 0
-            (MastNodeId::new_unchecked(0), 0, DecoratorId(10)),
-            (MastNodeId::new_unchecked(0), 0, DecoratorId(11)),
-            (MastNodeId::new_unchecked(0), 1, DecoratorId(12)),
-            (MastNodeId::new_unchecked(0), 2, DecoratorId(13)),
-            // Node 1
-            (MastNodeId::new_unchecked(1), 0, DecoratorId(20)),
-            (MastNodeId::new_unchecked(1), 2, DecoratorId(21)),
-            (MastNodeId::new_unchecked(1), 2, DecoratorId(22)),
-            // Node 2 (empty node, should still work)
-            // Node 3
-            (MastNodeId::new_unchecked(3), 0, DecoratorId(30)),
-        ];
-
-        // Build COO representation as a HashMap for easy lookup during verification
-        let mut coo_map: alloc::collections::BTreeMap<(MastNodeId, usize), Vec<DecoratorId>> =
-            alloc::collections::BTreeMap::new();
-        for (node, op_idx, decorator_id) in &coo_data {
-            coo_map.entry((*node, *op_idx)).or_default().push(*decorator_id);
-        }
-
-        // Build CSR representation using the builder API
-        let mut csr_storage = OpToDecoratorIds::new();
-
-        // Node 0: Op0 -> [10,11], Op1 -> [12], Op2 -> [13]
-        csr_storage
-            .add_decorator_info_for_node(
-                MastNodeId::new_unchecked(0),
-                vec![
-                    (0, DecoratorId(10)),
-                    (0, DecoratorId(11)),
-                    (1, DecoratorId(12)),
-                    (2, DecoratorId(13)),
-                ],
-            )
-            .unwrap();
-
-        // Node 1: Op0 -> [20], Op2 -> [21,22]
-        csr_storage
-            .add_decorator_info_for_node(
-                MastNodeId::new_unchecked(1),
-                vec![(0, DecoratorId(20)), (2, DecoratorId(21)), (2, DecoratorId(22))],
-            )
-            .unwrap();
-
-        // Node 2: empty
-        csr_storage
-            .add_decorator_info_for_node(MastNodeId::new_unchecked(2), vec![])
-            .unwrap();
-
-        // Node 3: Op0 -> [30]
-        csr_storage
-            .add_decorator_info_for_node(MastNodeId::new_unchecked(3), vec![(0, DecoratorId(30))])
-            .unwrap();
-
-        // Verify that CSR and COO produce the same elements
-        for node_idx in 0..4 {
-            let node_id = MastNodeId::new_unchecked(node_idx);
-
-            // Get all operations for this node from CSR
-            let op_range = csr_storage.operation_range_for_node(node_id).unwrap();
-            let num_ops = op_range.len();
-
-            // For each operation in this node
-            for op_idx in 0..num_ops {
-                // Get decorator IDs from CSR
-                let csr_decorator_ids =
-                    csr_storage.decorator_ids_for_operation(node_id, op_idx).unwrap();
-
-                // Get decorator IDs from COO map
-                let coo_key = (node_id, op_idx);
-                let coo_decorator_ids =
-                    coo_map.get(&coo_key).map_or(&[] as &[DecoratorId], |v| v.as_slice());
-
-                // They should be the same
-                assert_eq!(
-                    csr_decorator_ids, coo_decorator_ids,
-                    "CSR and COO should produce the same decorator IDs for node {:?}, op {}",
-                    node_id, op_idx
-                );
-            }
-        }
-
-        // Also verify using the flattened iterator approach
-        for node_idx in 0..4 {
-            let node_id = MastNodeId::new_unchecked(node_idx);
-
-            // Get flattened view from CSR
-            let csr_flat: Vec<(usize, DecoratorId)> =
-                csr_storage.decorator_links_for_node(node_id).unwrap().into_iter().collect();
-
-            // Build expected from COO map
-            let mut expected_flat = Vec::new();
-            for ((node, op_idx), decorator_ids) in &coo_map {
-                if *node == node_id {
-                    for decorator_id in decorator_ids {
-                        expected_flat.push((*op_idx, *decorator_id));
-                    }
-                }
-            }
-            // Sort by operation index then decorator ID for consistent comparison
-            expected_flat.sort_by_key(|(op_idx, dec_id)| (*op_idx, u32::from(*dec_id)));
-
-            assert_eq!(
-                csr_flat, expected_flat,
-                "Flattened CSR and COO should produce the same elements for node {:?}",
-                node_id
-            );
-        }
-    }
-
-    #[cfg(feature = "arbitrary")]
-    proptest! {
-        /// Property test that verifies decorator_links_for_node always produces a valid iterator
-        /// that can be fully consumed without panicking for any OpToDecoratorIds.
-        #[test]
-        fn decorator_links_for_node_always_iterates_complete(
-            mapping in any::<OpToDecoratorIds>()
-        ) {
-            // Skip empty mappings since they have no nodes to test
-            if mapping.num_nodes() == 0 {
-                return Ok(());
-            }
-
-            // Test every valid node in the mapping
-            for node_idx in 0..mapping.num_nodes() {
-                let node_id = MastNodeId::new_unchecked(node_idx as u32);
-
-                // Call decorator_links_for_node - this should never return an error for valid nodes
-                let result = mapping.decorator_links_for_node(node_id);
-
-                // The result should always be Ok for valid node indices
-                prop_assume!(result.is_ok(), "decorator_links_for_node should succeed for valid node");
-
-                let decorated_links = result.unwrap();
-
-                // Convert to iterator and collect all items - this should complete without panicking
-                let collected: Vec<(usize, DecoratorId)> = decorated_links.into_iter().collect();
-
-                // The collected items should match what we get from decorator_ids_for_node
-                let expected_items: Vec<(usize, DecoratorId)> = mapping
-                    .decorator_ids_for_node(node_id)
-                    .unwrap()
-                    .flat_map(|(op_idx, decorator_ids)| {
-                        decorator_ids.iter().map(move |&decorator_id| (op_idx, decorator_id))
-                    })
-                    .collect();
-
-                prop_assert_eq!(collected, expected_items);
-            }
-        }
-    }
-}
+mod tests;
