@@ -348,7 +348,7 @@ impl FastProcessor {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// Word[0] goes to stack position start_idx (top), word[1] to start_idx+1, etc.
+    /// `word[0]` goes to stack position start_idx (top), `word[1]` to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
         debug_assert!(start_idx < MIN_STACK_DEPTH);

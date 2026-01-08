@@ -291,7 +291,7 @@ impl<'a> ProcessState<'a> {
     /// a word from elements 1-4, etc.
     ///
     /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
-    /// and N+3 at position 3. Word[0] corresponds to the top of the stack.
+    /// and N+3 at position 3. `word[0]` corresponds to the top of the stack.
     ///
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
