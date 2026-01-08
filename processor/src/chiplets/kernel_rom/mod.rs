@@ -74,12 +74,12 @@ impl KernelRom {
     ///
     /// # Errors
     /// If the specified procedure does not exist in this kernel ROM, an error is returned.
-    pub fn access_proc(&mut self, proc_hash: Digest) -> Result<(), OperationError> {
-        let proc_hash_bytes: ProcHashBytes = proc_hash.into();
+    pub fn access_proc(&mut self, proc_root: Digest) -> Result<(), OperationError> {
+        let proc_hash_bytes: ProcHashBytes = proc_root.into();
         let access_info = self
             .access_map
             .get_mut(&proc_hash_bytes)
-            .ok_or(OperationError::SyscallTargetNotInKernel { proc_root: proc_hash })?;
+            .ok_or(OperationError::SyscallTargetNotInKernel { proc_root })?;
 
         self.trace_len += 1;
         access_info.num_accesses += 1;

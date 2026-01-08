@@ -9,7 +9,6 @@ Err(
             ctx: ContextId(
                 0,
             ),
-            clk: 1,
         },
     ),
 )
