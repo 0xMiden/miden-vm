@@ -1,6 +1,5 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
-assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
@@ -14,8 +13,8 @@ Err(
         },
         BinomialExtensionField {
             value: [
-                8,
-                9,
+                7,
+                6,
             ],
             _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
         },

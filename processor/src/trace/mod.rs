@@ -18,6 +18,8 @@ use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::ColMatrix,
 };
+#[cfg(feature = "std")]
+use miden_core::field::PrimeField64;
 use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{

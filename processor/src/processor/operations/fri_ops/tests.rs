@@ -83,12 +83,12 @@ proptest! {
         let end_ptr = Felt::new(end_ptr);
 
         // Build the stack inputs (only 16 elements for initial stack)
-        // The operation expects the following layout after pushing v7 (17 elements):
-        // [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, end_ptr]
+        // The operation expects the following layout after pushing v0 (17 elements):
+        // [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, end_ptr]
         //  ^0   1   2   3   4   5   6   7    8      9    10   11   12  13  14   15     overflow
         //
         // FastProcessor::new expects inputs in bottom-first order (index 0 = position 15).
-        // We build the initial 16-element stack, then push v7 on top.
+        // We build the initial 16-element stack, then push v0 on top.
         let stack_inputs = [
             end_ptr,                              // position 15 (will be pushed to overflow)
             layer_ptr,                            // position 14 -> 15 after push
@@ -99,22 +99,22 @@ proptest! {
             poe,                                  // position 9 -> 10
             d_seg_felt,                           // position 8 -> 9
             f_pos,                                // position 7 -> 8
-            query_values[0].as_basis_coefficients_slice()[0], // position 6 -> 7 (v0)
-            query_values[0].as_basis_coefficients_slice()[1], // position 5 -> 6 (v1)
-            query_values[1].as_basis_coefficients_slice()[0], // position 4 -> 5 (v2)
-            query_values[1].as_basis_coefficients_slice()[1], // position 3 -> 4 (v3)
-            query_values[2].as_basis_coefficients_slice()[0], // position 2 -> 3 (v4)
-            query_values[2].as_basis_coefficients_slice()[1], // position 1 -> 2 (v5)
-            query_values[3].as_basis_coefficients_slice()[0], // position 0 -> 1 (v6)
+            query_values[3].as_basis_coefficients_slice()[1], // position 6 -> 7 (v7)
+            query_values[3].as_basis_coefficients_slice()[0], // position 5 -> 6 (v6)
+            query_values[2].as_basis_coefficients_slice()[1], // position 4 -> 5 (v5)
+            query_values[2].as_basis_coefficients_slice()[0], // position 3 -> 4 (v4)
+            query_values[1].as_basis_coefficients_slice()[1], // position 2 -> 3 (v3)
+            query_values[1].as_basis_coefficients_slice()[0], // position 1 -> 2 (v2)
+            query_values[0].as_basis_coefficients_slice()[1], // position 0 -> 1 (v1)
         ];
 
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
 
-        // Push v7 to the top of the stack
+        // Push v0 to the top of the stack
         // This shifts everything down by one position, moving end_ptr to overflow
-        let v7 = query_values[3].as_basis_coefficients_slice()[1];
-        op_push(&mut processor, v7, &mut tracer).unwrap();
+        let v0 = query_values[0].as_basis_coefficients_slice()[0];
+        op_push(&mut processor, v0, &mut tracer).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Execute the operation

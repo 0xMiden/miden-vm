@@ -37,11 +37,11 @@ mod tests;
 /// In the above, the meaning of the columns is as follows:
 /// * Selector columns s0, s1, and s2 used to help select transition function for a given row.
 /// * Hasher state columns h0 through h11 used to hold the hasher state for each round of hash
-///   computation. The state is laid out as follows:
-///   - The first four columns represent the capacity state of the sponge function.
-///   - The next eight columns represent the rate elements of the state. These are used to absorb
-///     the values to be hashed. Once a permutation is complete, hash output is located in the first
-///     four rate columns (h4, h5, h6, h7).
+///   computation. The state is laid out as `[RATE0, RATE1, CAPACITY]`:
+///   - The first eight columns (h0-h7) represent the rate elements of the state. These are used
+///     to absorb the values to be hashed. Once a permutation is complete, hash output is located
+///     in the second four rate columns (h4, h5, h6, h7).
+///   - The last four columns (h8-h11) represent the capacity state of the sponge function.
 /// * Node index column idx used to help with Merkle path verification and Merkle root update
 ///   computations. For all other computations the values in this column are set to 0s.
 ///

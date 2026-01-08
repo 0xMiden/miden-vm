@@ -294,8 +294,6 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     };
 
     // Read the coefficients from the stack (top 8 elements)
-    // Stack layout: [c7, c6, c5, c4, c3, c2, c1, c0, ...]
-    // Note: stack[0]=c7, stack[7]=c0
     let coef: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
 
     let c0 = QuadFelt::from(coef[0]);
@@ -459,21 +457,9 @@ pub(super) fn op_log_precompile<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read COMM and TAG in structural (LSB-first) order from the stack
-    let comm: Word = [
-        processor.stack().get(0),
-        processor.stack().get(1),
-        processor.stack().get(2),
-        processor.stack().get(3),
-    ]
-    .into();
-    let tag: Word = [
-        processor.stack().get(4),
-        processor.stack().get(5),
-        processor.stack().get(6),
-        processor.stack().get(7),
-    ]
-    .into();
+    // Read COMM and TAG from the stack
+    let comm: Word = processor.stack().get_word(0);
+    let tag: Word = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_transcript_state();
@@ -598,14 +584,8 @@ pub(super) fn op_crypto_stream<P: Processor>(
     tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
-    processor.stack().set(0, ciphertext_word1[0]);
-    processor.stack().set(1, ciphertext_word1[1]);
-    processor.stack().set(2, ciphertext_word1[2]);
-    processor.stack().set(3, ciphertext_word1[3]);
-    processor.stack().set(4, ciphertext_word2[0]);
-    processor.stack().set(5, ciphertext_word2[1]);
-    processor.stack().set(6, ciphertext_word2[2]);
-    processor.stack().set(7, ciphertext_word2[3]);
+    processor.stack().set_word(0, &ciphertext_word1);
+    processor.stack().set_word(4, &ciphertext_word2);
 
     // Increment pointers by 8 (2 words)
     processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);

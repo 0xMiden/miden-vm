@@ -27,7 +27,7 @@ mod tests;
 /// Stack transition for this operation looks as follows:
 ///
 /// Input:
-/// [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
+/// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
 ///
 /// Output:
 /// [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0, eptr,
@@ -123,19 +123,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// value in the folded domain.
 ///
 /// Stack layout: positions 0-7 contain coefficients for 4 QuadFelt elements.
-/// - Position 0 (top): v7, Position 1: v6, Position 2: v5, Position 3: v4
-/// - Position 4: v3, Position 5: v2, Position 6: v1, Position 7: v0
-///
 /// QuadFelts are constructed as:
 /// - query_values[0] = (v0, v1), query_values[1] = (v2, v3)
 /// - query_values[2] = (v4, v5), query_values[3] = (v6, v7)
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    // get_word returns [s0, s1, s2, s3] where s0 is top of stack
-    // Stack positions 0-3 contain v7, v6, v5, v4 respectively
-    let [v7, v6, v5, v4]: [Felt; 4] = processor.stack().get_word(0).into();
-    // Stack positions 4-7 contain v3, v2, v1, v0 respectively
-    let [v3, v2, v1, v0]: [Felt; 4] = processor.stack().get_word(4).into();
+    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
         QuadFelt::from_basis_coefficients_fn(|i: usize| [v0, v1][i]),

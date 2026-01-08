@@ -51,25 +51,27 @@ pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 /// 1).
 pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
-/// The capacity portion of the hasher state in the execution trace, located in columns 3..7.
-pub const CAPACITY_COL_RANGE: Range<usize> = Range {
-    start: STATE_COL_RANGE.start,
-    end: STATE_COL_RANGE.start + CAPACITY_LEN,
-};
-
 /// Number of field elements in the rate portion of the hasher's state.
 pub const RATE_LEN: usize = 8;
 
-/// The rate portion of the hasher state in the execution trace, located in columns 7..15.
+/// The rate portion of the hasher state in the execution trace, located in columns 3..11.
+/// With LE sponge state layout [RATE0, RATE1, CAP], rate comes first.
 pub const RATE_COL_RANGE: Range<usize> = Range {
-    start: CAPACITY_COL_RANGE.end,
-    end: CAPACITY_COL_RANGE.end + RATE_LEN,
+    start: STATE_COL_RANGE.start,
+    end: STATE_COL_RANGE.start + RATE_LEN,
+};
+
+/// The capacity portion of the hasher state in the execution trace, located in columns 11..15.
+/// With LE sponge state layout [RATE0, RATE1, CAP], capacity comes last.
+pub const CAPACITY_COL_RANGE: Range<usize> = Range {
+    start: RATE_COL_RANGE.end,
+    end: RATE_COL_RANGE.end + CAPACITY_LEN,
 };
 
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
 
-/// The output portion of the hash state, located in state elements 3, 4, 5, and 6.
+/// The output portion of the hash state, located in the second rate word (RATE1).
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
 /// Number of needed to complete a single permutation.
