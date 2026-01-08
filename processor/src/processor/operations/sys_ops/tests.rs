@@ -21,7 +21,7 @@ fn test_op_assert() {
     // Calling assert with a minimum stack should be ok, as long as the top value is ONE.
     let mut processor = FastProcessor::new(&[ONE]);
 
-    assert!(op_assert(&mut processor, ZERO, &mut host, &program, &(), &mut tracer).is_ok());
+    assert!(op_assert(&mut processor, ZERO, &mut host, &program, &mut tracer).is_ok());
 }
 
 #[test]

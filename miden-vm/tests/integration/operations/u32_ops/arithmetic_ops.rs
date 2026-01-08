@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, RowIndex};
+use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
@@ -443,7 +443,7 @@ fn u32div_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -485,7 +485,7 @@ fn u32mod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -532,7 +532,7 @@ fn u32divmod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 

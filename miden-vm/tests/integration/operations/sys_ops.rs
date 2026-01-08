@@ -1,5 +1,5 @@
 use miden_core::{EventName, ZERO, mast};
-use miden_processor::{ExecutionError, NoopEventHandler, RowIndex};
+use miden_processor::{ExecutionError, NoopEventHandler, OperationError};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS
@@ -27,8 +27,8 @@ fn assert_with_code() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(6) && err_code == code && err_msg.as_deref() == Some("123")
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == code && err_msg.as_deref() == Some("123")
     );
 }
 
@@ -40,8 +40,8 @@ fn assert_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, .. }
-        if clk == RowIndex::from(6) && err_code == ZERO
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, .. }, .. }
+        if err_code == ZERO
     );
 }
 
@@ -64,16 +64,16 @@ fn assert_eq_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
     );
 
     let test = build_op_test!(asm_op, &[1, 4]);
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(7) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO && err_msg.is_none()
     );
 }
 

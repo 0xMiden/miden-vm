@@ -3,8 +3,8 @@ use alloc::collections::BTreeMap;
 use miden_air::trace::{RowIndex, chiplets::kernel_rom::TRACE_WIDTH};
 use miden_core::field::PrimeCharacteristicRing;
 
-use super::{ExecutionError, Felt, Kernel, TraceFragment, Word as Digest};
-use crate::ErrorContext;
+use super::{Felt, Kernel, TraceFragment, Word as Digest};
+use crate::errors::OperationError;
 
 #[cfg(test)]
 mod tests;
@@ -74,16 +74,12 @@ impl KernelRom {
     ///
     /// # Errors
     /// If the specified procedure does not exist in this kernel ROM, an error is returned.
-    pub fn access_proc(
-        &mut self,
-        proc_hash: Digest,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let proc_hash_bytes: ProcHashBytes = proc_hash.into();
+    pub fn access_proc(&mut self, proc_root: Digest) -> Result<(), OperationError> {
+        let proc_hash_bytes: ProcHashBytes = proc_root.into();
         let access_info = self
             .access_map
             .get_mut(&proc_hash_bytes)
-            .ok_or(ExecutionError::syscall_target_not_in_kernel(proc_hash, err_ctx))?;
+            .ok_or(OperationError::SyscallTargetNotInKernel { proc_root })?;
 
         self.trace_len += 1;
         access_info.num_accesses += 1;

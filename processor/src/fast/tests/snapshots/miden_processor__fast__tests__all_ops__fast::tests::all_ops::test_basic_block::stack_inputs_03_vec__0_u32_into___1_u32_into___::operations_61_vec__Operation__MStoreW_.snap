@@ -1,27 +1,27 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
-    MemoryError(
-        UnalignedWordAccess {
-            label: SourceSpan {
-                source_id: SourceId(
-                    4294967295,
-                ),
-                start: ByteIndex(
-                    0,
-                ),
-                end: ByteIndex(
-                    0,
-                ),
-            },
-            source_file: None,
+    MemoryError {
+        label: SourceSpan {
+            source_id: SourceId(
+                4294967295,
+            ),
+            start: ByteIndex(
+                0,
+            ),
+            end: ByteIndex(
+                0,
+            ),
+        },
+        source_file: None,
+        err: UnalignedWordAccess {
             addr: 1,
             ctx: ContextId(
                 0,
             ),
-            clk: 1,
         },
-    ),
+    },
 )

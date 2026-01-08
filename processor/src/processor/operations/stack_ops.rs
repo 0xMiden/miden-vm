@@ -1,7 +1,7 @@
 use miden_core::{Felt, ZERO, field::PrimeField64};
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ExecutionError, OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -75,9 +75,8 @@ pub(super) fn dup_nth<P: Processor>(
 #[inline(always)]
 pub(super) fn op_cswap<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
@@ -89,7 +88,7 @@ pub(super) fn op_cswap<P: Processor>(
             processor.stack().swap(0, 1);
         },
         _ => {
-            return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+            return Err(OperationError::NotBinaryValue { value: condition });
         },
     }
 
@@ -104,9 +103,8 @@ pub(super) fn op_cswap<P: Processor>(
 #[inline(always)]
 pub(super) fn op_cswapw<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
@@ -121,7 +119,7 @@ pub(super) fn op_cswapw<P: Processor>(
             processor.stack().swap(3, 7);
         },
         _ => {
-            return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+            return Err(OperationError::NotBinaryValue { value: condition });
         },
     }
 

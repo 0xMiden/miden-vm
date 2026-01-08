@@ -5,7 +5,7 @@ use miden_core::{
 };
 
 use crate::{
-    ExecutionError,
+    errors::OperationError,
     fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface},
 };
@@ -45,7 +45,7 @@ mod tests;
 pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
@@ -54,7 +54,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     // the power of the domain generator which can be used to determine current domain value x
     let poe = processor.stack().get(10);
     if poe.is_zero() {
-        return Err(ExecutionError::InvalidFriDomainGenerator);
+        return Err(OperationError::InvalidFriDomainGenerator);
     }
     // the result of the previous layer folding
     let prev_value = {
@@ -73,12 +73,12 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 
     // --- make sure the previous folding was done correctly --------------
     if domain_segment > 3 {
-        return Err(ExecutionError::InvalidFriDomainSegment(domain_segment));
+        return Err(OperationError::InvalidFriDomainSegment(domain_segment));
     }
 
     let d_seg = domain_segment as usize;
     if query_values[d_seg] != prev_value {
-        return Err(ExecutionError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
+        return Err(OperationError::InvalidFriLayerFolding(prev_value, query_values[d_seg]));
     }
 
     // --- fold query values ----------------------------------------------

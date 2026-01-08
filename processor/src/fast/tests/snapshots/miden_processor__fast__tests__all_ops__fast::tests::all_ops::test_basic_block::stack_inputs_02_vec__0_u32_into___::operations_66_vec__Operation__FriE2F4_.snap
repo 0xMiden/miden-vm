@@ -1,7 +1,22 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
-    InvalidFriDomainGenerator,
+    OperationError {
+        label: SourceSpan {
+            source_id: SourceId(
+                4294967295,
+            ),
+            start: ByteIndex(
+                0,
+            ),
+            end: ByteIndex(
+                0,
+            ),
+        },
+        source_file: None,
+        err: InvalidFriDomainGenerator,
+    },
 )

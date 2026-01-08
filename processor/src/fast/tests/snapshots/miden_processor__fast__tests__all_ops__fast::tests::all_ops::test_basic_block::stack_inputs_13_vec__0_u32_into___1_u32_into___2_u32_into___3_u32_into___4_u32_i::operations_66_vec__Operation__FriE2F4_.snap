@@ -4,20 +4,34 @@ assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
-    InvalidFriLayerFolding(
-        BinomialExtensionField {
-            value: [
+    OperationError {
+        label: SourceSpan {
+            source_id: SourceId(
+                4294967295,
+            ),
+            start: ByteIndex(
                 0,
+            ),
+            end: ByteIndex(
                 0,
-            ],
-            _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
+            ),
         },
-        BinomialExtensionField {
-            value: [
-                8,
-                9,
-            ],
-            _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
-        },
-    ),
+        source_file: None,
+        err: InvalidFriLayerFolding(
+            BinomialExtensionField {
+                value: [
+                    0,
+                    0,
+                ],
+                _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
+            },
+            BinomialExtensionField {
+                value: [
+                    8,
+                    9,
+                ],
+                _phantom: PhantomData<p3_miden_goldilocks::goldilocks::Goldilocks>,
+            },
+        ),
+    },
 )
