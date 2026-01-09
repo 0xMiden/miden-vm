@@ -92,11 +92,11 @@ fn insert_mem_values_into_adv_map(
 ///   Advice map: {...}
 ///
 /// Outputs:
-///   Advice map: {KEY: [B, A]}
+///   Advice map: {KEY: [A, B]}
 /// ```
 ///
 /// Where A is the first word after event_id (positions 1-4) and B is the second (positions 5-8).
-/// KEY is computed as `hash(B || A, domain)`, which matches `swapw hmerge` on stack `[A, B, ...]`.
+/// KEY is computed as `hash(A || B, domain)`, which matches `hmerge` on stack `[A, B, ...]`.
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
     domain: Felt,
@@ -106,13 +106,14 @@ fn insert_hdword_into_adv_map(
     let a = process.get_stack_word(1);
     let b = process.get_stack_word(5);
 
-    // Hash as [B, A] to match `swapw hmerge` behavior.
-    let key = Rpo256::merge_in_domain(&[b, a], domain);
+    // Hash as [A, B] to match `hmerge` behavior directly.
+    let key = Rpo256::merge_in_domain(&[a, b], domain);
 
-    // Store values as [B, A] for LIFO retrieval back to [A, B] order.
+    // Store values as [A, B] matching the hash order.
+    // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
     let mut values = Vec::with_capacity(2 * WORD_SIZE);
-    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(b));
     values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(a));
+    values.extend_from_slice(&Into::<[Felt; WORD_SIZE]>::into(b));
 
     process
         .advice_provider_mut()

@@ -355,8 +355,8 @@ proc set_empty_leaf
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map
-        adv.insert_hdword
+        # Update advice map (swap to put K on top for key = hash(K || V))
+        swapw adv.insert_hdword swapw
         #=> [V, K, R, ...]
 
         # Compute hash([K, V]); the new node value (NV)
@@ -455,8 +455,8 @@ proc insert_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
+        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
+        movupw.2 swapw adv.insert_hdword swapw
         # => [V, K, V_in_leaf, R]
 
         # Compute hash([K, V]); the new node value (NV)
@@ -618,8 +618,8 @@ proc remove_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
+        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
+        movupw.2 swapw adv.insert_hdword swapw
         # => [V, K, V_in_leaf, R]
 
         # Prepare the stack for `mtree_set`

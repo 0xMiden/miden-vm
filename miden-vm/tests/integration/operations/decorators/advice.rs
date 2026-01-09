@@ -299,15 +299,15 @@ fn advice_insert_hdword() {
     // --- test hashing without domain ----------------------------------------
     let source: &str = "
     begin
-        # stack: [5, 6, 7, 8, 1, 2, 3, 4, ...]
-        # A = [1,2,3,4], B = [5,6,7,8]
+        # stack: [1, 2, 3, 4, 5, 6, 7, 8, ...]
+        # W0 = [1,2,3,4], W1 = [5,6,7,8]
 
         # hash and insert top two words into the advice map
         adv.insert_hdword
 
         # manually compute the hash of the two words
-        # Swap words before hmerge to match adv.insert_hdword's internal ordering
-        swapw hmerge
+        # hmerge computes hash(W0 || W1), matching adv.insert_hdword
+        hmerge
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
@@ -315,29 +315,32 @@ fn advice_insert_hdword() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_loadw swapw
-        adv_loadw swapw
+        # Values stored as [W0, W1], advice stack top is W0
+        # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
+        adv_loadw swapw adv_loadw swapw
     end";
-    let stack_inputs = [4, 3, 2, 1, 8, 7, 6, 5];
+    let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1];
     let test = build_test!(source, &stack_inputs);
-    // Values are stored as [A, B] = [1,2,3,4,5,6,7,8] in advice map.
-    // adv.push_mapval pushes to advice stack, then adv_push.8 pops in LIFO order.
+    // Values are stored as [W0, W1] in advice map.
+    // Retrieval: adv_loadw swapw adv_loadw swapw produces [W0, W1].
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 
     // --- test hashing with domain -------------------------------------------
     let source: &str = "
     begin
-        # stack: [5, 6, 7, 8, 1, 2, 3, 4, 9, ...]
-        # A = [1,2,3,4], B = [5,6,7,8], domain = 9
+        # stack: [1, 2, 3, 4, 5, 6, 7, 8, 9, ...]
+        # W0 = [1,2,3,4], W1 = [5,6,7,8], domain = 9
 
         # hash and insert top two words into the advice map
         adv.insert_hdword_d
 
         # manually compute the hash of the two words with domain
-        swapw
-        push.0 movdn.8
+        # Set up state for hperm: [W0, W1, CAP] where CAP = [0, domain, 0, 0]
+        # (domain goes in state[9], not state[8])
+        push.0 push.0 movup.10 push.0 movdnw.2
+        # => [W0, W1, [0, domain, 0, 0], ...]
         hperm
-        # Extract hash from state[4..8] (rate word 2)
+        # Extract hash from R0 (state[0..4]) after permutation
         swapw.2 dropw dropw
         # => [KEY, ...]
 
@@ -346,13 +349,14 @@ fn advice_insert_hdword() {
         dropw
 
         # move the values from the advice stack to the operand stack
-        adv_push.8
-        swapdw dropw dropw
+        # Values stored as [W0, W1], advice stack top is W0
+        # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
+        adv_loadw swapw adv_loadw swapw
     end";
-    let stack_inputs = [9, 4, 3, 2, 1, 8, 7, 6, 5];
+    let stack_inputs = [9, 8, 7, 6, 5, 4, 3, 2, 1];
     let test = build_test!(source, &stack_inputs);
-    // Values retrieved in LIFO order from advice stack
-    test.expect_stack(&[8, 7, 6, 5, 4, 3, 2, 1]);
+    // Values stored as [W0, W1], retrieval produces [W0, W1] on operand stack
+    test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
 }
 
 #[test]
