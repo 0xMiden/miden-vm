@@ -9,7 +9,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_JOIN,
     chiplets::hasher,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
     prettier::PrettyPrint,
 };
 
@@ -254,7 +254,7 @@ impl MastNodeExt for JoinNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::Join(join_node) => join_node as *const JoinNode as *const (),
+                MastNode::Join(join_node) => join_node as *const JoinNode as *const (),
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();

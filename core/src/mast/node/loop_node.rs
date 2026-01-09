@@ -10,7 +10,7 @@ use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
 };
 
 // LOOP NODE
@@ -203,7 +203,7 @@ impl MastNodeExt for LoopNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::Loop(loop_node) => loop_node as *const LoopNode as *const (),
+                MastNode::Loop(loop_node) => loop_node as *const LoopNode as *const (),
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();
