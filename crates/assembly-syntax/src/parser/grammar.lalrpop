@@ -618,7 +618,7 @@ MaybeAdvMapKey: Option<Span<WordValue>> = {
 }
 
 AdvMap: Form = {
-    <l:@L> "adv_map" <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<Felt>> "]" <r:@R> => {
+    <l:@L> "adv_map" <name:ConstantName> <key:MaybeAdvMapKey> "=" "[" <value:CommaDelimited<ImmValue<Felt>>> "]" <r:@R> => {
         Form::AdviceMapEntry(AdviceMapEntry::new(
             span!(source_id, l, r),
             name,
