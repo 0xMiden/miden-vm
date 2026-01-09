@@ -41,22 +41,7 @@ pub enum SystemEvent {
     // ADVICE STACK SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
-    /// onto the advice stack. The node is pushed in reversed order for consumption by 4x AdvPop.
-    ///
-    /// Inputs:
-    ///   Operand stack: [depth, index, TREE_ROOT, ...]
-    ///   Advice stack: [...]
-    ///   Merkle store: {TREE_ROOT<-NODE}
-    ///
-    /// Outputs:
-    ///   Operand stack: [depth, index, TREE_ROOT, ...]
-    ///   Advice stack: [NODE[3], NODE[2], NODE[1], NODE[0], ...]
-    ///   Merkle store: {TREE_ROOT<-NODE}
-    MerkleNodeToStack,
-
-    /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
-    /// onto the advice stack. The node is pushed in structural order for consumption by
-    /// `adv_loadw`.
+    /// onto the advice stack in structural order for consumption by `AdvPopW`.
     ///
     /// Inputs:
     ///   Operand stack: [depth, index, TREE_ROOT, ...]
@@ -67,7 +52,7 @@ pub enum SystemEvent {
     ///   Operand stack: [depth, index, TREE_ROOT, ...]
     ///   Advice stack: [NODE, ...]
     ///   Merkle store: {TREE_ROOT<-NODE}
-    MerkleNodeToStackW,
+    MerkleNodeToStack,
 
     /// Pushes a list of field elements onto the advice stack. The list is looked up in the advice
     /// map using the specified word from the operand stack as the key.
@@ -363,7 +348,6 @@ impl SystemEvent {
         [
             Self::MerkleNodeMerge,
             Self::MerkleNodeToStack,
-            Self::MerkleNodeToStackW,
             Self::MapValueToStack,
             Self::MapValueCountToStack,
             Self::MapValueToStackN0,
@@ -422,7 +406,7 @@ pub(crate) struct SystemEventEntry {
 
 impl SystemEvent {
     /// The total number of system events.
-    pub const COUNT: usize = 20;
+    pub const COUNT: usize = 19;
 
     /// Lookup table mapping system events to their metadata.
     ///
@@ -438,11 +422,6 @@ impl SystemEvent {
             id: EventId::from_u64(6873007751276594108),
             event: SystemEvent::MerkleNodeToStack,
             name: "sys::merkle_node_to_stack",
-        },
-        SystemEventEntry {
-            id: EventId::from_u64(3947880503057907666),
-            event: SystemEvent::MerkleNodeToStackW,
-            name: "sys::merkle_node_to_stack_w",
         },
         SystemEventEntry {
             id: EventId::from_u64(17843484659000820118),
@@ -620,7 +599,6 @@ mod test {
             match event {
                 SystemEvent::MerkleNodeMerge
                 | SystemEvent::MerkleNodeToStack
-                | SystemEvent::MerkleNodeToStackW
                 | SystemEvent::MapValueToStack
                 | SystemEvent::MapValueCountToStack
                 | SystemEvent::MapValueToStackN0

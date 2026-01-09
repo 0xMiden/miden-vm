@@ -100,7 +100,7 @@ pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
 /// - node V, 4 elements
 /// - root of the tree, 4 elements.
 ///
-/// This operation takes 9 VM cycles.
+/// This operation takes 10 VM cycles.
 pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder) {
     // stack: [d, i, R, ...]
     // pops the value of the node we are looking for from the advice stack
@@ -130,11 +130,11 @@ pub(super) fn mtree_get(block_builder: &mut BasicBlockBuilder) {
 /// - old value of the node, 4 elements
 /// - new root of the tree after the update, 4 elements
 ///
-/// This operation takes 29 VM cycles.
+/// This operation takes 30 VM cycles.
 pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
     // stack: [d, i, R_old, V_new, ...]
 
-    // stack: [V_old, R_new, ...] (29 cycles)
+    // stack: [V_old, R_new, ...] (30 cycles)
     update_mtree(block_builder)
 }
 
@@ -182,31 +182,33 @@ pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
 /// - root of the Merkle tree, 4 elements
 /// - new value of the node, 4 elements (only in the case of mtree_set)
 ///
-/// This operation takes 4 VM cycles.
+/// This operation takes 5 VM cycles.
 fn read_mtree_node(block_builder: &mut BasicBlockBuilder) {
     // The stack should be arranged in the following way: [d, i, R, ...] so that the decorator
     // can fetch the node value from the root. In the `mtree.get` operation we have the stack in
     // the following format: [d, i, R], whereas in the case of `mtree.set` we would also have the
     // new node value post the tree root: [d, i, R, V_new]
     //
-    // pops the value of the node we are looking for from the advice stack
+    // Push the value of the node we are looking for onto the advice stack
     block_builder.push_system_event(SystemEvent::MerkleNodeToStack);
 
-    // pops the old node value from advice the stack => MPVERIFY: [V_old, d, i, R, ...]
-    // MRUPDATE: [V_old, d, i, R, V_new, ...]
-    block_builder.push_op_many(AdvPop, 4);
+    // Allocate space for the word and pop from advice stack
+    // => MPVERIFY: [V_old, d, i, R, ...]
+    // => MRUPDATE: [V_old, d, i, R, V_new, ...]
+    block_builder.push_op_many(Pad, 4);
+    block_builder.push_op(AdvPopW);
 }
 
 /// Update a node in the merkle tree. This operation will always copy the tree into a new instance,
 /// and perform the mutation on the copied tree.
 ///
-/// This operation takes 29 VM cycles.
+/// This operation takes 30 VM cycles.
 fn update_mtree(block_builder: &mut BasicBlockBuilder) -> Result<(), Report> {
     // stack: [d, i, R_old, V_new, ...]
     // output: [R_new, R_old, V_new, V_old, ...]
 
     // Inject the old node value onto the stack for the call to MRUPDATE.
-    // stack: [V_old, d, i, R_old, V_new, ...] (4 cycles)
+    // stack: [V_old, d, i, R_old, V_new, ...] (5 cycles)
     read_mtree_node(block_builder);
 
     #[rustfmt::skip]

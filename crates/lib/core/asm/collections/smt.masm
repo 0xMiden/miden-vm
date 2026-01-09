@@ -143,7 +143,7 @@ end
 #!   Leaf multiple
 #!     X cycles
 pub proc set
-    # Prepare stack for adv.push_mtnodew
+    # Prepare stack for adv.push_mtnode
     # (X cycles)
     movupw.2 dup.11 push.LEAF_DEPTH
     # => [depth, leaf_index=K[3], R, V, K]
@@ -151,7 +151,7 @@ pub proc set
     # Push MT node on advice stack (in structural order for adv_loadw), cleanup operand stack,
     # and then push MT node on operand stack (NV)
     # (X cycles)
-    adv.push_mtnodew drop drop movdnw.2 padw adv_loadw
+    adv.push_mtnode drop drop movdnw.2 padw adv_loadw
     # => [NV, V, K, R]
 
     # (X cycles)

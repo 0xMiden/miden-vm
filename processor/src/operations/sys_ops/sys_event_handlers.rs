@@ -20,8 +20,7 @@ pub fn handle_system_event(
 ) -> Result<(), ExecutionError> {
     match system_event {
         SystemEvent::MerkleNodeMerge => merge_merkle_nodes(process, err_ctx),
-        SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx, true),
-        SystemEvent::MerkleNodeToStackW => copy_merkle_node_to_adv_stack(process, err_ctx, false),
+        SystemEvent::MerkleNodeToStack => copy_merkle_node_to_adv_stack(process, err_ctx),
         SystemEvent::MapValueToStack => copy_map_value_to_adv_stack(process, false, 0, err_ctx),
         SystemEvent::MapValueCountToStack => copy_map_value_length_to_adv_stack(process, err_ctx),
         SystemEvent::MapValueToStackN0 => copy_map_value_to_adv_stack(process, true, 0, err_ctx),
@@ -248,7 +247,7 @@ fn merge_merkle_nodes(
 }
 
 /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
-/// onto the advice stack.
+/// onto the advice stack in structural order for consumption by `AdvPopW`.
 ///
 /// ```text
 /// Inputs:
@@ -261,10 +260,6 @@ fn merge_merkle_nodes(
 ///   Merkle store: {TREE_ROOT<-NODE}
 /// ```
 ///
-/// The `reverse` flag controls whether the node is reversed before pushing:
-/// - `true`: Reverse for consumption by 4x AdvPop (used by built-in mtree_get/mtree_set)
-/// - `false`: No reversal for consumption by `padw adv_loadw` (used by MASM procedures)
-///
 /// # Errors
 /// Returns an error if:
 /// - Merkle tree for the specified root cannot be found in the advice provider.
@@ -274,7 +269,6 @@ fn merge_merkle_nodes(
 fn copy_merkle_node_to_adv_stack(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
-    reverse: bool,
 ) -> Result<(), ExecutionError> {
     // Stack at this point is `[event_id, d, i, R, ...]` where:
     // - `d` is depth,
@@ -285,20 +279,13 @@ fn copy_merkle_node_to_adv_stack(
     // Read the root in structural (little-endian) word order from the operand stack.
     let root = process.get_stack_word(3);
 
-    let mut node = process
+    let node = process
         .advice_provider()
         .get_tree_node(root, depth, index)
         .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
 
-    if reverse {
-        // Reverse to compensate for the 4x AdvPop reversal used by mtree_get/mtree_set.
-        // push_stack_word pushes in reverse, and 4x AdvPop reverses again,
-        // so the net effect is correct word order on the operand stack.
-        node.reverse();
-    }
-    // For non-reversed case (adv_loadw): push_stack_word pushes in reverse, and adv_loadw
-    // reads in structural order, so the net effect is correct word order on the operand stack.
-
+    // push_stack_word pushes in reverse order so that node[0] ends up on top of advice stack.
+    // AdvPopW then pops the word maintaining structural order on the operand stack.
     process.advice_provider_mut().push_stack_word(&node);
 
     Ok(())

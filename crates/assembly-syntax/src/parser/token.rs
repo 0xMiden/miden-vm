@@ -464,7 +464,6 @@ pub enum Token<'input> {
     PushMapvalCount,
     PushMapvaln,
     PushMtnode,
-    PushMtnodew,
     And,
     Assert,
     Assertz,
@@ -692,7 +691,6 @@ impl fmt::Display for Token<'_> {
             Token::PushMapvalCount => write!(f, "push_mapval_count"),
             Token::PushMapvaln => write!(f, "push_mapvaln"),
             Token::PushMtnode => write!(f, "push_mtnode"),
-            Token::PushMtnodew => write!(f, "push_mtnodew"),
             Token::And => write!(f, "and"),
             Token::Assert => write!(f, "assert"),
             Token::Assertz => write!(f, "assertz"),
@@ -926,7 +924,6 @@ impl<'input> Token<'input> {
                 | Token::PushMapvalCount
                 | Token::PushMapvaln
                 | Token::PushMtnode
-                | Token::PushMtnodew
                 | Token::And
                 | Token::Assert
                 | Token::Assertz
@@ -1113,7 +1110,6 @@ impl<'input> Token<'input> {
         ("push_mapval_count", Token::PushMapvalCount),
         ("push_mapvaln", Token::PushMapvaln),
         ("push_mtnode", Token::PushMtnode),
-        ("push_mtnodew", Token::PushMtnodew),
         ("and", Token::And),
         ("assert", Token::Assert),
         ("assertz", Token::Assertz),

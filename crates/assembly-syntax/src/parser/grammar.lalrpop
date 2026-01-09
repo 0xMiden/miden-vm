@@ -72,7 +72,6 @@ extern {
         "push_mapval_count" => Token::PushMapvalCount,
         "push_mapvaln" => Token::PushMapvaln,
         "push_mtnode" => Token::PushMtnode,
-        "push_mtnodew" => Token::PushMtnodew,
         "and" => Token::And,
         "eval_circuit" => Token::EvalCircuit,
         "assert" => Token::Assert,
@@ -1077,7 +1076,6 @@ SystemEvent: Instruction = {
     },
     "adv" "." "has_mapkey" => Instruction::SysEvent(SystemEventNode::HasMapKey),
     "adv" "." "push_mtnode" => Instruction::SysEvent(SystemEventNode::PushMtNode),
-    "adv" "." "push_mtnodew" => Instruction::SysEvent(SystemEventNode::PushMtNodeW),
 }
 
 #[inline]
