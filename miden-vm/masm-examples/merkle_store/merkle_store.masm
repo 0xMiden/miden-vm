@@ -1,6 +1,6 @@
 begin
     # push the root of the Partial Merkle Tree on the stack
-    push.[11648929418061259452, 5674922742447872669, 9150905333485558227, 2741720808589460994]
+    push.[15205915704477211567, 2497157866997219775, 7737092243855731287, 10005008533832803365]
 
     # get value at depth = 2, index = 0 from the Partial Merkle Tree; this value should be 20
     push.0.2
@@ -12,7 +12,7 @@ begin
     dropw
 
     # push the root of the Sparse Merkle Tree on the stack
-    push.[2931872823396574633, 16643658429780850803, 14219267046467763045, 14595874174682620626]
+    push.[7376835135119391435, 14119287799397478348, 11655738258337000992, 2894263268938596110]
 
     # get value at depth = 64, index = 1 from the Sparse Merkle Tree; this value should be 21
     push.1.64
@@ -24,7 +24,7 @@ begin
     dropw
 
     # push the root of the Merkle Tree on the stack
-    push.[14198411665273461744, 6818908754985823595, 1483730808130506264, 7343578274654210939]
+    push.[8746697084226810548, 277589808084656486, 5200370501050121611, 15238507089253587473]
 
     # get value at depth = 2, index = 2 from the Merkle Tree; this value should be 22
     push.2.2
