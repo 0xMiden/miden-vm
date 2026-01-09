@@ -1067,7 +1067,7 @@ proc memcopy_word_range_and_advance_ptrs
     # => [cur_read, read_end, cur_read, cur_write]
 
     # Our pointers are originally from local memory, whose address range fits in a u32:
-    # https://docs.miden.xyz/miden-vm/user_docs/assembly/execution_contexts.html#memory-layout.
+    # https://docs.miden.xyz/miden-vm/user_docs/assembly/execution_contexts#memory-layout.
     u32overflowing_sub
     # => [ovf, read_end - cur_read, cur_read, cur_write]
 

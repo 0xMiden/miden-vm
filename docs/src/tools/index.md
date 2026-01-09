@@ -10,7 +10,7 @@ The following tools are available for interacting with Miden VM:
 - Via the [miden-vm](https://crates.io/crates/miden-vm) crate (or within the Miden VM repo):
   - [CLI](../usage.md#cli-interface)
 - Via your browser:
-  - The interactive [Miden VM Playground](https://docs.miden.xyz/examples/) for writing, executing, proving, and verifying programs from your browser.
+  - The interactive [Miden VM Playground](https://0xMiden.github.io/examples/) for writing, executing, proving, and verifying programs from your browser.
 
 The following resources are available to help you get started programming with Miden VM more quickly:
 
