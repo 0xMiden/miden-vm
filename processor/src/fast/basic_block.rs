@@ -10,7 +10,7 @@ use miden_core::{
 use crate::{
     AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{AdviceResultExt, EventResultExt, SystemEventResultExt},
+    errors::{SystemEventResultExt, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -371,26 +371,22 @@ impl FastProcessor {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();
-                    return ControlFlow::Break(BreakReason::Err(
-                        Err::<(), _>(err)
-                            .map_event_err(
-                                current_forest,
-                                node_id,
-                                host,
-                                in_debug_mode,
-                                event_id,
-                                event_name,
-                            )
-                            .unwrap_err(),
-                    ));
+                    let exec_err = event_error_with_context(
+                        err,
+                        current_forest,
+                        node_id,
+                        host,
+                        in_debug_mode,
+                        event_id,
+                        event_name,
+                    );
+                    return ControlFlow::Break(BreakReason::Err(exec_err));
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
-                return ControlFlow::Break(BreakReason::Err(
-                    Err::<(), _>(err)
-                        .map_advice_err(current_forest, node_id, host, in_debug_mode)
-                        .unwrap_err(),
-                ));
+                let exec_err =
+                    advice_error_with_context(err, current_forest, node_id, host, in_debug_mode);
+                return ControlFlow::Break(BreakReason::Err(exec_err));
             }
         }
         ControlFlow::Continue(())
