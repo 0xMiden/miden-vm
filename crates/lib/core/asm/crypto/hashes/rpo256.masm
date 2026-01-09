@@ -22,6 +22,7 @@ end
 #! - `R0` is the first rate word (positions 0-3, on top of stack).
 #! - `R1` is the second rate word / digest (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
+#! - `DIGEST = R1`.
 #!
 #! Cycles: 9
 pub proc squeeze_digest
@@ -35,18 +36,19 @@ pub proc squeeze_digest
     dropw
 end
 
-#! Copies the digest (R1) to the top of the stack.
+#! Copies the digest to the top of the stack.
 #!
 #! It is expected to have the hasher state at the top of the stack at the beginning of the procedure
 #! execution.
 #!
 #! Input: [R0, R1, C, ...]
-#! Output: [R1, R0, R1, C, ...]
+#! Output: [DIGEST, R0, R1, C, ...]
 #!
 #! Where:
 #! - `R0` is the first rate word (positions 0-3, on top of stack).
 #! - `R1` is the second rate word / digest (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
+#! - `DIGEST = R1`.
 #!
 #! Cycles: 4
 pub proc copy_digest

@@ -37,7 +37,7 @@ proc init_state
     # Stack: [nonce(4), key(4), ...]
 
     # Initialize capacity with all zeros
-    push.0.0.0.0
+    push.[0,0,0,0]
     # => [cap(4), nonce(4), key(4), ...]
 
     movdnw.2
@@ -74,7 +74,7 @@ proc process_ad
     # Push AD padding block [1,0,0,0,0,0,0,0] onto stack
     # Note: stack order is reversed, so we push [0,0,0,0] then [1,0,0,0]
     padw          # Second word [0,0,0,0] (padw pushes 4 zeros)
-    push.0.0.0.1  # First word [1,0,0,0]
+    push.[1,0,0,0]  # First word [1,0,0,0]
     # => [AD_padding(8), capacity'(4), ...]
 end
 
@@ -180,7 +180,7 @@ pub proc encrypt
     # => [dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
 
     # Write first word [1,0,0,0] to dst_ptr_final
-    push.0.0.0.1
+    push.[1,0,0,0]
     # => [1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]
     dup.4
     # => [dst_ptr_final, 1, 0, 0, 0, dst_ptr_final, rate(8), capacity(4), src_ptr_final, dst_ptr_final, ...]

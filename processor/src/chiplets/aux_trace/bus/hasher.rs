@@ -27,20 +27,6 @@ use crate::{
     debug::{BusDebugger, BusMessage},
 };
 
-// HELPERS
-// ==============================================================================================
-
-/// Reads a word from the stack starting at `start` index, in LSB-first order.
-#[inline(always)]
-fn read_stack_word(main_trace: &MainTrace, start: usize, row: RowIndex) -> Word {
-    Word::from([
-        main_trace.stack_element(start, row),
-        main_trace.stack_element(start + 1, row),
-        main_trace.stack_element(start + 2, row),
-        main_trace.stack_element(start + 3, row),
-    ])
-}
-
 // REQUESTS
 // ==============================================================================================
 
@@ -232,15 +218,15 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
 
     // Stack stores words for log_precompile in structural (LSB-first) layout,
     // so we read them directly as [w0, w1, w2, w3].
-    let comm = read_stack_word(main_trace, STACK_COMM_RANGE.start, row);
-    let tag = read_stack_word(main_trace, STACK_TAG_RANGE.start, row);
+    let comm = main_trace.stack_word(STACK_COMM_RANGE.start, row);
+    let tag = main_trace.stack_word(STACK_TAG_RANGE.start, row);
     // Internal RPO state is [RATE0, RATE1, CAPACITY] = [COMM, TAG, CAP_PREV]
     let state_input = [comm, tag, cap_prev];
 
     // Output state [R0, R1, CAP_NEXT] in sponge order
-    let r0 = read_stack_word(main_trace, STACK_R0_RANGE.start, row + 1);
-    let r1 = read_stack_word(main_trace, STACK_R1_RANGE.start, row + 1);
-    let cap_next = read_stack_word(main_trace, STACK_CAP_NEXT_RANGE.start, row + 1);
+    let r0 = main_trace.stack_word(STACK_R0_RANGE.start, row + 1);
+    let r1 = main_trace.stack_word(STACK_R1_RANGE.start, row + 1);
+    let cap_next = main_trace.stack_word(STACK_CAP_NEXT_RANGE.start, row + 1);
     let state_output = [r0, r1, cap_next];
 
     let input_req = HasherMessage {
@@ -279,10 +265,10 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
 ) -> E {
     let helper_0 = main_trace.helper_register(0, row);
 
-    let node_value = read_stack_word(main_trace, 0, row);
+    let node_value = main_trace.stack_word(0, row);
     let node_depth = main_trace.stack_element(4, row);
     let node_index = main_trace.stack_element(5, row);
-    let merkle_tree_root = read_stack_word(main_trace, 6, row);
+    let merkle_tree_root = main_trace.stack_word(6, row);
 
     // Build input state with node at RATE1 (indices 4..8)
     let mut node_state = [ZERO; hasher::STATE_WIDTH];
@@ -328,12 +314,12 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 ) -> E {
     let helper_0 = main_trace.helper_register(0, row);
 
-    let old_node_value = read_stack_word(main_trace, 0, row);
+    let old_node_value = main_trace.stack_word(0, row);
     let merkle_path_depth = main_trace.stack_element(4, row);
     let node_index = main_trace.stack_element(5, row);
-    let old_root = read_stack_word(main_trace, 6, row);
-    let new_node_value = read_stack_word(main_trace, 10, row);
-    let new_root = read_stack_word(main_trace, 0, row + 1);
+    let old_root = main_trace.stack_word(6, row);
+    let new_node_value = main_trace.stack_word(10, row);
+    let new_root = main_trace.stack_word(0, row + 1);
 
     // Build old node input state with value at RATE1 (indices 4..8)
     let mut old_node_state = [ZERO; hasher::STATE_WIDTH];

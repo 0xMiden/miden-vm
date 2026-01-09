@@ -332,6 +332,19 @@ impl MainTrace {
         self.columns.get_column(STACK_TRACE_OFFSET + column)[i]
     }
 
+    /// Returns a word from the stack starting at `start` index at row i, in LE order.
+    ///
+    /// The word is read such that `word[0]` comes from stack position `start` (top),
+    /// `word[1]` from `start + 1`, etc.
+    pub fn stack_word(&self, start: usize, i: RowIndex) -> Word {
+        Word::from([
+            self.stack_element(start, i),
+            self.stack_element(start + 1, i),
+            self.stack_element(start + 2, i),
+            self.stack_element(start + 3, i),
+        ])
+    }
+
     /// Returns the address of the top element in the stack overflow table at row i.
     pub fn parent_overflow_address(&self, i: RowIndex) -> Felt {
         self.columns.get_column(STACK_TRACE_OFFSET + B1_COL_IDX)[i]
