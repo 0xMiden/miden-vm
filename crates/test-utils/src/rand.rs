@@ -13,7 +13,7 @@ use super::{Felt, Word};
 /// Generates a random QuadFelt
 #[cfg(feature = "std")]
 pub fn rand_quad_felt() -> QuadFelt {
-    QuadFelt::new_complex(rand_value(), rand_value())
+    QuadFelt::new([rand_value(), rand_value()])
 }
 
 // SEEDED GENERATORS

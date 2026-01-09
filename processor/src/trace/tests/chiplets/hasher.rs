@@ -25,8 +25,8 @@ use miden_core::{
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, AdviceInputs, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt,
-    ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
-    build_trace_from_program, init_state_from_words, rand_array,
+    ONE, Operation, PrimeCharacteristicRing, ZERO, build_span_with_respan_ops,
+    build_trace_from_ops_with_inputs, build_trace_from_program, init_state_from_words, rand_array,
 };
 use crate::{PrimeField64, StackInputs};
 
@@ -943,8 +943,10 @@ fn build_expected(
 ) -> Felt {
     let first_cycle_row = addr_to_cycle_row(addr) == 0;
     let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
-    let header =
-        alphas[0] + alphas[1] * Felt::from(transition_label) + alphas[2] * addr + alphas[3] * index;
+    let header = alphas[0]
+        + alphas[1] * Felt::from_u8(transition_label)
+        + alphas[2] * addr
+        + alphas[3] * index;
     let mut value = header;
 
     if (first_cycle_row && label == LINEAR_HASH_LABEL) || label == RETURN_STATE_LABEL {
@@ -1070,7 +1072,7 @@ fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex
     ];
 
     if control_block_initializers.contains(&opcode_value) {
-        Felt::from(opcode_value)
+        Felt::from_u8(opcode_value)
     } else {
         ZERO
     }

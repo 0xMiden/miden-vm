@@ -350,8 +350,8 @@ fn test_op_ext2mul() {
 
     // multiply the top two extension field elements
     op_ext2mul(&mut processor);
-    let a = QuadFelt::new_complex(a0, a1);
-    let b = QuadFelt::new_complex(b0, b1);
+    let a = QuadFelt::new([a0, a1]);
+    let b = QuadFelt::new([b0, b1]);
     let product = b * a;
     let c = product.as_basis_coefficients_slice();
     let expected = build_expected(&[b1, b0, c[1], c[0]]);

@@ -20,7 +20,8 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, PrimeCharacteristicRing, StackInputs, StackOutputs, WORD_SIZE, Word,
+    ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeField64, QuadFelt},
     stack::MIN_STACK_DEPTH,
@@ -290,7 +291,7 @@ impl Test {
         {
             let mem_state = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::from(addr as u32), &())
+                .read_element(ContextId::root(), Felt::from_usize(addr), &())
                 .unwrap();
             assert_eq!(
                 *mem_value,
@@ -603,7 +604,7 @@ impl Test {
 
 /// Appends a Word to an operand stack Vec.
 pub fn append_word_to_vec(target: &mut Vec<u64>, word: Word) {
-    target.extend(word.iter().map(Felt::as_int));
+    target.extend(word.iter().map(Felt::as_canonical_u64));
 }
 
 /// Add a Word to the bottom of the operand stack Vec.

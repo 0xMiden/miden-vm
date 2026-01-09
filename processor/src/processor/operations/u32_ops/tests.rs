@@ -66,7 +66,7 @@ fn test_op_u32assert2_both_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967297u64), Felt::new(4294967296u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(123u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::new(123), &(), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -76,7 +76,7 @@ fn test_op_u32assert2_second_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967297u64), Felt::new(1000u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(456u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::new(456), &(), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -86,7 +86,7 @@ fn test_op_u32assert2_first_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(2000u64), Felt::new(4294967296u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(789u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::new(789), &(), &mut tracer);
     assert!(result.is_err());
 }
 

@@ -13,7 +13,7 @@ use miden_air::trace::{
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET, STACK_TOP_RANGE},
 };
 use miden_core::{
-    Felt, ONE, Operation, Word, ZERO,
+    Felt, ONE, Operation, PrimeCharacteristicRing, Word, ZERO,
     field::PrimeField64,
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
@@ -127,7 +127,7 @@ impl DecoderRow {
             addr: current_addr,
             in_basic_block: true,
             group_count: basic_block_ctx.group_count_in_block,
-            op_index: Felt::from(op_idx_in_group as u32),
+            op_index: Felt::from_usize(op_idx_in_group),
             op_batch_flags: [ZERO; NUM_OP_BATCH_FLAGS],
         }
     }
@@ -145,7 +145,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         basic_block_node: &BasicBlockNode,
     ) -> ControlFlow<()> {
-        let group_count_for_block = Felt::from(basic_block_node.num_op_groups() as u32);
+        let group_count_for_block = Felt::from_usize(basic_block_node.num_op_groups());
         let first_op_batch = basic_block_node
             .op_batches()
             .first()
@@ -309,7 +309,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         ctx_info: ExecutionContextInfo,
     ) -> ControlFlow<()> {
         let second_hasher_state: Word = [
-            Felt::from(ctx_info.parent_stack_depth),
+            Felt::from_u32(ctx_info.parent_stack_depth),
             ctx_info.parent_next_overflow_addr,
             ZERO,
             ZERO,
@@ -506,7 +506,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Decompose operation into bits
         let opcode = row.opcode;
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from((opcode >> i) & 1);
+            let bit = Felt::from_u8((opcode >> i) & 1);
             self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
         }
 

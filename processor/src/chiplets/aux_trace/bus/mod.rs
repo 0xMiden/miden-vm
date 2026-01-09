@@ -269,7 +269,7 @@ where
     E: ExtensionField<Felt>,
 {
     let control_block_req = ControlBlockRequestMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         op_code: op_code_felt,
         decoder_hasher_state: main_trace.decoder_hasher_state(row),
@@ -296,5 +296,5 @@ where
 /// Returns the operation unique label.
 #[inline(always)]
 fn get_op_label(s0: Felt, s1: Felt, s2: Felt, s3: Felt) -> Felt {
-    s3 * Felt::from_u16(1 << 3) + s2 * Felt::from_u16(1 << 2) + s1 * Felt::from_u16(2) + s0 + ONE
+    s3 * Felt::new(1 << 3) + s2 * Felt::new(1 << 2) + s1 * Felt::new(2) + s0 + ONE
 }

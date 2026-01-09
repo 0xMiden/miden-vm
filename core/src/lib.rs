@@ -65,6 +65,12 @@ pub mod field {
     pub type QuadFelt = BinomialExtensionField<super::Felt, 2>;
 }
 
+// Re-export commonly used traits from field module
+pub use field::{
+    BasedVectorSpace, BinomialExtensionField, ExtensionField, Field, PrimeCharacteristicRing,
+    PrimeField64, QuotientMap, batch_multiplicative_inverse,
+};
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{

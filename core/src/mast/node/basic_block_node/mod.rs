@@ -1,7 +1,7 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
-use miden_crypto::{Felt, Word, ZERO, hash::blake::Blake3_256};
+use miden_crypto::{Felt, Word, ZERO, field::PrimeField64, hash::blake::Blake3_256};
 use miden_formatting::prettier::PrettyPrint;
 
 use crate::{
@@ -1593,7 +1593,7 @@ impl MastForestContributor for BasicBlockNodeBuilder {
                 // we include the operation index to distinguish between basic blocks that
                 // would have the same assert instructions, but in a different order
                 assert_data.extend_from_slice(&op_idx.to_le_bytes());
-                let inner_value = u64::from(*inner_value);
+                let inner_value = inner_value.as_canonical_u64();
                 assert_data.extend_from_slice(&inner_value.to_le_bytes());
             }
         }

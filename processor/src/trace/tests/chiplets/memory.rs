@@ -195,7 +195,7 @@ fn build_expected_bus_element_msg(
     assert!(op_label == MEMORY_READ_ELEMENT_LABEL || op_label == MEMORY_WRITE_ELEMENT_LABEL);
 
     alphas[0]
-        + alphas[1] * Felt::from(op_label)
+        + alphas[1] * Felt::from_u8(op_label)
         + alphas[2] * ctx
         + alphas[3] * addr
         + alphas[4] * clk
@@ -213,7 +213,7 @@ fn build_expected_bus_word_msg(
     assert!(op_label == MEMORY_READ_WORD_LABEL || op_label == MEMORY_WRITE_WORD_LABEL);
 
     alphas[0]
-        + alphas[1] * Felt::from(op_label)
+        + alphas[1] * Felt::from_u8(op_label)
         + alphas[2] * ctx
         + alphas[3] * addr
         + alphas[4] * clk
