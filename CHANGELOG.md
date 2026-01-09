@@ -31,6 +31,7 @@
 - Change (de)serialization of `MastForest` to directly (de)serialize DebugInfo ([#2470](https://github.com/0xMiden/miden-vm/pull/2470/)).
 - Add `MastForest::write_stripped()` to serialize without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
 - [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
+- Added `From<Vec<T>>` implementation for `IndexVec<I, T>` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
 
 ## 0.20.2 (TBD)
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).

@@ -307,17 +307,14 @@ impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
     }
 }
 
-impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
-    type Error = IndexedVecError;
-
+impl<I: Idx, T> From<Vec<T>> for IndexVec<I, T> {
     /// Create an IndexVec from a Vec.
     ///
-    /// Returns an error if the Vec length exceeds u32::MAX.
-    fn try_from(raw: Vec<T>) -> Result<Self, Self::Error> {
-        if raw.len() > u32::MAX as usize {
-            return Err(IndexedVecError::TooManyItems);
-        }
-        Ok(Self { raw, _m: PhantomData })
+    /// # Panics
+    /// Panics if the Vec length exceeds u32::MAX.
+    fn from(raw: Vec<T>) -> Self {
+        assert!(raw.len() <= u32::MAX as usize, "Vec length exceeds u32::MAX");
+        Self { raw, _m: PhantomData }
     }
 }
 
@@ -345,9 +342,12 @@ where
 {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let vec: Vec<T> = Deserializable::read_from(source)?;
-        IndexVec::try_from(vec).map_err(|_| {
-            DeserializationError::InvalidValue("IndexVec length exceeds u32::MAX".into())
-        })
+        if vec.len() > u32::MAX as usize {
+            return Err(DeserializationError::InvalidValue(
+                "IndexVec length exceeds u32::MAX".into(),
+            ));
+        }
+        Ok(vec.into())
     }
 }
 
