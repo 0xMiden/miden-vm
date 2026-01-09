@@ -1,5 +1,9 @@
 # ===== WORD FUNCTIONS ==========================================================================
 
+pub proc reverse(input: word) -> word
+    reversew
+end
+
 # CONVERSION UTILITIES
 #! Writes the components of a word to memory as eight u32 limbs in little-endian order.
 #!

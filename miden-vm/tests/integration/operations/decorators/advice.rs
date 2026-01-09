@@ -338,7 +338,7 @@ fn advice_insert_hdword() {
         push.0 movdn.8
         hperm
         # Extract hash from state[4..8] (rate word 2)
-        dropw swapw dropw
+        swapw.2 dropw dropw
         # => [KEY, ...]
 
         # load the advice stack with values from the advice map and drop the key
@@ -384,7 +384,7 @@ fn advice_insert_hqword() {
         # => [RATE1'', RATE2'', CAP'', ...]
 
         # Extract hash 
-        dropw swapw dropw
+        swapw.2 dropw dropw
         # => [KEY]
 
         # load the advice stack with values from the advice map and drop the key

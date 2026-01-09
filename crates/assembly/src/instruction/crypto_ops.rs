@@ -34,12 +34,12 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
         // => [RATE0', RATE1', CAP', ...]
         HPerm,
 
-        // Extract digest (RATE1') using squeeze_digest pattern: dropw swapw dropw
-        // => [RATE1', CAP', ...]
+        // Extract digest (RATE0')
+        // => [CAP', RATE1', RATE0', ...]
+        SwapW2,
+        // => [RATE1', RATE0', ...]
         Drop, Drop, Drop, Drop,
-        // => [CAP', RATE1', ...]
-        SwapW,
-        // => [RATE1', ...]
+        // => [RATE0', ...]  (the digest)
         Drop, Drop, Drop, Drop,
     ];
     block_builder.push_ops(ops);
@@ -72,15 +72,15 @@ pub(super) fn hmerge(block_builder: &mut BasicBlockBuilder) {
         SwapW,
 
         // Apply hperm.
-        // => [A', B', CAP', ...]  where B' contains the digest
+        // => [A', B', CAP', ...]  where A' contains the digest
         HPerm,
 
-        // Extract digest (B') using squeeze_digest pattern: dropw swapw dropw
-        // => [B', CAP', ...]
+        // Extract digest (A')
+        // => [CAP', B', A', ...]
+        SwapW2,
+        // => [B', A', ...]
         Drop, Drop, Drop, Drop,
-        // => [CAP', B', ...]
-        SwapW,
-        // => [B', ...]  (the digest)
+        // => [A', ...]  (the digest)
         Drop, Drop, Drop, Drop,
     ];
     block_builder.push_ops(ops);

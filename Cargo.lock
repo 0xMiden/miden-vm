@@ -1310,7 +1310,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#56ef32e5d60e003957a7cea55a3da3e71279f2f7"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#5cc55be17bc1429cc1ec81a76832395bbff3dda5"
 dependencies = [
  "blake3",
  "cc",
@@ -1349,7 +1349,7 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#56ef32e5d60e003957a7cea55a3da3e71279f2f7"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#5cc55be17bc1429cc1ec81a76832395bbff3dda5"
 dependencies = [
  "quote",
  "syn 2.0.111",
@@ -1475,7 +1475,7 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#56ef32e5d60e003957a7cea55a3da3e71279f2f7"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-sponge-state-remapping-v2#5cc55be17bc1429cc1ec81a76832395bbff3dda5"
 dependencies = [
  "p3-field",
  "p3-miden-goldilocks",

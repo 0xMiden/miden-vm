@@ -369,19 +369,19 @@ fn test_copy_digest() {
         push.1000      # start address
         padw padw padw # hasher state
         exec.rpo256::absorb_double_words_from_memory
-        # => [C, B, A, end_ptr, end_ptr]
+        # => [A, B, C, end_ptr, end_ptr]  (sponge state [R0, R1, CAP] with R0=A on top)
 
         # drop the pointers
         movup.12 drop movup.12 drop
-        # => [C, B, A]
+        # => [A, B, C]
 
-        # copy the result of the permutation (second word, B)
+        # copy the result of the permutation (first word / digest, A)
         exec.rpo256::copy_digest
-        # => [B, C, B, A]
+        # => [A, A, B, C]
 
-        # assert that the copied word is equal to the second word in the hasher state
-        dupw.2 dupw.1 assert_eqw.err="copied word should be equal to the second word in the hasher state"
-        # => [B, C, B, A]
+        # assert that the copied word is equal to the first word in the hasher state
+        dupw.1 dupw.1 assert_eqw.err="copied word should be equal to the first word in the hasher state"
+        # => [A, A, B, C]
 
         # truncate stack
         exec.sys::truncate_stack
@@ -396,8 +396,8 @@ fn test_copy_digest() {
         0, 0, 0, 0, // capacity, no padding required
     ]).into_iter().map(|e| e.as_canonical_u64()).collect();
 
-    // push the permutation result on the top of the resulting stack
-    resulting_stack[4..8]
+    // push the permutation result (digest at R0, positions 0..4) on the top of the resulting stack
+    resulting_stack[0..4]
         .to_vec()
         .iter()
         .rev()

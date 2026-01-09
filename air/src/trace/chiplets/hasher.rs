@@ -71,7 +71,7 @@ pub const CAPACITY_COL_RANGE: Range<usize> = Range {
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
 
-/// The output portion of the hash state, located in the second rate word (RATE1).
+/// The output portion of the hash state, located in the first rate word (RATE0).
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
 /// Number of needed to complete a single permutation.

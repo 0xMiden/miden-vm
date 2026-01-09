@@ -107,3 +107,4 @@ p3-miden-fri     = { version = "0.4", default-features = false }
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 
+

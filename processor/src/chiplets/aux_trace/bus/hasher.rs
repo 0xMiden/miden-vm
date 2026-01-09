@@ -479,14 +479,14 @@ where
 
         // f_hout == 1
         // v_res = v_h + v_b;
-        // Digest is at sponge positions 4..8 (RATE1)
+        // Digest is at sponge positions 0..4 (RATE0)
         if selector1 == ZERO && selector2 == ZERO && selector3 == ZERO {
             let hasher_message = HasherMessage {
                 transition_label,
                 addr_next,
                 node_index,
                 hasher_state: [
-                    ZERO, ZERO, ZERO, ZERO, state[4], state[5], state[6], state[7], ZERO, ZERO,
+                    ZERO, ZERO, ZERO, ZERO, state[0], state[1], state[2], state[3], ZERO, ZERO,
                     ZERO, ZERO,
                 ],
                 source: "hasher",

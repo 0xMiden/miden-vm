@@ -19,20 +19,20 @@ end
 #! Output: [DIGEST, ...]
 #!
 #! Where:
-#! - `R0` is the first rate word (positions 0-3, on top of stack).
-#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
+#! - `R1` is the second rate word (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
-#! - `DIGEST = R1`.
+#! - `DIGEST = R0`.
 #!
 #! Cycles: 9
 pub proc squeeze_digest
-    # drop the first rate word (4 cycles)
+    # swap R0 (digest) with C (1 cycle)
+    swapw.2
+
+    # drop C (4 cycles)
     dropw
 
-    # save the hash result (1 cycles)
-    swapw
-
-    # drop the capacity word (4 cycles)
+    # drop R1 (4 cycles)
     dropw
 end
 
@@ -45,14 +45,14 @@ end
 #! Output: [DIGEST, R0, R1, C, ...]
 #!
 #! Where:
-#! - `R0` is the first rate word (positions 0-3, on top of stack).
-#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
+#! - `R1` is the second rate word (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
-#! - `DIGEST = R1`.
+#! - `DIGEST = R0`.
 #!
 #! Cycles: 4
 pub proc copy_digest
-    dupw.1
+    dupw
 end
 
 #! Hashes the memory `start_addr` to `end_addr` given an RPO state specified by 3 words.
@@ -64,8 +64,8 @@ end
 #! Output: [R0', R1', C', end_addr, end_addr ...]
 #!
 #! Where:
-#! - `R0` is the first rate word (positions 0-3, on top of stack).
-#! - `R1` is the second rate word / digest (positions 4-7).
+#! - `R0` is the first rate word / digest (positions 0-3, on top of stack).
+#! - `R1` is the second rate word (positions 4-7).
 #! - `C` is the capacity word (positions 8-11).
 #!
 #! Cycles: 4 + 3 * words, where `words` is the `start_addr - end_addr`

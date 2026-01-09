@@ -1,6 +1,6 @@
 use miden_air::trace::{
     LOG_PRECOMPILE_LABEL, MainTrace, RowIndex,
-    chiplets::hasher::DIGEST_RANGE,
+    chiplets::hasher::DIGEST_LEN,
     log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 use miden_core::{
@@ -136,6 +136,11 @@ where
 // VIRTUAL TABLE REQUESTS
 // ================================================================================================
 
+/// Range for RATE0 (first rate word) in sponge state.
+const RATE0_RANGE: core::ops::Range<usize> = 0..DIGEST_LEN;
+/// Range for RATE1 (second rate word) in sponge state.
+const RATE1_RANGE: core::ops::Range<usize> = DIGEST_LEN..(2 * DIGEST_LEN);
+
 /// Constructs the removals from the table when the hasher absorbs a new sibling node while
 /// computing the new Merkle root.
 fn chiplets_vtable_remove_sibling<E>(main_trace: &MainTrace, alphas: &[E], row: RowIndex) -> E
@@ -149,8 +154,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
+            // Node is left child at RATE0, sibling is right child at RATE1
+            let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -159,7 +164,7 @@ where
                 + alphas[15] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row)[..DIGEST_RANGE.start];
+            let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -171,8 +176,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
+            // Node is left child at RATE0, sibling is right child at RATE1
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -181,7 +186,7 @@ where
                 + alphas[15] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[..DIGEST_RANGE.start];
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -210,8 +215,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
-            let sibling = &main_trace.chiplet_hasher_state(row)[DIGEST_RANGE];
+            // Node is left child at RATE0, sibling is right child at RATE1
+            let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -220,7 +225,7 @@ where
                 + alphas[15] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row)[..DIGEST_RANGE.start];
+            let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]
@@ -232,8 +237,8 @@ where
         let index = main_trace.chiplet_node_index(row);
         let lsb = index.as_canonical_u64() & 1;
         if lsb == 0 {
-            // Node is left child at RATE0, sibling is right child at RATE1 (DIGEST_RANGE)
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[DIGEST_RANGE];
+            // Node is left child at RATE0, sibling is right child at RATE1
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[12] * sibling[0]
@@ -242,7 +247,7 @@ where
                 + alphas[15] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
-            let sibling = &main_trace.chiplet_hasher_state(row + 1)[..DIGEST_RANGE.start];
+            let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
                 + alphas[8] * sibling[0]

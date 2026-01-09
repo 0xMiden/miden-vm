@@ -645,7 +645,7 @@ fn b_chip_mpverify() {
 
     let mp_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
     let mut result_state = [ZERO; STATE_WIDTH];
-    result_state[4..8].copy_from_slice(tree.root().as_elements());
+    result_state[DIGEST_RANGE].copy_from_slice(tree.root().as_elements());
     let mp_result = build_expected(
         &alphas,
         RETURN_HASH_LABEL,
@@ -769,7 +769,7 @@ fn b_chip_mrupdate() {
 
     let mp_old_verify_complete = HASH_CYCLE_LEN + (tree.depth() as usize) * HASH_CYCLE_LEN;
     let mut result_state_old = [ZERO; STATE_WIDTH];
-    result_state_old[4..8].copy_from_slice(tree.root().as_elements());
+    result_state_old[DIGEST_RANGE].copy_from_slice(tree.root().as_elements());
     let mp_result_old = build_expected(
         &alphas,
         RETURN_HASH_LABEL,
@@ -807,7 +807,7 @@ fn b_chip_mrupdate() {
     expected *= mp_init_new.inverse();
 
     let mut result_state_new = [ZERO; STATE_WIDTH];
-    result_state_new[4..8].copy_from_slice(new_root.as_elements());
+    result_state_new[DIGEST_RANGE].copy_from_slice(new_root.as_elements());
     let mp_result_new = build_expected(
         &alphas,
         RETURN_HASH_LABEL,

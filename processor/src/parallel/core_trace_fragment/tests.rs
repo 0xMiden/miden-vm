@@ -811,7 +811,7 @@ fn test_loop_node_repeat_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
     use miden_core::{Operation, Word};
 
@@ -1106,7 +1106,7 @@ fn test_call_decoding() {
 
 #[test]
 #[rustfmt::skip]
-#[allow(clippy::needless_range_loop)]
+#[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
     use miden_core::{Operation, Word};
 

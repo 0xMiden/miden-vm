@@ -342,12 +342,11 @@ impl PrecompileTranscript {
             .copy_from_slice(comm.as_elements());
         state[Rpo256::RATE_RANGE.start + 4..Rpo256::RATE_RANGE.end]
             .copy_from_slice(tag.as_elements());
-        state[Rpo256::CAPACITY_RANGE.start..Rpo256::CAPACITY_RANGE.start + 4]
-            .copy_from_slice(self.state.as_elements());
+        state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
         Rpo256::apply_permutation(&mut state);
         // After absorption, update the state.
-        self.state = Word::new(state[Rpo256::CAPACITY_RANGE.clone()].try_into().unwrap());
+        self.state = Word::new(state[Rpo256::CAPACITY_RANGE].try_into().unwrap());
     }
 
     /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
@@ -361,11 +360,10 @@ impl PrecompileTranscript {
     pub fn finalize(self) -> PrecompileTranscriptDigest {
         // Interpret state as [RATE0, RATE1, CAPACITY] with two empty rate words.
         let mut state = [ZERO; Rpo256::STATE_WIDTH];
-        state[Rpo256::CAPACITY_RANGE.start..Rpo256::CAPACITY_RANGE.start + 4]
-            .copy_from_slice(self.state.as_elements());
+        state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
         Rpo256::apply_permutation(&mut state);
-        PrecompileTranscriptDigest::new(state[Rpo256::DIGEST_RANGE.clone()].try_into().unwrap())
+        PrecompileTranscriptDigest::new(state[Rpo256::DIGEST_RANGE].try_into().unwrap())
     }
 }
 

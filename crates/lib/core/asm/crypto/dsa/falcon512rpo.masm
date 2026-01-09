@@ -227,7 +227,7 @@ pub proc load_h_s2_and_product
     # => [Y, D, C, ptr, tau_inv_ptr, acc0, acc1, ...] where D is the digest expected to be PK
 
     # 3) Load PK, the saved claimed hash of h, and compare hashes
-    loc_loadw_le.0
+    swapw loc_loadw_le.0
     assert_eqw
     # => [C, ptr, tau_inv_ptr, h(tau)_0, h(tau)_1, ...]
 
@@ -283,7 +283,7 @@ pub proc load_h_s2_and_product
     # 6) Check that the challenge we computed the evaluations with is the correct one
 
     ## a) Clean up the stack
-    dropw swapw
+    swapw.2 dropw
     # => [C, tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
     ## b) Load from memory the challenge we got from the advice stack and assert equality between

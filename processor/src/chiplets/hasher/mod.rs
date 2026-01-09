@@ -40,7 +40,7 @@ mod tests;
 ///   computation. The state is laid out as `[RATE0, RATE1, CAPACITY]`:
 ///   - The first eight columns (h0-h7) represent the rate elements of the state. These are used to
 ///     absorb the values to be hashed. Once a permutation is complete, hash output is located in
-///     the second four rate columns (h4, h5, h6, h7).
+///     the first four rate columns (h0, h1, h2, h3).
 ///   - The last four columns (h8-h11) represent the capacity state of the sponge function.
 /// * Node index column idx used to help with Merkle path verification and Merkle root update
 ///   computations. For all other computations the values in this column are set to 0s.
@@ -459,9 +459,9 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
 /// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
 /// the Rescue Prime Optimized padding rule.
 ///
-/// State layout: [R1, R2, CAP] where:
-/// - state[0..4] = w1 (first rate word)
-/// - state[4..8] = w2 (second rate word, also digest location)
+/// State layout: [RATE0, RATE1, CAP] where:
+/// - state[0..4] = w1 (first rate word, also digest location)
+/// - state[4..8] = w2 (second rate word)
 /// - state[8..12] = capacity
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
@@ -472,9 +472,9 @@ pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
 /// capacity register to the provided domain. All other elements of the capacity register are set
 /// to 0.
 ///
-/// State layout: [R1, R2, CAP] where:
-/// - state[0..4] = w1 (first rate word)
-/// - state[4..8] = w2 (second rate word, also digest location)
+/// State layout: [RATE0, RATE1, CAP] where:
+/// - state[0..4] = w1 (first rate word, also digest location)
+/// - state[4..8] = w2 (second rate word)
 /// - state[8..12] = [ZERO, domain, ZERO, ZERO] (capacity)
 #[inline(always)]
 pub fn init_state_from_words_with_domain(
