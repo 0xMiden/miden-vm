@@ -275,6 +275,7 @@ pub enum Instruction {
 
     // ----- debug decorators --------------------------------------------------------------------
     Debug(DebugOptions),
+    DebugVar(miden_core::DebugVarInfo),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,

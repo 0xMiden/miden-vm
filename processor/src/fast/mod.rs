@@ -714,6 +714,10 @@ impl FastProcessor {
                     }
                 }
             },
+            Decorator::DebugVar(_debug_var) => {
+                // Debug variable info is recorded during assembly and stored in the MAST,
+                // but doesn't require any execution-time action.
+            },
         };
         ControlFlow::Continue(())
     }

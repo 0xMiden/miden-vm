@@ -326,6 +326,7 @@ impl PrettyPrint for Instruction {
 
             // ----- debug decorators -------------------------------------------------------------
             Self::Debug(options) => inst_with_imm("debug", options),
+            Self::DebugVar(info) => text(format!("debug.var({})", info)),
 
             // ----- event decorators -------------------------------------------------------------
             Self::Emit => const_text("emit"),

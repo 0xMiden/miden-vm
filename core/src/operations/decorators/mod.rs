@@ -12,6 +12,9 @@ pub use assembly_op::AssemblyOp;
 mod debug;
 pub use debug::DebugOptions;
 
+mod debug_var;
+pub use debug_var::{DebugVarInfo, DebugVarLocation};
+
 use crate::mast::{DecoratedOpLink, DecoratorFingerprint};
 
 // DECORATORS
@@ -33,6 +36,10 @@ pub enum Decorator {
     Debug(DebugOptions),
     /// Emits a trace to the host.
     Trace(u32),
+    /// Provides debug information about a source-level variable at this point in execution.
+    /// This decorator records where a variable's value can be found (stack position, memory
+    /// address, etc.) for use by debuggers.
+    DebugVar(DebugVarInfo),
 }
 
 impl Decorator {
@@ -40,6 +47,10 @@ impl Decorator {
         match self {
             Self::Debug(debug) => Blake3_256::hash(debug.to_string().as_bytes()),
             Self::Trace(trace) => Blake3_256::hash(&trace.to_le_bytes()),
+            Self::DebugVar(debug_var) => {
+                // Hash the debug variable info by its display representation
+                Blake3_256::hash(debug_var.to_string().as_bytes())
+            },
         }
     }
 }
@@ -55,6 +66,7 @@ impl fmt::Display for Decorator {
         match self {
             Self::Debug(options) => write!(f, "debug({options})"),
             Self::Trace(trace_id) => write!(f, "trace({trace_id})"),
+            Self::DebugVar(debug_var) => write!(f, "debugVar({})", debug_var),
         }
     }
 }
