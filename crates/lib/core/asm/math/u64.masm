@@ -333,20 +333,19 @@ const U64_DIV_EVENT = event("miden::core::math::u64::u64_div")
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a // b
-#! This takes 56 cycles.
+#! This takes 54 cycles.
 pub proc div(b: u64, a: u64) -> u64
-    movup.3 movup.3
-    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
     # Output: [q_lo, q_hi, ...]
 
     emit.U64_DIV_EVENT
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
-    # => [a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
 
     adv_push.2
     # Pops from advice: first q_hi, then q_lo, pushes them
-    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
     #==========================================================================
@@ -357,53 +356,53 @@ pub proc div(b: u64, a: u64) -> u64
     # For this to fit in 64 bits, q_hi * b_hi must be 0.
 
     # Step 1: Compute q_lo * b_lo
-    dup.4
-    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.2
+    # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
-    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_mul
     # outputs [lo, hi]: prod1 = q_lo * b_lo
-    # => [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     # Step 2: Compute q_lo * b_hi + p1_hi (must have hi=0)
-    dup.7
-    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.5
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.3
-    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_madd
     # outputs [lo, hi]: p2 = q_lo * b_hi + p1_hi
-    # => [p2_lo, p2_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_lo, p2_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
     assert
-    # p2_hi must be 0; Stack: [p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # p2_hi must be 0; Stack: [p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     # Step 3: Compute q_hi * b_lo + p2_lo (must have hi=0)
-    dup.6
-    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     dup.4
-    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    dup.4
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_madd
     # outputs [lo, hi]: p3 = q_hi * b_lo + p2_lo
-    # => [p3_lo, p3_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p3_lo, p3_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
     assert
-    # p3_hi must be 0; Stack: [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # p3_hi must be 0; Stack: [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     # Step 4: Check q_hi * b_hi = 0
-    dup.7
-    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.5
+    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.4
-    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     mul
     eq.0
     assert
-    # => [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     # Now: prod_hi = p3_lo, prod_lo = p1_lo
     # So: prod = prod_hi * 2^32 + prod_lo = q * b
 
@@ -412,12 +411,12 @@ pub proc div(b: u64, a: u64) -> u64
     #==========================================================================
     adv_push.2
     # Pops from advice: first r_hi, then r_lo
-    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
-    movup.8
-    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_hi, ...]
-    movup.9
+    movup.6
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_hi, a_lo, a_hi, ...]
+    movup.7
     # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     swap
     # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
@@ -494,18 +493,17 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a % b
 #! This takes 56 cycles.
 pub proc mod(b: u64, a: u64) -> u64
-    movup.3 movup.3
-    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
     # Output: [r_lo, r_hi, ...] (remainder only)
 
     emit.U64_DIV_EVENT
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
-    # => [a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
 
     adv_push.2
     # Pops from advice: first q_hi, then q_lo, pushes them
-    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
     #==========================================================================
@@ -513,60 +511,60 @@ pub proc mod(b: u64, a: u64) -> u64
     #==========================================================================
     # Same structure as div but q is consumed (not needed in output)
 
-    dup.4
-    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.2
+    # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
-    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_mul
-    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-
-    dup.7
-    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-    movup.3
-    # => [q_lo, b_hi, p1_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-    u32overflowing_madd
-    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-    swap
-    # => [p2_hi, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-    eq.0
-    assert
-    # => [p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     dup.5
-    # => [b_lo, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
-    dup.3
-    # => [q_hi, b_lo, p2_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    movup.3
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_madd
-    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p3_hi, p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_hi, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
     assert
-    # => [p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+
+    dup.3
+    # => [b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    dup.3
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    u32overflowing_madd
+    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    swap
+    # => [p3_hi, p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    eq.0
+    assert
+    # => [p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     # prod_hi = p3_lo, prod_lo = p1_lo
 
-    dup.6
-    # => [b_hi, p3_lo, p1_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.4
+    # => [b_hi, p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     movup.3
-    # => [q_hi, b_hi, p3_lo, p1_lo, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_hi, b_hi, p3_lo, p1_lo, b_lo, b_hi, a_lo, a_hi, ...]
     mul
     eq.0
     assert
-    # => [prod_hi, prod_lo, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [prod_hi, prod_lo, b_lo, b_hi, a_lo, a_hi, ...]
 
     #==========================================================================
     # REMAINDER BLOCK: Get remainder and verify b > r
     #==========================================================================
     adv_push.2
     # Pops from advice: first r_hi, then r_lo
-    # => [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [r_lo, r_hi, prod_hi, prod_lo, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
-    movup.6
-    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, b_hi, ...]
-    movup.7
+    movup.4
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, b_hi, a_lo, a_hi, ...]
+    movup.5
     # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     swap
     # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
@@ -638,18 +636,17 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [q_lo, q_hi, r_lo, r_hi, ...], where q = a / b, r = a % b.
 #! This takes 56 cycles.
 pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
-    movup.3 movup.3
-    # Input stack: [a_lo, a_hi, b_lo, b_hi, ...]
+    # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
     # Output: [q_lo, q_hi, r_lo, r_hi, ...]
 
     emit.U64_DIV_EVENT
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
-    # => [a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_lo, b_hi, a_lo, a_hi, ...]
 
     adv_push.2
     # Pops from advice: first q_hi, then q_lo, pushes them
-    # => [q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
     #==========================================================================
@@ -657,60 +654,60 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     #==========================================================================
     # Same as div procedure
 
-    dup.4
-    # => [b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.2
+    # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
-    # => [q_lo, b_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_mul
-    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
-    dup.7
-    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.5
+    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.3
-    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_madd
-    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
     assert
-    # => [p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
-    dup.6
-    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
     dup.4
-    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
+    dup.4
+    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32overflowing_madd
-    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
-    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
     assert
-    # => [p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     # prod_hi = p3_lo, prod_lo = p1_lo
 
-    dup.7
-    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    dup.5
+    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.4
-    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     mul
     eq.0
     assert
-    # => [prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     #==========================================================================
     # REMAINDER BLOCK: Get remainder and verify b > r
     #==========================================================================
     adv_push.2
     # Pops from advice: first r_hi, then r_lo
-    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi, ...]
+    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     u32assert2
 
-    movup.8
-    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, b_hi, ...]
-    movup.9
+    movup.6
+    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_hi, a_lo, a_hi, ...]
+    movup.7
     # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     swap
     # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]

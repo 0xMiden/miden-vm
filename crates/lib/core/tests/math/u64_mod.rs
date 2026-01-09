@@ -452,7 +452,7 @@ fn unchecked_eqz() {
 #[test]
 fn advice_push_u64div() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
         "begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.2 adv_push.2 movupw.2 dropw end"
     );
@@ -476,37 +476,38 @@ fn advice_push_u64div() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    // stack from top [a_lo, a_hi, b_lo, b_hi]
-    let input_stack = stack![a_lo, a_hi, b_lo, b_hi];
+    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
+    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
     let test = build_test!(source, &input_stack);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
-    let expected = [r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi];
+    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
 
 #[test]
 fn advice_push_u64div_two_pushes() {
     // Test that two separate adv_push.2 calls work correctly (like the div procedure uses)
-    // Uses [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
         "begin
             emit.event(\"{U64_DIV_EVENT_NAME}\")
             adv_push.2  # first push: quotient [q_lo, q_hi]
             adv_push.2  # second push: remainder [r_lo, r_hi]
-            # Stack: [r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi]
+            # Stack: [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi]
             # Drop input: positions 4-7
-            movup.7 drop  # b_hi
-            movup.6 drop  # b_lo
-            movup.5 drop  # a_hi
-            movup.4 drop  # a_lo
+            movup.7 drop  # a_hi
+            movup.6 drop  # a_lo
+            movup.5 drop  # b_hi
+            movup.4 drop  # b_lo
         end"
     );
 
     // a = 123, b = 10 => q = 12, r = 3
-    let input_stack = stack![123u64, 0, 10, 0];
+    // Stack from top: [b_lo=10, b_hi=0, a_lo=123, a_hi=0]
+    let input_stack = stack![10u64, 0, 123, 0];
     let test = build_test!(source, &input_stack);
     // Expected: [r_lo=3, r_hi=0, q_lo=12, q_hi=0]
     test.expect_stack(&[3, 0, 12, 0]);
@@ -515,7 +516,7 @@ fn advice_push_u64div_two_pushes() {
 #[test]
 fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    // Uses [a_lo, a_hi, b_lo, b_hi] from top
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
         "
     proc foo
@@ -549,20 +550,20 @@ fn advice_push_u64div_local_procedure() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    // stack from top [a_lo, a_hi, b_lo, b_hi]
-    let input_stack = stack![a_lo, a_hi, b_lo, b_hi];
+    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
+    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
     let test = build_test!(source, &input_stack);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
-    let expected = [r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, b_lo, b_hi];
+    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
 
 #[test]
 fn advice_push_u64div_conditional_execution() {
-    // Uses [a_lo, a_hi, b_lo, b_hi] from top after eq consumes condition
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top after eq consumes condition (divisor on top)
     // Test case: a = 8, b = 4, so q = 2, r = 0
     let source = format!(
         "
@@ -581,23 +582,23 @@ fn advice_push_u64div_conditional_execution() {
     );
 
     // if branch: a=8 (lo=8, hi=0), b=4 (lo=4, hi=0), condition values 1, 1
-    // Stack from top before eq: [cond1=1, cond2=1, a_lo=8, a_hi=0, b_lo=4, b_hi=0]
-    // After eq (1==1 → true): [a_lo=8, a_hi=0, b_lo=4, b_hi=0]
-    // Input array (bottom to top): [0, 4, 0, 8, 1, 1]
-    let test = build_test!(&source, &[0, 4, 0, 8, 1, 1]);
+    // Stack from top before eq: [cond1=1, cond2=1, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    // After eq (1==1 → true): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    // Input array (bottom to top): [0, 8, 0, 4, 1, 1]
+    let test = build_test!(&source, &[0, 8, 0, 4, 1, 1]);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
     // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
-    // Result: [r_lo=0, r_hi=0, q_lo=2, q_hi=0, a_lo=8, a_hi=0, b_lo=4, b_hi=0]
-    test.expect_stack(&[0, 0, 2, 0, 8, 0, 4, 0]);
+    // Result: [r_lo=0, r_hi=0, q_lo=2, q_hi=0, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    test.expect_stack(&[0, 0, 2, 0, 4, 0, 8, 0]);
 
     // else branch: condition values 0, 1 (not equal), so padw is used
     // Stack from top before eq: [cond1=0, cond2=1, ...]
-    // After eq (0==1 → false): [a_lo=8, a_hi=0, b_lo=4, b_hi=0]
+    // After eq (0==1 → false): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
     // padw adds [0, 0, 0, 0], then movupw.2 dropw removes padding word at depth 2
-    let test = build_test!(&source, &[0, 4, 0, 8, 1, 0]);
-    test.expect_stack(&[0, 0, 0, 0, 8, 0, 4, 0]);
+    let test = build_test!(&source, &[0, 8, 0, 4, 1, 0]);
+    test.expect_stack(&[0, 0, 0, 0, 4, 0, 8, 0]);
 }
 
 #[test]
