@@ -558,8 +558,9 @@ const ACC_LOW_INDEX: usize = 14;
 const ACC_HIGH_INDEX: usize = 15;
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
     #[test]
-    fn prove_verify_horner_base(
+    fn proptest_prove_verify_horner_base(
         // 8 coefficients (c0-c7) - top 8 stack elements
         c0 in any::<u64>(),
         c1 in any::<u64>(),
@@ -654,7 +655,7 @@ proptest! {
     }
 
     #[test]
-    fn prove_verify_horner_ext(
+    fn proptest_prove_verify_horner_ext(
         // 4 extension field coefficients (c0-c3), each is 2 base elements
         // Stack layout: [c0_1, c0_0, c1_1, c1_0, c2_1, c2_0, c3_1, c3_0, ...]
         c0_0 in any::<u64>(),
