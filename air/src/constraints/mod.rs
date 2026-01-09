@@ -11,7 +11,9 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
+pub mod chiplets;
 pub mod range;
+pub mod stack;
 
 /// Enforces the clock constraint: clk' = clk + 1
 ///
