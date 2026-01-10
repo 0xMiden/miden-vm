@@ -286,6 +286,17 @@ impl Instruction {
     pub const fn should_break(&self) -> bool {
         matches!(self, Self::Breakpoint)
     }
+
+    /// Returns true if the instruction has a textual representation in MASM syntax.
+    ///
+    /// Some instructions (like `DebugVar`) are only emitted by the compiler as decorators
+    /// and are not present in the textual format of MASM. These instructions cannot be
+    /// parsed from text, and should not be pretty-printed like normal instructions.
+    pub const fn has_textual_representation(&self) -> bool {
+        // DebugVar is a decorator-only instruction emitted by the compiler,
+        // not something that can be written in MASM source code.
+        !matches!(self, Self::DebugVar(_))
+    }
 }
 
 impl core::fmt::Display for Instruction {

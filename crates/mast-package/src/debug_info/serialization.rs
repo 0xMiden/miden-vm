@@ -5,6 +5,7 @@ use alloc::string::String;
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
+use miden_debug_types::{ColumnNumber, LineNumber};
 
 use super::{
     DEBUG_INFO_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo, DebugInfoSection,
@@ -225,11 +226,6 @@ impl Serializable for DebugFileInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.path_idx);
 
-        target.write_bool(self.directory_idx.is_some());
-        if let Some(idx) = self.directory_idx {
-            target.write_u32(idx);
-        }
-
         target.write_bool(self.checksum.is_some());
         if let Some(checksum) = &self.checksum {
             target.write_bytes(checksum);
@@ -241,9 +237,6 @@ impl Deserializable for DebugFileInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let path_idx = source.read_u32()?;
 
-        let has_directory = source.read_bool()?;
-        let directory_idx = if has_directory { Some(source.read_u32()?) } else { None };
-
         let has_checksum = source.read_bool()?;
         let checksum = if has_checksum {
             let bytes = source.read_slice(32)?;
@@ -254,7 +247,7 @@ impl Deserializable for DebugFileInfo {
             None
         };
 
-        Ok(Self { path_idx, directory_idx, checksum })
+        Ok(Self { path_idx, checksum })
     }
 }
 
@@ -271,8 +264,8 @@ impl Serializable for DebugFunctionInfo {
         }
 
         target.write_u32(self.file_idx);
-        target.write_u32(self.line);
-        target.write_u32(self.column);
+        target.write_u32(self.line.to_u32());
+        target.write_u32(self.column.to_u32());
 
         target.write_bool(self.type_idx.is_some());
         if let Some(idx) = self.type_idx {
@@ -310,8 +303,10 @@ impl Deserializable for DebugFunctionInfo {
         };
 
         let file_idx = source.read_u32()?;
-        let line = source.read_u32()?;
-        let column = source.read_u32()?;
+        let line_raw = source.read_u32()?;
+        let column_raw = source.read_u32()?;
+        let line = LineNumber::new(line_raw).unwrap_or_default();
+        let column = ColumnNumber::new(column_raw).unwrap_or_default();
 
         let has_type = source.read_bool()?;
         let type_idx = if has_type { Some(source.read_u32()?) } else { None };
@@ -362,8 +357,8 @@ impl Serializable for DebugVariableInfo {
         target.write_u32(self.name_idx);
         target.write_u32(self.type_idx);
         target.write_u32(self.arg_index);
-        target.write_u32(self.line);
-        target.write_u32(self.column);
+        target.write_u32(self.line.to_u32());
+        target.write_u32(self.column.to_u32());
         target.write_u32(self.scope_depth);
     }
 }
@@ -373,8 +368,10 @@ impl Deserializable for DebugVariableInfo {
         let name_idx = source.read_u32()?;
         let type_idx = source.read_u32()?;
         let arg_index = source.read_u32()?;
-        let line = source.read_u32()?;
-        let column = source.read_u32()?;
+        let line_raw = source.read_u32()?;
+        let column_raw = source.read_u32()?;
+        let line = LineNumber::new(line_raw).unwrap_or_default();
+        let column = ColumnNumber::new(column_raw).unwrap_or_default();
         let scope_depth = source.read_u32()?;
         Ok(Self {
             name_idx,
@@ -394,8 +391,8 @@ impl Serializable for DebugInlinedCallInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.callee_idx);
         target.write_u32(self.file_idx);
-        target.write_u32(self.line);
-        target.write_u32(self.column);
+        target.write_u32(self.line.to_u32());
+        target.write_u32(self.column.to_u32());
     }
 }
 
@@ -403,8 +400,10 @@ impl Deserializable for DebugInlinedCallInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let callee_idx = source.read_u32()?;
         let file_idx = source.read_u32()?;
-        let line = source.read_u32()?;
-        let column = source.read_u32()?;
+        let line_raw = source.read_u32()?;
+        let column_raw = source.read_u32()?;
+        let line = LineNumber::new(line_raw).unwrap_or_default();
+        let column = ColumnNumber::new(column_raw).unwrap_or_default();
         Ok(Self { callee_idx, file_idx, line, column })
     }
 }
@@ -483,8 +482,14 @@ mod tests {
         let file_idx = section.add_file(DebugFileInfo::new(file_idx_str));
 
         // Add a function
-        let mut func = DebugFunctionInfo::new(name_idx, file_idx, 10, 1);
-        func.add_variable(DebugVariableInfo::new(x_idx, i32_type_idx, 10, 5).with_arg_index(1));
+        let line = LineNumber::new(10).unwrap();
+        let column = ColumnNumber::new(1).unwrap();
+        let mut func = DebugFunctionInfo::new(name_idx, file_idx, line, column);
+        let var_line = LineNumber::new(10).unwrap();
+        let var_column = ColumnNumber::new(5).unwrap();
+        func.add_variable(
+            DebugVariableInfo::new(x_idx, i32_type_idx, var_line, var_column).with_arg_index(1),
+        );
         section.add_function(func);
 
         roundtrip(&section);
@@ -541,22 +546,30 @@ mod tests {
 
     #[test]
     fn test_file_info_with_checksum_roundtrip() {
-        let file = DebugFileInfo::new(0).with_directory(1).with_checksum([42u8; 32]);
+        let file = DebugFileInfo::new(0).with_checksum([42u8; 32]);
         roundtrip(&file);
     }
 
     #[test]
     fn test_function_with_mast_root_roundtrip() {
-        let mut func = DebugFunctionInfo::new(0, 0, 1, 1)
+        let line1 = LineNumber::new(1).unwrap();
+        let col1 = ColumnNumber::new(1).unwrap();
+        let mut func = DebugFunctionInfo::new(0, 0, line1, col1)
             .with_linkage_name(1)
             .with_type(2)
             .with_mast_root([0xab; 32]);
 
+        let var_line = LineNumber::new(5).unwrap();
+        let var_col = ColumnNumber::new(10).unwrap();
         func.add_variable(
-            DebugVariableInfo::new(0, 0, 5, 10).with_arg_index(1).with_scope_depth(2),
+            DebugVariableInfo::new(0, 0, var_line, var_col)
+                .with_arg_index(1)
+                .with_scope_depth(2),
         );
 
-        func.add_inlined_call(DebugInlinedCallInfo::new(0, 0, 20, 5));
+        let call_line = LineNumber::new(20).unwrap();
+        let call_col = ColumnNumber::new(5).unwrap();
+        func.add_inlined_call(DebugInlinedCallInfo::new(0, 0, call_line, call_col));
 
         roundtrip(&func);
     }
