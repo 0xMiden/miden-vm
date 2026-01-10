@@ -283,6 +283,24 @@ pub enum Instruction {
     Trace(ImmU32),
 }
 
+impl Instruction {
+    /// Returns true if the instruction should yield a breakpoint.
+    pub const fn should_break(&self) -> bool {
+        matches!(self, Self::Breakpoint)
+    }
+
+    /// Returns true if the instruction has a textual representation in MASM syntax.
+    ///
+    /// Some instructions (like `DebugVar`) are only emitted by the compiler as decorators
+    /// and are not present in the textual format of MASM. These instructions cannot be
+    /// parsed from text, and should not be pretty-printed like normal instructions.
+    pub const fn has_textual_representation(&self) -> bool {
+        // DebugVar is a decorator-only instruction emitted by the compiler,
+        // not something that can be written in MASM source code.
+        !matches!(self, Self::DebugVar(_))
+    }
+}
+
 impl core::fmt::Display for Instruction {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         use crate::prettier::PrettyPrint;

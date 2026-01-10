@@ -589,9 +589,7 @@ impl Assembler {
             },
 
             Instruction::DebugVar(debug_var_info) => {
-                if self.in_debug_mode() {
-                    block_builder.push_decorator(Decorator::DebugVar(debug_var_info.clone()))?;
-                }
+                block_builder.push_decorator(Decorator::DebugVar(debug_var_info.clone()))?;
             },
 
             // ----- emit instruction -------------------------------------------------------------
