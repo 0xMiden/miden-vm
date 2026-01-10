@@ -338,10 +338,8 @@ impl PrecompileTranscript {
         let comm = commitment.comm_calldata();
         let tag = commitment.tag();
 
-        state[Rpo256::RATE_RANGE.start..Rpo256::RATE_RANGE.start + 4]
-            .copy_from_slice(comm.as_elements());
-        state[Rpo256::RATE_RANGE.start + 4..Rpo256::RATE_RANGE.end]
-            .copy_from_slice(tag.as_elements());
+        state[Rpo256::INPUT1_RANGE].copy_from_slice(comm.as_elements());
+        state[Rpo256::INPUT2_RANGE].copy_from_slice(tag.as_elements());
         state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
         Rpo256::apply_permutation(&mut state);
@@ -355,7 +353,7 @@ impl PrecompileTranscript {
     /// The output is equivalent to the sequential hash of all [`PrecompileCommitment`]s, followed
     /// by two empty words. This is because
     /// - Each commitment is represented as two words, a multiple of the rate.
-    /// - The initial capacity is set to the zero word since we absord full double words when
+    /// - The initial capacity is set to the zero word since we absorb full double words when
     ///   calling `record` or `finalize`.
     pub fn finalize(self) -> PrecompileTranscriptDigest {
         // Interpret state as [RATE0, RATE1, CAPACITY] with two empty rate words.

@@ -7,7 +7,7 @@ use miden_crypto::{
 };
 
 use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
-use crate::utils::{ByteReader, Deserializable, DeserializationError, range};
+use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 // STACK OUTPUTS
 // ================================================================================================
@@ -79,14 +79,16 @@ impl StackOutputs {
     /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
     /// and N+3 at position 3. `Word[0]` corresponds to the top of the stack.
     pub fn get_stack_word(&self, idx: usize) -> Option<Word> {
-        let word_elements: [Felt; WORD_SIZE] = {
-            let word_elements: Vec<Felt> =
-                range(idx, 4).map(|idx| self.get_stack_item(idx)).collect::<Option<_>>()?;
+        if idx > MIN_STACK_DEPTH - WORD_SIZE {
+            return None;
+        }
 
-            word_elements.try_into().expect("a Word contains 4 elements")
-        };
-
-        Some(word_elements.into())
+        Some(Word::from([
+            self.elements[idx],
+            self.elements[idx + 1],
+            self.elements[idx + 2],
+            self.elements[idx + 3],
+        ]))
     }
 
     /// Returns the number of requested stack outputs or returns the full stack if fewer than the

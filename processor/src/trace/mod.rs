@@ -11,8 +11,6 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
-#[cfg(feature = "std")]
-use miden_core::field::PrimeField64;
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     field::ExtensionField,
@@ -226,6 +224,7 @@ impl ExecutionTrace {
     #[cfg(feature = "std")]
     pub fn print(&self) {
         use miden_air::trace::TRACE_WIDTH;
+        use miden_core::field::PrimeField64;
 
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.length() {
