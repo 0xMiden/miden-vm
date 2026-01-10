@@ -5,7 +5,7 @@ expression: layout
 MAIN TRACE LAYOUT
 ===================
 
-Minimum trace length: 64
+Minimum trace length: 2048
 
 System Trace:
   Offset: 0
