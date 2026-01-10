@@ -19,7 +19,7 @@ doctest = false
 
 [features]
 default = ["std"]
-std = ["miden-assembly-syntax/std", "miden-core/std", "thiserror/std"]
+std = ["miden-assembly-syntax/std", "miden-core/std", "thiserror/std", "miden-project/std", "miden-mast-package/std"]
 testing = ["logging", "miden-assembly-syntax/testing"]
 logging = ["dep:env_logger"]
 
@@ -28,6 +28,7 @@ logging = ["dep:env_logger"]
 miden-assembly-syntax.workspace = true
 miden-core.workspace = true
 miden-mast-package.workspace = true
+miden-project = { workspace = true, features = ["serde", "resolver"] }
 
 # External dependencies
 env_logger = { workspace = true, optional = true }

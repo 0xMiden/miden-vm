@@ -25,6 +25,7 @@ fn test_memcopy_words() {
     ";
 
     let core_lib = CoreLibrary::default();
+    #[allow(deprecated)]
     let assembler = miden_assembly::Assembler::default()
         .with_dynamic_library(&core_lib)
         .expect("failed to load core library");
@@ -141,6 +142,7 @@ fn test_memcopy_elements() {
     ";
 
     let core_lib = CoreLibrary::default();
+    #[allow(deprecated)]
     let assembler = miden_assembly::Assembler::default()
         .with_dynamic_library(&core_lib)
         .expect("failed to load core library");

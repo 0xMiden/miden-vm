@@ -19,6 +19,7 @@ fn merge_programs(
     let lib_a = Assembler::new(context.source_manager()).assemble_library([module])?;
 
     let mut assembler = Assembler::new(context.source_manager());
+    #[allow(deprecated)]
     assembler.link_dynamic_library(lib_a.clone())?;
     let lib_b = assembler.assemble_library([program_b])?.mast_forest().as_ref().clone();
     let lib_a = lib_a.mast_forest().as_ref().clone();

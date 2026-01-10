@@ -1,5 +1,6 @@
+use alloc::{boxed::Box, vec};
 #[cfg(feature = "std")]
-use std::{boxed::Box, path::Path};
+use std::path::Path;
 
 #[cfg(feature = "std")]
 use miden_assembly_syntax::debuginfo::Spanned;
@@ -38,6 +39,110 @@ pub struct Package {
     profiles: Vec<Profile>,
 }
 
+/// Constructor
+impl Package {
+    /// Create a new [Package] named `name` with the given default target.
+    ///
+    /// The resulting package will have a default version of `0.0.0`, no dependencies, and an
+    /// initial set of profiles that consist of the default development and release profiles. The
+    /// project will have no other configuration set up - that must be done in subsequent steps.
+    pub fn new(name: impl Into<Arc<str>>, default_target: Target) -> Box<Self> {
+        let name = name.into();
+        let (lib, bins) = if default_target.is_library() {
+            (Some(Span::unknown(default_target)), vec![])
+        } else {
+            (None, vec![Span::unknown(default_target)])
+        };
+        let profiles = vec![Profile::default(), Profile::release()];
+        Box::new(Self {
+            #[cfg(feature = "std")]
+            manifest_path: None,
+            name: Span::unknown(name),
+            version: Span::unknown(SemVer::new(0, 0, 0)),
+            description: None,
+            dependencies: Default::default(),
+            lints: Default::default(),
+            metadata: Default::default(),
+            lib,
+            bins,
+            profiles,
+        })
+    }
+
+    /// Specify a version for this package during initial construction
+    pub fn with_version(mut self: Box<Self>, version: SemVer) -> Box<Self> {
+        *self.version = version;
+        self
+    }
+
+    /// Provide the lint configuration for this package during initial construction
+    pub fn with_lints(mut self: Box<Self>, lints: MetadataSet) -> Box<Self> {
+        self.lints = lints;
+        self
+    }
+
+    /// Provide the metadata for this package during initial construction
+    pub fn with_metadata(mut self: Box<Self>, metadata: MetadataSet) -> Box<Self> {
+        self.metadata = metadata;
+        self
+    }
+
+    /// Add targets to this package during initial construction
+    ///
+    /// This function will panic if any of the given targets conflict with existing targets or
+    /// each other.
+    pub fn with_targets(
+        mut self: Box<Self>,
+        targets: impl IntoIterator<Item = Target>,
+    ) -> Box<Self> {
+        for target in targets {
+            if target.is_library() {
+                assert!(self.lib.is_none(), "a package cannot have duplicate library targets");
+                self.lib = Some(Span::unknown(target));
+            } else {
+                if self.bins.iter().any(|t| t.name == target.name) {
+                    panic!("duplicate definitions of the same target '{}'", &target.name);
+                }
+                self.bins.push(Span::unknown(target));
+            }
+        }
+        self
+    }
+
+    /// Add a profile to this package during initial construction
+    ///
+    /// If the given profile matches an existing profile, it will be merged over the top of it.
+    pub fn with_profile(mut self: Box<Self>, profile: Profile) -> Box<Self> {
+        for existing in self.profiles.iter_mut() {
+            if existing.name() == profile.name() {
+                existing.merge(&profile);
+                return self;
+            }
+        }
+
+        self.profiles.push(profile);
+        self
+    }
+
+    /// Add dependencies to this package during initial construction
+    ///
+    /// This function will panic if any of the given dependencies conflict with existing deps or
+    /// each other.
+    pub fn with_dependencies(
+        mut self: Box<Self>,
+        dependencies: impl IntoIterator<Item = Dependency>,
+    ) -> Box<Self> {
+        for dependency in dependencies {
+            if self.dependencies().iter().any(|dep| dep.name() == dependency.name()) {
+                panic!("duplicate definitions of dependency '{}'", dependency.name());
+            }
+            self.dependencies.push(dependency);
+        }
+
+        self
+    }
+}
+
 /// Accessors
 impl Package {
     /// Get the name of this package
@@ -53,6 +158,11 @@ impl Package {
     /// Get the description of this package, if specified
     pub fn description(&self) -> Option<Arc<str>> {
         self.description.clone()
+    }
+
+    /// Set the description of this package, if specified
+    pub fn set_description(&mut self, description: impl Into<Arc<str>>) {
+        self.description = Some(description.into());
     }
 
     /// Get the set of dependencies this package requires
@@ -88,6 +198,77 @@ impl Package {
     /// Get a reference to the executable build targets provided by this package
     pub fn executable_targets(&self) -> &[Span<Target>] {
         &self.bins
+    }
+
+    /// Get the total number of build targets for this package
+    pub fn num_targets(&self) -> usize {
+        self.bins.len() + self.lib.is_some() as usize
+    }
+
+    /// Get a reference to one of the build targets in this package, given a [TargetSelector].
+    ///
+    /// Returns a reference to the target if the selection is matched, and is unambiguous.
+    ///
+    /// Returns a [TargetSelectionError] if any of the following apply:
+    ///
+    /// * There are no matching targets
+    /// * The selector matched more than a single target
+    pub fn get_target(
+        &self,
+        selector: TargetSelector<'_>,
+    ) -> Result<&Target, TargetSelectionError> {
+        match selector {
+            TargetSelector::Default => self.get_default_target(),
+            TargetSelector::Type(ty) if ty.is_library() => match self.lib.as_ref() {
+                Some(target) if target.ty == ty => Ok(target.inner()),
+                Some(_) | None => Err(TargetSelectionError::TypeNotFound(ty)),
+            },
+            selector @ TargetSelector::Type(ty) => match self.bins.first() {
+                Some(target) if self.bins.len() == 1 => Ok(target.inner()),
+                Some(_) => Err(TargetSelectionError::Ambiguous { selector: selector.into_owned() }),
+                None => Err(TargetSelectionError::TypeNotFound(ty)),
+            },
+            selector @ TargetSelector::Name(_) => {
+                if let Some(lib_target) = self.lib.as_ref()
+                    && selector.matches(lib_target)
+                {
+                    return Ok(lib_target.inner());
+                }
+                let mut matches = self.bins.iter().filter(|target| selector.matches(target));
+                let selected = matches.next();
+                if matches.next().is_some() {
+                    Err(TargetSelectionError::Ambiguous { selector: selector.into_owned() })
+                } else {
+                    selected.map(|target| target.inner()).ok_or_else(|| match selector {
+                        TargetSelector::Default => {
+                            TargetSelectionError::TypeNotFound(TargetType::Library)
+                        },
+                        TargetSelector::Type(ty) => TargetSelectionError::TypeNotFound(ty),
+                        TargetSelector::Name(name) => {
+                            TargetSelectionError::NameNotFound(name.into_owned().into_boxed_str())
+                        },
+                    })
+                }
+            },
+        }
+    }
+
+    /// Returns the default build target for this package, or an error if one cannot be selected.
+    ///
+    /// Equivalent to calling [`Self::get_target`] with `TargetSelector::Default`.
+    pub fn get_default_target(&self) -> Result<&Target, TargetSelectionError> {
+        let has_executable_targets = !self.bins.is_empty();
+        match self.lib.as_ref() {
+            Some(lib_target) if !has_executable_targets => Ok(lib_target.inner()),
+            Some(_) => Err(TargetSelectionError::Ambiguous { selector: TargetSelector::Default }),
+            None => match self.bins.first() {
+                Some(target) if self.bins.len() == 1 => Ok(target.inner()),
+                Some(_) => {
+                    Err(TargetSelectionError::Ambiguous { selector: TargetSelector::Default })
+                },
+                None => Err(TargetSelectionError::NoTargets),
+            },
+        }
     }
 
     /// Get the location of the manifest this package was loaded from, if known/applicable.

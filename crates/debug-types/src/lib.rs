@@ -167,6 +167,15 @@ impl<'a> From<&'a std::path::Path> for Uri {
     }
 }
 
+#[cfg(feature = "std")]
+impl From<std::path::PathBuf> for Uri {
+    fn from(path: std::path::PathBuf) -> Self {
+        use alloc::string::ToString;
+
+        Self::from(path.display().to_string())
+    }
+}
+
 impl Serializable for Uri {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.as_str().write_into(target);
@@ -189,6 +198,80 @@ impl core::str::FromStr for Uri {
 
 // TESTS
 // ================================================================================================
+
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for Uri {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        prop_oneof![
+            2 => Self::arbitrary_file(),
+            1 => Self::arbitrary_http(),
+            2 => Self::arbitrary_git(),
+        ]
+        .boxed()
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod strategies {
+    use alloc::{format, string::String};
+
+    use proptest::prelude::*;
+
+    use super::Uri;
+
+    impl Uri {
+        /// Generate an arbitrary HTTP URI
+        pub fn arbitrary_http() -> impl Strategy<Value = Self> {
+            http_strategy()
+        }
+
+        /// Generate an arbitrary Git URI
+        pub fn arbitrary_git() -> impl Strategy<Value = Self> {
+            git_strategy()
+        }
+
+        /// Generate an arbitrary file URI
+        #[cfg(feature = "std")]
+        pub fn arbitrary_file() -> impl Strategy<Value = Self> {
+            any::<std::path::PathBuf>().prop_map(|path| Self::from(path.as_path()))
+        }
+    }
+
+    prop_compose! {
+        pub fn http_strategy()(
+            userinfo in prop::sample::select(&[None, Some("user:pass@")]),
+            host in "([a-zA-Z0-9-_]+[.])?[a-zA-Z0-9-_]+[.](com|org)",
+            path_components in prop::collection::vec(prop::string::string_regex("[a-zA-Z0-9-_]+").unwrap(), 0..4),
+        ) -> Uri {
+            let mut path = String::new();
+            for (i, component) in path_components.into_iter().enumerate() {
+                if i > 0 {
+                    path.push('/');
+                }
+                path.push_str(&component);
+            }
+            Uri::new(format!("http://{}{host}{path}", userinfo.unwrap_or_default()))
+        }
+    }
+
+    prop_compose! {
+        pub fn git_strategy()(
+            scheme in prop::sample::select(&["http", "git"]),
+            host in "([a-zA-Z0-9-_]+[.])?[a-zA-Z0-9-_]+[.](com|org)",
+            path in "[a-zA-Z0-9-_]+",
+        ) -> Uri {
+            match scheme {
+                "ssh" => Uri::new(format!("git@{host}:{path}.git")),
+                _ => Uri::new(format!("http://{host}/{path}")),
+            }
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

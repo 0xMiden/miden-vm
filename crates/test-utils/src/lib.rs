@@ -361,6 +361,7 @@ impl Test {
             });
         // Debug mode is now always enabled
         for library in &self.libraries {
+            #[allow(deprecated)]
             assembler.link_dynamic_library(library).unwrap();
         }
 

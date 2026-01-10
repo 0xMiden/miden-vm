@@ -336,6 +336,7 @@ fn run_keccak_with_max_hash_len(
     );
 
     let core_lib = miden_core_lib::CoreLibrary::default();
+    #[allow(deprecated)]
     let program = Assembler::default()
         .with_static_library(core_lib.library())
         .unwrap()

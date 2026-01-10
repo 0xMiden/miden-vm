@@ -9,16 +9,17 @@ use miden_assembly_syntax::{
     },
     debuginfo::{SourceManager, Span, Spanned},
 };
+use miden_project::VersionedPackageId;
 
 use super::{AdviceMap, LinkStatus, Symbol, SymbolItem, SymbolResolver};
 
 /// The source from which a [LinkModule] was derived.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ModuleSource {
     /// The module was parsed from Miden Assembly source code
     Ast,
     /// The module was loaded from a Miden package's MAST forest
-    Mast,
+    Mast(Option<VersionedPackageId>),
 }
 
 /// A [LinkModule] represents a module that is being linked or linked against by the linker.
@@ -124,13 +125,21 @@ impl LinkModule {
     /// Returns true if this module was loaded from MAST, rather than parsed from MASM sources.
     #[inline]
     pub fn is_mast(&self) -> bool {
-        matches!(self.source, ModuleSource::Mast)
+        matches!(self.source, ModuleSource::Mast(_))
+    }
+
+    /// Get the source package of this module, if available
+    pub fn source_package(&self) -> Option<&VersionedPackageId> {
+        match &self.source {
+            ModuleSource::Ast => None,
+            ModuleSource::Mast(pkgid) => pkgid.as_ref(),
+        }
     }
 
     /// Get the source type of this module.
     #[inline(always)]
-    pub fn source(&self) -> ModuleSource {
-        self.source
+    pub fn source(&self) -> &ModuleSource {
+        &self.source
     }
 
     /// Get the kind of this module, i.e. kernel, executable, or library.

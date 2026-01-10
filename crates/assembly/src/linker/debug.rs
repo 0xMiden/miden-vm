@@ -59,7 +59,7 @@ struct DisplayModuleGraphNode<'a> {
     id: GlobalItemIndex,
     path: &'a Path,
     name: &'a ast::Ident,
-    source: ModuleSource,
+    source: &'a ModuleSource,
 }
 
 impl fmt::Debug for DisplayModuleGraphNode<'_> {

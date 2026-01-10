@@ -30,6 +30,8 @@ pub use self::{
     scanner::Scanner,
     token::{BinEncodedValue, DocumentationType, IntValue, PushValue, Token, WordValue},
 };
+#[cfg(feature = "std")]
+use crate::ast::ModuleKind;
 use crate::{Path, ast, sema};
 
 // TYPE ALIASES
@@ -179,6 +181,10 @@ fn parse_forms_internal(
 /// Read the contents (modules) of this library from `dir`, returning any errors that occur
 /// while traversing the file system.
 ///
+/// By default, the file named `mod.masm` in `dir` will be used as the top-level module of the
+/// namespace parsed from `dir`. However, you can change this by passing a filename, `root`, that
+/// will be used instead. When `root` is provided, `mod.masm` will be ignored if present.
+///
 /// Errors may also be returned if traversal discovers issues with the modules, such as
 /// invalid names, etc.
 ///
@@ -187,6 +193,8 @@ fn parse_forms_internal(
 pub fn read_modules_from_dir(
     dir: impl AsRef<std::path::Path>,
     namespace: impl AsRef<Path>,
+    root: Option<&str>,
+    kind: ModuleKind,
     source_manager: Arc<dyn SourceManager>,
     warnings_as_errors: bool,
 ) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
@@ -200,14 +208,12 @@ pub fn read_modules_from_dir(
         return Err(report!("the provided path '{}' is not a valid directory", dir.display()));
     }
 
-    // mod.masm is not allowed in the root directory
-    if dir.join(ast::Module::ROOT_FILENAME).exists() {
-        return Err(report!("{} is not allowed in the root directory", ast::Module::ROOT_FILENAME));
-    }
+    let root_filename = root.unwrap_or(ast::Module::ROOT_FILENAME);
 
     let mut modules = BTreeMap::default();
 
-    let walker = WalkModules::new(namespace.as_ref().to_path_buf(), dir)
+    let namespace = namespace.as_ref();
+    let walker = WalkModules::new(namespace.to_path_buf(), dir, root_filename)
         .into_diagnostic()
         .wrap_err_with(|| format!("failed to load modules from '{}'", dir.display()))?;
     for entry in walker {
@@ -217,7 +223,11 @@ pub fn read_modules_from_dir(
         }
 
         // Parse module at the given path
-        let mut parser = ModuleParser::new(ast::ModuleKind::Library);
+        let mut parser = ModuleParser::new(if name.as_path() == namespace {
+            kind
+        } else {
+            ModuleKind::Library
+        });
         parser.set_warnings_as_errors(warnings_as_errors);
         let ast = parser.parse_file(&name, &source_path, source_manager.clone())?;
         match modules.entry(name) {
@@ -251,19 +261,26 @@ mod module_walker {
         pub source_path: PathBuf,
     }
 
-    pub struct WalkModules<'a> {
+    pub struct WalkModules {
         namespace: LibraryPathBuf,
-        root: &'a Path,
+        root: PathBuf,
+        root_module_path: PathBuf,
         stack: alloc::collections::VecDeque<io::Result<DirEntry>>,
     }
 
-    impl<'a> WalkModules<'a> {
-        pub fn new(namespace: LibraryPathBuf, path: &'a Path) -> io::Result<Self> {
+    impl WalkModules {
+        pub fn new(
+            namespace: LibraryPathBuf,
+            path: &Path,
+            root_module_filename: &str,
+        ) -> io::Result<Self> {
             use alloc::collections::VecDeque;
 
-            let stack = VecDeque::from_iter(fs::read_dir(path)?);
+            let root = path.canonicalize()?;
+            let root_module_path = root.join(root_module_filename);
+            let stack = VecDeque::from_iter(fs::read_dir(&root)?);
 
-            Ok(Self { namespace, root: path, stack })
+            Ok(Self { namespace, root, root_module_path, stack })
         }
 
         fn next_entry(
@@ -286,6 +303,22 @@ mod module_walker {
                 return Ok(None);
             }
 
+            let is_root_module = file_path == self.root_module_path.as_path();
+            if is_root_module {
+                return Ok(Some(ModuleEntry {
+                    name: self.namespace.clone(),
+                    source_path: file_path,
+                }));
+            }
+
+            // If the root module file name is not `mod.masm`, then ignore any mod.masm files in
+            // the root directory
+            if file_path.file_name().is_some_and(|name| name.eq_ignore_ascii_case("mod.masm"))
+                && file_path.parent().unwrap() == self.root
+            {
+                return Ok(None);
+            }
+
             // Remove the file extension and the root prefix, leaving a namespace-relative path
             file_path.set_extension("");
             if file_path.is_dir() {
@@ -295,7 +328,7 @@ mod module_walker {
                 ));
             }
             let relative_path = file_path
-                .strip_prefix(self.root)
+                .strip_prefix(&self.root)
                 .expect("expected path to be a child of the root directory");
 
             // Construct a [LibraryPath] from the path components, after validating them
@@ -312,7 +345,7 @@ mod module_walker {
         }
     }
 
-    impl Iterator for WalkModules<'_> {
+    impl Iterator for WalkModules {
         type Item = Result<ModuleEntry, Report>;
 
         fn next(&mut self) -> Option<Self::Item> {

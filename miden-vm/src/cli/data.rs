@@ -134,11 +134,13 @@ where
     {
         // compile program
         let mut assembler = Assembler::new(self.source_manager.clone());
+        #[allow(deprecated)]
         assembler
             .link_dynamic_library(CoreLibrary::default())
             .wrap_err("Failed to load core library")?;
 
         for library in libraries {
+            #[allow(deprecated)]
             assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
         }
 

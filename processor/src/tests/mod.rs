@@ -732,6 +732,7 @@ fn test_diagnostic_procedure_not_found_call() {
 
     let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
+    #[allow(deprecated)]
     let program = Assembler::new(source_manager.clone())
         .with_dynamic_library(&library)
         .unwrap()
@@ -791,6 +792,7 @@ fn test_diagnostic_procedure_not_found_join() {
 
     let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
+    #[allow(deprecated)]
     let program = Assembler::new(source_manager.clone())
         .with_dynamic_library(&library)
         .unwrap()
@@ -854,6 +856,7 @@ fn test_diagnostic_procedure_not_found_loop() {
 
     let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
+    #[allow(deprecated)]
     let program = Assembler::new(source_manager.clone())
         .with_dynamic_library(&library)
         .unwrap()
@@ -918,6 +921,7 @@ fn test_diagnostic_procedure_not_found_split() {
 
     let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
 
+    #[allow(deprecated)]
     let program = Assembler::new(source_manager.clone())
         .with_dynamic_library(&library)
         .unwrap()

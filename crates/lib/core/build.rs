@@ -7,10 +7,11 @@ use std::{
 
 use fs_err as fs;
 use miden_assembly::{
-    self as masm, Assembler, Library, Parse, ParseOptions, Report,
+    self as masm, Assembler, Library, Parse, ParseOptions, Report, TargetSelector,
     ast::{self, ModuleKind},
     debuginfo::DefaultSourceManager,
     diagnostics::IntoDiagnostic,
+    package::Package,
 };
 
 // CONSTANTS
@@ -215,21 +216,32 @@ fn main() -> Result<(), Report> {
     // Enable debug tracing to stderr via the MIDEN_LOG environment variable, if present
     env_logger::Builder::from_env("MIDEN_LOG").format_timestamp(None).init();
 
-    // Build core library
+    // Build core library package
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let asm_dir = Path::new(manifest_dir).join(ASM_DIR_PATH);
 
-    let assembler = Assembler::default();
-    let namespace = "::miden::core".parse::<masm::PathBuf>().expect("invalid base namespace");
-    let core_lib = assembler.assemble_library_from_dir(&asm_dir, namespace)?;
+    let mut assembler = Assembler::default();
+    assembler.load_project(asm_dir.join("miden-project.toml"))?;
+    let package = assembler.assemble_target(TargetSelector::Default)?;
+
+    let build_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // write the masp output
+    let output_file = build_dir.join(ASL_DIR_PATH).join("core").with_extension(Package::EXTENSION);
+
+    package
+        .write_to_file(output_file)
+        .map_err(|e| io::Error::other(e.to_string()))
+        .into_diagnostic()?;
+
     // write the masl output
-    let build_dir = env::var("OUT_DIR").unwrap();
-    let build_dir = Path::new(&build_dir);
     let output_file = build_dir
         .join(ASL_DIR_PATH)
         .join("core")
         .with_extension(Library::LIBRARY_EXTENSION);
-    core_lib
+
+    package
+        .mast
         .write_to_file(output_file)
         .map_err(|e| io::Error::other(e.to_string()))
         .into_diagnostic()?;

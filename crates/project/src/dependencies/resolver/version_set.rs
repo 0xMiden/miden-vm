@@ -1,12 +1,16 @@
+use alloc::collections::BTreeSet;
 use core::fmt;
-use std::collections::BTreeSet;
 
 use miden_core::{LexicographicWord, Word};
+#[cfg(feature = "resolver")]
 use pubgrub::VersionSet as _;
 use smallvec::{SmallVec, smallvec};
 
 use super::pubgrub_compat::SemverPubgrub;
-use crate::{SemVer, Version, VersionReq, VersionRequirement};
+use crate::{
+    Linkage, SemVer, Version, VersionReq, VersionRequirement,
+    dependencies::version::VersionSelection,
+};
 
 /// This type is an implementation detail of the dependency resolver provided by
 /// [`super::PackageIndex`].
@@ -30,7 +34,7 @@ use crate::{SemVer, Version, VersionReq, VersionRequirement};
 ///     provisionally considered to be contained in the set, IFF
 ///   * If the set specifies a content digest filter, then `v` must have a content digest component
 ///     that matches that filter.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct VersionSet {
     /// The range(s) of semantic versions that are included in the set
     range: SemverPubgrub,
@@ -38,6 +42,19 @@ pub struct VersionSet {
     /// to be members of this set. When non-empty, the set _only_ includes versions that are
     /// considered contained in `range` _and_ have a content digest in `digests`.
     digests: SmallVec<[LexicographicWord; 1]>,
+    /// The linkage specified by the dependent on whatever version is ultimately selected from this
+    /// set.
+    ///
+    /// When merging sets, we always prefer the more explicit linkage, and if both are explicit, we
+    /// take the tighter binding of the two (i.e. preferring static over dynamic).
+    linkage: Option<Linkage>,
+}
+
+impl Eq for VersionSet {}
+impl PartialEq for VersionSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.range == other.range && self.digests == other.digests
+    }
 }
 
 /// Represents an additional filter on the versions considered a member of a [VersionSet].
@@ -61,6 +78,50 @@ impl VersionSetFilter<'_> {
 }
 
 impl VersionSet {
+    /// Construct a new [VersionSet] from a semantic version requirement
+    pub fn new(range: VersionReq, linkage: Option<Linkage>) -> Self {
+        Self {
+            range: SemverPubgrub::from(&range),
+            digests: Default::default(),
+            linkage,
+        }
+    }
+
+    /// Construct a [VersionSet] representing all available versions
+    pub fn all() -> Self {
+        Self::from(SemverPubgrub::full())
+    }
+
+    /// Construct a new [VersionSet] for a single version
+    pub fn singleton(version: impl Into<VersionSelection>) -> Self {
+        let VersionSelection {
+            version: Version { version, digest },
+            linkage,
+        } = version.into();
+        Self {
+            range: SemverPubgrub::singleton(version),
+            digests: SmallVec::from_iter(digest),
+            linkage,
+        }
+    }
+
+    /// Specify the linkage for versions selected from this set
+    pub fn with_linkage(mut self, linkage: Linkage) -> Self {
+        self.linkage = Some(linkage);
+        self
+    }
+
+    /// Filter the versions in the set to only include those that have a digest in `digests`.
+    pub fn with_filter(mut self, digests: impl IntoIterator<Item = LexicographicWord>) -> Self {
+        self.digests.extend(digests);
+        self
+    }
+
+    /// Get the linkage for versions in this set
+    pub fn linkage(&self) -> Option<Linkage> {
+        self.linkage
+    }
+
     /// Get the semantic version range(s) that are members of this set
     pub fn range(&self) -> &SemverPubgrub {
         &self.range
@@ -88,6 +149,7 @@ impl From<Word> for VersionSet {
         Self {
             range: SemverPubgrub::empty(),
             digests: smallvec![LexicographicWord::new(value)],
+            linkage: None,
         }
     }
 }
@@ -97,6 +159,7 @@ impl From<SemVer> for VersionSet {
         Self {
             range: SemverPubgrub::singleton(value),
             digests: smallvec![],
+            linkage: None,
         }
     }
 }
@@ -107,6 +170,18 @@ impl From<Version> for VersionSet {
         Self {
             range: SemverPubgrub::singleton(version),
             digests: SmallVec::from_iter(digest),
+            linkage: None,
+        }
+    }
+}
+
+impl From<VersionSelection> for VersionSet {
+    fn from(VersionSelection { version, linkage }: VersionSelection) -> Self {
+        let Version { version, digest } = version;
+        Self {
+            range: SemverPubgrub::singleton(version),
+            digests: SmallVec::from_iter(digest),
+            linkage,
         }
     }
 }
@@ -116,6 +191,7 @@ impl From<VersionReq> for VersionSet {
         Self {
             range: SemverPubgrub::from(&value),
             digests: smallvec![],
+            linkage: None,
         }
     }
 }
@@ -125,6 +201,7 @@ impl From<&VersionReq> for VersionSet {
         Self {
             range: SemverPubgrub::from(value),
             digests: smallvec![],
+            linkage: None,
         }
     }
 }
@@ -140,7 +217,11 @@ impl From<VersionRequirement> for VersionSet {
 
 impl From<SemverPubgrub> for VersionSet {
     fn from(range: SemverPubgrub) -> Self {
-        Self { range, digests: smallvec![] }
+        Self {
+            range,
+            digests: smallvec![],
+            linkage: None,
+        }
     }
 }
 
@@ -163,8 +244,9 @@ impl fmt::Display for VersionSet {
     }
 }
 
+#[cfg(feature = "resolver")]
 impl pubgrub::VersionSet for VersionSet {
-    type V = Version;
+    type V = VersionSelection;
 
     fn empty() -> Self {
         Self::from(SemverPubgrub::empty())
@@ -179,12 +261,24 @@ impl pubgrub::VersionSet for VersionSet {
     }
 
     fn complement(&self) -> Self {
-        Self::from(self.range.complement())
+        let linkage = self.linkage;
+        Self {
+            linkage,
+            ..Self::from(self.range.complement())
+        }
     }
 
     fn intersection(&self, other: &Self) -> Self {
+        let linkage = match (self.linkage, other.linkage) {
+            (None, None) => None,
+            (None, l @ Some(_)) | (l @ Some(_), None) => l,
+            (Some(l), Some(r)) => Some(l | r),
+        };
         if self.digests.is_empty() && other.digests.is_empty() {
-            return Self::from(self.range.intersection(&other.range));
+            return Self {
+                linkage,
+                ..Self::from(self.range.intersection(&other.range))
+            };
         }
 
         let ldigests = BTreeSet::from_iter(self.digests.iter());
@@ -194,18 +288,18 @@ impl pubgrub::VersionSet for VersionSet {
         // return an empty set, as the expectation would be that at least one digest remains in a
         // non-empty intersection.
         if digests.is_empty() && !(self.digests.is_empty() || other.digests.is_empty()) {
-            Self::empty()
+            Self { linkage, ..Self::empty() }
         } else {
             let range = self.range.intersection(&other.range);
-            Self { range, digests }
+            Self { range, digests, linkage }
         }
     }
 
     fn contains(&self, v: &Self::V) -> bool {
-        if let Some(digest) = v.digest.as_ref() {
+        if let Some(digest) = v.version.digest.as_ref() {
             self.digests.contains(digest)
         } else {
-            self.range.contains(&v.version)
+            self.range.contains(&v.version.version)
         }
     }
 }

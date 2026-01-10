@@ -151,6 +151,7 @@ fn log_precompile_request_procedure() {
     assert_eq!(expected_transcript, transcript);
 
     // Prove/verify the same program to ensure deferred requests are handled in the STARK proof.
+    #[allow(deprecated)]
     let program: Program = Assembler::default()
         .with_dynamic_library(CoreLibrary::default())
         .expect("failed to load core library")

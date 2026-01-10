@@ -5,7 +5,7 @@ use pubgrub::{Dependencies, DependencyProvider, SelectedDependencies};
 use smallvec::SmallVec;
 
 use super::{version_set::VersionSetFilter, *};
-use crate::{SemVer, Version};
+use crate::{PackageId, SemVer, Version, dependencies::version::VersionSelection};
 
 /// Represents package priorities in the resolver.
 ///
@@ -179,7 +179,7 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
     /// The type used to identify packages in the provider
     type P = PackageId;
     /// The type used to represent package versions
-    type V = Version;
+    type V = VersionSelection;
     /// The type used to represent version requirements.
     ///
     /// NOTE: Requirements must be able to process versions of type `V`
@@ -228,6 +228,7 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
         let Some(versions) = self.index.get(package) else {
             return Ok(None);
         };
+        let linkage = range.linkage();
         let filter = range.filter();
         let ranges = range.range();
         if ranges.is_empty()
@@ -239,11 +240,11 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
                 .find(|v| v.digest.as_ref().is_some_and(|digest| digests.contains(digest)))
                 .cloned();
 
-            Ok(version)
+            Ok(version.map(|version| VersionSelection { version, linkage }))
         } else if let Some(version) = ranges.as_singleton()
             && let Some((v, _)) = versions.get_key_value(version)
         {
-            Ok(Some(v.clone()))
+            Ok(Some(VersionSelection { version: v.clone(), linkage }))
         } else if let Some((start, end)) = ranges.bounding_range() {
             let range = (start.cloned(), end.cloned());
             let version = versions
@@ -257,7 +258,7 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
                     }
                 })
                 .cloned();
-            Ok(version)
+            Ok(version.map(|version| VersionSelection { version, linkage }))
         } else {
             let version = versions
                 .keys()
@@ -265,7 +266,7 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
                 .find(|v| filter.matches(v) && ranges.contains(&v.version))
                 .cloned();
 
-            Ok(version)
+            Ok(version.map(|version| VersionSelection { version, linkage }))
         }
     }
 
@@ -282,14 +283,17 @@ impl<'a> DependencyProvider for PackageResolver<'a> {
         };
 
         // If `version` is not in the index, indicate that to the caller
-        let Some(deps) = available.get(version) else {
+        let Some(info) = available.get(&version.version) else {
             return Ok(Dependencies::Unavailable(format!(
                 "version '{version}' of '{package}' was not found in registry"
             )));
         };
 
         Ok(Dependencies::Available(
-            deps.iter().map(|(name, range)| (name.clone(), range.clone())).collect(),
+            info.requirements
+                .iter()
+                .map(|(name, range)| (name.clone(), range.clone()))
+                .collect(),
         ))
     }
 
@@ -314,7 +318,7 @@ pub enum DependencyResolutionError {
     #[error("could not get dependencies for '{package}' version '{version}': {error}")]
     FailedRetreivingDependencies {
         package: PackageId,
-        version: Version,
+        version: Box<VersionSelection>,
         error: String,
     },
     /// Resolution could not proceed because the resolver was unable to choose an appropriate
@@ -353,7 +357,11 @@ impl From<pubgrub::PubGrubError<PackageResolver<'_>>> for DependencyResolutionEr
         match error {
             PubGrubError::NoSolution(tree) => Self::from(tree),
             PubGrubError::ErrorRetrievingDependencies { package, version, source: _ } => {
-                Self::FailedRetreivingDependencies { package, version, error: String::new() }
+                Self::FailedRetreivingDependencies {
+                    package,
+                    version: Box::from(version),
+                    error: String::new(),
+                }
             },
             PubGrubError::ErrorChoosingVersion { package, source: _ } => {
                 Self::FailedToChooseVersion { package, error: String::new() }
@@ -382,12 +390,12 @@ mod tests {
                     Some((v, hex)) => {
                         let version = v.parse::<SemVer>().unwrap();
                         let word = Word::parse(hex).unwrap();
-                        Version { version, digest: Some(word.into()) }
+                        VersionSelection::from(Version { version, digest: Some(word.into()) })
                     },
-                    None => Version {
+                    None => VersionSelection::from(Version {
                         version: version.parse::<SemVer>().unwrap(),
                         digest: None,
-                    },
+                    }),
                 };
                 (name, version)
             })

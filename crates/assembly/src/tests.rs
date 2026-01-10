@@ -21,9 +21,8 @@ use miden_core::{
     program::Program,
     serde::{Deserializable, Serializable},
 };
-use miden_mast_package::{
-    MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
-};
+use miden_mast_package::{MastForest, Package, PackageExport, PackageManifest};
+use miden_project::{Target, TargetType};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -281,6 +280,7 @@ fn library_exports() -> Result<(), Report> {
     let bar = parse_module!(&context, "lib2::bar", bar);
     let lib2_modules = [foo, bar];
 
+    #[allow(deprecated)]
     let lib2 = Assembler::new(context.source_manager())
         .with_dynamic_library(lib1)?
         .assemble_library(lib2_modules.iter().cloned())?;
@@ -350,6 +350,7 @@ fn library_procedure_collision() -> Result<(), Report> {
         end
     "#;
     let bar = parse_module!(&context, "lib2::bar", bar);
+    #[allow(deprecated)]
     let lib2 = Assembler::new(context.source_manager())
         .with_dynamic_library(lib1)?
         .assemble_library([bar])?;
@@ -539,52 +540,40 @@ fn simple_main_call() -> TestResult {
     Ok(())
 }
 
-// TODO: Fix test after we implement the new `Assembler::add_library()`
-#[ignore]
 #[test]
 fn call_without_path() -> TestResult {
     let context = TestContext::default();
 
-    // compile first module
-    context.assemble_module(
-        "account_code1",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.1 add
-    end
+    let project = miden_project::Package::new("call_without_path", Target::executable("main"));
 
-    pub proc account_method_2
-        push.3.1 sub
-    end
-    "
-        ),
-    )?;
+    let account_code1_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.1 add
+end
 
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.3.1 sub
+end
+"
+    );
 
-    // compile second module
-    context.assemble_module(
-        "account_code2",
-        source_file!(
-            &context,
-            "\
-    pub proc account_method_1
-        push.2.2 add
-    end
+    let account_code2_src = source_file!(
+        &context,
+        "\
+pub proc account_method_1
+    push.2.2 add
+end
 
-    pub proc account_method_2
-        push.4.1 sub
-    end
-    "
-        ),
-    )?;
-
-    //---------------------------------------------------------------------------------------------
+pub proc account_method_2
+    push.4.1 sub
+end
+"
+    );
 
     // compile program in which functions from different modules but with equal names are called
-    context.assemble(source_file!(
+    let main_src = source_file!(
         &context,
         "
         begin
@@ -601,7 +590,30 @@ fn call_without_path() -> TestResult {
             call.0x1976bf72d457bd567036d3648b7e3f3c22eca4096936931e59796ec05c0ecb10
         end
         "
-    ))?;
+    );
+
+    let account_code1 = Module::parse(
+        "account_code1",
+        ModuleKind::Library,
+        account_code1_src,
+        context.source_manager(),
+    )?;
+    let account_code2 = Module::parse(
+        "account_code2",
+        ModuleKind::Library,
+        account_code2_src,
+        context.source_manager(),
+    )?;
+
+    let main = Module::parse(
+        Path::exec_path(),
+        ModuleKind::Executable,
+        main_src,
+        context.source_manager(),
+    )?;
+
+    context.assemble_virtual_project(project, [main, account_code1, account_code2])?;
+
     Ok(())
 }
 
@@ -1719,6 +1731,7 @@ fn link_time_const_evaluation_succeeds() -> TestResult {
         end"
     );
 
+    #[allow(deprecated)]
     let program = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(program_source)?;
@@ -1750,6 +1763,7 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         end"
     );
 
+    #[allow(deprecated)]
     let error = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(source)
@@ -1790,6 +1804,7 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
     end"
     );
 
+    #[allow(deprecated)]
     let error = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(source)
@@ -1947,6 +1962,7 @@ fn decorators_external() -> TestResult {
     end"
     );
 
+    #[allow(deprecated)]
     let program = Assembler::new(context.source_manager())
         .with_dynamic_library(lib)?
         .assemble_program(program_source)?;
@@ -3946,6 +3962,7 @@ fn test_compiled_library() {
     // Compile program that uses compiled library
     let mut assembler = Assembler::new(context.source_manager());
 
+    #[allow(deprecated)]
     assembler.link_dynamic_library(&compiled_library).unwrap();
 
     let program_source = "
@@ -4011,6 +4028,7 @@ fn test_reexported_proc_with_same_name_as_local_proc_diff_locals() {
     // Compile program that uses compiled library
     let mut assembler = Assembler::new(context.source_manager());
 
+    #[allow(deprecated)]
     assembler.link_dynamic_library(&compiled_library).unwrap();
 
     let program_source = "
@@ -4106,6 +4124,7 @@ fn vendoring() -> TestResult {
             .unwrap();
 
         let mut assembler = Assembler::default();
+        #[allow(deprecated)]
         assembler.link_static_library(vendor_lib)?;
         assembler.assemble_library([mod2]).unwrap()
     };
@@ -4132,6 +4151,7 @@ fn vendoring() -> TestResult {
 
     // 4. Verify we can create an assembler that successfully links the vendored library
     let mut assembler_with_vendored_lib = Assembler::default();
+    #[allow(deprecated)]
     let link_result = assembler_with_vendored_lib.link_static_library(lib.clone());
     assert!(link_result.is_ok(), "Should be able to link the vendored library");
 
@@ -4219,15 +4239,13 @@ fn test_assert_diagnostic_lines() {
 // ================================================================================================
 
 prop_compose! {
-    fn any_package()(name in ".*", mast in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
+    fn any_package()(name in ".*", artifact in any::<ArbitraryMastArtifact>(), manifest in any::<PackageManifest>()) -> Package {
         use miden_mast_package::{ConstantExport, TypeExport, ProcedureExport};
 
-        let mast = mast.0;
+        let ArbitraryMastArtifact { ty, lib } = artifact;
 
         // Ensure the manifest reflects exports of the actual MAST artifact
         let mut exports = Vec::default();
-        match &mast {
-            MastArtifact::Library(lib) => {
                 for export in lib.exports() {
                     match export {
                         LibraryExport::Procedure(export) => {
@@ -4253,46 +4271,47 @@ prop_compose! {
                                                 }
                     }
                 }
-            }
-            MastArtifact::Executable(prog) => {
-                let path = Path::exec_path().join(ProcedureName::MAIN_PROC_NAME).into();
-                let digest = prog.mast_forest()[prog.entrypoint()].digest();
-                exports.push(PackageExport::Procedure(ProcedureExport {
-                    path,
-                    digest,
-                    signature: None,
-                    attributes: Default::default(),
-                }));
-            }
-        }
 
         let manifest = PackageManifest::new(exports).with_dependencies(manifest.dependencies().cloned());
 
-        let kind = match &mast {
-            MastArtifact::Executable(_) => PackageKind::Executable,
-            MastArtifact::Library(_) => PackageKind::Library,
-        };
-
-        Package { name, version: None, description: None, kind, mast, manifest, sections: Default::default() }
+        let name = Arc::from(name.into_boxed_str());
+        let version = miden_mast_package::SemVer::new(0, 0, 0);
+        Package { name, version, description: None, kind: ty, mast: lib, manifest, sections: Default::default() }
     }
 }
 
 #[derive(Debug, Clone)]
-struct ArbitraryMastArtifact(MastArtifact);
+struct ArbitraryMastArtifact {
+    ty: TargetType,
+    lib: Arc<Library>,
+}
+
+impl ArbitraryMastArtifact {
+    fn library(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Library, lib }
+    }
+
+    fn executable(lib: Arc<Library>) -> Self {
+        Self { ty: TargetType::Executable, lib }
+    }
+}
 
 impl Arbitrary for ArbitraryMastArtifact {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        prop_oneof![Just(Self(LIB_EXAMPLE.clone().into())), Just(Self(PRG_EXAMPLE.clone().into()))]
-            .boxed()
+        prop_oneof![
+            Just(Self::library(LIB_EXAMPLE.clone())),
+            Just(Self::executable(PRG_EXAMPLE.clone()))
+        ]
+        .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
 }
 
 static LIB_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_library_example);
-static PRG_EXAMPLE: LazyLock<Arc<Program>> = LazyLock::new(build_program_example);
+static PRG_EXAMPLE: LazyLock<Arc<Library>> = LazyLock::new(build_program_example);
 
 fn build_library_example() -> Arc<Library> {
     let context = TestContext::new();
@@ -4326,7 +4345,7 @@ fn build_library_example() -> Arc<Library> {
         .into()
 }
 
-fn build_program_example() -> Arc<Program> {
+fn build_program_example() -> Arc<Library> {
     let source = "
     begin
         push.1.2
@@ -4335,7 +4354,25 @@ fn build_program_example() -> Arc<Program> {
     end
     ";
     let assembler = Assembler::default();
-    assembler.assemble_program(source).unwrap().into()
+    let prog = assembler.assemble_program(source).unwrap();
+    let mast = prog.mast_forest().clone();
+    let entry_path =
+        Arc::<Path>::from(Path::exec_path().join(ProcedureName::MAIN_PROC_NAME).into_boxed_path());
+    Arc::new(
+        Library::new(
+            mast,
+            alloc::collections::BTreeMap::from_iter([(
+                entry_path.clone(),
+                LibraryExport::Procedure(miden_assembly_syntax::library::ProcedureExport {
+                    node: prog.entrypoint(),
+                    path: entry_path,
+                    signature: None,
+                    attributes: Default::default(),
+                }),
+            )]),
+        )
+        .unwrap(),
+    )
 }
 
 #[test]
@@ -4380,6 +4417,7 @@ fn nested_blocks() -> Result<(), Report> {
             .unwrap();
 
         let mut assembler = Assembler::with_kernel(context.source_manager(), kernel_lib);
+        #[allow(deprecated)]
         assembler.link_dynamic_library(dummy_library).unwrap();
 
         assembler
@@ -4694,6 +4732,7 @@ fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
     let baz = context.parse_module_with_path(BAZ_NAME, BAZ)?;
     let library = context.assemble_library([bar, baz]).unwrap();
 
+    #[allow(deprecated)]
     let assembler =
         Assembler::new(context.source_manager()).with_dynamic_library(&library).unwrap();
 
@@ -4729,6 +4768,7 @@ fn re_exports() -> Result<(), Report> {
     let baz = context.parse_module_with_path(BAZ_NAME, BAZ)?;
     let library = context.assemble_library([bar, baz]).unwrap();
 
+    #[allow(deprecated)]
     let assembler =
         Assembler::new(context.source_manager()).with_dynamic_library(&library).unwrap();
 
@@ -5364,6 +5404,7 @@ fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
     let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
     let lib = Assembler::new(context.source_manager()).assemble_library([lib])?;
 
+    #[allow(deprecated)]
     let error = Assembler::with_kernel(context.source_manager(), kernel)
         .with_static_library(lib)?
         .assemble_program(source)
@@ -5498,6 +5539,7 @@ fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResul
     // The fix for this is to disregard import expansions of the same import in the same module
     // after the first time an import is expanded.
     let assembler = Assembler::new(context.source_manager());
+    #[allow(deprecated)]
     let _ = assembler.with_static_library(lib)?.assemble_program(
         r#"
         use lib::lib

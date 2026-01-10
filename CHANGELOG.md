@@ -25,6 +25,9 @@
 - Added recursion guards for assembly inputs and tests ([#2792](https://github.com/0xMiden/miden-vm/pull/2792)).
 - Introduced `build_trace_with_max_len()` which stops building the trace after a given max, and `build_trace()` no longer allocates more than 2^29 rows ([#2809](https://github.com/0xMiden/miden-vm/pull/2809)).
 - `DebugHandler`'s default method implementations are now no-ops (instead of prints) ([#2837](https://github.com/0xMiden/miden-vm/pull/2837)).
+- Add support for assembling packages from Miden project files (i.e. `miden-project.toml`) using the `Assembler` interface. ([#2851](https://github.com/0xMiden/miden-vm/pull/2851))
+- Deprecated `Assembler` APIs that operate on or produce `Library` or `Program` in preparation of removing those types ([#2851](https://github.com/0xMiden/miden-vm/pull/2851))
+- The build script for `miden-core-lib` now produces a Miden package in addition to a serialized `Library`
 
 #### Fixes
 

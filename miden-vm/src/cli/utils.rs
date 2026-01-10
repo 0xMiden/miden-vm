@@ -56,15 +56,13 @@ pub fn get_masm_program(
                     })?;
 
                 match package.into_mast_artifact() {
-                    MastArtifact::Library(lib) => {
-                        let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
-                        KernelLibrary::try_from(library).wrap_err_with(|| {
+                    MastArtifact::Library(library) => KernelLibrary::try_from(library)
+                        .wrap_err_with(|| {
                             format!(
                                 "The package `{}` is not a valid kernel package",
                                 kernel_path.display()
                             )
-                        })?
-                    },
+                        })?,
                     MastArtifact::Executable(_) => {
                         return Err(Report::msg(format!(
                             "Kernel package `{}` contains a program, not a kernel library",
@@ -93,12 +91,14 @@ pub fn get_masm_program(
         let mut assembler = Assembler::with_kernel(source_manager.clone(), kernel_lib);
 
         // Link standard library
+        #[allow(deprecated)]
         assembler
             .link_dynamic_library(CoreLibrary::default())
             .wrap_err("Failed to load stdlib")?;
 
         // Link user libraries
         for library in &libraries.libraries {
+            #[allow(deprecated)]
             assembler.link_dynamic_library(library).wrap_err("Failed to load libraries")?;
         }
 

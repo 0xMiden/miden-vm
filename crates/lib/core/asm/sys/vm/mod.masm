@@ -1,5 +1,3 @@
-use miden::core::crypto::hashes::poseidon2
-
 use miden::core::sys::vm::deep_queries
 use miden::core::sys::vm::constraints_eval
 use miden::core::sys::vm::ood_frames

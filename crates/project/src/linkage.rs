@@ -18,6 +18,18 @@ pub enum Linkage {
 }
 
 impl Linkage {
+    /// Returns true if this represents static linkage
+    #[inline]
+    pub const fn is_static(&self) -> bool {
+        matches!(self, Self::Static)
+    }
+
+    /// Returns true if this represents dynamic linkage
+    #[inline]
+    pub const fn is_dynamic(&self) -> bool {
+        matches!(self, Self::Dynamic)
+    }
+
     /// Get the string representation of this linkage
     pub const fn as_str(&self) -> &'static str {
         match self {
@@ -30,6 +42,25 @@ impl Linkage {
 impl fmt::Display for Linkage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+impl core::ops::BitOr for Linkage {
+    type Output = Linkage;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        if self == rhs {
+            return self;
+        }
+        // If the linkages aren't equal, one must be static and we always prefer static linkage
+        // in this case
+        Self::Static
+    }
+}
+
+impl core::ops::BitOrAssign for Linkage {
+    fn bitor_assign(&mut self, rhs: Self) {
+        *self = *self | rhs;
     }
 }
 
@@ -50,7 +81,6 @@ impl FromStr for Linkage {
     }
 }
 
-#[cfg(feature = "serde")]
 mod serialization {
     use alloc::format;
 
@@ -60,6 +90,7 @@ mod serialization {
 
     use super::Linkage;
 
+    #[cfg(feature = "serde")]
     impl serde::Serialize for Linkage {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
@@ -73,6 +104,7 @@ mod serialization {
         }
     }
 
+    #[cfg(feature = "serde")]
     impl<'de> serde::Deserialize<'de> for Linkage {
         fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
         where
@@ -109,6 +141,22 @@ mod serialization {
                     "unknown Linkage tag '{other}'"
                 ))),
             }
+        }
+    }
+}
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+    use proptest::prelude::*;
+
+    use super::Linkage;
+
+    impl proptest::arbitrary::Arbitrary for Linkage {
+        type Parameters = ();
+        type Strategy = BoxedStrategy<Self>;
+
+        fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+            prop_oneof![Just(Linkage::Dynamic), Just(Linkage::Static),].boxed()
         }
     }
 }

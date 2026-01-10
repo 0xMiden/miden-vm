@@ -47,6 +47,7 @@ fn program_execution_for_trace(c: &mut Criterion) {
                 let file_stem = entry.path().file_stem().unwrap().to_string_lossy();
                 group.bench_function(file_stem, |bench| {
                     let mut assembler = Assembler::default();
+                    #[allow(deprecated)]
                     assembler
                         .link_dynamic_library(CoreLibrary::default())
                         .expect("failed to load core library");

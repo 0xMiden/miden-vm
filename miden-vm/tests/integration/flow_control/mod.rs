@@ -634,6 +634,7 @@ fn procref() -> Result<(), Report> {
         let module_path = PathBuf::new("test::foo").unwrap();
         let mut parser = Module::parser(ModuleKind::Library);
         let module = parser.parse_str(module_path, module_source, source_manager.clone())?;
+        #[allow(deprecated)]
         let library = Assembler::new(source_manager)
             .with_dynamic_library(CoreLibrary::default())
             .unwrap()

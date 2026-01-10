@@ -1,3 +1,5 @@
+mod package_id;
+mod resolved;
 #[cfg(feature = "resolver")]
 mod resolver;
 mod version;
@@ -6,10 +8,14 @@ mod version_requirement;
 use alloc::{format, sync::Arc, vec};
 
 use miden_assembly_syntax::debuginfo::Spanned;
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "resolver")]
 pub use self::resolver::*;
 pub use self::{
+    package_id::{PackageId, VersionedPackageId},
+    resolved::ResolvedDependency,
     version::{SemVer, Version, VersionReq},
     version_requirement::VersionRequirement,
 };
@@ -17,6 +23,7 @@ use crate::{Diagnostic, Linkage, SourceSpan, Span, Uri, miette};
 
 /// Represents a project/package dependency declaration
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Dependency {
     /// The name of the dependency.
     name: Span<Arc<str>>,
@@ -70,8 +77,31 @@ impl Spanned for Dependency {
     }
 }
 
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for Dependency {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        let name = any::<PackageId>();
+        let version = any::<DependencyVersionScheme>();
+        let linkage = any::<Linkage>();
+        (name, version, linkage)
+            .prop_map(|(name, version, linkage)| Self {
+                name: Span::unknown(name.into()),
+                version,
+                linkage,
+            })
+            .boxed()
+    }
+}
+
 /// Represents the versioning requirement and resolution method for a specific dependency.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(u8)]
 pub enum DependencyVersionScheme {
     /// Resolve the given semantic version requirement or digest using the configured package
     /// registry, to an assembled Miden package artifact.
@@ -110,8 +140,43 @@ pub enum DependencyVersionScheme {
     },
 }
 
+#[cfg(feature = "arbitrary")]
+impl proptest::arbitrary::Arbitrary for DependencyVersionScheme {
+    type Parameters = ();
+    type Strategy = proptest::prelude::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+
+        let path_strategy = (Uri::arbitrary_file(), any::<Option<VersionRequirement>>())
+            .prop_map(|(uri, version)| Self::Path { path: Span::unknown(uri), version });
+
+        let git_strategy =
+            (Uri::arbitrary_git(), any::<GitRevision>(), any::<VersionRequirement>()).prop_map(
+                |(uri, revision, req)| Self::Git {
+                    repo: Span::unknown(uri),
+                    revision: Span::unknown(revision),
+                    version: match req {
+                        VersionRequirement::Digest(_) => None,
+                        VersionRequirement::Semantic(req) => Some(req),
+                    },
+                },
+            );
+
+        prop_oneof![
+            2 => any::<VersionRequirement>().prop_map(Self::Registry),
+            1 => any::<PackageId>().prop_map(|name| Self::Workspace { member: Span::unknown(Uri::new(name)) }),
+            1 => path_strategy,
+            1 => git_strategy,
+        ].boxed()
+    }
+}
+
 /// A reference to a revision in Git
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(proptest_derive::Arbitrary))]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[repr(u8)]
 pub enum GitRevision {
     /// A reference to the HEAD revision of the given branch.
     Branch(Arc<str>),
@@ -269,6 +334,214 @@ impl DependencyVersionScheme {
                 }
             },
             scheme => Ok(scheme),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serialization {
+    use alloc::{
+        string::{String, ToString},
+        sync::Arc,
+    };
+
+    use miden_core::serde::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+    };
+
+    use super::*;
+
+    macro_rules! impl_tag_for {
+        ($t:ty) => {
+            impl $t {
+                const fn tag(&self) -> u8 {
+                    // SAFETY: This is safe because we have given this enum a
+                    // primitive representation with #[repr(u8)], with the first
+                    // field of the underlying union-of-structs the discriminant
+                    //
+                    // See the section on "accessing the numeric value of the discriminant"
+                    // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
+                    unsafe { *(self as *const Self).cast::<u8>() }
+                }
+            }
+        };
+    }
+
+    impl_tag_for!(DependencyVersionScheme);
+    impl_tag_for!(GitRevision);
+    impl_tag_for!(VersionRequirement);
+
+    impl Serializable for Dependency {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            let Self { name, version, linkage } = self;
+            name.inner().write_into(target);
+            version.write_into(target);
+            linkage.write_into(target);
+        }
+    }
+
+    impl Deserializable for Dependency {
+        fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+            let name = Span::unknown(Arc::from(String::read_from(source)?.into_boxed_str()));
+            let version = DependencyVersionScheme::read_from(source)?;
+            let linkage = Linkage::read_from(source)?;
+
+            Ok(Self { name, version, linkage })
+        }
+    }
+
+    impl Serializable for DependencyVersionScheme {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            self.tag().write_into(target);
+            match self {
+                Self::Registry(version) => {
+                    version.write_into(target);
+                },
+                Self::Workspace { member } => {
+                    member.inner().write_into(target);
+                },
+                Self::Path { path, version } => {
+                    path.inner().write_into(target);
+                    if let Some(version) = version.as_ref() {
+                        target.write_bool(true);
+                        version.write_into(target);
+                    } else {
+                        target.write_bool(false);
+                    }
+                },
+                Self::Git { repo, revision, version } => {
+                    repo.inner().write_into(target);
+                    revision.inner().write_into(target);
+                    if let Some(req) = version.as_ref() {
+                        target.write_bool(true);
+                        let req = req.to_string();
+                        target.write_usize(req.len());
+                        target.write_bytes(req.as_bytes());
+                    } else {
+                        target.write_bool(false);
+                    }
+                },
+            }
+        }
+    }
+
+    impl Deserializable for DependencyVersionScheme {
+        fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+            match source.read_u8()? {
+                0 => {
+                    let version = VersionRequirement::read_from(source)?;
+                    Ok(Self::Registry(version))
+                },
+                1 => {
+                    let member = Uri::read_from(source).map(Span::unknown)?;
+                    Ok(Self::Workspace { member })
+                },
+                2 => {
+                    let path = Uri::read_from(source).map(Span::unknown)?;
+                    let version = if source.read_bool()? {
+                        Some(VersionRequirement::read_from(source)?)
+                    } else {
+                        None
+                    };
+                    Ok(Self::Path { path, version })
+                },
+                3 => {
+                    let repo = Uri::read_from(source).map(Span::unknown)?;
+                    let revision = GitRevision::read_from(source).map(Span::unknown)?;
+                    let version = if source.read_bool()? {
+                        let req_len = source.read_usize()?;
+                        let req_bytes = source.read_slice(req_len)?;
+                        let req_str = core::str::from_utf8(req_bytes).map_err(|err| {
+                            DeserializationError::InvalidValue(format!(
+                                "unable to deserialize VersionReq string: {err}"
+                            ))
+                        })?;
+                        let req = VersionReq::parse(req_str).map_err(|err| {
+                            DeserializationError::InvalidValue(format!("invalid VersionReq: {err}"))
+                        })?;
+                        Some(Span::unknown(req))
+                    } else {
+                        None
+                    };
+                    Ok(Self::Git { repo, revision, version })
+                },
+                tag => Err(DeserializationError::InvalidValue(format!(
+                    "invalid DependencyVersionScheme tag '{tag}'"
+                ))),
+            }
+        }
+    }
+
+    impl Serializable for GitRevision {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            target.write_u8(self.tag());
+            match self {
+                Self::Branch(s) | Self::Commit(s) => {
+                    target.write_usize(s.len());
+                    target.write_bytes(s.as_bytes());
+                },
+            }
+        }
+    }
+
+    impl Deserializable for GitRevision {
+        fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+            match source.read_u8()? {
+                0 => {
+                    let branch = Arc::from(String::read_from(source)?.into_boxed_str());
+                    Ok(Self::Branch(branch))
+                },
+                1 => {
+                    let rev = Arc::from(String::read_from(source)?.into_boxed_str());
+                    Ok(Self::Commit(rev))
+                },
+                tag => Err(DeserializationError::InvalidValue(format!(
+                    "invalid GitRevision tag '{tag}'"
+                ))),
+            }
+        }
+    }
+
+    impl Serializable for VersionRequirement {
+        fn write_into<W: ByteWriter>(&self, target: &mut W) {
+            target.write_u8(self.tag());
+            match self {
+                Self::Digest(word) => {
+                    word.inner().write_into(target);
+                },
+                Self::Semantic(version) => {
+                    let version = version.to_string();
+                    target.write_usize(version.len());
+                    target.write_bytes(version.as_bytes());
+                },
+            }
+        }
+    }
+
+    impl Deserializable for VersionRequirement {
+        fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+            match source.read_u8()? {
+                0 => {
+                    let word = miden_core::Word::read_from(source)?;
+                    Ok(Self::Digest(Span::unknown(word)))
+                },
+                1 => {
+                    let req_len = source.read_usize()?;
+                    let req_bytes = source.read_slice(req_len)?;
+                    let req_str = core::str::from_utf8(req_bytes).map_err(|err| {
+                        DeserializationError::InvalidValue(format!(
+                            "unable to deserialize VersionReq string: {err}"
+                        ))
+                    })?;
+                    let req = VersionReq::parse(req_str).map_err(|err| {
+                        DeserializationError::InvalidValue(format!("invalid VersionReq: {err}"))
+                    })?;
+                    Ok(Self::Semantic(Span::unknown(req)))
+                },
+                tag => Err(DeserializationError::InvalidValue(format!(
+                    "invalid VersionRequirement tag '{tag}'"
+                ))),
+            }
         }
     }
 }

@@ -59,6 +59,7 @@ use miden_assembly_syntax::{
     library::{ItemInfo, ModuleInfo},
 };
 use miden_core::{Word, advice::AdviceMap, program::Kernel};
+use miden_project::VersionedPackageId;
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
@@ -156,23 +157,21 @@ impl Linker {
         }
     }
 
-    /// Registers `library` and all of its modules with the linker, according to its kind
+    /// Registers `library` and all of its modules with the linker, according to its linkage
     pub fn link_library(&mut self, library: LinkLibrary) -> Result<(), LinkerError> {
         use alloc::collections::btree_map::Entry;
 
-        match self.libraries.entry(*library.library.digest()) {
+        match self.libraries.entry(library.mast.commitment()) {
             Entry::Vacant(entry) => {
                 entry.insert(library.clone());
-                self.link_assembled_modules(library.library.module_infos())
+                self.link_assembled_modules(library.source, library.module_infos)
             },
             Entry::Occupied(mut entry) => {
                 let prev = entry.get_mut();
 
                 // If the same library is linked both dynamically and statically, prefer static
                 // linking always.
-                if matches!(prev.kind, LinkLibraryKind::Dynamic) {
-                    prev.kind = library.kind;
-                }
+                prev.linkage |= library.linkage;
 
                 Ok(())
             },
@@ -185,10 +184,11 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link a set of assembled modules.
     pub fn link_assembled_modules(
         &mut self,
+        source_package: Option<VersionedPackageId>,
         modules: impl IntoIterator<Item = ModuleInfo>,
     ) -> Result<(), LinkerError> {
         for module in modules {
-            self.link_assembled_module(module)?;
+            self.link_assembled_module(source_package.clone(), module)?;
         }
 
         Ok(())
@@ -200,12 +200,23 @@ impl Linker {
     /// [`Self::link_library`] if you wish to statically link `module`.
     pub fn link_assembled_module(
         &mut self,
+        source_package: Option<VersionedPackageId>,
         module: ModuleInfo,
     ) -> Result<ModuleIndex, LinkerError> {
         log::debug!(target: "linker", "adding pre-assembled module {} to module graph", module.path());
 
         let module_path = module.path();
-        let is_duplicate = self.find_module_index(module_path).is_some();
+        let is_duplicate = match self.find_module_index(module_path) {
+            Some(dupe_mi) => {
+                // A module is considered duplicate unless all instances are explicitly versioned,
+                // and those versions are different. This is because we require references to a path
+                // to be unique, and if a module doesn't have a specific version requirement, then
+                // it cannot disambiguate
+                let dupe_module = self.modules[dupe_mi.as_usize()].source_package();
+                dupe_module.is_none_or(|dupe| source_package.as_ref().is_none_or(|p| p == dupe))
+            },
+            None => false,
+        };
         if is_duplicate {
             return Err(LinkerError::DuplicateModule {
                 path: module_path.to_path_buf().into_boxed_path().into(),
@@ -236,7 +247,7 @@ impl Linker {
             module_index,
             ast::ModuleKind::Library,
             LinkStatus::Linked,
-            ModuleSource::Mast,
+            ModuleSource::Mast(source_package),
             module_path.into(),
         )
         .with_symbols(symbols);
@@ -350,12 +361,38 @@ impl Linker {
 
         let mut graph = Self::new(source_manager);
         let kernel_index = graph
-            .link_assembled_module(kernel_module)
+            .link_assembled_module(None, kernel_module)
             .expect("failed to add kernel module to the module graph");
 
         graph.kernel_index = Some(kernel_index);
         graph.kernel = kernel;
         graph
+    }
+
+    /// Add a kernel to the linker after the linker is initially constructed.
+    ///
+    /// This cannot cause any issues with modules already added to the linker (if any), as they
+    /// cannot have directly depended on the kernel, or an error would have been raised.
+    ///
+    /// This will panic if the kernel is empty, or the provided kernel module info is not valid for
+    /// a kernel.
+    pub(super) fn link_with_kernel(
+        &mut self,
+        kernel: Kernel,
+        kernel_module: ModuleInfo,
+    ) -> Result<(), LinkerError> {
+        assert!(kernel.is_empty());
+        assert!(
+            kernel_module.path().is_kernel_path(),
+            "invalid root kernel module path: {}",
+            kernel_module.path()
+        );
+        log::debug!(target: "linker", "modifying linker with kernel {}", kernel_module.path());
+        let kernel_index = self.link_assembled_module(None, kernel_module)?;
+        self.kernel_index = Some(kernel_index);
+        self.kernel = kernel;
+
+        Ok(())
     }
 
     pub fn kernel(&self) -> &Kernel {
@@ -811,6 +848,20 @@ impl Linker {
     /// Resolve a [Path] to a [Module] in this graph
     pub fn find_module(&self, path: &Path) -> Option<&LinkModule> {
         self.modules.iter().find(|m| path == m.path())
+    }
+
+    /// Gather all module indices which belong to `namespace`
+    pub fn find_modules_in_namespace(&self, namespace: &Path) -> Vec<ModuleIndex> {
+        self.modules
+            .iter()
+            .filter_map(|m| {
+                if m.path().starts_with(namespace) {
+                    Some(m.id())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 }
 

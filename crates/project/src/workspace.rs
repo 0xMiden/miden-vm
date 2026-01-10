@@ -10,7 +10,7 @@ use crate::*;
 ///
 /// Workspaces are comprised of one or more sub-projects that define the member packages of the
 /// workspace.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Workspace {
     /// The file path of the workspace manifest, if applicable.
     #[cfg(feature = "std")]
@@ -129,4 +129,50 @@ impl Workspace {
 
         Ok(workspace)
     }
+}
+
+/// Locate the nearest `miden-project.toml` manifest from `path`.
+///
+/// This is intended for resolving a workspace manifest from a subdirectory of that workspace.
+///
+/// If `path` is the path to a package manifest, this will ignore the containing directory and
+/// start searching from the next nearest ancestor directory.
+#[cfg(feature = "std")]
+pub fn locate(path: impl AsRef<std::path::Path>) -> Result<Option<std::path::PathBuf>, Report> {
+    use alloc::format;
+
+    let path = path
+        .as_ref()
+        .canonicalize()
+        .map_err(|err| Report::msg(format!("unable to canonicalize path: {err}")))?;
+
+    let skip_first_ancestor = if path
+        .file_name()
+        .is_some_and(|name| name.eq_ignore_ascii_case("miden-project.toml"))
+    {
+        2usize
+    } else {
+        1usize
+    };
+
+    for ancestor in path.ancestors().skip(skip_first_ancestor) {
+        let workspace_manifest = ancestor.join("miden-project.toml");
+        match workspace_manifest.try_exists() {
+            // Keep looking..
+            Ok(false) => (),
+            // We found a `miden-project.toml`, which _must_ be the workspace manifest or
+            // the project structure is broken.
+            Ok(true) => return Ok(Some(ancestor.to_path_buf())),
+            // We don't have access to this path, or some other issue caused the check to
+            // fail.
+            Err(err) => {
+                return Err(Report::msg(format!(
+                    "error occurred while searching for workspace manifest from '{}': {err}",
+                    path.display()
+                )));
+            },
+        }
+    }
+
+    Ok(None)
 }

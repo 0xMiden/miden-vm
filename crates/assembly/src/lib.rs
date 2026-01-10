@@ -38,9 +38,14 @@ pub use miden_assembly_syntax::{
 /// Syntax components for the Miden Assembly AST
 /// Merkelized abstract syntax tree (MAST) components defining Miden VM programs.
 pub use miden_core::{mast, serde, utils};
+pub use miden_mast_package as package;
+pub use miden_project::{Linkage, TargetSelector};
 
 #[doc(hidden)]
-pub use self::linker::{LinkLibraryKind, LinkerError};
+#[deprecated = "use Linkage instead"]
+pub use self::linker::LinkLibraryKind;
+#[doc(hidden)]
+pub use self::linker::LinkerError;
 pub use self::{
     assembler::Assembler,
     procedure::{Procedure, ProcedureContext},

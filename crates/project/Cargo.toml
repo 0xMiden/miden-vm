@@ -14,8 +14,8 @@ rust-version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["std", "serde"]
-arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary"]
+default = ["std", "serde", "arbitrary"]
+arbitrary = ["std", "dep:proptest-derive", "dep:proptest", "miden-assembly-syntax/arbitrary", "miden-core/arbitrary"]
 resolver = ["std", "dep:pubgrub", "dep:smallvec"]
 std = ["miden-assembly-syntax/std", "serde/std", "thiserror/std", "toml/std"]
 serde = ["dep:serde", "dep:serde-untagged", "miden-assembly-syntax/serde", "miden-core/serde"]

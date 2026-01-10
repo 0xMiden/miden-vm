@@ -1,12 +1,11 @@
 mod index;
-mod package_id;
 mod provider;
 mod pubgrub_compat;
 mod version_set;
 
 pub use self::{
-    index::PackageIndex,
-    package_id::PackageId,
+    index::{PackageIndex, PackageLocation},
     provider::{DependencyResolutionError, PackageResolver},
+    pubgrub_compat::SemverPubgrub,
     version_set::VersionSet,
 };

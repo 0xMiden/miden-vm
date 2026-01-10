@@ -50,6 +50,7 @@ fn build_trace(c: &mut Criterion) {
                 // --------------------------------
                 group.bench_function(file_stem.clone(), |bench| {
                     let mut assembler = Assembler::default();
+                    #[allow(deprecated)]
                     assembler
                         .link_dynamic_library(CoreLibrary::default())
                         .expect("failed to load core library");
@@ -96,6 +97,7 @@ fn build_trace(c: &mut Criterion) {
                 // --------------------------------
                 group.bench_function(format!("{file_stem}_legacy"), |bench| {
                     let mut assembler = Assembler::default();
+                    #[allow(deprecated)]
                     assembler
                         .link_dynamic_library(CoreLibrary::default())
                         .expect("failed to load core library");

@@ -37,9 +37,10 @@ use miden_core::{
     program::Program,
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
+use miden_project::ResolvedDependency;
 
-use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};
-use crate::{Dependency, MastArtifact, Package, PackageExport, PackageManifest, Section};
+use super::{ConstantExport, ProcedureExport, TargetType, TypeExport};
+use crate::{MastArtifact, Package, PackageExport, PackageManifest, Section};
 
 // CONSTANTS
 // ================================================================================================
@@ -71,7 +72,7 @@ impl Serializable for Package {
         self.name.write_into(target);
 
         // Write package version
-        self.version.as_ref().map(|v| v.to_string()).write_into(target);
+        self.version.to_string().write_into(target);
 
         // Write package description
         self.description.write_into(target);
@@ -114,25 +115,25 @@ impl Deserializable for Package {
         let name = String::read_from(source)?;
 
         // Read package version
-        let version = Option::<String>::read_from(source)?;
-        let version = match version {
-            Some(version) => Some(
-                crate::Version::parse(&version)
-                    .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?,
-            ),
-            None => None,
-        };
+        let version_len = source.read_usize()?;
+        let version_bytes = source.read_slice(version_len)?;
+        let version = core::str::from_utf8(version_bytes).map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid version string: {err}"))
+        })?;
+        let version = crate::SemVer::parse(version).map_err(|err| {
+            DeserializationError::InvalidValue(format!("invalid package version: {err}"))
+        })?;
 
         // Read package description
         let description = Option::<String>::read_from(source)?;
 
         // Read package kind
         let kind_tag = source.read_u8()?;
-        let kind = PackageKind::try_from(kind_tag)
+        let kind = TargetType::try_from(kind_tag)
             .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
 
         // Read MAST artifact
-        let mast = MastArtifact::read_from(source)?;
+        let mast = Library::read_from(source).map(Arc::new)?;
 
         // Read manifest
         let manifest = PackageManifest::read_from(source)?;
@@ -141,7 +142,7 @@ impl Deserializable for Package {
         let sections = Vec::<Section>::read_from(source)?;
 
         Ok(Self {
-            name,
+            name: name.into_boxed_str().into(),
             version,
             description,
             kind,
@@ -253,7 +254,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                     .next_element::<Vec<PackageExport>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
                 let dependencies = seq
-                    .next_element::<Vec<Dependency>>()?
+                    .next_element::<Vec<ResolvedDependency>>()?
                     .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
                 Ok(PackageManifest::new(exports).with_dependencies(dependencies))
             }
@@ -276,7 +277,7 @@ impl<'de> serde::Deserialize<'de> for PackageManifest {
                             if dependencies.is_some() {
                                 return Err(serde::de::Error::duplicate_field("dependencies"));
                             }
-                            dependencies = Some(map.next_value::<Vec<Dependency>>()?);
+                            dependencies = Some(map.next_value::<Vec<ResolvedDependency>>()?);
                         },
                     }
                 }
@@ -322,7 +323,7 @@ impl Deserializable for PackageManifest {
         }
 
         // Read dependencies
-        let dependencies = Vec::<Dependency>::read_from(source)?;
+        let dependencies = Vec::<ResolvedDependency>::read_from(source)?;
 
         Ok(Self { exports, dependencies })
     }
@@ -421,13 +422,7 @@ impl Deserializable for TypeExport {
 
 #[cfg(test)]
 mod tests {
-    use alloc::{
-        collections::BTreeMap,
-        string::{String, ToString},
-        sync::Arc,
-        vec,
-        vec::Vec,
-    };
+    use alloc::{collections::BTreeMap, string::ToString, sync::Arc, vec, vec::Vec};
 
     use miden_assembly_syntax::{
         Library,
@@ -442,10 +437,9 @@ mod tests {
             SliceReader,
         },
     };
+    use miden_project::{SemVer, TargetType};
 
-    use super::{
-        MAGIC_PACKAGE, MastArtifact, Package, PackageExport, PackageKind, PackageManifest, VERSION,
-    };
+    use super::{MAGIC_PACKAGE, Package, PackageExport, PackageManifest, VERSION};
     use crate::package::manifest::ProcedureExport as PackageProcedureExport;
 
     fn build_forest() -> (MastForest, MastNodeId) {
@@ -490,11 +484,11 @@ mod tests {
         let manifest = PackageManifest::new([export]);
 
         Package {
-            name: String::from("test_pkg"),
-            version: None,
+            name: Arc::<str>::from("test_pkg"),
+            version: SemVer::new(0, 0, 0),
             description: None,
-            kind: PackageKind::Library,
-            mast: MastArtifact::Library(Arc::new(library)),
+            kind: TargetType::Library,
+            mast: Arc::new(library),
             manifest,
             sections: Vec::new(),
         }
@@ -507,7 +501,7 @@ mod tests {
         bytes.write_bytes(MAGIC_PACKAGE);
         bytes.write_bytes(&VERSION);
         package.name.write_into(&mut bytes);
-        package.version.as_ref().map(|v| v.to_string()).write_into(&mut bytes);
+        package.version.to_string().write_into(&mut bytes);
         package.description.write_into(&mut bytes);
         bytes.write_u8(package.kind.into());
         package.mast.write_into(&mut bytes);

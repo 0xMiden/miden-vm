@@ -350,6 +350,7 @@ fn falcon_prove_verify() {
     let message = random_word();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
 
+    #[allow(deprecated)]
     let program: Program = Assembler::default()
         .with_dynamic_library(CoreLibrary::default())
         .expect("failed to load core library")

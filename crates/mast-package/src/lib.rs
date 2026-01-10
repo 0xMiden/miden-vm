@@ -9,27 +9,21 @@ extern crate std;
 
 mod artifact;
 pub mod debug_info;
-mod dependency;
+pub mod dependency;
 mod package;
+pub mod registry;
 
 pub use miden_assembly_syntax::{
     Library, PathBuf,
     ast::{ProcedureName, QualifiedProcedureName},
 };
 pub use miden_core::{Word, mast::MastForest, program::Program};
+pub use miden_project::{Dependency, SemVer, TargetType, semver};
 
 pub use self::{
     artifact::MastArtifact,
-    dependency::{
-        Dependency, DependencyName,
-        resolver::{
-            DependencyResolver, LocalResolvedDependency, MemDependencyResolverByDigest,
-            ResolvedDependency,
-        },
-    },
     package::{
-        ConstantExport, InvalidPackageKindError, InvalidSectionIdError, Package, PackageExport,
-        PackageKind, PackageManifest, ProcedureExport, Section, SectionId, TypeExport, Version,
-        VersionError,
+        ConstantExport, InvalidSectionIdError, Package, PackageExport, PackageManifest,
+        ProcedureExport, Section, SectionId, TypeExport,
     },
 };

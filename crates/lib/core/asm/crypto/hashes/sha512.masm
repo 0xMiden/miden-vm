@@ -1,6 +1,4 @@
-use miden::core::mem
 use miden::core::sys
-use miden::core::word
 use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS

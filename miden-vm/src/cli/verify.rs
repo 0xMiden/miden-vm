@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::Arc, time::Instant};
+use std::{fs, path::PathBuf, time::Instant};
 
 use clap::Parser;
 use miden_assembly::{
@@ -119,8 +119,7 @@ fn load_kernel(kernel_path: &PathBuf) -> Result<Kernel, Report> {
                 })?;
 
             match package.into_mast_artifact() {
-                MastArtifact::Library(lib) => {
-                    let library = Arc::try_unwrap(lib).unwrap_or_else(|arc| (*arc).clone());
+                MastArtifact::Library(library) => {
                     KernelLibrary::try_from(library).wrap_err_with(|| {
                         format!(
                             "The package `{}` is not a valid kernel package",

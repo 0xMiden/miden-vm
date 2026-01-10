@@ -39,6 +39,7 @@ fn test_issue_2456_statically_linked_library_call() {
         end
     ";
 
+    #[allow(deprecated)]
     assembler.link_static_library(library).unwrap();
     let program = assembler.assemble_program(source).unwrap();
 

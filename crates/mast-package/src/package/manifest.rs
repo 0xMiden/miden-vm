@@ -6,12 +6,11 @@ use miden_assembly_syntax::ast::{
     types::{FunctionType, Type},
 };
 use miden_core::{Word, utils::DisplayHex};
+use miden_project::ResolvedDependency;
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::{Strategy, any};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
-
-use crate::Dependency;
 
 // PACKAGE MANIFEST
 // ================================================================================================
@@ -31,7 +30,7 @@ pub struct PackageManifest {
     pub(super) exports: BTreeMap<Arc<Path>, PackageExport>,
     /// The libraries (packages) linked against by this package, which must be provided when
     /// executing the program.
-    pub(super) dependencies: Vec<Dependency>,
+    pub(super) dependencies: Vec<ResolvedDependency>,
 }
 
 impl PackageManifest {
@@ -44,13 +43,16 @@ impl PackageManifest {
     }
 
     /// Extend this manifest with the provided dependencies
-    pub fn with_dependencies(mut self, dependencies: impl IntoIterator<Item = Dependency>) -> Self {
+    pub fn with_dependencies(
+        mut self,
+        dependencies: impl IntoIterator<Item = ResolvedDependency>,
+    ) -> Self {
         self.dependencies.extend(dependencies);
         self
     }
 
     /// Add a dependency to the manifest
-    pub fn add_dependency(&mut self, dependency: Dependency) {
+    pub fn add_dependency(&mut self, dependency: ResolvedDependency) {
         self.dependencies.push(dependency);
     }
 
@@ -60,7 +62,7 @@ impl PackageManifest {
     }
 
     /// Get an iterator over the dependencies of this package
-    pub fn dependencies(&self) -> impl Iterator<Item = &Dependency> {
+    pub fn dependencies(&self) -> impl Iterator<Item = &ResolvedDependency> {
         self.dependencies.iter()
     }
 

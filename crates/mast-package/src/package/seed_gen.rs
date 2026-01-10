@@ -1,4 +1,4 @@
-use alloc::{collections::BTreeMap, string::String, sync::Arc, vec, vec::Vec};
+use alloc::{collections::BTreeMap, sync::Arc, vec, vec::Vec};
 use std::{fs, path::Path, println};
 
 use miden_assembly_syntax::{
@@ -14,11 +14,9 @@ use miden_core::{
     operations::Operation,
     serde::Serializable,
 };
+use miden_project::{SemVer, TargetType};
 
-use crate::{
-    MastArtifact, Package, PackageExport, PackageKind, PackageManifest,
-    ProcedureExport as PackageProcedureExport,
-};
+use crate::{Package, PackageExport, PackageManifest, ProcedureExport as PackageProcedureExport};
 
 fn build_forest() -> (MastForest, MastNodeId) {
     let mut forest = MastForest::new();
@@ -64,11 +62,11 @@ fn build_package(library: Library, signature: FunctionType) -> Package {
     let manifest = PackageManifest::new([export]);
 
     Package {
-        name: String::from("test_pkg"),
-        version: None,
+        name: Arc::<str>::from("test_pkg"),
+        version: SemVer::new(0, 0, 0),
         description: None,
-        kind: PackageKind::Library,
-        mast: MastArtifact::Library(Arc::new(library)),
+        kind: TargetType::Library,
+        mast: Arc::new(library),
         manifest,
         sections: Vec::new(),
     }

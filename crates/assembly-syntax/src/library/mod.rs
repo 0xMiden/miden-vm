@@ -369,7 +369,7 @@ impl Library {
                 Arc::from(export.path().parent().unwrap().to_path_buf().into_boxed_path());
             let module = modules_by_path
                 .entry(Arc::clone(&module_name))
-                .or_insert_with(|| ModuleInfo::new(module_name));
+                .or_insert_with(|| ModuleInfo::new(None, module_name));
             match export {
                 LibraryExport::Procedure(ProcedureExport { node, path, signature, attributes }) => {
                     let proc_digest = self.mast_forest[*node].digest();
@@ -459,13 +459,13 @@ impl Library {
 /// - The number of exported procedures cannot exceed [Kernel::MAX_NUM_PROCEDURES] (i.e., 256).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Deserialize))]
-#[cfg_attr(feature = "serde", serde(try_from = "Library"))]
+#[cfg_attr(feature = "serde", serde(try_from = "Arc<Library>"))]
 pub struct KernelLibrary {
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel: Kernel,
     #[cfg_attr(feature = "serde", serde(skip))]
     kernel_info: ModuleInfo,
-    library: Library,
+    library: Arc<Library>,
 }
 
 #[cfg(feature = "serde")]
@@ -498,18 +498,23 @@ impl KernelLibrary {
 
     /// Destructures this kernel library into individual parts.
     pub fn into_parts(self) -> (Kernel, ModuleInfo, Arc<MastForest>) {
-        (self.kernel, self.kernel_info, self.library.mast_forest)
+        (self.kernel, self.kernel_info, self.library.mast_forest.clone())
+    }
+
+    /// Extracts the underlying [Library] from this kernel library
+    pub fn into_library(self) -> Arc<Library> {
+        self.library
     }
 }
 
-impl TryFrom<Library> for KernelLibrary {
+impl TryFrom<Arc<Library>> for KernelLibrary {
     type Error = LibraryError;
 
-    fn try_from(library: Library) -> Result<Self, Self::Error> {
+    fn try_from(library: Arc<Library>) -> Result<Self, Self::Error> {
         let kernel_path = Arc::from(Path::kernel_path().to_path_buf().into_boxed_path());
         let mut proc_digests = Vec::with_capacity(library.exports.len());
 
-        let mut kernel_module = ModuleInfo::new(Arc::clone(&kernel_path));
+        let mut kernel_module = ModuleInfo::new(None, Arc::clone(&kernel_path));
 
         for export in library.exports.values() {
             match export {
@@ -764,7 +769,7 @@ impl Serializable for KernelLibrary {
 /// NOTE: Serialization of libraries is likely to be deprecated in a future release
 impl Deserializable for KernelLibrary {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let library = Library::read_from(source)?;
+        let library = Arc::new(Library::read_from(source)?);
 
         Self::try_from(library).map_err(|err| {
             DeserializationError::InvalidValue(format!(

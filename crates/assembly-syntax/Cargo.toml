@@ -32,7 +32,7 @@ serde = [
     "semver/serde",
     "smallvec/serde",
 ]
-arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary"]
+arbitrary = ["dep:proptest", "dep:proptest-derive", "miden-core/arbitrary", "miden-debug-types/arbitrary"]
 testing = ["arbitrary", "logging"]
 logging = ["dep:env_logger"]
 
