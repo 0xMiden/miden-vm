@@ -1,7 +1,23 @@
 //! Type definitions for the debug_info section.
+//!
+//! This module provides types for storing debug information in MASP packages,
+//! enabling debuggers to provide meaningful source-level debugging experiences.
+//!
+//! # Overview
+//!
+//! The debug info section contains:
+//! - **Type definitions**: Describe the types of variables (primitives, structs, arrays, etc.)
+//! - **Source file paths**: Deduplicated file paths for source locations
+//! - **Function metadata**: Function signatures, local variables, and inline call sites
+//!
+//! # Usage
+//!
+//! Debuggers can use this information along with `DebugVar` decorators in the MAST
+//! to provide source-level variable inspection, stepping, and call stack visualization.
 
 use alloc::{string::String, vec::Vec};
 
+use miden_debug_types::{ColumnNumber, LineNumber};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -257,31 +273,24 @@ pub struct DebugFieldInfo {
 // ================================================================================================
 
 /// Source file information.
+///
+/// Contains the path and optional metadata for a source file referenced by debug info.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFileInfo {
-    /// Path to the source file (index into string table)
+    /// Full path to the source file (index into string table).
     pub path_idx: u32,
-    /// Optional directory containing the file (index into string table)
-    pub directory_idx: Option<u32>,
-    /// Optional checksum of the file content for verification
+    /// Optional checksum of the file content for verification.
+    ///
+    /// When present, debuggers can use this to verify that the source file on disk
+    /// matches the version used during compilation.
     pub checksum: Option<[u8; 32]>,
 }
 
 impl DebugFileInfo {
-    /// Creates a new file info with just a path.
+    /// Creates a new file info with a path.
     pub fn new(path_idx: u32) -> Self {
-        Self {
-            path_idx,
-            directory_idx: None,
-            checksum: None,
-        }
-    }
-
-    /// Sets the directory index.
-    pub fn with_directory(mut self, directory_idx: u32) -> Self {
-        self.directory_idx = Some(directory_idx);
-        self
+        Self { path_idx, checksum: None }
     }
 
     /// Sets the checksum.
@@ -295,6 +304,9 @@ impl DebugFileInfo {
 // ================================================================================================
 
 /// Debug information for a function.
+///
+/// Links source-level function information to the compiled MAST representation,
+/// including local variables and inlined call sites.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFunctionInfo {
@@ -304,14 +316,14 @@ pub struct DebugFunctionInfo {
     pub linkage_name_idx: Option<u32>,
     /// File containing this function (index into file table)
     pub file_idx: u32,
-    /// Line number where the function starts
-    pub line: u32,
-    /// Column number where the function starts
-    pub column: u32,
+    /// Line number where the function starts (1-indexed)
+    pub line: LineNumber,
+    /// Column number where the function starts (1-indexed)
+    pub column: ColumnNumber,
     /// Type of this function (index into type table, optional)
     pub type_idx: Option<u32>,
-    /// MAST root digest of this function (if known)
-    /// This links the debug info to the compiled code
+    /// MAST root digest of this function (if known).
+    /// This links the debug info to the compiled code.
     pub mast_root: Option<[u8; 32]>,
     /// Local variables declared in this function
     pub variables: Vec<DebugVariableInfo>,
@@ -321,7 +333,7 @@ pub struct DebugFunctionInfo {
 
 impl DebugFunctionInfo {
     /// Creates a new function info.
-    pub fn new(name_idx: u32, file_idx: u32, line: u32, column: u32) -> Self {
+    pub fn new(name_idx: u32, file_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
         Self {
             name_idx,
             linkage_name_idx: None,
@@ -368,6 +380,9 @@ impl DebugFunctionInfo {
 // ================================================================================================
 
 /// Debug information for a local variable or parameter.
+///
+/// This struct captures the source-level information about a variable, enabling
+/// debuggers to display variable names, types, and locations to users.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugVariableInfo {
@@ -377,17 +392,38 @@ pub struct DebugVariableInfo {
     pub type_idx: u32,
     /// If this is a parameter, its 1-based index (0 = not a parameter)
     pub arg_index: u32,
-    /// Line where the variable is declared
-    pub line: u32,
-    /// Column where the variable is declared
-    pub column: u32,
-    /// Scope depth (0 = function scope)
+    /// Line where the variable is declared (1-indexed)
+    pub line: LineNumber,
+    /// Column where the variable is declared (1-indexed)
+    pub column: ColumnNumber,
+    /// Scope depth indicating the lexical nesting level of this variable.
+    ///
+    /// - `0` = function-level scope (parameters and variables at function body level)
+    /// - `1` = first nested block (e.g., inside an `if` or `loop`)
+    /// - `2` = second nested block, and so on
+    ///
+    /// This is used by debuggers to:
+    /// 1. Determine variable visibility at a given execution point
+    /// 2. Handle variable shadowing (a variable with the same name but higher depth shadows one
+    ///    with lower depth when both are in scope)
+    /// 3. Display variables grouped by their scope level
+    ///
+    /// For example, in:
+    /// ```text
+    /// fn foo(x: i32) {           // x has scope_depth 0
+    ///     let y = 1;             // y has scope_depth 0
+    ///     if condition {
+    ///         let z = 2;         // z has scope_depth 1
+    ///         let x = 3;         // this x has scope_depth 1, shadows parameter x
+    ///     }
+    /// }
+    /// ```
     pub scope_depth: u32,
 }
 
 impl DebugVariableInfo {
     /// Creates a new variable info.
-    pub fn new(name_idx: u32, type_idx: u32, line: u32, column: u32) -> Self {
+    pub fn new(name_idx: u32, type_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
         Self {
             name_idx,
             type_idx,
@@ -420,6 +456,9 @@ impl DebugVariableInfo {
 // ================================================================================================
 
 /// Debug information for an inlined function call.
+///
+/// Captures the call site location when a function has been inlined,
+/// enabling debuggers to show the original call stack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInlinedCallInfo {
@@ -427,15 +466,15 @@ pub struct DebugInlinedCallInfo {
     pub callee_idx: u32,
     /// Call site file (index into file table)
     pub file_idx: u32,
-    /// Call site line number
-    pub line: u32,
-    /// Call site column number
-    pub column: u32,
+    /// Call site line number (1-indexed)
+    pub line: LineNumber,
+    /// Call site column number (1-indexed)
+    pub column: ColumnNumber,
 }
 
 impl DebugInlinedCallInfo {
     /// Creates a new inlined call info.
-    pub fn new(callee_idx: u32, file_idx: u32, line: u32, column: u32) -> Self {
+    pub fn new(callee_idx: u32, file_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
         Self { callee_idx, file_idx, line, column }
     }
 }

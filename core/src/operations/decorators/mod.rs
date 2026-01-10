@@ -90,7 +90,7 @@ impl fmt::Display for Decorator {
             },
             Self::Debug(options) => write!(f, "debug({options})"),
             Self::Trace(trace_id) => write!(f, "trace({trace_id})"),
-            Self::DebugVar(debug_var) => write!(f, "debugVar({})", debug_var),
+            Self::DebugVar(debug_var) => write!(f, "variable({})", debug_var),
         }
     }
 }

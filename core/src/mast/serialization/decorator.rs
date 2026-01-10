@@ -133,7 +133,10 @@ impl DecoratorInfo {
                 let value_location = match location_tag {
                     0 => DebugVarLocation::Stack(data_reader.read_u8()?),
                     1 => DebugVarLocation::Memory(data_reader.read_u32()?),
-                    2 => DebugVarLocation::Const(data_reader.read_u64()?),
+                    2 => {
+                        let value = data_reader.read_u64()?;
+                        DebugVarLocation::Const(crate::Felt::new(value))
+                    },
                     3 => DebugVarLocation::Local(data_reader.read_u16()?),
                     4 => {
                         let len = data_reader.read_u16()? as usize;
@@ -154,9 +157,13 @@ impl DecoratorInfo {
                     debug_var.set_type_id(data_reader.read_u32()?);
                 }
 
-                // Read optional arg_index
+                // Read optional arg_index (1-based, stored as raw u32)
                 if data_reader.read_bool()? {
-                    debug_var.set_arg_index(data_reader.read_u32()?);
+                    let arg_index = data_reader.read_u32()?;
+                    // set_arg_index expects a non-zero value for 1-based indices
+                    if arg_index > 0 {
+                        debug_var.set_arg_index(arg_index);
+                    }
                 }
 
                 // Read optional source location
@@ -379,9 +386,10 @@ impl DecoratorDataBuilder {
                         self.decorator_data.push(1); // tag
                         self.decorator_data.extend(addr.to_le_bytes());
                     },
-                    DebugVarLocation::Const(val) => {
+                    DebugVarLocation::Const(felt) => {
                         self.decorator_data.push(2); // tag
-                        self.decorator_data.extend(val.to_le_bytes());
+                        // Serialize Felt as u64
+                        self.decorator_data.extend(felt.as_int().to_le_bytes());
                     },
                     DebugVarLocation::Local(idx) => {
                         self.decorator_data.push(3); // tag
@@ -400,10 +408,10 @@ impl DecoratorDataBuilder {
                     self.decorator_data.extend(type_id.to_le_bytes());
                 }
 
-                // Write optional arg_index
+                // Write optional arg_index (serialize NonZeroU32 as u32)
                 self.decorator_data.write_bool(debug_var.arg_index().is_some());
                 if let Some(arg_index) = debug_var.arg_index() {
-                    self.decorator_data.extend(arg_index.to_le_bytes());
+                    self.decorator_data.extend(arg_index.get().to_le_bytes());
                 }
 
                 // Write optional source location
