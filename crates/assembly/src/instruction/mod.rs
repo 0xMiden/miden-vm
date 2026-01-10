@@ -587,6 +587,10 @@ impl Assembler {
                     .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;
             },
 
+            Instruction::DebugVar(debug_var_info) => {
+                block_builder.push_decorator(Decorator::DebugVar(debug_var_info.clone()))?;
+            },
+
             // ----- emit instruction -------------------------------------------------------------
             // emit: reads event ID from top of stack and execute the corresponding handler.
             Instruction::Emit => {
