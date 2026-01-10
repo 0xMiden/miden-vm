@@ -30,6 +30,7 @@ use crate::trace::{
         OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET, OP_BITS_RANGE,
         OP_INDEX_COL_IDX, USER_OP_HELPERS_OFFSET,
     },
+    range::{B_RANGE_COL_IDX, M_COL_IDX, V_COL_IDX},
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, NUM_STACK_HELPER_COLS, STACK_TOP_OFFSET},
     ACE_CHIPLET_WIRING_BUS_OFFSET, ACE_CHIPLET_WIRING_BUS_RANGE, ACE_CHIPLET_WIRING_BUS_WIDTH,
     AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH, CHIPLETS_BUS_AUX_TRACE_OFFSET,
@@ -209,6 +210,33 @@ Helper Columns:
     );
 
     insta::assert_snapshot!("stack_trace_layout", layout);
+}
+
+/// Documents range check trace column ranges and offsets.
+///
+/// This test captures the computed values of range check-specific column indices.
+#[test]
+fn document_range_check_trace_layout() {
+    let layout = format!(
+        r#"RANGE CHECK TRACE LAYOUT
+============================
+
+Main Trace:
+  Offset: {RANGE_CHECK_TRACE_OFFSET}
+  Width: {RANGE_CHECK_TRACE_WIDTH}
+  Range: {RANGE_CHECK_TRACE_RANGE:?}
+  - M column (multiplicity): {M_COL_IDX}
+  - V column (values being range-checked): {V_COL_IDX}
+
+Auxiliary Trace:
+  Offset: {RANGE_CHECK_AUX_TRACE_OFFSET}
+  Width: {RANGE_CHECK_AUX_TRACE_WIDTH}
+  Range: {RANGE_CHECK_AUX_TRACE_RANGE:?}
+  - B column (running product): {B_RANGE_COL_IDX}
+"#
+    );
+
+    insta::assert_snapshot!("range_check_trace_layout", layout);
 }
 
 /// Documents hasher chiplet column ranges, especially the capacity portion of RPO.
