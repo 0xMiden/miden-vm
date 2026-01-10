@@ -3,9 +3,12 @@ use core::ops::Range;
 use chiplets::hasher::RATE_LEN;
 use miden_core::utils::range;
 
+pub mod aux_trace;
 pub mod chiplets;
 pub mod decoder;
+pub mod main_trace;
 pub mod range;
+pub mod rows;
 pub mod stack;
 
 mod rows;
@@ -18,6 +21,11 @@ mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 #[cfg(test)]
 mod tests;
+
+// Re-export commonly used types
+pub use aux_trace::AuxTraceBuilder;
+pub use main_trace::MainTraceRow;
+pub use rows::RowIndex;
 
 // CONSTANTS
 // ================================================================================================
