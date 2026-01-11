@@ -65,6 +65,11 @@ pub(crate) fn batch_inversion_par(values: &mut [Felt]) {
     );
 }
 
+/// Inverts all values in the provided column in place, leaving zeros unchanged.
+///
+/// This is an alias for [`batch_inversion_par`].
+pub(crate) use self::batch_inversion_par as invert_column_allow_zeros;
+
 /// Montgomery's trick for batch inversion, handling zeros.
 fn batch_inversion_helper(values: &[Felt], result: &mut [Felt]) {
     debug_assert_eq!(values.len(), result.len());
@@ -96,11 +101,6 @@ fn batch_inversion_helper(values: &[Felt], result: &mut [Felt]) {
     }
 }
 
-/// Inverts all values in the provided column in place, leaving zeros unchanged.
-pub(crate) fn invert_column_allow_zeros(column: &mut [Felt]) {
-    batch_inversion_par(column);
-}
-
 // TESTS
 // ================================================================================================
 
@@ -123,9 +123,9 @@ mod tests {
     }
 
     #[test]
-    fn invert_column_allow_zeros_works() {
+    fn batch_inversion_par_works_on_small_slice() {
         let mut column = Vec::from([Felt::new(2), ZERO, Felt::new(4), Felt::new(5)]);
-        invert_column_allow_zeros(&mut column);
+        batch_inversion_par(&mut column);
 
         assert_eq!(column[0], Felt::new(2).inverse());
         assert_eq!(column[1], ZERO);
