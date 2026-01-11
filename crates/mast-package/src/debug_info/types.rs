@@ -275,6 +275,11 @@ pub struct DebugFieldInfo {
 /// Source file information.
 ///
 /// Contains the path and optional metadata for a source file referenced by debug info.
+///
+/// TODO: Consider adding `directory_idx: Option<u32>` to reduce serialized debug info size.
+/// When `directory_idx` is set, `path_idx` would be a relative path; otherwise `path_idx`
+/// is expected to be absolute. This would allow sharing common directory prefixes across
+/// multiple files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugFileInfo {
