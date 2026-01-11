@@ -37,11 +37,11 @@ mod tests;
 /// In the above, the meaning of the columns is as follows:
 /// * Selector columns s0, s1, and s2 used to help select transition function for a given row.
 /// * Hasher state columns h0 through h11 used to hold the hasher state for each round of hash
-///   computation. The state is laid out as follows:
-///   - The first four columns represent the capacity state of the sponge function.
-///   - The next eight columns represent the rate elements of the state. These are used to absorb
-///     the values to be hashed. Once a permutation is complete, hash output is located in the first
-///     four rate columns (h4, h5, h6, h7).
+///   computation. The state is laid out as `[RATE0, RATE1, CAPACITY]`:
+///   - The first eight columns (h0-h7) represent the rate elements of the state. These are used to
+///     absorb the values to be hashed. Once a permutation is complete, hash output is located in
+///     the first four rate columns (h0, h1, h2, h3).
+///   - The last four columns (h8-h11) represent the capacity state of the sponge function.
 /// * Node index column idx used to help with Merkle path verification and Merkle root update
 ///   computations. For all other computations the values in this column are set to 0s.
 ///
@@ -429,6 +429,10 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 /// padding rule, the first capacity element is set with the provided padding flag, which is assumed
 /// to be ZERO or ONE, depending on whether the number of elements to be absorbed is a multiple of
 /// the rate or not. The remaining elements in the capacity portion of the state are set to ZERO.
+///
+/// State layout: [R1, R2, CAP] where:
+/// - state[0..8] = init_values (rate)
+/// - state[8..12] = [padding_flag, ZERO, ZERO, ZERO] (capacity)
 #[inline(always)]
 pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; STATE_WIDTH] {
     debug_assert!(
@@ -436,10 +440,6 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
         "first capacity element must be 0 or 1"
     );
     [
-        padding_flag,
-        ZERO,
-        ZERO,
-        ZERO,
         init_values[0],
         init_values[1],
         init_values[2],
@@ -448,41 +448,57 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
         init_values[5],
         init_values[6],
         init_values[7],
+        padding_flag,
+        ZERO,
+        ZERO,
+        ZERO,
     ]
 }
 
 /// Initializes hasher state with the elements from the provided words. Because the length of the
 /// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
 /// the Rescue Prime Optimized padding rule.
+///
+/// State layout: [RATE0, RATE1, CAP] where:
+/// - state[0..4] = w1 (first rate word, also digest location)
+/// - state[4..8] = w2 (second rate word)
+/// - state[8..12] = capacity
 #[inline(always)]
 pub fn init_state_from_words(w1: &Digest, w2: &Digest) -> [Felt; STATE_WIDTH] {
     init_state_from_words_with_domain(w1, w2, ZERO)
 }
 
-/// Initializes hasher state with elements from the provided words.  Sets the second element of the
-/// capacity register to the provided domain.  All other elements of the capacity register are set
+/// Initializes hasher state with elements from the provided words. Sets the second element of the
+/// capacity register to the provided domain. All other elements of the capacity register are set
 /// to 0.
+///
+/// State layout: [RATE0, RATE1, CAP] where:
+/// - state[0..4] = w1 (first rate word, also digest location)
+/// - state[4..8] = w2 (second rate word)
+/// - state[8..12] = [ZERO, domain, ZERO, ZERO] (capacity)
 #[inline(always)]
 pub fn init_state_from_words_with_domain(
     w1: &Digest,
     w2: &Digest,
     domain: Felt,
 ) -> [Felt; STATE_WIDTH] {
-    [ZERO, domain, ZERO, ZERO, w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3]]
+    [w1[0], w1[1], w1[2], w1[3], w2[0], w2[1], w2[2], w2[3], ZERO, domain, ZERO, ZERO]
 }
 
 /// Absorbs the specified values into the provided state by overwriting the corresponding elements
 /// in the rate portion of the state.
+///
+/// State layout: rate is at state[0..8]
 #[inline(always)]
 pub fn absorb_into_state(state: &mut [Felt; STATE_WIDTH], values: &[Felt; RATE_LEN]) {
-    state[4] = values[0];
-    state[5] = values[1];
-    state[6] = values[2];
-    state[7] = values[3];
-    state[8] = values[4];
-    state[9] = values[5];
-    state[10] = values[6];
-    state[11] = values[7];
+    state[0] = values[0];
+    state[1] = values[1];
+    state[2] = values[2];
+    state[3] = values[3];
+    state[4] = values[4];
+    state[5] = values[5];
+    state[6] = values[6];
+    state[7] = values[7];
 }
 
 /// Returns elements representing the digest portion of the provided hasher's state.

@@ -40,12 +40,28 @@ where
     imms.iter().for_each(|imm| push_felt(block_builder, (*imm).into()));
 }
 
+/// Appends `PUSH` operations to the basic block to push a Word constant onto the stack in
+/// little-endian order.
+///
+/// The elements are pushed in reverse order (Word[3], Word[2], Word[1], Word[0]) so that
+/// Word[0] ends up on top of the stack (low element at lowest address / on top).
+///
+/// After this operation, calling `get_stack_word(0)` will return the original Word.
+pub fn push_word(word: &[Felt; 4], block_builder: &mut BasicBlockBuilder) {
+    // Push in reverse order so Word[0] ends up on top
+    for felt in word.iter().rev() {
+        push_felt(block_builder, *felt);
+    }
+}
+
 /// Appends `PUSH` operations to the basic block using the [Felt]s obtained from the Word value
 /// using the provided range.
 ///
-/// In cases when the immediate value is 0, `PUSH` operation is replaced with `PAD`. Also, in cases
-/// when immediate value is 1, `PUSH` operation is replaced with `PAD INCR` because in most cases
-/// this will be more efficient than doing a `PUSH`.
+/// The elements are pushed in reverse order so that the first element of the slice ends up on
+/// top of the stack, consistent with `push_word` behavior.
+///
+/// For example, if `WORD = [1, 2, 3, 4]`, then `push.WORD[0..2]` results in stack `[1, 2, ...]`
+/// with 1 on top.
 ///
 /// # Errors
 /// Returns an error if:
@@ -72,7 +88,12 @@ pub fn push_word_slice(
                 range: range.clone(),
             }));
         },
-        Some(values) => push_many(values, block_builder),
+        // Push in reverse order so slice[0] ends up on top, consistent with push_word
+        Some(values) => {
+            for felt in values.iter().rev() {
+                push_felt(block_builder, *felt);
+            }
+        },
     }
 
     Ok(())

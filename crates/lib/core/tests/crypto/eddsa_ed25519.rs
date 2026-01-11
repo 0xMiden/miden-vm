@@ -131,15 +131,16 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let output = test.execute().unwrap();
         let stack = output.stack_outputs();
 
-        let commitment = stack.get_stack_word_be(0).unwrap();
-        let tag = stack.get_stack_word_be(4).unwrap();
+        let commitment = stack.get_stack_word(0).unwrap();
+        let tag = stack.get_stack_word(4).unwrap();
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
 
         let verifier_commitment =
             EddsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
         assert_eq!(precompile_commitment, verifier_commitment);
 
-        let result = stack.get_stack_item(6).unwrap();
+        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
+        let result = stack.get_stack_item(5).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -164,24 +165,26 @@ fn test_eddsa_verify_with_message() {
     let pk_felts = bytes_to_packed_u32_elements(&secret_key.public_key().to_bytes());
     let pk_commitment = Rpo256::hash_elements(&pk_felts);
 
-    let stack_words = [message, pk_commitment];
-    let stack_inputs: Vec<_> =
-        Word::words_as_elements(&stack_words).iter().map(Felt::as_int).collect();
+    let advice: Vec<_> =
+        eddsa_sign(&secret_key, message).iter().map(Felt::as_canonical_u64).collect();
 
-    let advice: Vec<_> = eddsa_sign(&secret_key, message).iter().map(Felt::as_int).collect();
-
-    let source = "
+    // Use push.{word} syntax for correct LE stack layout
+    let source = format!(
+        "
             use miden::core::crypto::dsa::eddsa_ed25519
             use miden::core::sys
 
             begin
+                push.{message}
+                push.{pk_commitment}
                 exec.eddsa_ed25519::verify
 
                 exec.sys::truncate_stack
             end
-        ";
+        "
+    );
 
-    let test = build_debug_test!(source, &stack_inputs, &advice);
+    let test = build_debug_test!(&source, &[], &advice);
 
     let _ = test.execute().unwrap();
 }
@@ -205,7 +208,9 @@ impl EddsaSignatureHandler {
 
 impl EventHandler for EddsaSignatureHandler {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let provided_pk_rpo = process.get_stack_word_be(1);
+        // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
+        // Position 0 has the event ID, so pk_commitment starts at position 1
+        let provided_pk_rpo = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
@@ -219,10 +224,12 @@ impl EventHandler for EddsaSignatureHandler {
             pk_commitment, provided_pk_rpo
         );
 
-        let message = process.get_stack_word_be(5);
+        // Message starts at position 5 (after event_id + pk_commitment)
+        let message = process.get_stack_word(5);
         let calldata = eddsa_sign(&secret_key, message);
 
-        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+        // Use extend_stack to make elements available in order: pk first, then sig
+        Ok(vec![AdviceMutation::extend_stack(calldata)])
     }
 }
 

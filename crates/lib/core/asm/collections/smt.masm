@@ -41,7 +41,8 @@ const MAX_LEAF_SIZE = 8192
 pub proc get
     # Prepare for `mtree_get`
     # (6 cycles)
-    dupw.1 dup.4 push.LEAF_DEPTH
+    # => [K[0], K[1], K[2], K[3], R[0], R[1], R[2], R[3]]
+    dupw.1 dup.7 push.LEAF_DEPTH
     # => [depth, K[3], R, K, R]
 
     # Retrieve node value from merkle store
@@ -85,17 +86,20 @@ pub proc get
 
             # Push leaf pre-image on stack (single K-V pair)
             # (1 cycle)
-            drop adv_push.8
-            # => [V, K, NV, K, R]
+            drop
+            padw adv_loadw
+            padw adv_loadw
+            swapw
+            # => [K, V, NV, K, R]
 
             # Confirm that the key stored in the leaf is as expected
             # (18 cycles)
-            movupw.3 dupw.2 assert_eqw
-            # => [V, K, NV, R]
+            movupw.3 dupw.1 assert_eqw
+            # => [K, V, NV, R]
 
             # Duplicate V to return it after hash check
             # (7 cycles)
-            dupw movdnw.3
+            dupw.1 movdnw.3
             # => [V, K, NV, V, R]
 
             # Hash leaf preimage and ensure that it equals node value
@@ -141,13 +145,13 @@ end
 pub proc set
     # Prepare stack for adv.push_mtnode
     # (X cycles)
-    movupw.2 dup.8 push.LEAF_DEPTH
-    # => [depth, leaf_index, R, V, K]
+    movupw.2 dup.11 push.LEAF_DEPTH
+    # => [depth, leaf_index=K[3], R, V, K]
 
-    # Push MT node on advice stack, cleanup operand stack, and then
-    # push MT node on operand stack (NV)
+    # Push MT node on advice stack (in structural order for adv_loadw), cleanup operand stack,
+    # and then push MT node on operand stack (NV)
     # (X cycles)
-    adv.push_mtnode drop drop movdnw.2 adv_push.4
+    adv.push_mtnode drop drop movdnw.2 padw adv_loadw
     # => [NV, V, K, R]
 
     # (X cycles)
@@ -297,7 +301,7 @@ proc get_multi_leaf_value
         # => [val_ptr, x, x, x, x, R]
 
         # (1 cycle)
-        mem_loadw_be
+        mem_loadw_le
         # => [V, R]
     else
         # If the key wasn't found, then the key's value is an empty word.
@@ -336,7 +340,7 @@ proc set_empty_leaf
 
         # Prepare stack: verify that the leaf is actually empty
         # (X cycles)
-        movupw.2 swapw dup.8 movdn.4 push.LEAF_DEPTH movdn.4
+        movupw.2 swapw dup.11 movdn.4 push.LEAF_DEPTH movdn.4
         #=> [V (=ZERO), depth, K[3], R, K, ...]
 
         # (1 cycle)
@@ -351,17 +355,17 @@ proc set_empty_leaf
         dropw
         #=> [V, K, R, ...]
 
-        # Update advice map
-        adv.insert_hdword
+        # Update advice map (swap to put K on top for key = hash(K || V))
+        swapw adv.insert_hdword swapw
         #=> [V, K, R, ...]
 
         # Compute hash([K, V]); the new node value (NV)
-        # (21 cycles)
-        dupw.1 swapw hmerge
+        # (20 cycles)
+        dupw.1 hmerge
         # => [NV, K, R]
 
         # Prepare stack for `mtree_set` (5 cycles)
-        movupw.2 dup.8 push.LEAF_DEPTH
+        movupw.2 dup.11 push.LEAF_DEPTH
         #=> [depth, K[3], R, NV, K]
 
         # Insert node in Merkle store (29 cycles)
@@ -435,7 +439,8 @@ end
 proc insert_single_leaf
     # Push the leaf pre-image on stack
     # (X cycles)
-    adv_push.8
+    padw adv_loadw
+    padw adv_loadw
     # => [V_in_leaf, K_in_leaf, V, K, R]
 
     # Check if the key stored in the leaf is the same as K
@@ -450,18 +455,18 @@ proc insert_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
+        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
+        movupw.2 swapw adv.insert_hdword swapw
         # => [V, K, V_in_leaf, R]
 
         # Compute hash([K, V]); the new node value (NV)
         # (X cycles)
-        dupw.1 swapw hmerge
+        dupw.1 hmerge
         # => [NV, K, V_in_leaf, R]
 
         # Prepare stack to update Merkle store
         # (X cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
+        movupw.3 dup.11 push.LEAF_DEPTH
         # => [depth, K[3], R, NV, K, V_in_leaf]
 
         # Update Merkle store (29 cycles)
@@ -471,7 +476,7 @@ proc insert_single_leaf
         # Confirm that claimed `V_in_leaf` from advice provider is correct by checking if
         # `[K, V_in_leaf]` hashes to `NV_old`
         # (33 cycles)
-        movupw.2 dupw.3 hmerge assert_eqw
+        movupw.2 dupw.3 swapw hmerge assert_eqw
         # => [R_new, V_in_leaf]
 
         # Clean up stack for return
@@ -523,20 +528,20 @@ proc insert_single_to_multi_leaf
         #  8..12: K
         # 12..16: V
 
-        loc_storew_be.0 dropw
+        loc_storew_le.0 dropw
         # => [K, V_l, V, R]
 
         # Save K[3], as that is our index `i`.
-        dup movdn.12
+        dup.3 movdn.12
         # => [K, V_l, V, leaf_index, R]
 
-        loc_storew_be.8 dropw
+        loc_storew_le.8 dropw
         # => [V_l, V, leaf_index, R]
 
-        loc_storew_be.4 dropw
+        loc_storew_le.4 dropw
         # => [V, leaf_index, R]
 
-        loc_storew_be.12 dropw
+        loc_storew_le.12 dropw
         # => [leaf_index, R]
     else
         # => [K_l, K, V_l, V, R]
@@ -547,20 +552,20 @@ proc insert_single_to_multi_leaf
         #  8..12: K_in_leaf
         # 12..16: V_in_leaf
 
-        loc_storew_be.8 dropw
+        loc_storew_le.8 dropw
         # => [K, V_l, V, R]
 
         # Save K[3], as that is our index `i`.
-        dup movdn.12
+        dup.3 movdn.12
         # => [K, V_l, V, leaf_index, R]
 
-        loc_storew_be.0 dropw
+        loc_storew_le.0 dropw
         # => [V_l, V, leaf_index, R]
 
-        loc_storew_be.12 dropw
+        loc_storew_le.12 dropw
         # => [V, leaf_index, R]
 
-        loc_storew_be.4 dropw
+        loc_storew_le.4 dropw
         # => [leaf_index, R]
     end
 
@@ -597,7 +602,8 @@ end
 proc remove_single_leaf
     # Push the leaf pre-image on stack
     # (0 cycles)
-    adv_push.8
+    padw adv_loadw
+    padw adv_loadw
     # => [V_in_leaf, K_in_leaf, V, K, R]
 
     # Check if the key stored in the leaf is the same as K
@@ -612,15 +618,15 @@ proc remove_single_leaf
         dropw
         # => [K, V_in_leaf, V, R]
 
-        # Update advice map (3 cycles)
-        movupw.2 adv.insert_hdword
+        # Update advice map (5 cycles, swap to put K on top for key = hash(K || V))
+        movupw.2 swapw adv.insert_hdword swapw
         # => [V, K, V_in_leaf, R]
 
         # Prepare the stack for `mtree_set`
         # Note that the new node value will be the empty word, so we can use `V`
         # as the node value (since we confirmed that it's `ZERO`)
         # (7 cycles)
-        movupw.3 dup.8 push.LEAF_DEPTH
+        movupw.3 dup.11 push.LEAF_DEPTH
         # => [depth, K[3], R, V, K, V_in_leaf]
 
         # (29 cycles)
@@ -629,7 +635,9 @@ proc remove_single_leaf
 
         # Confirm that hmerge([K, V_in_leaf]) = NV_old
         # (33 cycles)
-        movupw.2 dupw.3 hmerge assert_eqw
+        movupw.2 dupw.3 
+        swapw hmerge 
+        assert_eqw
         # => [R_new, V_in_leaf, ...]
 
         # Cleanup stack for return (1 cycle)
@@ -648,7 +656,7 @@ proc remove_single_leaf
         # => [K_in_leaf, K, V_in_leaf, R]
 
         # Prepare stack for mtree_get
-        movupw.3 dup.8 push.LEAF_DEPTH
+        movupw.3 dup.11 push.LEAF_DEPTH
         # => [depth, K[3], R, K_in_leaf, K, V_in_leaf]
 
         # Retrieve node value (NV) from merkle tree
@@ -660,7 +668,7 @@ proc remove_single_leaf
         # => [NV, R, K_in_leaf, V_in_leaf]
 
         # Ensure that hash([K_in_leaf, V_in_leaf]) == NV
-        movupw.2 movupw.3 hmerge assert_eqw
+        movupw.2 movupw.3 swapw hmerge assert_eqw
         # => [R]
 
         # Prepare stack for return
@@ -827,7 +835,7 @@ proc insert_into_leaf
     # => [key_ptr, V, K, R]
 
     # Save K[3], which is the leaf index `i`.
-    dup.5 movdn.9
+    dup.8 movdn.9
     # => [key_ptr, V, K, leaf_index, R]
 
     #
@@ -866,14 +874,14 @@ proc insert_into_leaf
     # => [cur_write, K, cur_write, V, leaf_index, R]
 
     # *cur_write = K
-    mem_storew_be dropw
+    mem_storew_le dropw
     # => [cur_write, V, leaf_index, R]
 
     add.4 movdn.4 dup.4
     # => [cur_write, V, cur_write, leaf_index, R]
 
     # *cur_write = V
-    mem_storew_be dropw
+    mem_storew_le dropw
     # => [cur_write, leaf_index, R, ]
 
     # cur_write = &new_pairs[2]
@@ -922,7 +930,7 @@ proc replace_in_multi_leaf
 
     padw dup.4
     # => [val_ptr, ZERO, val_ptr, start_ptr, end_ptr, V, K, R]
-    mem_loadw_be
+    mem_loadw_le
     # => [V_old, val_ptr, start_ptr, end_ptr, V, K, R]
 
     # Word-align the stack for a moment.
@@ -933,7 +941,7 @@ proc replace_in_multi_leaf
     # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
     dup.5
     # => [val_ptr, V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
-    mem_storew_be
+    mem_storew_le
     # => [V, z, val_ptr, start_ptr, end_ptr, V_old, K, R]
 
     # Prepare for hash_words
@@ -955,7 +963,7 @@ proc replace_in_multi_leaf
     drop drop
     # => [start_ptr, end_ptr, R, K, V_old]
 
-    dup.6 # K[3]
+    dup.9 # K[3]
     # => [leaf_index, start_ptr, end_ptr, R, K, V_old]
 
     movdn.2
@@ -1002,11 +1010,11 @@ proc remove_in_multi_leaf
     # => [V=EMPTY, key_ptr, K, R]
 
     # Get V_in_leaf from key_ptr+4. We'll need it later. Since we know V is an
-    # empty word, we can reuse that stack space for mem_loadw_be.
+    # empty word, we can reuse that stack space for mem_loadw_le.
 
     dup.4 add.4
     # => [val_ptr, V=EMPTY, key_ptr, K, R]
-    mem_loadw_be
+    mem_loadw_le
     # => [V_old, key_ptr, K, R]
 
     # Shift memory from key_ptr+8..end_ptr to key_ptr, removing the (K, V_old) pair in the process.
@@ -1029,7 +1037,7 @@ proc remove_in_multi_leaf
     # => [R, V_old, K]
 
     # K[3] is the leaf index.
-    dup.8
+    dup.11
     # => [leaf_index, R, V_old, K]
 
     loc_load.3 loc_load.0

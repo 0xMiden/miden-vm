@@ -52,7 +52,7 @@ mod host;
 pub use host::{
     AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
     SyncHost,
-    advice::{AdviceError, AdviceInputs, AdviceProvider},
+    advice::{AdviceError, AdviceInputs, AdviceProvider, AdviceStackBuilder},
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{
@@ -175,7 +175,7 @@ pub async fn execute(
     host: &mut impl AsyncHost,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
-    let stack_inputs: Vec<Felt> = stack_inputs.into_iter().rev().collect();
+    let stack_inputs: Vec<Felt> = stack_inputs.into_iter().collect();
     let processor = FastProcessor::new_with_options(&stack_inputs, advice_inputs, options);
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
@@ -284,61 +284,23 @@ impl<'a> ProcessState<'a> {
         }
     }
 
-    /// Returns a word starting at the specified element index on the stack in big-endian
-    /// (reversed) order.
+    /// Returns a word starting at the specified element index on the stack.
     ///
     /// The word is formed by taking 4 consecutive elements starting from the specified index.
     /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
     /// a word from elements 1-4, etc.
     ///
-    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
-    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
-    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
+    /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
+    /// and N+3 at position 3. `word[0]` corresponds to the top of the stack.
     ///
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
-    pub fn get_stack_word_be(&self, start_idx: usize) -> Word {
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
         match self {
             ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
-    }
-
-    /// Returns a word starting at the specified element index on the stack in little-endian
-    /// (memory) order.
-    ///
-    /// The word is formed by taking 4 consecutive elements starting from the specified index.
-    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
-    /// a word from elements 1-4, etc.
-    ///
-    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
-    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
-    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    /// Creating a word does not change the state of the stack.
-    #[inline(always)]
-    pub fn get_stack_word_le(&self, start_idx: usize) -> Word {
-        let mut word = self.get_stack_word_be(start_idx);
-        word.reverse();
-        word
-    }
-
-    /// Returns a word starting at the specified element index on the stack.
-    ///
-    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
-    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
-    /// ordering expectations clear.
-    ///
-    /// See [`Self::get_stack_word_be`] for detailed documentation.
-    #[deprecated(
-        since = "0.19.0",
-        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
-    )]
-    #[inline(always)]
-    pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        self.get_stack_word_be(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the
@@ -382,8 +344,8 @@ impl<'a> ProcessState<'a> {
         start_idx: usize,
         end_idx: usize,
     ) -> Result<core::ops::Range<u32>, MemoryError> {
-        let start_addr = self.get_stack_item(start_idx).as_int();
-        let end_addr = self.get_stack_item(end_idx).as_int();
+        let start_addr = self.get_stack_item(start_idx).as_canonical_u64();
+        let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
 
         if start_addr > u32::MAX as u64 {
             return Err(MemoryError::address_out_of_bounds(start_addr, &()));

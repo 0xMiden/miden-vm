@@ -516,10 +516,6 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         &self.context.state.stack.stack_top
     }
 
-    fn top_mut(&mut self) -> &mut [Felt] {
-        &mut self.context.state.stack.stack_top
-    }
-
     fn get(&self, idx: usize) -> Felt {
         debug_assert!(idx < MIN_STACK_DEPTH);
         self.context.state.stack.stack_top[MIN_STACK_DEPTH - idx - 1]
@@ -535,7 +531,11 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
 
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
-        self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap()
+        let mut result: [Felt; WORD_SIZE] =
+            self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        // Reverse so top of stack (idx 0) goes to word[0]
+        result.reverse();
+        result.into()
     }
 
     fn depth(&self) -> u32 {
@@ -550,9 +550,13 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
 
+        // Reverse so word[0] ends up at the top of stack (highest internal index)
+        let mut source: [Felt; WORD_SIZE] = (*word).into();
+        source.reverse();
+
         let word_on_stack =
             &mut self.context.state.stack.stack_top[range(word_start_idx, WORD_SIZE)];
-        word_on_stack.copy_from_slice(word.as_slice());
+        word_on_stack.copy_from_slice(&source);
     }
 
     fn swap(&mut self, idx1: usize, idx2: usize) {

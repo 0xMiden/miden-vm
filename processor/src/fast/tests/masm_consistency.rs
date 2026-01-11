@@ -67,7 +67,7 @@ use super::*;
 #[case(None, "
     proc foo add end
     begin
-        procref.foo mem_storew_be.100 dropw push.100
+        procref.foo mem_storew_le.100 dropw push.100
         dyncall swap.8 drop
     end",
     vec![16_u32.into(); 16]
@@ -78,7 +78,7 @@ use super::*;
     begin
         push.1
         if.true
-            procref.foo mem_storew_be.100 dropw
+            procref.foo mem_storew_le.100 dropw
             push.100 dyncall
             push.100 dyncall
         else
@@ -92,7 +92,7 @@ use super::*;
 #[case(None,"
     @locals(2) proc foo locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin
-        procref.foo mem_storew_be.100 dropw push.100
+        procref.foo mem_storew_le.100 dropw push.100
         dyncall
     end",
     vec![16_u32.into(); 16]
@@ -102,9 +102,9 @@ use super::*;
     proc foo push.100 mem_store.44 end
     proc bar mem_load.44 assertz end
     begin
-        procref.foo mem_storew_be.100 dropw push.100 dyncall
+        procref.foo mem_storew_le.100 dropw push.100 dyncall
         mem_load.44 assertz
-        procref.bar mem_storew_be.104 dropw push.104 dyncall
+        procref.bar mem_storew_le.104 dropw push.104 dyncall
     end",
     vec![16_u32.into(); 16]
 )]
@@ -114,11 +114,11 @@ use super::*;
     proc foo mem_load.44 assertz end
     proc bar
         push.100 mem_store.44
-        procref.foo mem_storew_be.104 dropw push.104 dyncall
+        procref.foo mem_storew_le.104 dropw push.104 dyncall
         mem_load.44 swap.8 drop
     end
     begin
-        procref.bar mem_storew_be.104 dropw push.104 dyncall
+        procref.bar mem_storew_le.104 dropw push.104 dyncall
     end",
     vec![16_u32.into(); 16]
 )]
@@ -128,7 +128,7 @@ use super::*;
 #[case(None, "
     proc foo add end
     begin
-        procref.foo mem_storew_be.100 dropw push.100
+        procref.foo mem_storew_le.100 dropw push.100
         dynexec swap.8 drop
     end",
     vec![16_u32.into(); 16]
@@ -139,7 +139,7 @@ use super::*;
     begin
         push.1
         if.true
-            procref.foo mem_storew_be.100 dropw
+            procref.foo mem_storew_le.100 dropw
             push.100 dynexec
             push.100 dynexec
         else
@@ -153,7 +153,7 @@ use super::*;
 #[case(None,"
     @locals(2) proc foo locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin
-        procref.foo mem_storew_be.100 dropw push.100
+        procref.foo mem_storew_le.100 dropw push.100
         dynexec
     end",
     vec![16_u32.into(); 16]
@@ -163,18 +163,20 @@ use super::*;
     proc foo push.100 mem_store.44 end
     proc bar mem_load.44 sub.100 assertz end
     begin
-        procref.foo mem_storew_be.104 dropw push.104 dynexec
+        procref.foo mem_storew_le.104 dropw push.104 dynexec
         mem_load.44 sub.100 assertz
-        procref.bar mem_storew_be.108 dropw push.108 dynexec
+        procref.bar mem_storew_le.108 dropw push.108 dynexec
     end",
     vec![16_u32.into(); 16]
 )]
 // ---- loop --------------------------------
 
 // check that the loop is never entered if the condition is false (and that clk is properly updated)
-#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![3_u32.into(), 2_u32.into(), 1_u32.into(), ZERO])]
+// Stack: [ZERO, 1, 2, 3] with ZERO at top (for while.true condition)
+#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![ZERO, 1_u32.into(), 2_u32.into(), 3_u32.into()])]
 // check that the loop is entered if the condition is true, and that the stack and clock are managed
 // properly
+// Stack: [ONE, ONE, ONE, ONE, ZERO, 42] with first ONE at top (for while.true condition)
 #[case(None,
     "begin
         while.true
@@ -182,34 +184,30 @@ use super::*;
         end
         clk swap.8 drop
     end",
-    vec![42_u32.into(), ZERO, ONE, ONE, ONE, ONE]
+    vec![ONE, ONE, ONE, ONE, ZERO, 42_u32.into()]
 )]
 // ---- horner ops --------------------------------
 #[case(None,
-    "begin 
-        push.1.2.3.4 mem_storew_be.40 dropw
+    "begin
+        push.1.2.3.4 mem_storew_le.40 dropw
         horner_eval_base
     end",
-    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
-    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
-        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
-        14_u32.into(), 15_u32.into(), 16_u32.into()]
+    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
+        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
+        40_u32.into(), 4_u32.into(), 100_u32.into()]
 )]
-#[case(None,
-    "begin 
-        push.1.2.3.4 mem_storew_be.40 dropw
-        horner_eval_ext
-        end",
-    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
-    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
-        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
-        14_u32.into(), 15_u32.into(), 16_u32.into()]
-)]
-// ---- log precompile ops --------------------------------
 #[case(None,
     "begin
-        log_precompile
-    end",
+        push.1.2.3.4 mem_storew_le.40 dropw
+        horner_eval_ext
+        end",
+    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
+        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
+        40_u32.into(), 4_u32.into(), 100_u32.into()]
+)]
+// ---- log precompile ops --------------------------------
+// Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
+#[case(None, "begin log_precompile end",
     vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
          5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
 )]
@@ -356,29 +354,36 @@ fn test_masm_errors_consistency(
 /// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
 ///
 /// This test verifies:
-/// 1. The RPO permutation is applied correctly to [CAP_PREV, TAG, COMM]
+/// 1. The RPO permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
 /// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
 /// 3. The capacity is properly initialized to [0,0,0,0] for the first call
 #[test]
 fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Rpo256;
 
-    // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
-    // Taking into account big-endian encoding, the stack is [COMM, TAG]
+    // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
+    // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
     let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);
+    let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new).into();
+    let tag: Word = [5, 6, 7, 8].map(Felt::new).into();
     let cap_prev = Word::empty();
-    let tag: Word = [1, 2, 3, 4].map(Felt::new).into();
-    let comm_calldata: Word = [5, 6, 7, 8].map(Felt::new).into();
 
     // Compute expected output using RPO permutation
-    // Input state: [CAP_PREV, TAG, COMM], with CAP_PREV = [0,0,0,0]
+    // Input state: [COMM, TAG, CAP_PREV], with CAP_PREV = [0,0,0,0]
     let mut hasher_state = [ZERO; 12];
-    hasher_state[0..4].copy_from_slice(cap_prev.as_slice());
+    hasher_state[0..4].copy_from_slice(comm_calldata.as_slice());
     hasher_state[4..8].copy_from_slice(tag.as_slice());
-    hasher_state[8..12].copy_from_slice(comm_calldata.as_slice());
+    hasher_state[8..12].copy_from_slice(cap_prev.as_slice());
 
     // Apply RPO permutation
     Rpo256::apply_permutation(&mut hasher_state);
+
+    // The implementation writes output to stack as:
+    // stack[0..4] = R0 elements, stack[4..8] = R1 elements, stack[8..12] = CAP_NEXT elements
+    // Each written as: stack[i] = word[i]
+    let expected_r0: Word = hasher_state[0..4].try_into().unwrap();
+    let expected_r1: Word = hasher_state[4..8].try_into().unwrap();
+    let expected_cap: Word = hasher_state[8..12].try_into().unwrap();
 
     // Execute the program
     let program_source = "begin log_precompile end";
@@ -391,14 +396,13 @@ fn test_log_precompile_correctness() {
     let processor = FastProcessor::new(&stack_inputs);
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    // Verify stack outputs: [R1, R0, CAP_NEXT, ...]
-    let r1 = execution_output.stack.get_stack_word_be(0).unwrap();
-    let r0 = execution_output.stack.get_stack_word_be(4).unwrap();
-    let cap_next = execution_output.stack.get_stack_word_be(8).unwrap();
+    let actual_r0 = execution_output.stack.get_stack_word(0).unwrap();
+    let actual_r1 = execution_output.stack.get_stack_word(4).unwrap();
+    let actual_cap = execution_output.stack.get_stack_word(8).unwrap();
 
-    assert_eq!(&hasher_state[0..4], cap_next.as_slice(), "CAP_NEXT on stack mismatch");
-    assert_eq!(&hasher_state[4..8], r0.as_slice(), "R0 on stack mismatch");
-    assert_eq!(&hasher_state[8..12], r1.as_slice(), "R1 on stack mismatch");
+    assert_eq!(expected_r0, actual_r0, "R0 mismatch");
+    assert_eq!(expected_r1, actual_r1, "R1 mismatch");
+    assert_eq!(expected_cap, actual_cap, "CAP_NEXT mismatch");
 }
 
 // Workaround to make insta and rstest work together.

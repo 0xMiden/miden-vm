@@ -181,9 +181,9 @@ impl FastProcessor {
 
     /// Most general constructor unifying all the other ones.
     ///
-    /// The stack inputs are expected to be stored in reverse order. For example, if `stack_inputs =
-    /// [1,2,3]`, then the stack will be initialized as `[3,2,1,0,0,...]`, with `3` being on
-    /// top.
+    /// Stack inputs are stored in natural order: the first element of `stack_inputs` will be at
+    /// position 0 (top of stack). For example, if `stack_inputs = [1, 2, 3]`, then the stack will
+    /// be initialized as `[1, 2, 3, 0, 0, ...]`, with `1` being on top.
     pub fn new_with_options(
         stack_inputs: &[Felt],
         advice_inputs: AdviceInputs,
@@ -198,9 +198,11 @@ impl FastProcessor {
             // stack overflow on some systems.
             let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
                 vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
-            let bottom_idx = stack_top_idx - stack_inputs.len();
 
-            stack[bottom_idx..stack_top_idx].copy_from_slice(stack_inputs);
+            // Copy inputs in reverse order so first element ends up at top of stack
+            for (i, &input) in stack_inputs.iter().enumerate() {
+                stack[stack_top_idx - 1 - i] = input;
+            }
             stack
         };
 
@@ -298,8 +300,7 @@ impl FastProcessor {
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
     ///
-    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
-    /// word.
+    /// For `start_idx=0` the top element of the stack will be at position 0 in the word.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -308,8 +309,8 @@ impl FastProcessor {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
-    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
+    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
+    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
@@ -320,8 +321,10 @@ impl FastProcessor {
         );
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let result: [Felt; WORD_SIZE] =
+        let mut result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        // Reverse so top of stack (idx 0) goes to word[0]
+        result.reverse();
         result.into()
     }
 
@@ -347,14 +350,15 @@ impl FastProcessor {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// The index is the index of the first element of the word, and the word is written in reverse
-    /// order.
+    /// `word[0]` goes to stack position start_idx (top), `word[1]` to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
         debug_assert!(start_idx < MIN_STACK_DEPTH);
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let source: [Felt; WORD_SIZE] = (*word).into();
+        let mut source: [Felt; WORD_SIZE] = (*word).into();
+        // Reverse so word[0] ends up at the top of stack (highest internal index)
+        source.reverse();
         self.stack[range(word_start_idx, WORD_SIZE)].copy_from_slice(&source)
     }
 

@@ -215,23 +215,27 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
     P::HelperRegisters::op_expacc_registers(acc_update_val)
 }
 
-/// Gets the top four values from the stack [b1, b0, a1, a0], where a = (a1, a0) and
-/// b = (b1, b0) are elements of the extension field, and outputs the product c = (c1, c0)
-/// where c0 = a0 * b0 + 7 * a1 * b1 and c1 = a0 * b1 + a1 * b0. The extension field is
-/// defined by the irreducible polynomial x² - 7. It leaves b1, b0 in the first and second
-/// positions on the stack, sets c1 and c0 to the third and fourth positions, and leaves the
-/// rest of the stack unchanged.
+/// Gets the top four values from the stack [b0, b1, a0, a1] (low coefficient at lower
+/// index/closer to top), where a = (a0, a1) and b = (b0, b1) are elements of the
+/// extension field, and outputs the product c = (c0, c1) where c0 = a0 * b0 + 7 * a1 * b1
+/// and c1 = a0 * b1 + a1 * b0. The extension field is defined by the irreducible polynomial
+/// x² - 7. It leaves b0, b1 in the first and second positions on the stack, sets c0 and c1
+/// to the third and fourth positions, and leaves the rest of the stack unchanged.
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const SEVEN: Felt = Felt::new(7);
-    let [a0, a1, b0, b1]: [Felt; 4] = processor.stack().get_word(0).into();
+    // get_word returns [s0, s1, s2, s3] where s0 is top of stack
+    // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
+    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 
     let b0_times_a0 = b0 * a0;
     let b1_times_a1 = b1 * a1;
-    processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0 - b1_times_a1);
-    processor.stack().set(3, b0_times_a0 + SEVEN * b1_times_a1);
+    let c1 = (b0 + b1) * (a1 + a0) - b0_times_a0 - b1_times_a1;
+    let c0 = b0_times_a0 + SEVEN * b1_times_a1;
+    processor.stack().set(2, c0); // c0 (low) at position 2
+    processor.stack().set(3, c1); // c1 (high) at position 3
 }
 
 // HELPERS

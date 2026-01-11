@@ -224,13 +224,14 @@ impl ExecutionTrace {
     #[cfg(feature = "std")]
     pub fn print(&self) {
         use miden_air::trace::TRACE_WIDTH;
+        use miden_core::field::PrimeField64;
 
         let mut row = [ZERO; PADDED_TRACE_WIDTH];
         for i in 0..self.length() {
             self.main_trace.read_row_into(i, &mut row);
             std::println!(
                 "{:?}",
-                row.iter().take(TRACE_WIDTH).map(|v| v.as_int()).collect::<Vec<_>>()
+                row.iter().take(TRACE_WIDTH).map(|v| v.as_canonical_u64()).collect::<Vec<_>>()
             );
         }
     }

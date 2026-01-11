@@ -53,7 +53,7 @@ pub proc hash_bytes_impl
     # simultaneously compute COMM_DIGEST = Rpo(DIGEST[0..16])
     locaddr.0
     exec.rpo256::init_no_padding
-    # => [ZERO, ZERO, ZERO, digest_ptr, ptr, len_u32, len_bytes, ...]
+    # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
     repeat.2
         adv_pipe
         exec.rpo256::permute
@@ -64,25 +64,22 @@ pub proc hash_bytes_impl
     movup.4 drop
     # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
 
-    # prepare stack to compute COMM_INPUT = rpo::hash_elements(ptr, len_u32)
+    # Compute COMM_INPUT = rpo::hash_elements(ptr, len_u32)
     movup.5 movup.5 exec.rpo256::hash_elements
-    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ..]
+    # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
 
-    # Merge COMM_INPUT and COMM_DIGEST to compute COMM = RPO(COMM_INPUT | COMM_DIGEST)
-    swapw exec.rpo256::merge
+    # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
+    exec.rpo256::merge
     # => [COMM, len_bytes, ...]
 
     # Prepare TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0]
-    push.SHA512_HASH_BYTES_EVENT movup.5 push.0.0 swapw
+    push.0.0 movup.6 push.SHA512_HASH_BYTES_EVENT swapw
     # => [COMM, TAG, ...]
 
-    # Reload digest limbs from locals, placing them after COMM and TAG
-    padw loc_loadw_le.12
-    movdnw.2
-    padw loc_loadw_le.8
-    movdnw.2
-    padw loc_loadw_le.4
-    movdnw.2
-    padw loc_loadw_le.0
-    movdnw.2
+    # Reload digest limbs from locals
+    padw loc_loadw_le.12 movdnw.2
+    padw loc_loadw_le.8 movdnw.2
+    padw loc_loadw_le.4 movdnw.2
+    padw loc_loadw_le.0 movdnw.2
+    # => [COMM, TAG, DIGEST_U32[16], ...]
 end

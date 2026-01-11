@@ -4,6 +4,6 @@ expression: fast_stack_outputs
 ---
 Err(
     InvalidFriDomainSegment(
-        5,
+        9,
     ),
 )

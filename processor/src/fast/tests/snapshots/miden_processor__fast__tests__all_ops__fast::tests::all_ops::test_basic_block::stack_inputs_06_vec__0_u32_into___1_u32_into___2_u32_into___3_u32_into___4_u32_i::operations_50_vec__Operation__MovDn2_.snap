@@ -5,11 +5,11 @@ expression: fast_stack_outputs
 Ok(
     StackOutputs {
         elements: [
-            3,
-            2,
-            4,
             1,
+            2,
             0,
+            3,
+            4,
             0,
             0,
             0,

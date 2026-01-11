@@ -39,11 +39,13 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
-    let key = process.get_stack_word_be(1);
-    let root = process.get_stack_word_be(5);
+    // Stack at emit: [event_id, KEY, ROOT, ...] where KEY and ROOT are structural words.
+    let key = process.get_stack_word(1);
+    let root = process.get_stack_word(5);
 
     // get the node from the SMT for the specified key; this node can be either a leaf node,
     // or a root of an empty subtree at the returned depth
+    // K[3] is used as the leaf index (most significant in BE ordering)
     let node = process
         .advice_provider()
         .get_tree_node(root, Felt::new(SMT_DEPTH as u64), key[3])
@@ -54,7 +56,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
     if node == *empty_leaf {
         // if the node is a root of an empty subtree, then there is no value associated with
         // the specified key
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE.into_iter().rev());
+        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
         Ok(vec![mutation])
     } else {
         let leaf_preimage = get_smt_leaf_preimage(process, node)?;
@@ -62,14 +64,14 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
         for (key_in_leaf, value_in_leaf) in leaf_preimage {
             if key == key_in_leaf {
                 // Found key - push value associated with key, and return
-                let mutation = AdviceMutation::extend_stack(value_in_leaf.into_iter().rev());
+                let mutation = AdviceMutation::extend_stack(value_in_leaf);
                 return Ok(vec![mutation]);
             }
         }
 
         // if we can't find any key in the leaf that matches `key`, it means no value is
         // associated with `key`
-        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE.into_iter().rev());
+        let mutation = AdviceMutation::extend_stack(Smt::EMPTY_VALUE);
         Ok(vec![mutation])
     }
 }

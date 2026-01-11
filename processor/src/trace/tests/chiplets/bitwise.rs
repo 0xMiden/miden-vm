@@ -83,11 +83,12 @@ fn b_chip_trace_bitwise() {
 
     // The second bitwise request from the stack is sent when the `U32and` operation is executed at
     // cycle 4, so the request is included in the next row.
+    // After Push(a) then Push(b), stack is [b, a, ...] so operands are (s0=b, s1=a).
     let value = build_expected_bitwise(
         &rand_elements,
         BITWISE_AND_LABEL,
-        Felt::from(a),
         Felt::from(b),
+        Felt::from(a),
         Felt::from(a & b),
     );
     expected *= value.inverse();
@@ -118,11 +119,12 @@ fn b_chip_trace_bitwise() {
 
     // At cycle 15, `U32xor` is requested by the stack and `U32and` is provided by the bitwise
     // chiplet.
+    // After Push(a) then Push(b), stack is [b, a, ...] so operands are (s0=b, s1=a).
     let value = build_expected_bitwise(
         &rand_elements,
         BITWISE_XOR_LABEL,
-        Felt::from(a),
         Felt::from(b),
+        Felt::from(a),
         Felt::from(a ^ b),
     );
     expected *= value.inverse();

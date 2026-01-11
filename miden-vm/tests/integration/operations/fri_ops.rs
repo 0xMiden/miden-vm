@@ -15,9 +15,13 @@ fn fri_ext2fold4() {
         .collect::<Vec<_>>();
     inputs[7] = 2; // domain segment must be < 4
 
-    // when domain segment is 2, the 3rd query value and the previous value must be the same
-    inputs[4] = inputs[13];
-    inputs[5] = inputs[14];
+    // When domain segment is 2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
+    // After pushing 17 inputs:
+    //   Position 4 = inputs[12] (v4), Position 5 = inputs[11] (v5)
+    //   Position 12 = inputs[4] (pe0), Position 11 = inputs[5] (pe1)
+    // So we need inputs[12] = inputs[4] and inputs[11] = inputs[5].
+    inputs[12] = inputs[4];
+    inputs[11] = inputs[5];
 
     let end_ptr = inputs[0];
     let layer_ptr = inputs[1];

@@ -226,7 +226,10 @@ fn decoder_p1_loop_with_repeat() {
         Program::new(mast_forest.into(), loop_node_id)
     };
 
-    let trace = build_trace_from_program(&program, &[0, 1, 1]);
+    // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
+    // After Pad+Drop: position 0 = 1 (2nd iteration enters)
+    // After Pad+Drop: position 0 = 0 (loop exits)
+    let trace = build_trace_from_program(&program, &[1, 1, 0]);
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -586,8 +589,10 @@ fn decoder_p2_loop_with_repeat() {
 
     let program = Program::new(mast_forest.into(), loop_node_id);
 
-    // build trace from program
-    let trace = build_trace_from_program(&program, &[0, 1, 1]);
+    // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
+    // After Pad+Drop: position 0 = 1 (2nd iteration enters)
+    // After Pad+Drop: position 0 = 0 (loop exits)
+    let trace = build_trace_from_program(&program, &[1, 1, 0]);
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);

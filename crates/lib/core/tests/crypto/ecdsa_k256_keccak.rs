@@ -109,9 +109,11 @@ fn test_ecdsa_verify_impl_commitment() {
         let output = test.execute().unwrap();
         let stack = output.stack_outputs();
 
-        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 6 = TAG[1]), ...]
-        let commitment = stack.get_stack_word_be(0).unwrap();
-        let tag = stack.get_stack_word_be(4).unwrap();
+        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
+        // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
+        // Use get_stack_word to match LE stack convention
+        let commitment = stack.get_stack_word(0).unwrap();
+        let tag = stack.get_stack_word(4).unwrap();
         // Commitment and tag must match verifier output
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
         let verifier_commitment =
@@ -121,8 +123,8 @@ fn test_ecdsa_verify_impl_commitment() {
             "commitment on stack should match verifier output"
         );
 
-        // Verify result
-        let result = stack.get_stack_item(6).unwrap();
+        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
+        let result = stack.get_stack_item(5).unwrap();
         assert_eq!(
             result,
             Felt::from_bool(expected_valid),
@@ -155,7 +157,9 @@ impl EcdsaSignatureHandler {
 
 impl EventHandler for EcdsaSignatureHandler {
     fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let provided_pk_rpo = process.get_stack_word_be(1);
+        // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
+        // Position 0 has the event ID, so pk_commitment starts at position 1
+        let provided_pk_rpo = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
@@ -169,10 +173,12 @@ impl EventHandler for EcdsaSignatureHandler {
             pk_commitment, provided_pk_rpo
         );
 
-        let message = process.get_stack_word_be(5);
+        // Message starts at position 5 (after event_id + pk_commitment)
+        let message = process.get_stack_word(5);
         let calldata = ecdsa_sign(&secret_key, message);
 
-        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+        // Use extend_stack to make elements available in order: pk first, then sig
+        Ok(vec![AdviceMutation::extend_stack(calldata)])
     }
 }
 
@@ -193,8 +199,8 @@ fn test_ecdsa_verify_bis_wrapper() {
         use miden::core::crypto::dsa::ecdsa_k256_keccak
 
         begin
-            push.{message} push.{pk_commitment}
-            debug.stack
+            push.{message}
+            push.{pk_commitment}
             emit.event(\"{EVENT_ECDSA_SIG_TO_STACK}\")
             exec.ecdsa_k256_keccak::verify
         end

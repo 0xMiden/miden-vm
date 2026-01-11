@@ -37,7 +37,7 @@ use crate::PrimeField64;
 fn b_chip_trace_mem() {
     const FOUR: Felt = Felt::new(4);
 
-    let stack = [1, 2, 3, 4, 0];
+    let stack = [0, 1, 2, 3, 4];
     let word = [ONE, Felt::new(2), Felt::new(3), Felt::new(4)];
     let operations = vec![
         Operation::MStoreW, // store [1, 2, 3, 4]

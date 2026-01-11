@@ -41,7 +41,7 @@ pub enum SystemEvent {
     // ADVICE STACK SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
-    /// onto the advice stack.
+    /// onto the advice stack in structural order for consumption by `AdvPopW`.
     ///
     /// Inputs:
     ///   Operand stack: [depth, index, TREE_ROOT, ...]

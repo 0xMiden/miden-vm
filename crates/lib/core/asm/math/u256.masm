@@ -34,27 +34,27 @@ end
 
 pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     swapw.3
-    movup.3
     movup.7
+    movup.4
     u32overflowing_sub
     movup.7
     u32overflowing_add
+    swap
     movup.5
-    movup.2
     u32overflowing_sub
     movup.2
     add
     movup.6
     u32overflowing_add
+    swap
     movup.5
-    movup.2
     u32overflowing_sub
     movup.2
     add
     movup.5
     u32overflowing_add
+    swap
     movup.5
-    movup.2
     u32overflowing_sub
     movup.2
     add
@@ -63,22 +63,22 @@ pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     movup.12
     movup.4
     u32overflowing_add
+    swap
     movup.8
-    movup.2
     u32overflowing_sub
     movup.2
     add
     movup.4
     u32overflowing_add
+    swap
     movup.7
-    movup.2
     u32overflowing_sub
     movup.2
     add
     movup.4
     u32overflowing_add
+    swap
     movup.6
-    movup.2
     u32overflowing_sub
     movup.2
     add
@@ -87,7 +87,7 @@ pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     movup.2
     u32overflowing_add
     drop
-    u32overflowing_sub
+    swap u32overflowing_sub
     drop
 end
 
@@ -204,12 +204,19 @@ end
 # ===== MULTIPLICATION ============================================================================
 
 proc mulstep
-    movdn.2
-    u32overflowing_madd
-    movdn.2
-    u32overflowing_add
-    movup.2
-    add
+    # Input: [k, c, b, a, ...]
+    #   k = carry from previous step
+    #   c = partial sum to accumulate into
+    #   b = multiplier limb
+    #   a = multiplicand limb
+    # Output: [new_k, result, ...]
+
+    movdn.2                    # [c, b, k, a, ...]
+    u32overflowing_madd        # [lo, hi, a, ...]  (computes c*b+k)
+    movup.2                    # [a, lo, hi, ...]
+    u32overflowing_add         # [carry, result, hi, ...]  (computes a+lo)
+    movup.2                    # [hi, carry, result, ...]
+    add                        # [new_k, result, ...]  (computes hi+carry)
 end
 
 proc mulstep4

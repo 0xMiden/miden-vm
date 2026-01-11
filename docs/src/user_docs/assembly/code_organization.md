@@ -68,7 +68,7 @@ Dynamic code execution in the same context is achieved by setting the top elemen
 
 ```
 # Retrieve the hash of `foo`, store it at `ADDR`, and push `ADDR` on top of the stack
-procref.foo mem_storew_be.ADDR dropw push.ADDR
+procref.foo mem_storew_le.ADDR dropw push.ADDR
 
 # Execute `foo` dynamically
 dynexec

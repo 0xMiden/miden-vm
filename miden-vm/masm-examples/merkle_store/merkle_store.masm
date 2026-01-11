@@ -1,36 +1,36 @@
 begin
     # push the root of the Partial Merkle Tree on the stack
-    push.0x82bb4d9a8e93582f1387611949703eecd8e4c74b904880f9c9c85f1fc1d7576d
+    push.[15205915704477211567, 2497157866997219775, 7737092243855731287, 10005008533832803365]
 
     # get value at depth = 2, index = 0 from the Partial Merkle Tree; this value should be 20
     push.0.2
     mtree_get
     # check that returned value is equal to 20
-    push.20.0.0.0
+    push.[20,0,0,0]
     assert_eqw
 
     dropw
 
     # push the root of the Sparse Merkle Tree on the stack
-    push.0x444693b04b509c6b69d9ed981e67243342505f3b64aa3d45746211c180d11902
+    push.[7376835135119391435, 14119287799397478348, 11655738258337000992, 2894263268938596110]
 
     # get value at depth = 64, index = 1 from the Sparse Merkle Tree; this value should be 21
     push.1.64
     mtree_get
     # check that returned value is equal to 21
-    push.21.0.0.0
+    push.[21,0,0,0]
     assert_eqw
 
     dropw
 
     # push the root of the Merkle Tree on the stack
-    push.0x0463f7d47758ad94b11dbf9675ffb7b331baa9c150d7fac6d784055c313eab0e
+    push.[8746697084226810548, 277589808084656486, 5200370501050121611, 15238507089253587473]
 
     # get value at depth = 2, index = 2 from the Merkle Tree; this value should be 22
     push.2.2
     mtree_get
     # check that returned value is equal to 22
-    push.22.0.0.0
+    push.[22,0,0,0]
     assert_eqw
 
     dropw

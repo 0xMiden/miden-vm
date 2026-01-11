@@ -27,7 +27,7 @@ mod tests;
 /// Stack transition for this operation looks as follows:
 ///
 /// Input:
-/// [v7, v6, v5, v4, v3, v2, v1, v0, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
+/// [v0, v1, v2, v3, v4, v5, v6, v7, f_pos, d_seg, poe, pe1, pe0, a1, a0, cptr, ...]
 ///
 /// Output:
 /// [t1, t0, s1, s0, df3, df2, df1, df0, poe^2, f_tau, cptr+2, poe^4, f_pos, ne1, ne0, eptr,
@@ -60,13 +60,13 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let prev_value = {
         let pe1 = processor.stack().get(11);
         let pe0 = processor.stack().get(12);
-        QuadFelt::new_complex(pe0, pe1)
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [pe0, pe1][i])
     };
     // the verifier challenge for the current layer
     let alpha = {
         let a1 = processor.stack().get(13);
         let a0 = processor.stack().get(14);
-        QuadFelt::new_complex(a0, a1)
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [a0, a1][i])
     };
     // the memory address of the current layer
     let layer_ptr = processor.stack().get(15);
@@ -121,16 +121,21 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 
 /// Returns 4 query values in the source domain. These values are to be folded into a single
 /// value in the folded domain.
+///
+/// Stack layout: positions 0-7 contain coefficients for 4 QuadFelt elements.
+/// QuadFelts are constructed as:
+/// - query_values[0] = (v0, v1), query_values[1] = (v2, v3)
+/// - query_values[2] = (v4, v5), query_values[3] = (v6, v7)
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v4, v5, v6, v7] = processor.stack().get_word(0).into();
-    let [v0, v1, v2, v3] = processor.stack().get_word(4).into();
+    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
-        QuadFelt::new_complex(v0, v1),
-        QuadFelt::new_complex(v2, v3),
-        QuadFelt::new_complex(v4, v5),
-        QuadFelt::new_complex(v6, v7),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v0, v1][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v2, v3][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v4, v5][i]),
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [v6, v7][i]),
     ]
 }
 

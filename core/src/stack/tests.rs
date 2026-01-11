@@ -20,7 +20,6 @@ fn test_inputs_simple() {
     expected_serialized.push(source.len() as u8);
     source
         .iter()
-        .rev()
         .for_each(|v| expected_serialized.append(&mut v.to_le_bytes().to_vec()));
 
     assert_eq!(serialized, expected_serialized);
@@ -42,7 +41,6 @@ fn test_inputs_full() {
     expected_serialized.push(source.len() as u8);
     source
         .iter()
-        .rev()
         .for_each(|v| expected_serialized.append(&mut v.to_le_bytes().to_vec()));
 
     assert_eq!(serialized, expected_serialized);
@@ -129,59 +127,31 @@ fn test_outputs_empty() {
     assert_eq!(*inputs, *result);
 }
 
-// GET_STACK_WORD ENDIANNESS TESTS
+// GET_STACK_WORD TESTS
 // ================================================================================================
 
 #[test]
-fn test_get_stack_word_be_and_le() {
+fn test_get_stack_word() {
     use crate::Felt;
 
     // Create stack outputs with known values: [1, 2, 3, 4, 5, 6, 7, 8, ...]
     let source = Vec::<u64>::from([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     let outputs = StackOutputs::try_from_ints(source).unwrap();
 
-    // Test big-endian (reversed) ordering
-    // For idx=0, we expect [4, 3, 2, 1] (elements at positions 0-3, reversed)
-    let word_be_0 = outputs.get_stack_word_be(0).unwrap();
-    assert_eq!(word_be_0[0], Felt::new(4), "BE word[0] element 0");
-    assert_eq!(word_be_0[1], Felt::new(3), "BE word[0] element 1");
-    assert_eq!(word_be_0[2], Felt::new(2), "BE word[0] element 2");
-    assert_eq!(word_be_0[3], Felt::new(1), "BE word[0] element 3");
-
-    // For idx=4, we expect [8, 7, 6, 5]
-    let word_be_4 = outputs.get_stack_word_be(4).unwrap();
-    assert_eq!(word_be_4[0], Felt::new(8), "BE word[4] element 0");
-    assert_eq!(word_be_4[1], Felt::new(7), "BE word[4] element 1");
-    assert_eq!(word_be_4[2], Felt::new(6), "BE word[4] element 2");
-    assert_eq!(word_be_4[3], Felt::new(5), "BE word[4] element 3");
-
-    // Test little-endian (memory) ordering
     // For idx=0, we expect [1, 2, 3, 4] (elements at positions 0-3, in order)
-    let word_le_0 = outputs.get_stack_word_le(0).unwrap();
-    assert_eq!(word_le_0[0], Felt::new(1), "LE word[0] element 0");
-    assert_eq!(word_le_0[1], Felt::new(2), "LE word[0] element 1");
-    assert_eq!(word_le_0[2], Felt::new(3), "LE word[0] element 2");
-    assert_eq!(word_le_0[3], Felt::new(4), "LE word[0] element 3");
+    let word_0 = outputs.get_stack_word(0).unwrap();
+    assert_eq!(word_0[0], Felt::new(1), "word[0] element 0");
+    assert_eq!(word_0[1], Felt::new(2), "word[0] element 1");
+    assert_eq!(word_0[2], Felt::new(3), "word[0] element 2");
+    assert_eq!(word_0[3], Felt::new(4), "word[0] element 3");
 
     // For idx=4, we expect [5, 6, 7, 8]
-    let word_le_4 = outputs.get_stack_word_le(4).unwrap();
-    assert_eq!(word_le_4[0], Felt::new(5), "LE word[4] element 0");
-    assert_eq!(word_le_4[1], Felt::new(6), "LE word[4] element 1");
-    assert_eq!(word_le_4[2], Felt::new(7), "LE word[4] element 2");
-    assert_eq!(word_le_4[3], Felt::new(8), "LE word[4] element 3");
-
-    // Verify that get_stack_word() is an alias for get_stack_word_be()
-    #[expect(deprecated)]
-    let word_default = outputs.get_stack_word(0).unwrap();
-    assert_eq!(word_default, word_be_0, "get_stack_word() should equal get_stack_word_be()");
+    let word_4 = outputs.get_stack_word(4).unwrap();
+    assert_eq!(word_4[0], Felt::new(5), "word[4] element 0");
+    assert_eq!(word_4[1], Felt::new(6), "word[4] element 1");
+    assert_eq!(word_4[2], Felt::new(7), "word[4] element 2");
+    assert_eq!(word_4[3], Felt::new(8), "word[4] element 3");
 
     // Test bounds checking - should return None for out of bounds access
-    assert!(
-        outputs.get_stack_word_be(13).is_none(),
-        "Should return None for out of bounds BE"
-    );
-    assert!(
-        outputs.get_stack_word_le(13).is_none(),
-        "Should return None for out of bounds LE"
-    );
+    assert!(outputs.get_stack_word(13).is_none(), "Should return None for out of bounds");
 }

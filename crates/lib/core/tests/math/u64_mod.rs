@@ -4,12 +4,8 @@ use miden_core::assert_matches;
 use miden_core_lib::handlers::u64_div::{U64_DIV_EVENT_NAME, U64DivError};
 use miden_processor::ExecutionError;
 use miden_utils_testing::{
-    Felt, TRUNCATE_STACK_PROC, U32_BOUND, expect_exec_error_matches, proptest::prelude::*,
-    rand::rand_value,
+    Felt, U32_BOUND, expect_exec_error_matches, proptest::prelude::*, rand::rand_value, stack,
 };
-
-// ADDITION
-// ------------------------------------------------------------------------------------------------
 
 #[test]
 fn wrapping_add() {
@@ -27,8 +23,33 @@ fn wrapping_add() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
+}
+
+#[test]
+fn wrapping_add_le() {
+    // Choose concrete values so we can reason about limbs explicitly.
+    let a: u64 = 0x0000_0002_0000_0005; // hi = 2, lo = 5
+    let b: u64 = 0x0000_0001_0000_0003; // hi = 1, lo = 3
+    let c = a.wrapping_add(b);
+
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::wrapping_add
+        end";
+
+    let (a1, a0) = split_u64(a); // (hi, lo)
+    let (b1, b0) = split_u64(b); // (hi, lo)
+    let (c1, c0) = split_u64(c);
+
+    // [a_lo, a_hi, b_lo, b_hi, ...] -> [c_lo, c_hi, ...]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -47,8 +68,10 @@ fn overflowing_add() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[0, c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [overflow_flag, c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[0, c0, c1]);
 
     let a = u64::MAX;
     let b = rand_value::<u64>();
@@ -58,8 +81,9 @@ fn overflowing_add() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[1, c1, c0]);
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[1, c0, c1]);
 }
 
 // SUBTRACTION
@@ -81,8 +105,10 @@ fn wrapping_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [c_lo, c_hi]
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -101,8 +127,10 @@ fn overflowing_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[flag as u64, c1, c0]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a - b -> [borrow, c_lo, c_hi]
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[flag as u64, c0, c1]);
 
     let base = rand_value::<u64>() as u32 as u64;
     let diff = rand_value::<u64>() as u32 as u64;
@@ -115,8 +143,9 @@ fn overflowing_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[1, c1, c0]);
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[1, c0, c1]);
 
     let base = rand_value::<u64>() as u32 as u64;
     let diff = rand_value::<u64>() as u32 as u64;
@@ -129,8 +158,9 @@ fn overflowing_sub() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[0, c1, c0]);
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[0, c0, c1]);
 }
 
 // MULTIPLICATION
@@ -152,8 +182,10 @@ fn wrapping_mul() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -175,8 +207,10 @@ fn overflowing_mul() {
     let (b1, b0) = split_u64(b);
     let (c3, c2, c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c3, c2, c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c0, c1, c2, c3]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1, c2, c3]);
 
     let a = rand_value::<u64>() as u128;
     let b = rand_value::<u64>() as u128;
@@ -189,8 +223,9 @@ fn overflowing_mul() {
     let (b1, b0) = split_u64(b);
     let (c3, c2, c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c3, c2, c1, c0]);
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1, c2, c3]);
 }
 
 // COMPARISONS
@@ -205,14 +240,15 @@ fn unchecked_lt() {
             exec.u64::lt
         end";
 
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
-    // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[1]);
+    // a = 0, b = 1 => 0 < 1 = true
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[1]);
 
-    // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[0]);
+    // a = 1, b = 0 => 1 < 0 = false
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[0]);
 }
 
 #[test]
@@ -223,14 +259,15 @@ fn unchecked_lte() {
             exec.u64::lte
         end";
 
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a <= b
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
-    // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[1]);
+    // a = 0, b = 1 => 0 <= 1 = true
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[1]);
 
-    // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[0]);
+    // a = 1, b = 0 => 1 <= 0 = false
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[0]);
 
     // randomized test
     let a: u64 = rand_value();
@@ -239,7 +276,7 @@ fn unchecked_lte() {
 
     let (a1, a0) = split_u64(a);
     let (b1, b0) = split_u64(b);
-    build_test!(source, &[a0, a1, b0, b1]).expect_stack(&[c]);
+    build_test!(source, &stack![b0, b1, a0, a1]).expect_stack(&[c]);
 }
 
 #[test]
@@ -251,14 +288,15 @@ fn unchecked_gt() {
             exec.u64::gt
         end";
 
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
-    // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[0]);
+    // a = 0, b = 1 => 0 > 1 = false
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[0]);
 
-    // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[1]);
+    // a = 1, b = 0 => 1 > 0 = true
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[1]);
 }
 
 #[test]
@@ -269,14 +307,15 @@ fn unchecked_gte() {
             exec.u64::gte
         end";
 
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a >= b
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
-    // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[0]);
+    // a = 0, b = 1 => 0 >= 1 = false
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[0]);
 
-    // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[1]);
+    // a = 1, b = 0 => 1 >= 0 = true
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[1]);
 
     // randomized test
     let a: u64 = rand_value();
@@ -285,7 +324,7 @@ fn unchecked_gte() {
 
     let (a1, a0) = split_u64(a);
     let (b1, b0) = split_u64(b);
-    build_test!(source, &[a0, a1, b0, b1]).expect_stack(&[c]);
+    build_test!(source, &stack![b0, b1, a0, a1]).expect_stack(&[c]);
 }
 
 #[test]
@@ -297,14 +336,15 @@ fn unchecked_min() {
             exec.u64::min
         end";
 
+    // [a_lo, a_hi, b_lo, b_hi] -> [min_lo, min_hi]
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[0, 0]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0, 0]);
 
     // a = 1, b = 2
-    build_test!(source, &[1, 0, 2, 0]).expect_stack(&[0, 1]);
+    build_test!(source, &stack![1, 0, 2, 0]).expect_stack(&[1, 0]);
 
     // a = 3, b = 2
-    build_test!(source, &[3, 0, 2, 0]).expect_stack(&[0, 2]);
+    build_test!(source, &stack![3, 0, 2, 0]).expect_stack(&[2, 0]);
 }
 
 #[test]
@@ -316,14 +356,15 @@ fn unchecked_max() {
             exec.u64::max
         end";
 
+    // [a_lo, a_hi, b_lo, b_hi] -> [max_lo, max_hi]
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[0, 0]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0, 0]);
 
     // a = 1, b = 2
-    build_test!(source, &[1, 0, 2, 0]).expect_stack(&[0, 2]);
+    build_test!(source, &stack![1, 0, 2, 0]).expect_stack(&[2, 0]);
 
     // a = 3, b = 2
-    build_test!(source, &[3, 0, 2, 0]).expect_stack(&[0, 3]);
+    build_test!(source, &stack![3, 0, 2, 0]).expect_stack(&[3, 0]);
 }
 
 #[test]
@@ -334,14 +375,15 @@ fn unchecked_eq() {
             exec.u64::eq
         end";
 
+    // [a_lo, a_hi, b_lo, b_hi] -> [flag]
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[1]);
 
     // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[0]);
 
     // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[0]);
 
     // randomized test
     let a: u64 = rand_value();
@@ -350,7 +392,7 @@ fn unchecked_eq() {
 
     let (a1, a0) = split_u64(a);
     let (b1, b0) = split_u64(b);
-    build_test!(source, &[a0, a1, b0, b1]).expect_stack(&[c]);
+    build_test!(source, &stack![a0, a1, b0, b1]).expect_stack(&[c]);
 }
 
 #[test]
@@ -361,14 +403,15 @@ fn unchecked_neq() {
             exec.u64::neq
         end";
 
+    // [a_lo, a_hi, b_lo, b_hi] -> [flag]
     // a = 0, b = 0
-    build_test!(source, &[0, 0, 0, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![0, 0, 0, 0]).expect_stack(&[0]);
 
     // a = 0, b = 1
-    build_test!(source, &[0, 0, 1, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![0, 0, 1, 0]).expect_stack(&[1]);
 
     // a = 1, b = 0
-    build_test!(source, &[1, 0, 0, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![1, 0, 0, 0]).expect_stack(&[1]);
 
     // randomized test
     let a: u64 = rand_value();
@@ -377,7 +420,7 @@ fn unchecked_neq() {
 
     let (a1, a0) = split_u64(a);
     let (b1, b0) = split_u64(b);
-    build_test!(source, &[a0, a1, b0, b1]).expect_stack(&[c]);
+    build_test!(source, &stack![a0, a1, b0, b1]).expect_stack(&[c]);
 }
 
 #[test]
@@ -388,18 +431,19 @@ fn unchecked_eqz() {
             exec.u64::eqz
         end";
 
+    // [a_lo, a_hi] -> [flag]
     // a = 0
-    build_test!(source, &[0, 0]).expect_stack(&[1]);
+    build_test!(source, &stack![0, 0]).expect_stack(&[1]);
 
     // a = 1
-    build_test!(source, &[1, 0]).expect_stack(&[0]);
+    build_test!(source, &stack![1, 0]).expect_stack(&[0]);
 
     // randomized test
     let a: u64 = rand_value();
     let c = (a == 0) as u64;
 
     let (a1, a0) = split_u64(a);
-    build_test!(source, &[a0, a1]).expect_stack(&[c]);
+    build_test!(source, &stack![a0, a1]).expect_stack(&[c]);
 }
 
 // DIVISION
@@ -408,8 +452,10 @@ fn unchecked_eqz() {
 #[test]
 fn advice_push_u64div() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
-    let source =
-        format!("begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.4 movupw.2 dropw end");
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
+    let source = format!(
+        "begin emit.event(\"{U64_DIV_EVENT_NAME}\") adv_push.2 adv_push.2 movupw.2 dropw end"
+    );
 
     // get two random 64-bit integers and split them into 32-bit limbs
     let a = rand_value::<u64>();
@@ -430,69 +476,53 @@ fn advice_push_u64div() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
-    let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
+    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
+    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
+    let test = build_test!(source, &input_stack);
+    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
+    // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
+    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
 
 #[test]
-fn advice_push_u64div_repeat() {
-    // This procedure repeats the following steps 7 times:
-    // - pushes quotient and remainder to advice stack
-    // - drops divisor (top 2 elements of the stack representing 32 bit limbs of divisor)
-    // - reads quotient from advice stack to the stack
-    // - push 2_u64 to the stack divided into 2 32 bit limbs
-    // Finally the first 2 elements of the stack are removed
+fn advice_push_u64div_two_pushes() {
+    // Test that two separate adv_push.2 calls work correctly (like the div procedure uses)
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
-        "
-    {TRUNCATE_STACK_PROC}
-
-    begin
-        repeat.7
+        "begin
             emit.event(\"{U64_DIV_EVENT_NAME}\")
-            drop drop
-            adv_push.2
-            push.2
-            push.0
-        end
-        drop drop
-
-        exec.truncate_stack
-    end"
+            adv_push.2  # first push: quotient [q_lo, q_hi]
+            adv_push.2  # second push: remainder [r_lo, r_hi]
+            # Stack: [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi]
+            # Drop input: positions 4-7
+            movup.7 drop  # a_hi
+            movup.6 drop  # a_lo
+            movup.5 drop  # b_hi
+            movup.4 drop  # b_lo
+        end"
     );
 
-    let mut a = 256;
-    let a_hi = 0;
-    let a_lo = a;
-
-    let b = 2;
-    let b_hi = 0;
-    let b_lo = b;
-
-    let mut expected = vec![a_lo, a_hi];
-
-    for _ in 0..7 {
-        let q = a / b;
-        let q_hi = 0;
-        let q_lo = q;
-        expected.extend_from_slice(&[q_lo, q_hi]);
-        a = q;
-    }
-
-    expected.reverse();
-
-    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
-    test.expect_stack(&expected);
+    // a = 123, b = 10 => q = 12, r = 3
+    // Stack from top: [b_lo=10, b_hi=0, a_lo=123, a_hi=0]
+    let input_stack = stack![10u64, 0, 123, 0];
+    let test = build_test!(source, &input_stack);
+    // Expected: [r_lo=3, r_hi=0, q_lo=12, q_hi=0]
+    test.expect_stack(&[3, 0, 12, 0]);
 }
 
 #[test]
 fn advice_push_u64div_local_procedure() {
     // push a/b onto the advice stack and then move these values onto the operand stack.
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top (divisor on top, then dividend)
     let source = format!(
         "
     proc foo
         emit.event(\"{U64_DIV_EVENT_NAME}\")
-        adv_push.4
+        adv_push.2  # quotient
+        adv_push.2  # remainder
     end
 
     begin
@@ -520,20 +550,29 @@ fn advice_push_u64div_local_procedure() {
     let r_hi = r >> 32;
     let r_lo = r as u32 as u64;
 
-    let test = build_test!(source, &[a_lo, a_hi, b_lo, b_hi]);
-    let expected = [r_hi, r_lo, q_hi, q_lo, b_hi, b_lo, a_hi, a_lo];
+    // stack from top [b_lo, b_hi, a_lo, a_hi] (divisor on top)
+    let input_stack = stack![b_lo, b_hi, a_lo, a_hi];
+    let test = build_test!(source, &input_stack);
+    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
+    // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
+    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    let expected = [r_lo, r_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi];
     test.expect_stack(&expected);
 }
 
 #[test]
 fn advice_push_u64div_conditional_execution() {
+    // Uses [b_lo, b_hi, a_lo, a_hi] from top after eq consumes condition (divisor on top)
+    // Test case: a = 8, b = 4, so q = 2, r = 0
     let source = format!(
         "
     begin
         eq
         if.true
             emit.event(\"{U64_DIV_EVENT_NAME}\")
-            adv_push.4
+            adv_push.2  # quotient
+            adv_push.2  # remainder
         else
             padw
         end
@@ -542,13 +581,25 @@ fn advice_push_u64div_conditional_execution() {
     end"
     );
 
-    // if branch
-    let test = build_test!(&source, &[8, 0, 4, 0, 1, 1]);
-    test.expect_stack(&[0, 0, 0, 2, 0, 4, 0, 8]);
+    // if branch: a=8 (lo=8, hi=0), b=4 (lo=4, hi=0), condition values 1, 1
+    // Stack from top before eq: [cond1=1, cond2=1, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    // After eq (1==1 → true): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    // Input array (top to bottom): [1, 1, 4, 0, 8, 0]
+    let test = build_test!(&source, &[1, 1, 4, 0, 8, 0]);
+    // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
+    // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
+    // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
+    // Second adv_push.2: pops r_hi then r_lo → [r_lo, r_hi, q_lo, q_hi, ...]
+    // Result: [r_lo=0, r_hi=0, q_lo=2, q_hi=0, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    test.expect_stack(&[0, 0, 2, 0, 4, 0, 8, 0]);
 
-    // else branch
-    let test = build_test!(&source, &[8, 0, 4, 0, 1, 0]);
-    test.expect_stack(&[0, 0, 0, 0, 0, 4, 0, 8]);
+    // else branch: condition values 0, 1 (not equal), so padw is used
+    // Stack from top before eq: [cond1=0, cond2=1, ...]
+    // After eq (0==1 → false): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
+    // padw adds [0, 0, 0, 0], then movupw.2 dropw removes padding word at depth 2
+    // Input array (top to bottom): [0, 1, 4, 0, 8, 0]
+    let test = build_test!(&source, &[0, 1, 4, 0, 8, 0]);
+    test.expect_stack(&[0, 0, 0, 0, 4, 0, 8, 0]);
 }
 
 #[test]
@@ -567,14 +618,17 @@ fn unchecked_div() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 
     let d = a / b0;
     let (d1, d0) = split_u64(d);
 
-    let test = build_test!(source, &[a0, a1, b0, 0]);
-    test.expect_stack(&[d1, d0]);
+    let input_stack = stack![b0, 0, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[d0, d1]);
 }
 
 /// The `U64Div` event handler is susceptible to crashing the processor if we don't ensure that the
@@ -588,11 +642,12 @@ fn ensure_div_doesnt_crash() {
         end";
 
     // 1. divisor limbs not u32
-
     let (dividend_hi, dividend_lo) = (0, 1);
     let (divisor_hi, divisor_lo) = (u32::MAX as u64, u32::MAX as u64 + 1);
 
-    let test = build_test!(source, &[dividend_lo, dividend_hi, divisor_lo, divisor_hi]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b
+    let input_stack = stack![divisor_lo, divisor_hi, dividend_lo, dividend_hi];
+    let test = build_test!(source, &input_stack);
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
@@ -610,11 +665,11 @@ fn ensure_div_doesnt_crash() {
     }
 
     // 2. dividend limbs not u32
-
     let (dividend_hi, dividend_lo) = (u32::MAX as u64, u32::MAX as u64 + 1);
     let (divisor_hi, divisor_lo) = (0, 1);
 
-    let test = build_test!(source, &[dividend_lo, dividend_hi, divisor_lo, divisor_hi]);
+    let input_stack = stack![divisor_lo, divisor_hi, dividend_lo, dividend_hi];
+    let test = build_test!(source, &input_stack);
     let err = test.execute();
     match err {
         Ok(_) => panic!("expected an error"),
@@ -651,14 +706,17 @@ fn unchecked_mod() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 
     let d = a % b0;
     let (d1, d0) = split_u64(d);
 
-    let test = build_test!(source, &[a0, a1, b0, 0]);
-    test.expect_stack(&[d1, d0]);
+    let input_stack = stack![b0, 0, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[d0, d1]);
 }
 
 // DIVMOD OPERATION
@@ -682,8 +740,11 @@ fn unchecked_divmod() {
     let (q1, q0) = split_u64(q);
     let (r1, r0) = split_u64(r);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[r1, r0, q1, q0]);
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
+    // r_lo, r_hi]
+    let input_stack = stack![b0, b1, a0, a1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[q0, q1, r0, r1]);
 }
 
 // BITWISE OPERATIONS
@@ -705,8 +766,10 @@ fn checked_and() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -723,7 +786,8 @@ fn checked_and_fail() {
             exec.u64::and
         end";
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
 
     expect_exec_error_matches!(
         test,
@@ -750,8 +814,10 @@ fn checked_or() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -768,7 +834,8 @@ fn checked_or_fail() {
             exec.u64::or
         end";
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
 
     expect_exec_error_matches!(
         test,
@@ -795,8 +862,10 @@ fn checked_xor() {
     let (b1, b0) = split_u64(b);
     let (c1, c0) = split_u64(c);
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
-    test.expect_stack(&[c1, c0]);
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1]);
 }
 
 #[test]
@@ -813,7 +882,8 @@ fn checked_xor_fail() {
             exec.u64::xor
         end";
 
-    let test = build_test!(source, &[a0, a1, b0, b1]);
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
 
     expect_exec_error_matches!(
         test,
@@ -832,19 +902,20 @@ fn unchecked_shl() {
             exec.u64::shl
         end";
 
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[a1, a0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
 
     // shift by 31 (max lower limb of b)
     let b: u32 = 31;
     let c = a.wrapping_shl(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 32 (min for upper limb of b)
     let a = 1_u64;
@@ -853,7 +924,7 @@ fn unchecked_shl() {
     let c = a.wrapping_shl(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 33
     let a = 1_u64;
@@ -862,7 +933,7 @@ fn unchecked_shl() {
     let c = a.wrapping_shl(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift 64 by 58
     let a = 64_u64;
@@ -871,7 +942,7 @@ fn unchecked_shl() {
     let c = a.wrapping_shl(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
 #[test]
@@ -882,25 +953,28 @@ fn unchecked_shr() {
             exec.u64::shr
         end";
 
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[a1, a0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
 
-    // simple right shift
-    build_test!(source, &[5, 1, 1, 1]).expect_stack(&[0, 2_u64.pow(31), 5]);
+    // simple right shift: a=0x0000_0001_0000_0001 >> 1 = 0x0000_0000_8000_0000
+    // lo=1, hi=1 shifted right 1 gives lo=2^31, hi=0
+    build_test!(source, &stack![1, 1, 1, 5]).expect_stack(&[2_u64.pow(31), 0, 5]);
 
-    // simple right shift
-    build_test!(source, &[5, 3, 3, 1]).expect_stack(&[1, 2_u64.pow(31) + 1, 5]);
+    // simple right shift: a=0x0000_0003_0000_0003 >> 1 = 0x0000_0001_8000_0001
+    // lo=3, hi=3 shifted right 1 gives lo=2^31+1, hi=1
+    build_test!(source, &stack![1, 3, 3, 5]).expect_stack(&[2_u64.pow(31) + 1, 1, 5]);
 
     // shift by 31 (max lower limb of b)
     let b: u32 = 31;
     let c = a.wrapping_shr(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 32 (min for upper limb of b)
     let a = 1_u64;
@@ -909,7 +983,7 @@ fn unchecked_shr() {
     let c = a.wrapping_shr(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 33
     let a = 1_u64;
@@ -918,7 +992,7 @@ fn unchecked_shr() {
     let c = a.wrapping_shr(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift 4294967296 by 2
     let a = 4294967296;
@@ -927,7 +1001,7 @@ fn unchecked_shr() {
     let c = a.wrapping_shr(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
 #[test]
@@ -938,19 +1012,20 @@ fn unchecked_rotl() {
             exec.u64::rotl
         end";
 
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[a1, a0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
 
     // shift by 31 (max lower limb of b)
     let b: u32 = 31;
     let c = a.rotate_left(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 32 (min for upper limb of b)
     let a = 1_u64;
@@ -959,7 +1034,7 @@ fn unchecked_rotl() {
     let c = a.rotate_left(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 33
     let a = 1_u64;
@@ -968,7 +1043,7 @@ fn unchecked_rotl() {
     let c = a.rotate_left(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift 64 by 58
     let a = 64_u64;
@@ -977,7 +1052,7 @@ fn unchecked_rotl() {
     let c = a.rotate_left(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
 #[test]
@@ -988,19 +1063,20 @@ fn unchecked_rotr() {
             exec.u64::rotr
         end";
 
+    // [n, a_lo, a_hi] -> [c_lo, c_hi]
     // shift by 0
     let a: u64 = rand_value();
     let (a1, a0) = split_u64(a);
     let b: u32 = 0;
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[a1, a0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[a0, a1, 5]);
 
     // shift by 31 (max lower limb of b)
     let b: u32 = 31;
     let c = a.rotate_right(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 32 (min for upper limb of b)
     let a = 1_u64;
@@ -1009,7 +1085,7 @@ fn unchecked_rotr() {
     let c = a.rotate_right(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift by 33
     let a = 1_u64;
@@ -1018,7 +1094,7 @@ fn unchecked_rotr() {
     let c = a.rotate_right(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 
     // shift 64 by 58
     let a = 64_u64;
@@ -1027,7 +1103,7 @@ fn unchecked_rotr() {
     let c = a.rotate_right(b);
     let (c1, c0) = split_u64(c);
 
-    build_test!(source, &[5, a0, a1, b as u64]).expect_stack(&[c1, c0, 5]);
+    build_test!(source, &stack![b as u64, a0, a1, 5]).expect_stack(&[c0, c1, 5]);
 }
 
 #[test]
@@ -1038,11 +1114,23 @@ fn clz() {
         exec.u64::clz
     end";
 
-    build_test!(source, &[0, 0]).expect_stack(&[64]);
-    build_test!(source, &[492665065, 0]).expect_stack(&[35]);
-    build_test!(source, &[3941320520, 0]).expect_stack(&[32]);
-    build_test!(source, &[3941320520, 492665065]).expect_stack(&[3]);
-    build_test!(source, &[492665065, 492665065]).expect_stack(&[3]);
+    // [a_lo, a_hi] -> [count]
+    // Note: clz operates on the conceptual u64, so hi limb is checked first
+    // 0x0000_0000_0000_0000 -> 64 leading zeros
+    build_test!(source, &stack![0, 0]).expect_stack(&[64]);
+    // lo=492665065, hi=0 -> clz counts from hi (all 32 zeros) + clz of lo
+    // 492665065 = 0x1d5b_2ce9 -> leading zeros = 3
+    // Total = 32 + 3 = 35
+    build_test!(source, &stack![492665065, 0]).expect_stack(&[35]);
+    // lo=3941320520, hi=0 -> hi is all zeros (32) + lo has clz=0
+    // 3941320520 = 0xeacd_1748 -> leading zeros = 0
+    // Total = 32 + 0 = 32
+    build_test!(source, &stack![3941320520, 0]).expect_stack(&[32]);
+    // lo=3941320520, hi=492665065 -> clz of hi only (since hi != 0)
+    // 492665065 = 0x1d5b_2ce9 -> leading zeros = 3
+    build_test!(source, &stack![3941320520, 492665065]).expect_stack(&[3]);
+    // Same case
+    build_test!(source, &stack![492665065, 492665065]).expect_stack(&[3]);
 }
 
 #[test]
@@ -1053,11 +1141,22 @@ fn ctz() {
         exec.u64::ctz
     end";
 
-    build_test!(source, &[0, 0]).expect_stack(&[64]);
-    build_test!(source, &[0, 3668265216]).expect_stack(&[40]);
-    build_test!(source, &[0, 3668265217]).expect_stack(&[32]);
-    build_test!(source, &[3668265216, 3668265217]).expect_stack(&[8]);
-    build_test!(source, &[3668265216, 3668265216]).expect_stack(&[8]);
+    // [a_lo, a_hi] -> [count]
+    // Note: ctz operates on the conceptual u64, so lo limb is checked first
+    // 0x0000_0000_0000_0000 -> 64 trailing zeros
+    build_test!(source, &stack![0, 0]).expect_stack(&[64]);
+    // lo=0, hi=3668265216 -> ctz of lo is 32 + ctz of hi
+    // 3668265216 = 0xda8d_9100 -> trailing zeros = 8
+    // Total = 32 + 8 = 40
+    build_test!(source, &stack![0, 3668265216]).expect_stack(&[40]);
+    // lo=0, hi=3668265217 -> ctz of lo is 32 + ctz of hi
+    // 3668265217 = 0xda8d_9101 -> trailing zeros = 0
+    // Total = 32 + 0 = 32
+    build_test!(source, &stack![0, 3668265217]).expect_stack(&[32]);
+    // lo=3668265216, hi=3668265217 -> ctz of lo only (since lo != 0)
+    // 3668265216 = 0xda8d_9100 -> trailing zeros = 8
+    build_test!(source, &stack![3668265216, 3668265217]).expect_stack(&[8]);
+    build_test!(source, &stack![3668265216, 3668265216]).expect_stack(&[8]);
 }
 
 #[test]
@@ -1068,11 +1167,22 @@ fn clo() {
         exec.u64::clo
     end";
 
-    build_test!(source, &[4294967295, 4294967295]).expect_stack(&[64]);
-    build_test!(source, &[4278190080, 4294967295]).expect_stack(&[40]);
-    build_test!(source, &[0, 4294967295]).expect_stack(&[32]);
-    build_test!(source, &[0, 4278190080]).expect_stack(&[8]);
-    build_test!(source, &[4278190080, 4278190080]).expect_stack(&[8]);
+    // [a_lo, a_hi] -> [count]
+    // Note: clo operates on the conceptual u64, so hi limb is checked first
+    // 0xffff_ffff_ffff_ffff -> 64 leading ones
+    build_test!(source, &stack![4294967295, 4294967295]).expect_stack(&[64]);
+    // lo=4278190080, hi=4294967295 -> clo of hi is 32 + clo of lo
+    // 4278190080 = 0xff00_0000 -> leading ones = 8
+    // Total = 32 + 8 = 40
+    build_test!(source, &stack![4278190080, 4294967295]).expect_stack(&[40]);
+    // lo=0, hi=4294967295 -> clo of hi is 32 + clo of lo
+    // 0 has leading ones = 0
+    // Total = 32 + 0 = 32
+    build_test!(source, &stack![0, 4294967295]).expect_stack(&[32]);
+    // lo=0, hi=4278190080 -> clo of hi only (since hi != 0xffffffff)
+    // 4278190080 = 0xff00_0000 -> leading ones = 8
+    build_test!(source, &stack![0, 4278190080]).expect_stack(&[8]);
+    build_test!(source, &stack![4278190080, 4278190080]).expect_stack(&[8]);
 }
 
 #[test]
@@ -1083,11 +1193,22 @@ fn cto() {
         exec.u64::cto
     end";
 
-    build_test!(source, &[4294967295, 4294967295]).expect_stack(&[64]);
-    build_test!(source, &[4294967295, 255]).expect_stack(&[40]);
-    build_test!(source, &[4294967295, 0]).expect_stack(&[32]);
-    build_test!(source, &[255, 0]).expect_stack(&[8]);
-    build_test!(source, &[255, 255]).expect_stack(&[8]);
+    // [a_lo, a_hi] -> [count]
+    // Note: cto operates on the conceptual u64, so lo limb is checked first
+    // 0xffff_ffff_ffff_ffff -> 64 trailing ones
+    build_test!(source, &stack![4294967295, 4294967295]).expect_stack(&[64]);
+    // lo=4294967295, hi=255 -> cto of lo is 32 + cto of hi
+    // 255 = 0xff -> trailing ones = 8
+    // Total = 32 + 8 = 40
+    build_test!(source, &stack![4294967295, 255]).expect_stack(&[40]);
+    // lo=4294967295, hi=0 -> cto of lo is 32 + cto of hi
+    // 0 has trailing ones = 0
+    // Total = 32 + 0 = 32
+    build_test!(source, &stack![4294967295, 0]).expect_stack(&[32]);
+    // lo=255, hi=0 -> cto of lo only (since lo != 0xffffffff)
+    // 255 = 0xff -> trailing ones = 8
+    build_test!(source, &stack![255, 0]).expect_stack(&[8]);
+    build_test!(source, &stack![255, 255]).expect_stack(&[8]);
 }
 
 // RANDOMIZED TESTS
@@ -1107,7 +1228,8 @@ proptest! {
                 exec.u64::lt
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c])?;
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a < b
+        build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c])?;
     }
 
     #[test]
@@ -1123,7 +1245,8 @@ proptest! {
                 exec.u64::gt
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c])?;
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a > b
+        build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c])?;
     }
 
     #[test]
@@ -1139,7 +1262,8 @@ proptest! {
                 exec.u64::min
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c1, c0])?;
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1]).prop_expect_stack(&[c0, c1])?;
     }
 
     #[test]
@@ -1155,7 +1279,8 @@ proptest! {
                 exec.u64::max
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c1, c0])?;
+        // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![a0, a1, b0, b1]).prop_expect_stack(&[c0, c1])?;
     }
 
     #[test]
@@ -1173,7 +1298,8 @@ proptest! {
                 exec.u64::div
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c1, c0])?;
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a / b -> [q_lo, q_hi]
+        build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c0, c1])?;
     }
 
     #[test]
@@ -1191,7 +1317,8 @@ proptest! {
                 exec.u64::mod
             end";
 
-        build_test!(source, &[a0, a1, b0, b1]).prop_expect_stack(&[c1, c0])?;
+        // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a % b -> [r_lo, r_hi]
+        build_test!(source, &stack![b0, b1, a0, a1]).prop_expect_stack(&[c0, c1])?;
     }
 
     #[test]
@@ -1208,7 +1335,8 @@ proptest! {
             exec.u64::shl
         end";
 
-        build_test!(source, &[5, a0, a1, b as u64]).prop_expect_stack(&[c1, c0, 5])?;
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
     #[test]
@@ -1225,7 +1353,8 @@ proptest! {
             exec.u64::shr
         end";
 
-        build_test!(source, &[5, a0, a1, b as u64]).prop_expect_stack(&[c1, c0, 5])?;
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
     #[test]
@@ -1242,7 +1371,8 @@ proptest! {
             exec.u64::rotl
         end";
 
-        build_test!(source, &[5, a0, a1, b as u64]).prop_expect_stack(&[c1, c0, 5])?;
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
     #[test]
@@ -1259,7 +1389,8 @@ proptest! {
             exec.u64::rotr
         end";
 
-        build_test!(source, &[5, a0, a1, b as u64]).prop_expect_stack(&[c1, c0, 5])?;
+        // [n, a_lo, a_hi] -> [c_lo, c_hi]
+        build_test!(source, &stack![b as u64, a0, a1, 5]).prop_expect_stack(&[c0, c1, 5])?;
     }
 
     #[test]
@@ -1274,7 +1405,8 @@ proptest! {
                 exec.u64::clz
             end";
 
-        build_test!(source, &[a0, a1]).prop_expect_stack(&[c])?;
+        // [a_lo, a_hi] -> [count]
+        build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
     #[test]
@@ -1289,7 +1421,8 @@ proptest! {
                 exec.u64::ctz
             end";
 
-        build_test!(source, &[a0, a1]).prop_expect_stack(&[c])?;
+        // [a_lo, a_hi] -> [count]
+        build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
     #[test]
@@ -1304,7 +1437,8 @@ proptest! {
                 exec.u64::clo
             end";
 
-        build_test!(source, &[a0, a1]).prop_expect_stack(&[c])?;
+        // [a_lo, a_hi] -> [count]
+        build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 
     #[test]
@@ -1319,7 +1453,8 @@ proptest! {
                 exec.u64::cto
             end";
 
-        build_test!(source, &[a0, a1]).prop_expect_stack(&[c])?;
+        // [a_lo, a_hi] -> [count]
+        build_test!(source, &stack![a0, a1]).prop_expect_stack(&[c])?;
     }
 }
 

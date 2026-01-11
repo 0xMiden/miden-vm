@@ -178,11 +178,11 @@ pub mod falcon512_rpo {
         let digest_polynomials = Rpo256::hash_elements(&polynomials);
         let challenge = (digest_polynomials[0], digest_polynomials[1]);
 
-        let mut result: Vec<Felt> = vec![challenge.0, challenge.1];
+        // Push tau1 first, then tau0, so adv_push.2 produces _le format [tau0, tau1, ...] directly
+        let mut result: Vec<Felt> = vec![challenge.1, challenge.0];
         result.extend_from_slice(&polynomials);
         result.extend_from_slice(&nonce.to_elements());
 
-        result.reverse();
         result
     }
 }

@@ -14,19 +14,19 @@ fn add() {
     let asm_op = "add";
 
     // --- simple case ----------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 2]);
+    let test = build_op_test!(asm_op, &[2, 1]);
     test.expect_stack(&[3]);
 
-    let test = build_op_test!(asm_op, &[5, 8]);
+    let test = build_op_test!(asm_op, &[8, 5]);
     test.expect_stack(&[13]);
 
     // --- test overflow --------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[Felt::ORDER_U64 - 1, 9]);
+    let test = build_op_test!(asm_op, &[9, Felt::ORDER_U64 - 1]);
     test.expect_stack(&[8]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 5, 2]);
+    let test = build_op_test!(asm_op, &[2, 5, c]);
     test.expect_stack(&[7, c]);
 }
 
@@ -53,7 +53,7 @@ fn add_b() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(build_asm_op(2), &[c, 5]);
+    let test = build_op_test!(build_asm_op(2), &[5, c]);
     test.expect_stack(&[7, c]);
 }
 
@@ -62,19 +62,19 @@ fn sub() {
     let asm_op = "sub";
 
     // --- simple case ----------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[3, 2]);
+    let test = build_op_test!(asm_op, &[2, 3]);
     test.expect_stack(&[1]);
 
-    let test = build_op_test!(asm_op, &[10, 7]);
+    let test = build_op_test!(asm_op, &[7, 10]);
     test.expect_stack(&[3]);
 
     // --- test underflow -------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[0, 1]);
+    let test = build_op_test!(asm_op, &[1, 0]);
     test.expect_stack(&[Felt::ORDER_U64 - 1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 2, 2]);
+    let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[0, c]);
 }
 
@@ -95,7 +95,7 @@ fn sub_b() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(build_asm_op(2), &[c, 2]);
+    let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[0, c]);
 }
 
@@ -104,21 +104,21 @@ fn mul() {
     let asm_op = "mul";
 
     // --- simple cases ---------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 0]);
+    let test = build_op_test!(asm_op, &[0, 1]);
     test.expect_stack(&[0]);
 
-    let test = build_op_test!(asm_op, &[1, 5]);
+    let test = build_op_test!(asm_op, &[5, 1]);
     test.expect_stack(&[5]);
 
     // --- test overflow --------------------------------------------------------------------------
     let high_number = Felt::ORDER_U64 - 1;
-    let test = build_op_test!(asm_op, &[high_number, 2]);
+    let test = build_op_test!(asm_op, &[2, high_number]);
     let expected = high_number as u128 * 2_u128 % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 2, 2]);
+    let test = build_op_test!(asm_op, &[2, 2, c]);
     test.expect_stack(&[4, c]);
 }
 
@@ -144,7 +144,7 @@ fn mul_b() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(build_asm_op(2), &[c, 2]);
+    let test = build_op_test!(build_asm_op(2), &[2, c]);
     test.expect_stack(&[4, c]);
 }
 
@@ -153,21 +153,21 @@ fn div() {
     let asm_op = "div";
 
     // --- simple cases ---------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[0, 1]);
+    let test = build_op_test!(asm_op, &[1, 0]);
     test.expect_stack(&[0]);
 
-    let test = build_op_test!(asm_op, &[2, 1]);
+    let test = build_op_test!(asm_op, &[1, 2]);
     test.expect_stack(&[2]);
 
     // --- test remainder -------------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[5, 2]);
+    let test = build_op_test!(asm_op, &[2, 5]);
     let expected =
         (Felt::new(2).inverse().as_canonical_u64() as u128 * 5_u128) % Felt::ORDER_U64 as u128;
     test.expect_stack(&[expected as u64]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 10, 5]);
+    let test = build_op_test!(asm_op, &[5, 10, c]);
     test.expect_stack(&[2, c]);
 }
 
@@ -205,7 +205,7 @@ fn div_b() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(build_asm_op(5), &[c, 10]);
+    let test = build_op_test!(build_asm_op(5), &[10, c]);
     test.expect_stack(&[2, c]);
 }
 
@@ -214,7 +214,7 @@ fn div_fail() {
     let asm_op = "div";
 
     // --- test divide by zero --------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 0]);
+    let test = build_op_test!(asm_op, &[0, 1]);
     expect_exec_error_matches!(
         test,
         ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
@@ -237,7 +237,7 @@ fn neg() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 5]);
+    let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::ORDER_U64 - 5, c]);
 }
 
@@ -274,7 +274,7 @@ fn inv() {
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let c = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[c, 5]);
+    let test = build_op_test!(asm_op, &[5, c]);
     test.expect_stack(&[Felt::new(5).inverse().as_canonical_u64(), c]);
 }
 
@@ -341,7 +341,7 @@ fn exp_bits_length() {
     let pow = 1021;
     let expected = Felt::new(base).exp_u64(pow);
 
-    let test = build_op_test!(build_asm_op(10), &[base, pow]);
+    let test = build_op_test!(build_asm_op(10), &[pow, base]);
     test.expect_stack(&[expected.as_canonical_u64()]);
 }
 
@@ -354,7 +354,7 @@ fn exp_bits_length_fail() {
     let base = 9;
     let pow = 1021; // pow is a 10 bit number
 
-    let test = build_op_test!(build_asm_op(9), &[base, pow]);
+    let test = build_op_test!(build_asm_op(9), &[pow, base]);
 
     expect_exec_error_matches!(
         test,
@@ -367,7 +367,7 @@ fn exp_bits_length_fail() {
     let base = 9;
     let pow = 1021; // pow is a 10 bit number
 
-    let test = build_op_test!(build_asm_op(65), &[base, pow]);
+    let test = build_op_test!(build_asm_op(65), &[pow, base]);
 
     assert_assembler_diagnostic!(
         test,
@@ -461,20 +461,19 @@ fn and() {
 fn and_fail() {
     let asm_op = "and";
 
-    // --- test value > 1 --------------------------------------------------------------------
     let test = build_op_test!(asm_op, &[2, 3]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(3_u64)
-    );
-
-    let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
+    );
+
+    let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
@@ -502,22 +501,20 @@ fn or() {
 fn or_fail() {
     let asm_op = "or";
 
-    // --- test value > 1 --------------------------------------------------------------------
-    let expected_value = Felt::new(3);
+    let expected_value = Felt::new(2);
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
     );
 
-    let expected_value = Felt::new(2);
-    let test = build_op_test!(asm_op, &[2, 0]);
+    let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
     );
 
-    let test = build_op_test!(asm_op, &[0, 2]);
+    let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
@@ -547,19 +544,22 @@ fn xor_fail() {
 
     let expected_value = Felt::new(2);
     // --- test value > 1 --------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[2, 3]);
+    // Stack [3, 2] - VM checks position 1 first, so error for value 2
+    let test = build_op_test!(asm_op, &[3, 2]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
     );
 
-    let test = build_op_test!(asm_op, &[2, 0]);
-    expect_exec_error_matches!(
-        test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
-    );
-
+    // Stack [0, 2] - position 1 is 2, error for value 2
     let test = build_op_test!(asm_op, &[0, 2]);
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+    );
+
+    // Stack [2, 0] - position 1 is 0 (valid), position 0 is 2, error for value 2
+    let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
         ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
@@ -602,20 +602,14 @@ fn eqw() {
     // --- test when top two words are equal ------------------------------------------------------
     let values = vec![5, 4, 3, 2, 5, 4, 3, 2];
     let mut expected = values.clone();
-    // push the result
-    expected.push(1);
-    // put it in stack order
-    expected.reverse();
+    expected.insert(0, 1);
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
 
     // --- test when top two words are not equal --------------------------------------------------
     let values = vec![8, 7, 6, 5, 4, 3, 2, 1];
     let mut expected = values.clone();
-    // push the result
-    expected.push(0);
-    // put it in stack order
-    expected.reverse();
+    expected.insert(0, 0);
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
 }
@@ -678,12 +672,12 @@ proptest! {
 
         let expected = a - b;
 
-        // b provided via the stack
-        let test = build_op_test!(asm_op, &[a, b]);
+        // b provided via the stack: stack [b, a] computes a - b
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected])?;
 
-        // underflow by a provided via the stack
-        let test = build_op_test!(asm_op, &[b, a]);
+        // underflow by a provided via the stack: stack [a, b] computes b - a
+        let test = build_op_test!(asm_op, &[a, b]);
         test.prop_expect_stack(&[Felt::ORDER_U64 - expected])?;
 
         // b provided as a parameter
@@ -721,8 +715,8 @@ proptest! {
         // allow a possible overflow then mod by the Felt Modulus
         let expected = (Felt::new(b).inverse().as_canonical_u64() as u128 * a as u128) % Felt::ORDER_U64 as u128;
 
-        // b provided via the stack
-        let test = build_op_test!(asm_op, &[a, b]);
+        // b provided via the stack: stack [b, a] computes a / b
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected as u64])?;
 
         // b provided as a parameter
@@ -772,7 +766,7 @@ proptest! {
         let pow = b;
         let expected = Felt::new(base).exp_u64(pow);
 
-        let test = build_op_test!(asm_op, &[base, pow]);
+        let test = build_op_test!(asm_op, &[pow, base]);
         test.prop_expect_stack(&[expected.as_canonical_u64()])?;
 
         // --- exp with parameter containing pow --------------------------------------------------
@@ -814,8 +808,8 @@ proptest! {
         // test the eqw assembly operation with randomized inputs
         let asm_op = "eqw";
 
-        // 2 words (8 values) for comparison and 1 for the result
-        let mut values = vec![0; 2 * WORD_SIZE + 1];
+        // 2 words (8 values) for comparison
+        let mut values = vec![0; 2 * WORD_SIZE];
 
         // check the inputs for equality in the field
         let mut inputs_equal = true;
@@ -833,10 +827,10 @@ proptest! {
 
         // add the expected result to get the expected state
         let expected_result = if inputs_equal { 1 } else { 0 };
-        values.push(expected_result);
-        values.reverse();
+        let mut expected = values.clone();
+        expected.insert(0, expected_result);
 
-        test.prop_expect_stack(&values)?;
+        test.prop_expect_stack(&expected)?;
     }
 
     #[test]
@@ -846,7 +840,7 @@ proptest! {
         // compare the random a & b values modulo the field modulus to get the expected result
         let expected_result = if a % Felt::ORDER_U64 < b % Felt::ORDER_U64 { 1 } else { 0 };
 
-        let test = build_op_test!(asm_op, &[a,b]);
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected_result])?;
     }
 
@@ -857,7 +851,7 @@ proptest! {
         // compare the random a & b values modulo the field modulus to get the expected result
         let expected_result = if a % Felt::ORDER_U64 <= b % Felt::ORDER_U64 { 1 } else { 0 };
 
-        let test = build_op_test!(asm_op, &[a,b]);
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected_result])?;
     }
 
@@ -868,7 +862,7 @@ proptest! {
         // compare the random a & b values modulo the field modulus to get the expected result
         let expected_result = if a % Felt::ORDER_U64 > b % Felt::ORDER_U64 { 1 } else { 0 };
 
-        let test = build_op_test!(asm_op, &[a,b]);
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected_result])?;
     }
 
@@ -879,7 +873,7 @@ proptest! {
         // compare the random a & b values modulo the field modulus to get the expected result
         let expected_result = if a % Felt::ORDER_U64 >= b % Felt::ORDER_U64 { 1 } else { 0 };
 
-        let test = build_op_test!(asm_op, &[a,b]);
+        let test = build_op_test!(asm_op, &[b, a]);
         test.prop_expect_stack(&[expected_result])?;
     }
 }
@@ -918,21 +912,21 @@ fn test_felt_comparison_op(asm_op: &str, expect_if_lt: u64, expect_if_eq: u64, e
 
     // --- a < b ----------------------------------------------------------------------------------
     // a is smaller in the low bits (equal in high bits)
-    let test = build_op_test!(asm_op, &[smaller, hi_eq_lo_gt]);
+    let test = build_op_test!(asm_op, &[hi_eq_lo_gt, smaller]);
     test.expect_stack(&[expect_if_lt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(hi_eq_lo_gt), &[smaller]);
     test.expect_stack(&[expect_if_lt]);
 
     // a is smaller in the high bits and equal in the low bits
-    let test = build_op_test!(asm_op, &[smaller, hi_gt_lo_eq]);
+    let test = build_op_test!(asm_op, &[hi_gt_lo_eq, smaller]);
     test.expect_stack(&[expect_if_lt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(hi_gt_lo_eq), &[smaller]);
     test.expect_stack(&[expect_if_lt]);
 
     // a is smaller in the high bits but bigger in the low bits
-    let test = build_op_test!(asm_op, &[smaller, hi_gt_lo_lt]);
+    let test = build_op_test!(asm_op, &[hi_gt_lo_lt, smaller]);
     test.expect_stack(&[expect_if_lt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(hi_gt_lo_lt), &[smaller]);
@@ -948,21 +942,21 @@ fn test_felt_comparison_op(asm_op: &str, expect_if_lt: u64, expect_if_eq: u64, e
 
     // --- a > b ----------------------------------------------------------------------------------
     // a is bigger in the low bits (equal in high bits)
-    let test = build_op_test!(asm_op, &[hi_eq_lo_gt, smaller]);
+    let test = build_op_test!(asm_op, &[smaller, hi_eq_lo_gt]);
     test.expect_stack(&[expect_if_gt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(smaller), &[hi_eq_lo_gt]);
     test.expect_stack(&[expect_if_gt]);
 
     // a is bigger in the high bits and equal in the low bits
-    let test = build_op_test!(asm_op, &[hi_gt_lo_eq, smaller]);
+    let test = build_op_test!(asm_op, &[smaller, hi_gt_lo_eq]);
     test.expect_stack(&[expect_if_gt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(smaller), &[hi_gt_lo_eq]);
     test.expect_stack(&[expect_if_gt]);
 
     // a is bigger in the high bits but smaller in the low bits
-    let test = build_op_test!(asm_op, &[hi_gt_lo_lt, smaller]);
+    let test = build_op_test!(asm_op, &[smaller, hi_gt_lo_lt]);
     test.expect_stack(&[expect_if_gt]);
     // run the same test using instruction with an immediate value
     let test = build_op_test!(build_asm_op(smaller), &[hi_gt_lo_lt]);

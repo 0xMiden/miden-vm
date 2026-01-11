@@ -7,6 +7,7 @@
 
 use miden_core::{
     Felt,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_core_lib::handlers::sha512::{
@@ -57,7 +58,7 @@ fn test_sha512_handler(bytes: &[u8]) {
     let test = build_debug_test!(source, &[]);
     let output = test.execute().unwrap();
 
-    let advice_stack: Vec<_> = output.advice_provider().stack().iter().rev().copied().collect();
+    let advice_stack: Vec<_> = output.advice_provider().stack().to_vec();
     assert_eq!(advice_stack, preimage.digest().as_ref());
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -103,8 +104,8 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
 
     let preimage = Sha512Preimage::new(request.calldata().to_vec());
 
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = stack.get_stack_word_be(4).unwrap();
+    let commitment = stack.get_stack_word(0).unwrap();
+    let tag = stack.get_stack_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment = Sha512Precompile.verify(preimage.as_ref()).unwrap();
     assert_eq!(precompile_commitment, verifier_commitment, "commitment mismatch");
@@ -138,6 +139,6 @@ fn test_sha512_hash_memory(bytes: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }

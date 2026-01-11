@@ -148,8 +148,7 @@ fn test_op_dup() {
 #[test]
 fn test_op_swap() {
     // Create processor with initial stack [3, 2, 1] (top=3)
-    // FastProcessor::new takes stack in reverse order, so bottom is last
-    let mut processor = FastProcessor::new(&[Felt::new(1), Felt::new(2), Felt::new(3)]);
+    let mut processor = FastProcessor::new(&[Felt::new(3), Felt::new(2), Felt::new(1)]);
 
     op_swap(&mut processor);
     let expected = build_expected(&[2, 3, 1]);
@@ -164,15 +163,15 @@ fn test_op_swap() {
 fn test_op_swapw() {
     // Create processor with initial stack [9, 8, 7, 6, 5, 4, 3, 2, 1] (top=9)
     let mut processor = FastProcessor::new(&[
-        Felt::new(1),
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
         Felt::new(9),
+        Felt::new(8),
+        Felt::new(7),
+        Felt::new(6),
+        Felt::new(5),
+        Felt::new(4),
+        Felt::new(3),
+        Felt::new(2),
+        Felt::new(1),
     ]);
 
     Processor::stack(&mut processor).swapw_nth(1);
@@ -188,19 +187,19 @@ fn test_op_swapw() {
 fn test_op_swapw2() {
     // Create processor with initial stack [13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1] (top=13)
     let mut processor = FastProcessor::new(&[
-        Felt::new(1),
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
-        Felt::new(9),
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
         Felt::new(13),
+        Felt::new(12),
+        Felt::new(11),
+        Felt::new(10),
+        Felt::new(9),
+        Felt::new(8),
+        Felt::new(7),
+        Felt::new(6),
+        Felt::new(5),
+        Felt::new(4),
+        Felt::new(3),
+        Felt::new(2),
+        Felt::new(1),
     ]);
 
     Processor::stack(&mut processor).swapw_nth(2);
@@ -216,22 +215,22 @@ fn test_op_swapw2() {
 fn test_op_swapw3() {
     // Create processor with initial stack [16, 15, ..., 1] (top=16)
     let mut processor = FastProcessor::new(&[
-        Felt::new(1),
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
-        Felt::new(9),
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
         Felt::new(16),
+        Felt::new(15),
+        Felt::new(14),
+        Felt::new(13),
+        Felt::new(12),
+        Felt::new(11),
+        Felt::new(10),
+        Felt::new(9),
+        Felt::new(8),
+        Felt::new(7),
+        Felt::new(6),
+        Felt::new(5),
+        Felt::new(4),
+        Felt::new(3),
+        Felt::new(2),
+        Felt::new(1),
     ]);
 
     Processor::stack(&mut processor).swapw_nth(3);
@@ -247,22 +246,22 @@ fn test_op_swapw3() {
 fn test_op_swapdw() {
     // Create processor with initial stack [16, 15, ..., 1] (top=16)
     let mut processor = FastProcessor::new(&[
-        Felt::new(1),
-        Felt::new(2),
-        Felt::new(3),
-        Felt::new(4),
-        Felt::new(5),
-        Felt::new(6),
-        Felt::new(7),
-        Felt::new(8),
-        Felt::new(9),
-        Felt::new(10),
-        Felt::new(11),
-        Felt::new(12),
-        Felt::new(13),
-        Felt::new(14),
-        Felt::new(15),
         Felt::new(16),
+        Felt::new(15),
+        Felt::new(14),
+        Felt::new(13),
+        Felt::new(12),
+        Felt::new(11),
+        Felt::new(10),
+        Felt::new(9),
+        Felt::new(8),
+        Felt::new(7),
+        Felt::new(6),
+        Felt::new(5),
+        Felt::new(4),
+        Felt::new(3),
+        Felt::new(2),
+        Felt::new(1),
     ]);
 
     // SwapDW swaps each element at position i with element at position i+8 for i in 0..8
@@ -283,22 +282,22 @@ fn test_op_swapdw() {
 fn test_op_movup() {
     // Create processor with initial stack [1, 2, ..., 16] (top=1)
     let mut processor = FastProcessor::new(&[
-        Felt::new(16),
-        Felt::new(15),
-        Felt::new(14),
-        Felt::new(13),
-        Felt::new(12),
-        Felt::new(11),
-        Felt::new(10),
-        Felt::new(9),
-        Felt::new(8),
-        Felt::new(7),
-        Felt::new(6),
-        Felt::new(5),
-        Felt::new(4),
-        Felt::new(3),
-        Felt::new(2),
         Felt::new(1),
+        Felt::new(2),
+        Felt::new(3),
+        Felt::new(4),
+        Felt::new(5),
+        Felt::new(6),
+        Felt::new(7),
+        Felt::new(8),
+        Felt::new(9),
+        Felt::new(10),
+        Felt::new(11),
+        Felt::new(12),
+        Felt::new(13),
+        Felt::new(14),
+        Felt::new(15),
+        Felt::new(16),
     ]);
 
     // movup2: rotate_left(3) - moves element at index 2 to top
@@ -330,22 +329,22 @@ fn test_op_movup() {
 fn test_op_movdn() {
     // Create processor with initial stack [1, 2, ..., 16] (top=1)
     let mut processor = FastProcessor::new(&[
-        Felt::new(16),
-        Felt::new(15),
-        Felt::new(14),
-        Felt::new(13),
-        Felt::new(12),
-        Felt::new(11),
-        Felt::new(10),
-        Felt::new(9),
-        Felt::new(8),
-        Felt::new(7),
-        Felt::new(6),
-        Felt::new(5),
-        Felt::new(4),
-        Felt::new(3),
-        Felt::new(2),
         Felt::new(1),
+        Felt::new(2),
+        Felt::new(3),
+        Felt::new(4),
+        Felt::new(5),
+        Felt::new(6),
+        Felt::new(7),
+        Felt::new(8),
+        Felt::new(9),
+        Felt::new(10),
+        Felt::new(11),
+        Felt::new(12),
+        Felt::new(13),
+        Felt::new(14),
+        Felt::new(15),
+        Felt::new(16),
     ]);
 
     // movdn2: rotate_right(3) - moves top element to index 2
@@ -377,7 +376,7 @@ fn test_op_movdn() {
 fn test_op_cswap() {
     // Create processor with initial stack [0, 1, 2, 3, 4] (top=0)
     let mut processor =
-        FastProcessor::new(&[Felt::new(4), Felt::new(3), Felt::new(2), Felt::new(1), Felt::new(0)]);
+        FastProcessor::new(&[Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
     let mut tracer = NoopTracer;
 
     // no swap (top of the stack is 0)
@@ -402,18 +401,18 @@ fn test_op_cswap() {
 fn test_op_cswapw() {
     // Create processor with initial stack [0, 1, 2, ..., 11] (top=0)
     let mut processor = FastProcessor::new(&[
-        Felt::new(11),
-        Felt::new(10),
-        Felt::new(9),
-        Felt::new(8),
-        Felt::new(7),
-        Felt::new(6),
-        Felt::new(5),
-        Felt::new(4),
-        Felt::new(3),
-        Felt::new(2),
-        Felt::new(1),
         Felt::new(0),
+        Felt::new(1),
+        Felt::new(2),
+        Felt::new(3),
+        Felt::new(4),
+        Felt::new(5),
+        Felt::new(6),
+        Felt::new(7),
+        Felt::new(8),
+        Felt::new(9),
+        Felt::new(10),
+        Felt::new(11),
     ]);
     let mut tracer = NoopTracer;
 

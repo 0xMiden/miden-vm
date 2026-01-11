@@ -46,28 +46,28 @@ fn u32testw() {
 
     // --- 1st element >= 2^32 --------------------------------------------------------------------
     let values = [U32_BOUND, 0, 0, 0];
-    let expected = [0, 0, 0, 0, U32_BOUND];
+    let expected = [0, U32_BOUND, 0, 0, 0];
 
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
 
     // --- 2nd element >= 2^32 --------------------------------------------------------------------
     let values = [0, U32_BOUND, 0, 0];
-    let expected = [0, 0, 0, U32_BOUND, 0];
+    let expected = [0, 0, U32_BOUND, 0, 0];
 
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
 
     // --- 3rd element >= 2^32 --------------------------------------------------------------------
     let values = [0, 0, U32_BOUND, 0];
-    let expected = [0, 0, U32_BOUND, 0, 0];
+    let expected = [0, 0, 0, U32_BOUND, 0];
 
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
 
     // --- 4th element >= 2^32 --------------------------------------------------------------------
     let values = [0, 0, 0, U32_BOUND];
-    let expected = [0, U32_BOUND, 0, 0, 0];
+    let expected = [0, 0, 0, 0, U32_BOUND];
 
     let test = build_op_test!(asm_op, &values);
     test.expect_stack(&expected);
@@ -127,12 +127,12 @@ fn u32assert2() {
     let value_a = 1_u64;
     let value_b = 2_u64;
     let test = build_op_test!(asm_op, &[value_a, value_b]);
-    test.expect_stack(&[value_b, value_a]);
+    test.expect_stack(&[value_a, value_b]);
 
     let value_a = rand_value::<u32>() as u64;
     let value_b = rand_value::<u32>() as u64;
     let test = build_op_test!(asm_op, &[value_a, value_b]);
-    test.expect_stack(&[value_b, value_a]);
+    test.expect_stack(&[value_a, value_b]);
 }
 
 #[test]
@@ -149,8 +149,8 @@ fn u32assert2_fail() {
         test,
         ExecutionError::NotU32Values{ values, label: _, source_file: _ } if
             values.len() == 2 &&
-            values[0] == Felt::new(value_b) &&
-            values[1] == Felt::new(value_a)
+            values[0] == Felt::new(value_a) &&
+            values[1] == Felt::new(value_b)
     );
 
     // -------- Case 2: a > 2^32 and b < 2^32 ---------------------------------------------------
@@ -184,7 +184,7 @@ fn u32assertw() {
     let asm_op = "u32assertw";
 
     let test = build_op_test!(asm_op, &[2, 3, 4, 5]);
-    test.expect_stack(&[5, 4, 3, 2]);
+    test.expect_stack(&[2, 3, 4, 5]);
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn u32cast() {
     let a = rand_value();
     let b = rand_value();
 
-    let test = build_op_test!(asm_op, &[a, b]);
+    let test = build_op_test!(asm_op, &[b, a]);
     test.expect_stack(&[b % U32_BOUND, a]);
 }
 
@@ -233,12 +233,13 @@ fn u32split() {
     let asm_op = "u32split";
 
     // --- low bits set, no high bits set ---------------------------------------------------------
+    // u32split now outputs [lo, hi] in LE order with lo on top
     let test = build_op_test!(asm_op, &[1]);
-    test.expect_stack(&[0, 1]);
+    test.expect_stack(&[1, 0]);
 
     // --- high bits set, no low bits set ---------------------------------------------------------
     let test = build_op_test!(asm_op, &[U32_BOUND]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
 
     // --- high bits and low bits set -------------------------------------------------------------
     let test = build_op_test!(asm_op, &[U32_BOUND + 1]);
@@ -250,8 +251,8 @@ fn u32split() {
     let expected_hi = b >> 32;
     let expected_lo = b % U32_BOUND;
 
-    let test = build_op_test!(asm_op, &[a, b]);
-    test.expect_stack(&[expected_hi, expected_lo, a]);
+    let test = build_op_test!(asm_op, &[b, a]);
+    test.expect_stack(&[expected_lo, expected_hi, a]);
 }
 
 // U32 OPERATIONS TESTS - RANDOMIZED - CONVERSIONS AND TESTS
@@ -275,10 +276,8 @@ proptest! {
         // should leave a 1 on the stack since all values in the word are valid u32 values
         let values: Vec<u64> = word.iter().map(|a| *a as u64).collect();
         let mut expected = values.clone();
-        // push the expected result
-        expected.push(1);
-        // reverse the values to put the expected array in stack order
-        expected.reverse();
+        // insert the expected result at the beginning (top of stack)
+        expected.insert(0, 1);
 
         let test = build_op_test!(asm_op, &values);
         test.prop_expect_stack(&expected)?;
@@ -299,9 +298,7 @@ proptest! {
 
         // should pass and leave the stack unchanged if a < 2^32 for all values in the word
         let values: Vec<u64> = word.iter().map(|a| *a as u64).collect();
-        let mut expected = values.clone();
-        // reverse the values to put the expected array in stack order
-        expected.reverse();
+        let expected = values.clone();
 
         let test = build_op_test!(asm_op, &values);
         test.prop_expect_stack(&expected)?;
@@ -325,11 +322,12 @@ proptest! {
 
         // expected result will be mod 2^32 applied to a field element
         // so the field modulus must be applied first
+        // u32split outputs [lo, hi] in LE order with lo on top
         let felt_value = value % Felt::ORDER_U64;
-        let expected_b = felt_value >> 32;
-        let expected_c = felt_value as u32 as u64;
+        let expected_hi = felt_value >> 32;
+        let expected_lo = felt_value as u32 as u64;
 
         let test = build_op_test!(asm_op, &[value, value]);
-        test.prop_expect_stack(&[expected_b, expected_c, value])?;
+        test.prop_expect_stack(&[expected_lo, expected_hi, value])?;
     }
 }

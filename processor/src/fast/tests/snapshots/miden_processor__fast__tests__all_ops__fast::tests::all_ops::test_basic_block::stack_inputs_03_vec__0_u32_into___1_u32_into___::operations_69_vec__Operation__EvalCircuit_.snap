@@ -17,7 +17,7 @@ Err(
         },
         source_file: None,
         error: NumVarIsNotWordAlignedOrIsEmpty(
-            0,
+            1,
         ),
     },
 )

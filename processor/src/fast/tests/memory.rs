@@ -58,10 +58,10 @@ fn test_mloadw_success() {
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
         let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
+        // Memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
             stack_outputs.stack_truncated(4),
-            // memory order is the reverse from the stack order
-            &[word_at_addr[3], word_at_addr[2], word_at_addr[1], word_at_addr[0]]
+            &[word_at_addr[0], word_at_addr[1], word_at_addr[2], word_at_addr[3]]
         );
     }
 
@@ -84,23 +84,24 @@ fn test_mloadw_success() {
 fn test_mstorew_success() {
     let mut host = DefaultHost::default();
     let addr = Felt::from(40_u32);
-    let word_to_store = [1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()];
+    let word_to_store = Word::from([Felt::from(1_u32), 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     let ctx = 0_u32.into();
     let clk = 0_u32.into();
 
     // Store the word at address 40
+    // Stack layout: [addr, word[0], word[1], word[2], word[3]] with addr at position 0 (top)
     let mut processor = FastProcessor::new(&[
+        addr,
         word_to_store[0],
         word_to_store[1],
         word_to_store[2],
         word_to_store[3],
-        addr,
     ]);
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
     // Ensure that the memory was correctly modified
-    assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store.into());
+    assert_eq!(processor.memory.read_word(ctx, addr, clk, &()).unwrap(), word_to_store);
 }
 
 #[rstest]
@@ -114,8 +115,8 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let clk = 1_u32.into();
     let value_to_store = Felt::from(value_to_store);
 
-    // Store the value at address 40
-    let mut processor = FastProcessor::new(&[value_to_store, addr.into()]);
+    // Store the value at address - addr at top, value at position 1
+    let mut processor = FastProcessor::new(&[addr.into(), value_to_store]);
     let program = simple_program_with_ops(vec![Operation::MStore]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
@@ -161,14 +162,11 @@ fn test_mstream() {
     let word_at_addr_40 = Word::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     let word_at_addr_44 = Word::from([Felt::from(5_u32), 6_u32.into(), 7_u32.into(), 8_u32.into()]);
     let ctx = 0_u32.into();
-    let clk = 1_u32.into();
+    let clk: RowIndex = 1_u32.into();
 
     let mut processor = {
-        let stack_init = {
-            let mut stack = vec![ZERO; 16];
-            stack[MIN_STACK_DEPTH - 1 - 12] = addr.into();
-            stack
-        };
+        let mut stack_init = vec![ZERO; 16];
+        stack_init[12] = addr.into();
         FastProcessor::new(&stack_init)
     };
     // Store values at addresses 40 and 44
@@ -184,19 +182,19 @@ fn test_mstream() {
     let program = simple_program_with_ops(vec![Operation::MStream]);
     let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
 
-    // Ensure that Operation::MStream correctly reads the values on the stack
+    // Word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
+    // word[0] at lowest position (top of stack)
     assert_eq!(
         stack_outputs.stack_truncated(8),
-        // memory order is the reverse from the stack order
         &[
-            word_at_addr_44[3],
-            word_at_addr_44[2],
-            word_at_addr_44[1],
-            word_at_addr_44[0],
-            word_at_addr_40[3],
-            word_at_addr_40[2],
+            word_at_addr_40[0],
             word_at_addr_40[1],
-            word_at_addr_40[0]
+            word_at_addr_40[2],
+            word_at_addr_40[3],
+            word_at_addr_44[0],
+            word_at_addr_44[1],
+            word_at_addr_44[2],
+            word_at_addr_44[3]
         ]
     );
 }

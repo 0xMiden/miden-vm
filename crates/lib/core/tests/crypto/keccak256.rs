@@ -10,6 +10,7 @@ use core::array;
 
 use miden_core::{
     Felt,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_core_lib::handlers::keccak256::{
@@ -123,8 +124,8 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let output = test.execute().unwrap();
 
     let stack = output.stack_outputs();
-    let commitment = stack.get_stack_word_be(0).unwrap();
-    let tag = stack.get_stack_word_be(4).unwrap();
+    let commitment = stack.get_stack_word(0).unwrap();
+    let tag = stack.get_stack_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment = KeccakPrecompile.verify(preimage.as_ref()).unwrap();
     assert_eq!(precompile_commitment, verifier_commitment);
@@ -172,7 +173,7 @@ fn test_keccak_hash_bytes(input_u8: &[u8]) {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }
 
@@ -203,7 +204,7 @@ fn test_keccak_hash() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }
 
@@ -234,6 +235,6 @@ fn test_keccak_merge() {
     );
 
     let test = build_debug_test!(source, &[]);
-    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_int).collect();
+    let digest: Vec<u64> = preimage.digest().as_ref().iter().map(Felt::as_canonical_u64).collect();
     test.expect_stack(&digest);
 }

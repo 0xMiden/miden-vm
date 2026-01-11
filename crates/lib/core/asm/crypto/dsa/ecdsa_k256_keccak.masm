@@ -56,8 +56,9 @@ const SIG_LEN_FELTS = 17   # 65.div_ceil(4)
 @locals(48)
 pub proc verify
     # Load the compressed public key (9 felts) into local memory at locaddr.[0..9]
-    adv_push.4 loc_storew_be.0
-    adv_loadw  loc_storew_be.4 dropw
+    padw adv_loadw loc_storew_le.0
+
+    adv_loadw loc_storew_le.4 dropw
     adv_push.1 loc_store.8
 
     # Compute the expected commitment and ensure it matches the provided PK_COMM
@@ -79,10 +80,10 @@ pub proc verify
     # => [DIGEST[4..8], ...]
 
     # store the signature (17 felts) provided via advice at locaddr.[28..45]
-    adv_loadw  loc_storew_be.28
-    adv_loadw  loc_storew_be.32
-    adv_loadw  loc_storew_be.36
-    adv_loadw  loc_storew_be.40 dropw
+    adv_loadw loc_storew_le.28
+    adv_loadw loc_storew_le.32
+    adv_loadw loc_storew_le.36
+    adv_loadw loc_storew_le.40 dropw
     adv_push.1 loc_store.44
     # => [...]
 
@@ -171,6 +172,9 @@ pub proc verify_prehash_impl
     # => [COMM_DIGEST, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_DIGEST into COMM_PK_DIGEST = Rpo256(Rpo256(pk) || Rpo256(digest))
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    swapw
+    # => [COMM_PK, COMM_DIGEST, result, sig_ptr]
     exec.rpo256::merge
     # => [COMM_PK_DIGEST, result, sig_ptr]
 
@@ -179,10 +183,14 @@ pub proc verify_prehash_impl
     # => [COMM_SIG, COMM_PK_DIGEST, result]
 
     # Merge into final commitment COMM = Rpo256(COMM_PK_DIGEST || COMM_SIG)
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_DIGEST on top
+    swapw
+    # => [COMM_PK_DIGEST, COMM_SIG, result]
     exec.rpo256::merge
     # => [COMM, result]
 
-    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0]
-    push.ECDSA_VERIFY_EVENT dup.5 push.0.0 swapw
+    # Create TAG = [ECDSA_VERIFY_EVENT, result, 0, 0] on stack
+    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
+    push.0.0 dup.6 push.ECDSA_VERIFY_EVENT swapw
     # => [COMM, TAG, result]
 end

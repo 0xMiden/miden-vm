@@ -200,10 +200,10 @@ fn build_trace(bitwise: Bitwise, num_rows: usize) -> Vec<Vec<Felt>> {
     trace
 }
 
+#[expect(clippy::needless_range_loop)]
 fn check_decomposition(trace: &[Vec<Felt>], start: usize, a: u64, b: u64) {
     let mut bit_offset = 28;
 
-    #[expect(clippy::needless_range_loop)]
     for i in start..start + 8 {
         let a = a >> bit_offset;
         let b = b >> bit_offset;

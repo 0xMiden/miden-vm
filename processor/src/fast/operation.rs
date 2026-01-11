@@ -191,11 +191,6 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn top_mut(&mut self) -> &mut [Felt] {
-        self.stack_top_mut()
-    }
-
-    #[inline(always)]
     fn get(&self, idx: usize) -> Felt {
         self.stack_get(idx)
     }

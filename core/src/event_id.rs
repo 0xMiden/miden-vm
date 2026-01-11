@@ -80,13 +80,13 @@ impl PartialOrd for EventId {
 
 impl Ord for EventId {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
-        self.0.inner().cmp(&other.0.inner())
+        self.0.as_int().cmp(&other.0.as_int())
     }
 }
 
 impl core::hash::Hash for EventId {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
-        self.0.inner().hash(state);
+        self.0.as_int().hash(state);
     }
 }
 

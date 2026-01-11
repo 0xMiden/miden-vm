@@ -19,8 +19,10 @@ fn ext2add() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    let stack_init = [a0, a1, b0, b1];
-    let expected = [c1, c0];
+    // Input: [b0, b1, a0, a1] with b0 on top
+    let stack_init = [b0, b1, a0, a1];
+    // Output: [c0, c1] with c0 on top
+    let expected = [c0, c1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);
@@ -38,8 +40,9 @@ fn ext2sub() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    let stack_init = [a0, a1, b0, b1];
-    let expected = [c1, c0];
+    // Input: [b0, b1, a0, a1] with b0 on top
+    let stack_init = [b0, b1, a0, a1];
+    let expected = [c0, c1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);
@@ -57,8 +60,9 @@ fn ext2mul() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    let stack_init = [a0, a1, b0, b1];
-    let expected = [c1, c0];
+    // Input: [b0, b1, a0, a1] with b0 on top
+    let stack_init = [b0, b1, a0, a1];
+    let expected = [c0, c1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);
@@ -75,8 +79,9 @@ fn ext2div() {
     let (b0, b1) = ext_element_to_ints(b);
     let (c0, c1) = ext_element_to_ints(c);
 
-    let stack_init = [a0, a1, b0, b1];
-    let expected = [c1, c0];
+    // Input: [b0, b1, a0, a1] with b0 on top
+    let stack_init = [b0, b1, a0, a1];
+    let expected = [c0, c1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);
@@ -91,8 +96,10 @@ fn ext2neg() {
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
 
+    // Input: [a0, a1] with a0 on top
     let stack_init = [a0, a1];
-    let expected = [b1, b0];
+    // Output: [b0, b1] with b0 on top
+    let expected = [b0, b1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);
@@ -108,8 +115,9 @@ fn ext2inverse() {
     let (a0, a1) = ext_element_to_ints(a);
     let (b0, b1) = ext_element_to_ints(b);
 
+    // Input: [a0, a1] with a0 on top
     let stack_init = [a0, a1];
-    let expected = [b1, b0];
+    let expected = [b0, b1];
 
     let test = build_op_test!(asm_op, &stack_init);
     test.expect_stack(&expected);

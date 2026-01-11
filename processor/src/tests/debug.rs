@@ -44,10 +44,10 @@ fn test_debug_stack() {
 
     insta::assert_snapshot!(output, @r"
     Stack state before step 5:
-    ├──  0: 4
-    ├──  1: 3
-    ├──  2: 2
-    ├──  3: 1
+    ├──  0: 1
+    ├──  1: 2
+    ├──  2: 3
+    ├──  3: 4
     ├──  4: 0
     ├──  5: 0
     ├──  6: 0
@@ -61,10 +61,10 @@ fn test_debug_stack() {
     ├── 14: 0
     └── 15: 0
     Stack state in interval [0, 3] before step 5:
-    ├── 0: 4
-    ├── 1: 3
-    ├── 2: 2
-    ├── 3: 1
+    ├── 0: 1
+    ├── 1: 2
+    ├── 2: 3
+    ├── 3: 4
     └── (12 more items)
     Stack state in interval [0, 19] before step 22:
     ├──  0: 42
@@ -79,20 +79,20 @@ fn test_debug_stack() {
     ├──  9: 42
     ├── 10: 42
     ├── 11: 42
-    ├── 12: 4
-    ├── 13: 3
-    ├── 14: 2
-    ├── 15: 1
+    ├── 12: 1
+    ├── 13: 2
+    ├── 14: 3
+    ├── 15: 4
     ├── 16: 0
     ├── 17: 0
     ├── 18: 0
     ├── 19: 0
     └── (8 more items)
     Stack state before step 34:
-    ├──  0: 4
-    ├──  1: 3
-    ├──  2: 2
-    ├──  3: 1
+    ├──  0: 1
+    ├──  1: 2
+    ├──  2: 3
+    ├──  3: 4
     ├──  4: 0
     ├──  5: 0
     ├──  6: 0
@@ -111,10 +111,10 @@ fn test_debug_stack() {
     └── 19: EMPTY
     Stack state in interval [0, 6] before step 35:
     ├── 0: 5
-    ├── 1: 4
-    ├── 2: 3
-    ├── 3: 2
-    ├── 4: 1
+    ├── 1: 1
+    ├── 2: 2
+    ├── 3: 3
+    ├── 4: 4
     ├── 5: 0
     ├── 6: 0
     └── (10 more items)
@@ -162,25 +162,25 @@ fn test_debug_mem() {
 
     insta::assert_snapshot!(output, @r"
     Memory state before step 15 for the context 0:
-    ├── 0x00000000: 1
-    ├── 0x00000001: 2
-    ├── 0x00000002: 3
+    ├── 0x00000000: 5
+    ├── 0x00000001: 3
+    ├── 0x00000002: 2
     ├── 0x00000003: 0
     ├── 0xfffffffc: 0
     ├── 0xfffffffd: 0
     ├── 0xfffffffe: 2147483648
     └── 0xffffffff: 0
-    Memory state before step 15 for the context 0 at address 0x00000002: 3
+    Memory state before step 15 for the context 0 at address 0x00000002: 2
     Memory state before step 15 for the context 0 at address 0x00000006: EMPTY
     Memory state before step 15 for the context 0 in the interval [1, 2]:
-    ├── 0x00000001: 2
-    └── 0x00000002: 3
+    ├── 0x00000001: 3
+    └── 0x00000002: 2
     Memory state before step 21 for the context 0:
-    ├── 0x00000000: 1
-    ├── 0x00000001: 2
-    ├── 0x00000002: 3
+    ├── 0x00000000: 5
+    ├── 0x00000001: 3
+    ├── 0x00000002: 2
     ├── 0x00000003: 0
-    ├── 0x00000004: 5
+    ├── 0x00000004: 1
     ├── 0x00000005: 0
     ├── 0x00000006: 0
     ├── 0x00000007: 0
@@ -189,9 +189,9 @@ fn test_debug_mem() {
     ├── 0xfffffffe: 2147483648
     └── 0xffffffff: 0
     Memory state before step 21 for the context 0 in the interval [2, 5]:
-    ├── 0x00000002: 3
+    ├── 0x00000002: 2
     ├── 0x00000003: 0
-    ├── 0x00000004: 5
+    ├── 0x00000004: 1
     └── 0x00000005: 0
     Memory state before step 21 for the context 0 in the interval [12, 14]:
     ├── 0x0000000c: EMPTY
@@ -248,9 +248,9 @@ fn test_debug_local() {
 
     insta::assert_snapshot!(output, @r"
     Memory state before step 43 for the context 0:
-    ├── 0x80000000: 1
-    ├── 0x80000001: 2
-    ├── 0x80000002: 3
+    ├── 0x80000000: 5
+    ├── 0x80000001: 3
+    ├── 0x80000002: 2
     ├── 0x80000003: 0
     ├── 0x80000004: 42
     ├── 0x80000005: 0
@@ -261,38 +261,38 @@ fn test_debug_local() {
     ├── 0xfffffffe: 2147483656
     └── 0xffffffff: 0
     State of procedure locals [0, 5] before step 43:
-    ├── 0: 1
-    ├── 1: 2
-    ├── 2: 3
+    ├── 0: 5
+    ├── 1: 3
+    ├── 2: 2
     ├── 3: 0
     ├── 4: 42
     └── 5: 0
-    State of procedure local 2 before step 43: 3
+    State of procedure local 2 before step 43: 2
     State of procedure local 4 before step 43: 42
     State of procedure locals [1, 2] before step 43:
-    ├── 1: 2
-    └── 2: 3
+    ├── 1: 3
+    └── 2: 2
     State of procedure locals [0, 5] before step 50:
-    ├── 0: 1
-    ├── 1: 2
-    ├── 2: 3
+    ├── 0: 5
+    ├── 1: 3
+    ├── 2: 2
     ├── 3: 0
-    ├── 4: 5
+    ├── 4: 1
     └── 5: 0
-    State of procedure local 4 before step 50: 5
+    State of procedure local 4 before step 50: 1
     State of procedure local 6 before step 50: 0
     State of procedure locals [2, 6] before step 50:
-    ├── 2: 3
+    ├── 2: 2
     ├── 3: 0
-    ├── 4: 5
+    ├── 4: 1
     ├── 5: 0
     └── 6: 0
     Memory state before step 58 for the context 0:
-    ├── 0x80000000: 1
-    ├── 0x80000001: 2
-    ├── 0x80000002: 3
+    ├── 0x80000000: 5
+    ├── 0x80000001: 3
+    ├── 0x80000002: 2
     ├── 0x80000003: 0
-    ├── 0x80000004: 5
+    ├── 0x80000004: 1
     ├── 0x80000005: 0
     ├── 0x80000006: 0
     ├── 0x80000007: 0
@@ -305,7 +305,7 @@ fn test_debug_local() {
 
 #[test]
 fn test_debug_adv_stack() {
-    let stack_input = [0, 1, 2, 3, 4]; // 4 is on top
+    let stack_input = [4, 3, 2, 1, 0];
     let advice_stack = [8, 7, 6, 5, 4, 3, 2, 1]; // 8 is on top
     let source = "
         begin
@@ -318,8 +318,8 @@ fn test_debug_adv_stack() {
             debug.adv_stack.10
 
             padw adv_loadw
-            # => [5, 6, 7, 8, 4, 3, 2, 1, 0]
-            debug.adv_stack # => [4, 3, 2, 1, 0]
+            # => [8, 7, 6, 5, 4, 3, 2, 1, 0]
+            debug.adv_stack # => [4, 3, 2, 1]
             debug.stack.9
             push.[8, 7, 6, 5] assert_eqw
             # => [4, 3, 2, 1, 0]
@@ -389,10 +389,10 @@ fn test_debug_adv_stack() {
     ├── 2: 2
     └── 3: 1
     Stack state in interval [0, 8] before step 10:
-    ├── 0: 5
-    ├── 1: 6
-    ├── 2: 7
-    ├── 3: 8
+    ├── 0: 8
+    ├── 1: 7
+    ├── 2: 6
+    ├── 3: 5
     ├── 4: 4
     ├── 5: 3
     ├── 6: 2

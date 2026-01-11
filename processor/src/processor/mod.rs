@@ -127,10 +127,6 @@ pub trait StackInterface {
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
 
-    /// Returns a mutable reference to the top 16 elements of the stack, such that the top of the
-    /// stack is at the last index of the returned slice.
-    fn top_mut(&mut self) -> &mut [Felt];
-
     /// Returns the element on the stack at index `idx`.
     fn get(&self, idx: usize) -> Felt;
 
@@ -149,9 +145,11 @@ pub trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
-    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
+    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
+    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
+    ///
+    /// Word[0] corresponds to the top of stack.
     fn get_word(&self, start_idx: usize) -> Word;
 
     /// Returns the number of elements on the stack in the current context.
@@ -162,8 +160,7 @@ pub trait StackInterface {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// The index is the index of the first element of the word, and the word is written in reverse
-    /// order.
+    /// Word[0] goes to stack position start_idx (top), word[1] to start_idx+1, etc.
     fn set_word(&mut self, start_idx: usize, word: &Word);
 
     /// Swaps the elements at the given indices on the stack.

@@ -54,13 +54,10 @@ pub async fn prove(
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
-
-    // Reverse stack inputs since FastProcessor expects them in reverse order
-    // (first element = bottom of stack, last element = top)
-    let stack_inputs_reversed: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().rev().collect();
+    let stack_inputs_slice: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().collect();
 
     let processor = FastProcessor::new_with_options(
-        &stack_inputs_reversed,
+        &stack_inputs_slice,
         advice_inputs,
         *options.execution_options(),
     );

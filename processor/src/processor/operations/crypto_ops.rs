@@ -7,8 +7,6 @@ use miden_core::{
     chiplets::hasher::STATE_WIDTH,
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     mast::MastForest,
-    stack::MIN_STACK_DEPTH,
-    utils::range,
 };
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
@@ -28,31 +26,38 @@ mod tests;
 // CRYPTOGRAPHIC OPERATIONS
 // ================================================================================================
 
-/// Performs a Rescue Prime Optimized permutation to the top 12 elements of the operand stack,
-/// where the top two words are the rate (words C and B), the deepest word is the capacity
-/// (word A), and the digest output is the middle word E.
+/// Performs a hash permutation operation.
+/// Applies Rescue Prime Optimized permutation to the top 12 elements of the stack.
 ///
-/// Stack transition:
-/// [C, B, A, ...] -> [F, E, D, ...]
+/// Stack layout:
+/// ```text
+/// stack[0..4]   = R1 word (rate word 1)      → state[0..4]
+/// stack[4..8]   = R2 word (rate word 2)      → state[4..8]
+/// stack[8..12]  = CAP word (capacity)        → state[8..12]
+/// ```
+///
+/// The top of the stack (`get(0)`) maps to `state[0]`, giving the sponge state
+/// `[R1, R2, CAP]` where R1[0] is at the top of the stack.
 #[inline(always)]
 pub(super) fn op_hperm<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    let state_range = range(MIN_STACK_DEPTH - STATE_WIDTH, STATE_WIDTH);
+    // Build sponge state from stack: state[i] = stack.get(i)
+    let input_state: [Felt; STATE_WIDTH] = core::array::from_fn(|i| processor.stack().get(i));
 
-    // Compute the hash of the input
-    let input_state: [Felt; STATE_WIDTH] = processor.stack().top()[state_range.clone()]
-        .try_into()
-        .expect("state range expected to be 12 elements");
+    // Apply RPO permutation
     let (addr, output_state) = processor.hasher().permute(input_state);
 
-    // Write the hash back to the stack
-    processor.stack().top_mut()[state_range].copy_from_slice(&output_state);
+    // Write result back to stack (state[0] at top).
+    let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
+    let r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect("r1 slice has length 4");
+    let cap: Word = output_state[STATE_CAP_RANGE].try_into().expect("cap slice has length 4");
+    processor.stack().set_word(0, &r0);
+    processor.stack().set_word(4, &r1);
+    processor.stack().set_word(8, &cap);
 
-    // Record the hasher permutation
     tracer.record_hasher_permute(input_state, output_state);
-
     P::HelperRegisters::op_hperm_registers(addr)
 }
 
@@ -85,7 +90,7 @@ pub(super) fn op_mpverify<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let clk = processor.system().clk();
 
-    // read node value, depth, index and root value from the stack
+    // Read node, depth, index, and root from the stack.
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
@@ -96,7 +101,6 @@ pub(super) fn op_mpverify<P: Processor>(
         .advice_provider()
         .get_merkle_path(root, depth, index)
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
-
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
     // verify the path
@@ -150,7 +154,7 @@ pub(super) fn op_mrupdate<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let clk = processor.system().clk();
 
-    // read old node value, depth, index, tree root and new node values from the stack
+    // Read old node value, depth, index, tree root and new node values from the stack.
     let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);
@@ -198,7 +202,7 @@ pub(super) fn op_mrupdate<P: Processor>(
         new_root,
     );
 
-    // Replace the old node value with computed new root; everything else remains the same.
+    // Replace the old node value with computed new root.
     processor.stack().set_word(0, &new_root);
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
@@ -210,14 +214,19 @@ pub(super) fn op_mrupdate<P: Processor>(
 /// Performs 8 steps of the Horner evaluation method on a polynomial with coefficients over
 /// the base field using a 3-level computation to reduce constraint degree.
 ///
-/// The computation is broken into 3 levels:
-/// - Level 1: tmp0 = (acc * α + c₀) * α + c₁
-/// - Level 2: tmp1 = ((tmp0 * α + c₂) * α + c₃) * α + c₄
-/// - Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
+/// The computation processes 8 base field coefficients from the stack using Horner's method.
+/// If we denote the values at stack positions 0..7 as `s[0]..s[7]`, the computation is:
 ///
-/// In other words, the instruction computes the evaluation at alpha of the polynomial:
+/// - Level 1: tmp0 = (acc * α + s[0]) * α + s[1]
+/// - Level 2: tmp1 = ((tmp0 * α + s[2]) * α + s[3]) * α + s[4]
+/// - Level 3: acc' = ((tmp1 * α + s[5]) * α + s[6]) * α + s[7]
 ///
-/// P(X) := c₀ * X^7 + c₁ * X^6 + c₂ * X^5 + c₃ * X^4 + c₄ * X^3 + c₅ * X^2 + c₆ * X + c₇
+/// This evaluates the polynomial:
+///
+/// P(X) := s[0] * X^7 + s[1] * X^6 + s[2] * X^5 + s[3] * X^4 + s[4] * X^3 + s[5] * X^2 + s[6] * X +
+/// s[7]
+///
+/// where s[0] is the highest-degree coefficient and s[7] is the constant term.
 ///
 /// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
 /// by repeated invocations interleaved with any operation that loads the next batch of 8
@@ -228,42 +237,39 @@ pub(super) fn op_mrupdate<P: Processor>(
 /// Input:
 ///
 /// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
-/// |  c7  |  c6  |  c5  |  c4  |  c3  |  c2  |  c1  |  c0  | - | - | - | - | - |alpha_addr| acc1 | acc0 |
+/// | s[0] | s[1] | s[2] | s[3] | s[4] | s[5] | s[6] | s[7] | - | - | - | - | - |alpha_addr| acc1 | acc0 |
 /// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
-///
+///   (X^7)  (X^6)  (X^5)  (X^4)  (X^3)  (X^2)  (X^1)  (X^0)
 ///
 /// Output:
 ///
 /// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
-/// |  c7  |  c6  |  c5  |  c4  |  c3  |  c2  |  c1  |  c0  | - | - | - | - | - |alpha_addr| acc1' | acc0' |
+/// | s[0] | s[1] | s[2] | s[3] | s[4] | s[5] | s[6] | s[7] | - | - | - | - | - |alpha_addr| acc1' | acc0' |
 /// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
-///
 ///
 /// Here:
 ///
-/// 1. ci for i in 0..=7 stands for the the value of the i-th coefficient in the current batch of 8
-///    coefficients of the polynomial.
-/// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
-///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
-/// 3. alpha_addr is the memory address pointing to the evaluation point α. The operation reads α₀
+/// 1. s[i] for i in 0..=7 is the coefficient at stack position i. s[0] is the highest-degree
+///    coefficient (X^7) and s[7] is the constant term (X^0).
+/// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
+///    (acc0', acc1') is the updated accumulator after processing this batch.
+/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁). The operation reads α₀
 ///    from alpha_addr and α₁ from alpha_addr + 1.
 ///
 /// The instruction uses helper registers to store intermediate values:
 /// - h₀, h₁: evaluation point α = (α₀, α₁)
 /// - h₂, h₃: Level 2 intermediate result tmp1
 /// - h₄, h₅: Level 1 intermediate result tmp0
-///
-/// In this implementation, we replay the recorded operations and compute the result.
 #[inline(always)]
 pub(super) fn op_horner_eval_base<P: Processor>(
     processor: &mut P,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants from the original implementation
+    // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
-    const ACC_HIGH_INDEX: usize = 14;
-    const ACC_LOW_INDEX: usize = 15;
+    const ACC_LOW_INDEX: usize = 14;
+    const ACC_HIGH_INDEX: usize = 15;
 
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
@@ -284,28 +290,25 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
         tracer.record_memory_read_element(eval_point_1, addr + ONE, ctx, clk);
 
-        QuadFelt::new_complex(eval_point_0, eval_point_1)
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [eval_point_0, eval_point_1][i])
     };
 
     // Read the coefficients from the stack (top 8 elements)
-    // Stack layout: [c7, c6, c5, c4, c3, c2, c1, c0, ...]
-    // Note: with the coefficient ordering, stack[0]=c7, stack[7]=c0
     let coef: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
 
-    let c7 = QuadFelt::from(coef[0]);
-    let c6 = QuadFelt::from(coef[1]);
-    let c5 = QuadFelt::from(coef[2]);
-    let c4 = QuadFelt::from(coef[3]);
-    let c3 = QuadFelt::from(coef[4]);
-    let c2 = QuadFelt::from(coef[5]);
-    let c1 = QuadFelt::from(coef[6]);
-    let c0 = QuadFelt::from(coef[7]);
+    let c0 = QuadFelt::from(coef[0]);
+    let c1 = QuadFelt::from(coef[1]);
+    let c2 = QuadFelt::from(coef[2]);
+    let c3 = QuadFelt::from(coef[3]);
+    let c4 = QuadFelt::from(coef[4]);
+    let c5 = QuadFelt::from(coef[5]);
+    let c6 = QuadFelt::from(coef[6]);
+    let c7 = QuadFelt::from(coef[7]);
 
-    // Read the current accumulator
-    let acc = QuadFelt::new_complex(
-        processor.stack().get(ACC_LOW_INDEX),
-        processor.stack().get(ACC_HIGH_INDEX),
-    );
+    // Read the current accumulator (LE: low at lower index)
+    let acc_low = processor.stack().get(ACC_LOW_INDEX);
+    let acc_high = processor.stack().get(ACC_HIGH_INDEX);
+    let acc = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
     let tmp0 = (acc * alpha + c0) * alpha + c1;
@@ -316,7 +319,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     // Level 3: acc' = ((tmp1 * α + c₅) * α + c₆) * α + c₇
     let acc_new = ((tmp1 * alpha + c5) * alpha + c6) * alpha + c7;
 
-    // Update the accumulator values on the stack
+    // Update the accumulator values on the stack (LE: low at lower index)
     let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
     processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
@@ -326,80 +329,71 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 }
 
 /// Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over
-/// the quadratic extension field, i.e., it computes
+/// the quadratic extension field.
 ///
-/// acc' = (acc_tmp * alpha + c2) * alpha + c3
+/// The computation processes 4 extension field coefficients from the stack using Horner's method.
+/// If we denote the QuadFelt values at stack positions (0,1), (2,3), (4,5), (6,7) as
+/// `s[0]..s[3]`, the computation is:
 ///
-/// where
+/// - Level 1: acc_tmp = (acc * α + s[0]) * α + s[1]
+/// - Level 2: acc' = ((acc_tmp * α + s[2]) * α + s[3]
 ///
-/// acc_tmp = (acc * alpha + c0) * alpha + c1
+/// This evaluates the polynomial:
 ///
+/// P(X) := s[0] * X^3 + s[1] * X^2 + s[2] * X + s[3]
 ///
-/// In other words, the instruction computes the evaluation at alpha of the polynomial
+/// where s[0] is the highest-degree coefficient and s[3] is the constant term.
 ///
-/// P(X) := c0 * X^3 + c1 * X^2 + c2 * X + c3
-///
-/// As can be seen from the two equations defining acc', the instruction can be used in order
-/// to compute the evaluation of polynomials of arbitrary degree by repeated invocations of
-/// the same instruction interleaved with any operation that loads the next batch of 4
+/// The instruction can be used to compute the evaluation of polynomials of arbitrary degree
+/// by repeated invocations interleaved with any operation that loads the next batch of 4
 /// coefficients on the top of the operand stack, i.e., `mem_stream` or `adv_pipe`.
 ///
 /// The stack transition of the instruction can be visualized as follows:
 ///
 /// Input:
 ///
-/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
-/// | c3_1 | c3_0 | c2_1 | c2_0 | c1_1 | c1_0 | c0_1 | c0_0 | - | - | - | - | - |alpha_addr| acc1 | acc0 |
-/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+------+------+
-///
+/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+------+------+
+/// | s0_lo | s0_hi | s1_lo | s1_hi | s2_lo | s2_hi | s3_lo | s3_hi | - | - | - | - | - |alpha_addr| acc0 | acc1 |
+/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+------+------+
+///   (X^3)           (X^2)           (X^1)           (X^0)
 ///
 /// Output:
 ///
-/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
-/// | c3_1 | c3_0 | c2_1 | c2_0 | c1_1 | c1_0 | c0_1 | c0_0 | - | - | - | - | - |alpha_addr| acc1' | acc0' |
-/// +------+------+------+------+------+------+------+------+---+---+---+---+---+----------+-------+-------+
-///
+/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+-------+-------+
+/// | s0_lo | s0_hi | s1_lo | s1_hi | s2_lo | s2_hi | s3_lo | s3_hi | - | - | - | - | - |alpha_addr| acc0' | acc1' |
+/// +-------+-------+-------+-------+-------+-------+-------+-------+---+---+---+---+---+----------+-------+-------+
 ///
 /// Here:
 ///
-/// 1. ci for i in 0..=3 stands for the value of the i-th coefficient in the current batch of 4
-///    extension field coefficients of the polynomial.
-/// 2. (acc0, acc1) stands for an extension field element accumulating the values of the Horner
-///    evaluation procedure. (acc0', acc1') is the updated value of this accumulator.
-/// 3. alpha_addr is the memory address of the evaluation point i.e., alpha.
+/// 1. s[i] = (si_lo, si_hi) for i in 0..=3 is the extension field coefficient at stack position
+///    2*i. s[0] is the highest-degree coefficient (X^3) and s[3] is the constant term (X^0).
+/// 2. (acc0, acc1) is a quadratic extension field element accumulating the Horner evaluation.
+///    (acc0', acc1') is the updated accumulator after processing this batch.
+/// 3. alpha_addr is the memory address of the evaluation point α = (α₀, α₁).
 ///
-/// The instruction also makes use of the helper registers to hold the value of
-/// alpha = (alpha0, alpha1) during the course of its execution.
-/// The helper registers are also used in order to hold the second half of the memory word
-/// containing (alpha0, alpha1), as well as the temporary values acc_tmp.
-///
-/// In this implementation, we replay the recorded operations and compute the result.
+/// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
 #[inline(always)]
 pub(super) fn op_horner_eval_ext<P: Processor>(
     processor: &mut P,
     err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
-    // Constants from the original implementation
+    // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
-    const ACC_HIGH_INDEX: usize = 14;
-    const ACC_LOW_INDEX: usize = 15;
+    const ACC_LOW_INDEX: usize = 14;
+    const ACC_HIGH_INDEX: usize = 15;
 
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
 
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
-    // Stack layout: [c3_1, c3_0, c2_1, c2_0, c1_1, c1_0, c0_1, c0_0, ...]
-    let coef = [
-        QuadFelt::new_complex(processor.stack().get(1), processor.stack().get(0)), /* c0: (c0_0,
-                                                                                    * c0_1) */
-        QuadFelt::new_complex(processor.stack().get(3), processor.stack().get(2)), /* c1: (c1_0,
-                                                                                    * c1_1) */
-        QuadFelt::new_complex(processor.stack().get(5), processor.stack().get(4)), /* c2: (c2_0,
-                                                                                    * c2_1) */
-        QuadFelt::new_complex(processor.stack().get(7), processor.stack().get(6)), /* c3: (c3_0,
-                                                                                    * c3_1) */
-    ];
+    // Stack layout: [s0_lo, s0_hi, s1_lo, s1_hi, s2_lo, s2_hi, s3_lo, s3_hi, ...]
+    // s[0] at stack[0,1] is highest degree (X^3), s[3] at stack[6,7] is constant (X^0)
+    let coef: [QuadFelt; 4] = core::array::from_fn(|j| {
+        let lo = processor.stack().get(2 * j);
+        let hi = processor.stack().get(2 * j + 1);
+        QuadFelt::from_basis_coefficients_fn(|i: usize| [lo, hi][i])
+    });
 
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
@@ -415,22 +409,27 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             processor.system().clk(),
         );
 
-        (QuadFelt::new_complex(word[0], word[1]), word[2], word[3])
+        (
+            QuadFelt::from_basis_coefficients_fn(|i: usize| [word[0], word[1]][i]),
+            word[2],
+            word[3],
+        )
     };
 
-    // Read the current accumulator
-    let acc_old = QuadFelt::new_complex(
-        processor.stack().get(ACC_LOW_INDEX),  // acc0
-        processor.stack().get(ACC_HIGH_INDEX), // acc1
-    );
+    // Read the current accumulator (LE: low at lower index)
+    let acc_low = processor.stack().get(ACC_LOW_INDEX);
+    let acc_high = processor.stack().get(ACC_HIGH_INDEX);
+    let acc_old = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
-    // Compute the temporary accumulator (first 2 coefficients: c0, c1)
-    let acc_tmp = coef.iter().rev().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
+    // Compute the temporary accumulator (first 2 coefficients from stack)
+    // Process coef[0], coef[1] (highest degree coefficients)
+    let acc_tmp = coef.iter().take(2).fold(acc_old, |acc, coef| *coef + alpha * acc);
 
-    // Compute the final accumulator (remaining 2 coefficients: c2, c3)
-    let acc_new = coef.iter().rev().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
+    // Compute the final accumulator (remaining 2 coefficients)
+    // Process coef[2], coef[3] (lower degree coefficients)
+    let acc_new = coef.iter().skip(2).fold(acc_tmp, |acc, coef| *coef + alpha * acc);
 
-    // Update the accumulator values on the stack
+    // Update the accumulator values on the stack (LE: low at lower index)
     let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
     processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
     processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
@@ -446,60 +445,58 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 /// capacity.
 ///
 /// Stack transition:
-/// `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]`
+/// `[COMM, TAG, PAD, ...] -> [R0, R1, CAP_NEXT, ...]`
 ///
 /// Where:
-/// - The hasher computes: `[CAP_NEXT, R0, R1] = Rpo([CAP_PREV, TAG, COMM])`
+/// - The hasher computes: `[R0, R1, CAP_NEXT] = Rpo([COMM, TAG, CAP_PREV])`
 /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
 ///   registers.
-/// - The VM stack stores each 4-element word in reverse element order, so the top of the stack
-///   exposes the elements of `R1` first, followed by the elements of `R0`, then `CAP_NEXT`.
+/// - Stack elements are in LSB-first order (structural order).
 #[inline(always)]
 pub(super) fn op_log_precompile<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    // Read TAG and COMM from stack
-    let comm = processor.stack().get_word(0);
-    let tag = processor.stack().get_word(4);
+    // Read COMM and TAG from the stack
+    let comm: Word = processor.stack().get_word(0);
+    let tag: Word = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_transcript_state();
 
     // Build the full 12-element hasher state for RPO permutation
-    // State layout: [CAP_PREV, TAG, COMM]
+    // State layout: [RATE0 = COMM, RATE1 = TAG, CAPACITY = CAP_PREV]
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
+    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(comm.as_slice());
+    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(tag.as_slice());
     hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
-    hasher_state[STATE_RATE_0_RANGE].copy_from_slice(tag.as_slice());
-    hasher_state[STATE_RATE_1_RANGE].copy_from_slice(comm.as_slice());
 
     // Perform the RPO permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state);
 
-    // Extract CAP_NEXT (first 4 elements), R0 (next 4 elements), R1 (last 4 elements)
-    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
-        .try_into()
-        .expect("cap_next slice has length 4");
+    // Extract R0, R1 and CAP_NEXT from the output state
     let r0: Word = output_state[STATE_RATE_0_RANGE.clone()]
         .try_into()
         .expect("r0 slice has length 4");
     let r1: Word = output_state[STATE_RATE_1_RANGE.clone()]
         .try_into()
         .expect("r1 slice has length 4");
+    let cap_next: Word = output_state[STATE_CAP_RANGE.clone()]
+        .try_into()
+        .expect("cap_next slice has length 4");
 
     // Update the processor's precompile sponge capacity
     processor.set_precompile_transcript_state(cap_next);
 
-    // Write the output to the stack (top 12 elements): [R1, R0, CAP_NEXT, ...]
-    processor.stack().set_word(0, &r1);
-    processor.stack().set_word(4, &r0);
+    // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
+    processor.stack().set_word(0, &r0);
+    processor.stack().set_word(4, &r1);
     processor.stack().set_word(8, &cap_next);
 
     // Record the hasher permutation for trace generation
     tracer.record_hasher_permute(hasher_state, output_state);
 
     // Return helper registers containing the hasher address and CAP_PREV
-    // Convert cap_prev Word to array for the helper registers
     P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
 }
 
@@ -553,17 +550,8 @@ pub(super) fn op_crypto_stream<P: Processor>(
         .map_err(ExecutionError::MemoryError)?;
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
-    // Get rate (keystream) from stack[0..7] in stack order
-    let rate = [
-        processor.stack().get(7),
-        processor.stack().get(6),
-        processor.stack().get(5),
-        processor.stack().get(4),
-        processor.stack().get(3),
-        processor.stack().get(2),
-        processor.stack().get(1),
-        processor.stack().get(0),
-    ];
+    // Get rate (keystream) from stack[0..7]
+    let rate: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
 
     // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
     let ciphertext_word1 = [
@@ -596,8 +584,8 @@ pub(super) fn op_crypto_stream<P: Processor>(
     tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
-    processor.stack().set_word(0, &ciphertext_word2);
-    processor.stack().set_word(4, &ciphertext_word1);
+    processor.stack().set_word(0, &ciphertext_word1);
+    processor.stack().set_word(4, &ciphertext_word2);
 
     // Increment pointers by 8 (2 words)
     processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);

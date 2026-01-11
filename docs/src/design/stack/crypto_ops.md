@@ -170,7 +170,7 @@ $$
 where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, $\mathsf{acc}^{'}$ the updated accumulator value, and $\mathsf{tmp0}$, $\mathsf{tmp1}$ are helper variables used for constraint degree reduction.
 
 The stack for the operation is expected to be arranged as follows:
-- The first $8$ stack elements (positions 0-7) are the $8$ base field elements representing the current 8-element batch of coefficients for the polynomial being evaluated, arranged as $[c_7, c_6, c_5, c_4, c_3, c_2, c_1, c_0]$ where $c_7$ is at position 0.
+- The first $8$ stack elements (positions 0-7) are the $8$ base field elements representing the current 8-element batch of coefficients for the polynomial being evaluated, arranged as $[c_0, c_1, c_2, c_3, c_4, c_5, c_6, c_7]$ where $c_0$ is at position 0 (top of stack). Here $c_0$ is the highest-degree coefficient ($\alpha^7$ term) and $c_7$ is the constant term.
 - The next $5$ stack elements are irrelevant for the operation and unaffected by it.
 - The next stack element contains the memory address `alpha_ptr` pointing to the evaluation point $\alpha = (\alpha_0, \alpha_1)$. The operation reads $\alpha_0$ from `alpha_ptr` and $\alpha_1$ from `alpha_ptr + 1`.
 - The next $2$ stack elements contain the value of the current accumulator $\textsf{acc} = (\textsf{acc}_0, \textsf{acc}_1)$.

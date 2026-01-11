@@ -10,6 +10,10 @@ fn sha256_hash_bytes() {
     let ibytes: Vec<u8> = rand_vector(length_in_bytes as usize);
     let ipadding: Vec<u8> = vec![0; (4 - (length_in_bytes as usize % 4)) % 4];
 
+    // Note: We need .rev() here because push_inputs generates MASM push instructions.
+    // MASM push puts each value on top, so pushing [a, b, c] results in stack [c, b, a].
+    // To get word0 on top after all pushes (and after mem_store.1 pops length),
+    // we need to push wordN-1 first, then ..., then word0, then length.
     let ifelts = [
         group_slice_elements::<u8, 4>(&[ibytes.clone(), ipadding].concat())
             .iter()
@@ -85,23 +89,21 @@ fn sha256_2_to_1_hash() {
     ibytes[..32].copy_from_slice(&input0);
     ibytes[32..].copy_from_slice(&input1);
 
-    let ifelts = group_slice_elements::<u8, 4>(&ibytes)
+    let ifelts: Vec<u64> = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-        .rev()
-        .collect::<Vec<u64>>();
+        .collect();
 
     let mut hasher = Sha256::new();
     hasher.update(ibytes);
 
     let obytes = hasher.finalize();
-    let ofelts = group_slice_elements::<u8, 4>(&obytes)
+    let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-        .collect::<Vec<u64>>();
+        .collect();
 
-    let test = build_test!(source, &ifelts);
-    test.expect_stack(&ofelts);
+    build_test!(source, &ifelts).expect_stack(&ofelts);
 }
 
 #[test]
@@ -114,21 +116,19 @@ fn sha256_1_to_1_hash() {
     end";
 
     let ibytes = rand_array::<Felt, 4>().into_bytes();
-    let ifelts = group_slice_elements::<u8, 4>(&ibytes)
+    let ifelts: Vec<u64> = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-        .rev()
-        .collect::<Vec<u64>>();
+        .collect();
 
     let mut hasher = Sha256::new();
     hasher.update(ibytes);
 
     let obytes = hasher.finalize();
-    let ofelts = group_slice_elements::<u8, 4>(&obytes)
+    let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
-        .collect::<Vec<u64>>();
+        .collect();
 
-    let test = build_test!(source, &ifelts);
-    test.expect_stack(&ofelts);
+    build_test!(source, &ifelts).expect_stack(&ofelts);
 }

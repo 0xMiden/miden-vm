@@ -21,7 +21,7 @@ pub proc memcopy_words
   # stack: [-n, read_ptr, write_ptr, ...]
   neg
 
-  # Pad the stack because mem_load overwrites it (4 cycles)
+  # Pad the stack because mem_loadw_le overwrites it (4 cycles)
   # stack: [0, 0, 0, 0, -n, read_ptr, write_ptr, ...]
   padw
 
@@ -33,15 +33,15 @@ pub proc memcopy_words
   # while(n!=0) (16 cycles)
   while.true
     # perform read (2 cycles)
-    # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.5 mem_loadw_be
+    # stack: [w0, w1, w2, w3, -n, read_ptr, write_ptr, ...]
+    dup.5 mem_loadw_le
 
     # perform write (2 cycles)
-    # stack: [a3, a2, a1, a0, -n, read_ptr, write_ptr, ...]
-    dup.6 mem_storew_be
+    # stack: [w0, w1, w2, w3, -n, read_ptr, write_ptr, ...]
+    dup.6 mem_storew_le
 
-    # note: the values of `A` are no longer necessary, use 0 to signal its a
-    # padding
+    # note: the values of the loaded word are no longer necessary, use 0 to
+    # signal it is padding
     # stack: [-n, read_ptr, write_ptr, x, 0, 0, 0, 0, ...]
     swapw
 
@@ -106,12 +106,13 @@ end
 
 #! Copies an even number of words from the advice_stack to memory, computing their permutation.
 #!
-#! Inputs:  [C, B, A, write_ptr, end_ptr]
-#! Outputs: [C, B, A, write_ptr]
+#! Inputs:  [R0, R1, C, write_ptr, end_ptr]
+#! Outputs: [R0', R1', C', write_ptr]
 #!
 #! Where:
-#! - A is the capacity of the RPO hasher state
-#! - C and B are the rate portion of the RPO hasher state
+#! - R0 is the first rate word (positions 0-3, on top of stack).
+#! - R1 is the second rate word / digest (positions 4-7).
+#! - C is the capacity word (positions 8-11).
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - end_ptr is the memory pointer where the copying should end.
 #!
@@ -122,30 +123,29 @@ pub proc pipe_double_words_to_memory
   dup.13 dup.13 neq # (4 cycles)
 
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
-  # LOOP: [b, C, B, A, write_ptr, end_ptr, ...]
+  # LOOP: [b, R0, R1, C, write_ptr, end_ptr, ...]
   while.true
     adv_pipe exec.rpo256::permute # (2 cycles)
-    # => [C', B', A', write_ptr', end_ptr, ...]
+    # => [R0', R1', C', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq # (4 cycles)
-    # LOOP: [b, C', B', A', write_ptr', end_ptr, ...]
+    # LOOP: [b, R0', R1', C', write_ptr', end_ptr, ...]
   end
 
   movup.13 drop # (5 cycles)
-  # [C', B', A', write_ptr', ...]
+  # [R0', R1', C', write_ptr', ...]
 end
 
 #! Copies an arbitrary number of words from the advice stack to memory, computing their permutation.
 #!
 #! Inputs:  [num_words, write_ptr]
-#! Outputs: [C, B, A, write_ptr']
+#! Outputs: [R0, R1, C, write_ptr']
 #!
 #! Where:
 #! - num_words is the number of words which will be copied to the memory.
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
-#! - A is the capacity of the RPO hasher state
-#! - C and B are the rate portion of the RPO hasher state
+#! - R0, R1, C are the final RPO hasher state (R0 on top).
 #!
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
@@ -166,52 +166,54 @@ pub proc pipe_words_to_memory
   # Prepare the capacity word. We use the padding rule which sets the first capacity
   # element to `len % 8` where `len` is the length of the hashed sequence. Since `len % 8`
   # is either equal to 0 or 4,  this is determined by the `needs_padding` flag multiplied
-  # by 4. (6 cycles)
+  # by 4. (7 cycles)
   dup.2 mul.4 push.0.0.0
-  # => [A, write_ptr, end_ptr, needs_padding, ...]
+  movup.3
+  # => [C, write_ptr, end_ptr, needs_padding, ...]
+  # (C is the capacity word)
 
   # set initial hasher state (8 cycles)
   padw padw
-  # => [C, B, A, write_ptr, end_ptr, needs_padding, ...]
+  # => [R0, R1, C, write_ptr, end_ptr, needs_padding, ...]
 
   # (9 + 6 * num_words cycles)
   exec.pipe_double_words_to_memory
-  # => [C, B, A, write_ptr, needs_padding, ...]
+  # => [R0, R1, C, write_ptr, needs_padding, ...]
 
   # (4 cycles)
   movup.13
-  # => [needs_padding, C, B, A, write_ptr, ...]
+  # => [needs_padding, R0, R1, C, write_ptr, ...]
 
   # if(needs_padding) (17 cycles)
   if.true
-    # Rescue Prime Optimized uses overwrite mode, drop `C`. (4 cycles)
-    dropw
-    # => [B, A, write_ptr, ...]
+    # Rescue Prime Optimized uses overwrite mode, drop R1. (4 cycles)
+    swapw dropw
+    # => [R0, C, write_ptr, ...]
 
-    # Overwrite the `B` with the new data (1 cycles)
+    # Overwrite R0 with new data from advice stack (1 cycles)
     adv_loadw
-    # => [B', A, write_ptr, ...]
+    # => [R0', C, write_ptr, ...]
 
-    # - get the memory address that B' should be saved to
+    # - get the memory address that R0' should be saved to
     # - update the write_ptr to point to the next address (4 cycles)
     movup.8 dup.0 add.4 movdn.5
-    # => [write_ptr, B', write_ptr+4, A, ...]
+    # => [write_ptr, R0', write_ptr+4, C, ...]
 
     # save data to memory (1 cycles)
-    mem_storew_be
-    # => [B', write_ptr+1, A, ...]
+    mem_storew_le
+    # => [R0', write_ptr+4, C, ...]
 
     # Fix write_ptr position (2 cycles)
     movup.4 movdn.8
-    # => [B', A, write_ptr+1, ...]
+    # => [R0', C, write_ptr+4, ...]
 
     # Push padding word (4 cycles)
-    padw
-    # => [C, B', A, write_ptr+1, ...]
+    padw swapw
+    # => [R0', R1, C, write_ptr+4, ...]
 
     # Run RPO permutation (1 cycles)
     exec.rpo256::permute
-    # => [C', B', A', write_ptr+1, ...]
+    # => [R0'', R1', C', write_ptr+4, ...]
   end
 end
 
@@ -234,11 +236,11 @@ end
 pub proc pipe_preimage_to_memory
   # Copies the advice stack data to memory
   exec.pipe_words_to_memory
-  # => [C, B, A, write_ptr', COMMITMENT, ...]
+  # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave only the digest on the stack
   exec.rpo256::squeeze_digest
-  # => [B, write_ptr', COMMITMENT, ...]
+  # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Save the write_ptr (2 cycles)
   movup.4 movdn.8
@@ -272,20 +274,20 @@ pub proc pipe_double_words_preimage_to_memory
   mul.4 dup.1 add swap
   # => [write_ptr, end_ptr, COMMITMENT, ...]
 
-  # Setup the initial hasher state, which starts with a capacity word `A`.
-  # For us, the capacity word is entirely empty.
+  # Setup the initial hasher state [R0, R1, C] with empty capacity.
+  #
   # (12 cycles).
   exec.rpo256::init_no_padding
-  # => [C, B, A, write_ptr, end_ptr, COMMITMENT, ...]
+  # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
   # (e.g., 25 cycles for 4 words)
   exec.pipe_double_words_to_memory
-  # => [C, B, A, write_ptr', COMMITMENT, ...]
+  # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack (9 cycles).
   exec.rpo256::squeeze_digest
-  # => [B, write_ptr', COMMITMENT, ...]
+  # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).
   movup.4 movdn.8

@@ -56,8 +56,8 @@ const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 @locals(72)
 pub proc verify
     # Load the public key (8 felts = 32 bytes) from advice into locaddr[0..8]
-    adv_push.4 loc_storew_be.0
-    adv_loadw  loc_storew_be.4 dropw
+    padw adv_loadw loc_storew_le.0
+    adv_loadw loc_storew_le.4 dropw
     # => [PK_COMM, MSG, ...]
 
     # Compute the RPO hash of the public key and verify it matches PK_COMM
@@ -70,10 +70,10 @@ pub proc verify
     # => [...]
 
     # Load the signature (16 felts = 64 bytes) from advice into locaddr[16..32]
-    adv_push.4 loc_storew_be.16
-    adv_loadw  loc_storew_be.20
-    adv_loadw  loc_storew_be.24
-    adv_loadw  loc_storew_be.28 dropw
+    padw adv_loadw loc_storew_le.16
+    adv_loadw loc_storew_le.20
+    adv_loadw loc_storew_le.24
+    adv_loadw loc_storew_le.28 dropw
     # => [...]
 
     # Build the SHA512 input: R || PK || MSG at locaddr[32..56] (96 bytes/24 felts total)
@@ -155,19 +155,19 @@ end
 #! Output: `[PAD, PAD, [ptr_out + 8, 0, 0, 0], ptr_in + 8, ...]`
 proc write_mem_stream_pair
     # Read two words from memory starting at `ptr_in`.
+    # mem_stream returns [MEM[ptr_in], MEM[ptr_in+4], ...]
     mem_stream
-    swapw
     # => [MEM[ptr_in], MEM[ptr_in+4], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
     # Store the first word at `ptr_out`.
     dup.8
-    mem_storew_be
+    mem_storew_le
     swapw
     # => [MEM[ptr_in+4], MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
     # Store the second word at `ptr_out + 4`.
     dup.8 add.4
-    mem_storew_be
+    mem_storew_le
     # => [MEM[ptr_in], [ptr_out, 0, 0, 0], ptr_in + 8, ...]
 
     # Advance `ptr_out` by 8 and restore the padding words.
@@ -238,6 +238,9 @@ pub proc verify_prehash_impl
     # => [COMM_K, COMM_PK, result, sig_ptr]
 
     # Merge COMM_PK and COMM_K into COMM_PK_K = rpo::merge(COMM_PK, COMM_K)
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
+    swapw
+    # => [COMM_PK, COMM_K, result, sig_ptr]
     exec.rpo256::merge
     # => [COMM_PK_K, result, sig_ptr]
 
@@ -246,10 +249,14 @@ pub proc verify_prehash_impl
     # => [COMM_SIG, COMM_PK_K, result]
 
     # Merge into final commitment COMM = rpo::merge(COMM_PK_K, COMM_SIG)
+    # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
+    swapw
+    # => [COMM_PK_K, COMM_SIG, result]
     exec.rpo256::merge
     # => [COMM, result]
 
-    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0]
-    push.EDDSA_VERIFY_EVENT dup.5 push.0.0 swapw
+    # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack
+    # Stack positions 4-7 should have [event_id, result, 0, 0] for get_stack_word(4)
+    push.0.0 dup.6 push.EDDSA_VERIFY_EVENT swapw
     # => [COMM, TAG, result]
 end

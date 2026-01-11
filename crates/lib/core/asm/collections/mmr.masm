@@ -53,7 +53,7 @@ pub proc get
   # stack: [peak_ptr, relative_pos, depth, ...]
 
   # load the target peak (6 cycles)
-  padw movup.4 mem_loadw_be
+  padw movup.4 mem_loadw_le
   # stack: [P, relative_pos, depth, ...]
 
   # find the tree depth (2 cycles)
@@ -131,8 +131,8 @@ pub proc unpack
   # operand_stack => [HASH, mmr_ptr, ...]
   # advice_stack => [NUM_LEAVES, peaks*, ...]
 
-  # load the size from the advice stack (7 cycles)
-  adv_push.4 drop drop drop
+  # load the size from the advice stack (10 cycles)
+  padw adv_loadw movdn.3 drop drop drop
   # operand_stack => [num_leaves, HASH, mmr_ptr, ...]
   # advice_stack => [peaks*, ...]
 
@@ -163,15 +163,15 @@ pub proc unpack
   adv_pipe exec.rpo256::permute
   adv_pipe exec.rpo256::permute
   adv_pipe exec.rpo256::permute
-  # => [C, B, A, mmr_ptr+68, mmt_ptr_end, HASH, ...]
+  # => [R0, R1, C, mmr_ptr+68, mmt_ptr_end, HASH, ...]
 
   # handle MMR with more than 16 elements (10 + 9 * words cycles)
   exec.mem::pipe_double_words_to_memory
-  # => [C, B, A, mmr_ptr+17, HASH, ...]
+  # => [R0, R1, C, mmr_ptr+17, HASH, ...]
 
-  # drop anything but the hash result, word B (11 cycles)
+  # drop anything but the digest (R1) (11 cycles)
   exec.rpo256::squeeze_digest movup.4 drop
-  # => [B, HASH, ...]
+  # => [DIGEST, HASH, ...]
 
   # assert on the resulting hash (11 cycles)
   assert_eqw
@@ -241,7 +241,7 @@ pub proc add
   mul.4 movup.6 add add.4
   # [mmr_end, num_leaves, EL]
 
-  # find how many MMR peaks will be merged (41 cycles)
+  # find how many MMR peaks will be merged (42 cycles)
   swap u32split exec.u64::cto
   # => [num_merges, mmr_end, EL]
 
@@ -263,15 +263,15 @@ pub proc add
 
   while.true # (39 cycles)
     # load peak (4 cycles)
-    dup.9 sub.4 mem_loadw_be
+    dup.9 sub.4 mem_loadw_le
     # => [PEAK, EL, -num_merges, mmr_end]
 
     # merge the nodes (17 cycles)
-    swapw mtree_merge
+    mtree_merge
     # => [EL', -num_merges, mmr_end]
 
     # erase existing peak (6 cycles)
-    padw dup.9 mem_storew_be
+    padw dup.9 mem_storew_le
     # => [PAD, EL', -num_merges, mmr_end]
 
     # update control (7 cycles)
@@ -288,7 +288,7 @@ pub proc add
   # =>: [EL, -num_merges+1, mmr_end-4]
 
   # save the new peak (2 cycles)
-  movup.5 mem_storew_be
+  movup.5 mem_storew_le
   # =>: [EL, -num_merges+1]
 
   # clean stack (5 cycles)
