@@ -11,21 +11,11 @@ pub mod range;
 pub mod rows;
 pub mod stack;
 
-mod rows;
-pub use rows::{RowIndex, RowIndexError};
-
-mod main_trace;
-pub use main_trace::{MainTrace, MainTraceRow};
-
-mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
+pub use main_trace::{MainTrace, MainTraceRow};
+pub use rows::{RowIndex, RowIndexError};
 #[cfg(test)]
 mod tests;
-
-// Re-export commonly used types
-pub use aux_trace::AuxTraceBuilder;
-pub use main_trace::MainTraceRow;
-pub use rows::RowIndex;
 
 // CONSTANTS
 // ================================================================================================
