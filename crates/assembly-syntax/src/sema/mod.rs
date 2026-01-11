@@ -9,7 +9,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Rpo256};
+use miden_core::{Felt, Word, crypto::hash::Rpo256};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -122,7 +122,9 @@ pub fn analyze(
                 docs.take();
                 analyzer.error(SemanticAnalysisError::UnexpectedEntrypoint { span: body.span() });
             },
-            Form::AdviceMapEntry(entry) => {
+            Form::AdviceMapEntry(mut entry) => {
+                let mut visitor = ConstEvalVisitor::new(&mut analyzer);
+                let _ = visitor.visit_mut_advice_entry(&mut entry);
                 add_advice_map_entry(&mut module, entry.with_docs(docs.take()), &mut analyzer)?;
             },
         }
@@ -302,9 +304,10 @@ fn add_advice_map_entry(
     entry: AdviceMapEntry,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
+    let elements: Vec<Felt> = entry.value.iter().map(|v| (*v).expect_value()).collect();
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
-        None => Rpo256::hash_elements(&entry.value),
+        None => Rpo256::hash_elements(&elements),
     };
     let cst = Constant::new(
         entry.span,
@@ -318,7 +321,7 @@ fn add_advice_map_entry(
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });
         },
         None => {
-            module.advice_map.insert(key, entry.value);
+            module.advice_map.insert(key, elements);
         },
     }
     Ok(())

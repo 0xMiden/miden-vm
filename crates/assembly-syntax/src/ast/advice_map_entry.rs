@@ -2,7 +2,7 @@ use alloc::{string::String, vec::Vec};
 
 use miden_debug_types::{SourceSpan, Span};
 
-use super::DocString;
+use super::{DocString, Immediate};
 use crate::{Felt, ast::Ident, parser::WordValue};
 
 // Advice Map data that the host populates before the VM starts.
@@ -19,7 +19,8 @@ pub struct AdviceMapEntry {
     /// The key to insert in the Advice Map.
     pub key: Option<Span<WordValue>>,
     /// The value to insert in the Advice Map.
-    pub value: Vec<Felt>,
+    /// Note that each value may be literal value or constant (e.g. CONSTANT_1 or 0x07)
+    pub value: Vec<Immediate<Felt>>,
 }
 
 impl AdviceMapEntry {
@@ -27,7 +28,7 @@ impl AdviceMapEntry {
         span: SourceSpan,
         name: Ident,
         key: Option<Span<WordValue>>,
-        value: Vec<Felt>,
+        value: Vec<Immediate<Felt>>,
     ) -> Self {
         Self { span, docs: None, name, key, value }
     }
