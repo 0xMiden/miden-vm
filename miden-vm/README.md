@@ -196,7 +196,7 @@ let program = assembler.assemble_program(&source).unwrap();
 let mut host = DefaultHost::default();
 
 // initialize the stack with values 0 and 1
-let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
 // execute the program
 let (outputs, proof) = miden_vm::prove_sync(
