@@ -127,6 +127,9 @@ pub trait Visit<T = ()> {
     fn visit_op(&mut self, op: &Op) -> ControlFlow<T> {
         visit_op(self, op)
     }
+    fn visit_advice_entry(&mut self, entry: &AdviceMapEntry) -> ControlFlow<T> {
+        visit_advice_entry(self, entry)
+    }
     fn visit_inst(&mut self, inst: &Span<Instruction>) -> ControlFlow<T> {
         visit_inst(self, inst)
     }
@@ -226,6 +229,9 @@ where
     fn visit_op(&mut self, op: &Op) -> ControlFlow<T> {
         (**self).visit_op(op)
     }
+    fn visit_advice_entry(&mut self, entry: &AdviceMapEntry) -> ControlFlow<T> {
+        (**self).visit_advice_entry(entry)
+    }
     fn visit_inst(&mut self, inst: &Span<Instruction>) -> ControlFlow<T> {
         (**self).visit_inst(inst)
     }
@@ -296,6 +302,7 @@ where
         Export::Constant(item) => visitor.visit_constant(item),
         Export::Type(item) => visitor.visit_type_decl(item),
         Export::Alias(item) => visitor.visit_alias(item),
+        Export::AdviceMapEntry(item) => visitor.visit_advice_entry(item),
     }
 }
 
@@ -430,6 +437,16 @@ where
         Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_block(body),
         Op::Inst(inst) => visitor.visit_inst(inst),
     }
+}
+
+pub fn visit_advice_entry<V, T>(visitor: &mut V, entry: &AdviceMapEntry) -> ControlFlow<T>
+where
+    V: ?Sized + Visit<T>,
+{
+    for item in entry.value.iter() {
+        let _ = visitor.visit_immediate_felt(item);
+    }
+    ControlFlow::Continue(())
 }
 
 pub fn visit_inst<V, T>(visitor: &mut V, inst: &Span<Instruction>) -> ControlFlow<T>
@@ -712,6 +729,9 @@ pub trait VisitMut<T = ()> {
     fn visit_mut_op(&mut self, op: &mut Op) -> ControlFlow<T> {
         visit_mut_op(self, op)
     }
+    fn visit_mut_advice_entry(&mut self, entry: &mut AdviceMapEntry) -> ControlFlow<T> {
+        visit_mut_advice_entry(self, entry)
+    }
     fn visit_mut_inst(&mut self, inst: &mut Span<Instruction>) -> ControlFlow<T> {
         visit_mut_inst(self, inst)
     }
@@ -811,6 +831,9 @@ where
     fn visit_mut_op(&mut self, op: &mut Op) -> ControlFlow<T> {
         (**self).visit_mut_op(op)
     }
+    fn visit_mut_advice_entry(&mut self, entry: &mut AdviceMapEntry) -> ControlFlow<T> {
+        (**self).visit_mut_advice_entry(entry)
+    }
     fn visit_mut_inst(&mut self, inst: &mut Span<Instruction>) -> ControlFlow<T> {
         (**self).visit_mut_inst(inst)
     }
@@ -881,6 +904,7 @@ where
         Export::Constant(item) => visitor.visit_mut_constant(item),
         Export::Type(item) => visitor.visit_mut_type_decl(item),
         Export::Alias(item) => visitor.visit_mut_alias(item),
+        Export::AdviceMapEntry(item) => visitor.visit_mut_advice_entry(item),
     }
 }
 
@@ -1016,7 +1040,15 @@ where
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
     }
 }
-
+pub fn visit_mut_advice_entry<V, T>(visitor: &mut V, entry: &mut AdviceMapEntry) -> ControlFlow<T>
+where
+    V: ?Sized + VisitMut<T>,
+{
+    for item in entry.value.iter_mut() {
+        let _ = visitor.visit_mut_immediate_felt(item);
+    }
+    ControlFlow::Continue(())
+}
 pub fn visit_mut_inst<V, T>(visitor: &mut V, inst: &mut Span<Instruction>) -> ControlFlow<T>
 where
     V: ?Sized + VisitMut<T>,

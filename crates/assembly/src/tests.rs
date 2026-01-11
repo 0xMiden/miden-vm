@@ -3028,6 +3028,23 @@ begin adv.has_mapkey assert end"
     Ok(())
 }
 
+#[test]
+fn test_adv_has_map_key_constant() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(
+        &context,
+        "\
+        adv_map A = [CONSTANT, 0x07]
+        begin adv.has_mapkey assert end
+        const CONSTANT = 0x06        
+        "
+    );
+
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
 // ERRORS
 // ================================================================================================
 

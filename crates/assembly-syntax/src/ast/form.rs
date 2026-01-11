@@ -73,6 +73,7 @@ impl From<Export> for Form {
             Export::Type(TypeDecl::Alias(item)) => Self::Type(item),
             Export::Type(TypeDecl::Enum(item)) => Self::Enum(item),
             Export::Procedure(item) => Self::Procedure(item),
+            Export::AdviceMapEntry(item) => Self::AdviceMapEntry(item),
         }
     }
 }
