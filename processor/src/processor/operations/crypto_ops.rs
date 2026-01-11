@@ -50,9 +50,9 @@ pub(super) fn op_hperm<P: Processor>(
     let (addr, output_state) = processor.hasher().permute(input_state);
 
     // Write result back to stack (state[0] at top).
-    let r0: Word = output_state[0..4].try_into().expect("r0 slice has length 4");
-    let r1: Word = output_state[4..8].try_into().expect("r1 slice has length 4");
-    let cap: Word = output_state[8..12].try_into().expect("cap slice has length 4");
+    let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
+    let r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect("r1 slice has length 4");
+    let cap: Word = output_state[STATE_CAP_RANGE].try_into().expect("cap slice has length 4");
     processor.stack().set_word(0, &r0);
     processor.stack().set_word(4, &r1);
     processor.stack().set_word(8, &cap);
