@@ -2,25 +2,26 @@
 source: processor/src/fast/tests/all_ops.rs
 expression: fast_stack_outputs
 ---
-Ok(
-    StackOutputs {
-        elements: [
-            13,
-            12,
-            11,
-            10,
-            9,
-            8,
-            7,
-            6,
-            5,
-            4,
-            3,
-            2,
-            1,
-            0,
-            7,
-            6,
-        ],
-    },
+Err(
+    MemoryError(
+        UnalignedWordAccess {
+            label: SourceSpan {
+                source_id: SourceId(
+                    4294967295,
+                ),
+                start: ByteIndex(
+                    0,
+                ),
+                end: ByteIndex(
+                    0,
+                ),
+            },
+            source_file: None,
+            addr: 13,
+            ctx: ContextId(
+                0,
+            ),
+            clk: 1,
+        },
+    ),
 )

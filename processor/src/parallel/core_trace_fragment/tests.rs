@@ -646,7 +646,8 @@ fn test_loop_node_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0, 1], &program);
+    // Input [1, 0]: position 0 (top) = 1 (loop enters), position 1 = 0 (loop exits after body)
+    let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let body_addr = INIT_ADDR + EIGHT;
@@ -750,7 +751,10 @@ fn test_loop_node_repeat_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0, 1, 1], &program);
+    // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
+    // After Pad+Drop: position 0 = 1 (2nd iteration enters)
+    // After Pad+Drop: position 0 = 0 (loop exits)
+    let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let iter1_addr = INIT_ADDR + EIGHT;
@@ -1454,17 +1458,13 @@ fn test_dyn_node_decoding() {
 
     let program = Program::new(mast_forest.into(), program_root_node_id);
 
-    // Stack inputs are reversed by FastProcessor::new(), so to get the correct digest in memory
-    // after MStoreW (which uses LE layout), we pass digest elements in reverse order.
-    // Input: [d3, d2, d1, d0, 40] -> After reversal: [40, d0, d1, d2, d3] on stack
-    // MStoreW stores [d0, d1, d2, d3] to memory, which is the correct Word layout.
     let (trace, trace_len) = build_dyn_trace_helper(
         &[
-            foo_root_node.digest()[3].as_canonical_u64(),
-            foo_root_node.digest()[2].as_canonical_u64(),
-            foo_root_node.digest()[1].as_canonical_u64(),
-            foo_root_node.digest()[0].as_canonical_u64(),
             FOO_ROOT_NODE_ADDR,
+            foo_root_node.digest()[0].as_canonical_u64(),
+            foo_root_node.digest()[1].as_canonical_u64(),
+            foo_root_node.digest()[2].as_canonical_u64(),
+            foo_root_node.digest()[3].as_canonical_u64(),
         ],
         &program,
     );
@@ -1571,7 +1571,7 @@ fn set_user_op_helpers_many() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
-    let (trace, ..) = build_trace_helper(&[dividend as u64, divisor as u64], &program);
+    let (trace, ..) = build_trace_helper(&[divisor as u64, dividend as u64], &program);
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.

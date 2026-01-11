@@ -257,13 +257,11 @@ fn test_mmr_unpack() {
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
     ];
-    let mut peaks_hash = hash_elements(&peaks.concat());
-    peaks_hash.reverse();
+    let peaks_hash = hash_elements(&peaks.concat());
 
-    // Set up the VM stack with the MMR hash, and its target address
-    let mut stack = felt_slice_to_ints(&*peaks_hash);
     let mmr_ptr = 1000_u32;
-    stack.insert(0, mmr_ptr as u64);
+    let mut stack = felt_slice_to_ints(&*peaks_hash);
+    stack.push(mmr_ptr as u64);
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -274,8 +272,8 @@ fn test_mmr_unpack() {
     mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
-    let hash_arr: [Felt; 4] = *peaks_hash;
-    let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
+    // Advice map key is the hash word (positions 0-3 on stack)
+    let hash_key = peaks_hash;
     let advice_map: &[(Word, Vec<Felt>)] = &[
         // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding
         (hash_key, mmr_mem_repr),
@@ -322,13 +320,12 @@ fn test_mmr_unpack_invalid_hash() {
         EMPTY_WORD.into(),
         EMPTY_WORD.into(),
     ];
-    let mut hash = hash_elements(&hash_data.concat());
-    hash.reverse();
+    let hash = hash_elements(&hash_data.concat());
 
-    // Set up the VM stack with the MMR hash, and its target address
-    let mut stack = felt_slice_to_ints(&*hash);
+    // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mmr_ptr = 1000;
-    stack.insert(0, mmr_ptr);
+    let mut stack = felt_slice_to_ints(&*hash);
+    stack.push(mmr_ptr);
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -342,8 +339,7 @@ fn test_mmr_unpack_invalid_hash() {
     map_data.extend_from_slice(&[Felt::new(0b10101), ZERO, ZERO, ZERO]); // 3 peaks, 21 leaves
     map_data.extend_from_slice(&hash_data.as_slice().concat());
 
-    let hash_arr: [Felt; 4] = *hash;
-    let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
+    let hash_key = hash;
     let advice_map: &[(Word, Vec<Felt>)] = &[
         // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding
         (hash_key, map_data),
@@ -386,13 +382,12 @@ fn test_mmr_unpack_large_mmr() {
         [ZERO, ZERO, ZERO, Felt::new(17)],
         EMPTY_WORD.into(),
     ];
-    let mut peaks_hash = hash_elements(&peaks.concat());
-    peaks_hash.reverse();
+    let peaks_hash = hash_elements(&peaks.concat());
 
-    // Set up the VM stack with the MMR hash, and its target address
-    let mut stack = felt_slice_to_ints(&*peaks_hash);
+    // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mmr_ptr = 1000_u32;
-    stack.insert(0, mmr_ptr as u64);
+    let mut stack = felt_slice_to_ints(&*peaks_hash);
+    stack.push(mmr_ptr as u64);
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -403,10 +398,8 @@ fn test_mmr_unpack_large_mmr() {
     mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
-    // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word(1)`.
-    let hash_arr: [Felt; 4] = *peaks_hash;
-    let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
+    // Advice map key is the hash word (positions 0-3 on stack)
+    let hash_key = peaks_hash;
     let advice_map: &[(Word, Vec<Felt>)] = &[(hash_key, mmr_mem_repr)];
 
     let source = "
@@ -448,14 +441,11 @@ fn test_mmr_pack_roundtrip() {
     mmr.add(init_merkle_leaf(3));
 
     let accumulator = mmr.peaks();
-    let mut hash = accumulator.hash_peaks();
-    hash.reverse();
-
-    // Set up the VM stack with the MMR hash, and its target address
-    let mut stack = felt_slice_to_ints(&*hash);
+    let hash = accumulator.hash_peaks();
     let mmr_ptr = 1000;
-    stack.insert(0, mmr_ptr); // first value is used by unpack, to load data to memory
-    stack.insert(0, mmr_ptr); // second is used by pack, to load data from memory
+    let mut stack = felt_slice_to_ints(&*hash);
+    stack.push(mmr_ptr);
+    stack.push(mmr_ptr);
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -468,11 +458,8 @@ fn test_mmr_pack_roundtrip() {
     map_data.extend_from_slice(&[Felt::new(accumulator.num_leaves() as u64), ZERO, ZERO, ZERO]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data).as_ref());
 
-    // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word(1)` given
-    // the stack initialization and `StackInputs` reversing.
-    let hash_arr: [Felt; 4] = *hash;
-    let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
+    // Advice map key is the hash word
+    let hash_key = hash;
     let advice_map: &[(Word, Vec<Felt>)] = &[(hash_key, map_data)];
 
     let source = "
@@ -486,7 +473,8 @@ fn test_mmr_pack_roundtrip() {
         end
     ";
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());
-    let expected_stack: Vec<u64> = hash.iter().rev().map(|e| e.as_canonical_u64()).collect();
+    // Expected stack after pack: [HASH, ...], then swapw dropw leaves [h0, h1, h2, h3]
+    let expected_stack: Vec<u64> = hash.iter().map(|e| e.as_canonical_u64()).collect();
 
     let mut expect_memory: Vec<u64> = Vec::new();
 
@@ -705,14 +693,11 @@ fn test_mmr_large_add_roundtrip() {
     }
 
     let old_accumulator = mmr.peaks();
-    let mut hash = old_accumulator.hash_peaks();
-    // Reverse the digest so that after StackInputs reversing, get_stack_word(1)
-    // sees the canonical hash word used as the advice map key, matching mmr::unpack.
-    hash.reverse();
+    let hash = old_accumulator.hash_peaks();
 
-    // Set up the VM stack with the MMR hash, and its target address
+    // Set up the VM stack: mmr::unpack expects [HASH, mmr_ptr, ...]
     let mut stack = felt_slice_to_ints(&*hash);
-    stack.insert(0, mmr_ptr as u64);
+    stack.push(mmr_ptr as u64);
 
     // both the advice stack and merkle store start empty (data is available in
     // the map and pushed to the advice stack by the MASM code)
@@ -727,10 +712,8 @@ fn test_mmr_large_add_roundtrip() {
     map_data.extend_from_slice(&[Felt::new(num_leaves), ZERO, ZERO, ZERO]);
     map_data.extend_from_slice(Word::words_as_elements(&hash_data));
 
-    // Under the MMR key is the number_of_leaves, followed by the MMR peaks, and any padding.
-    // The key must match how the VM reads it from the stack via `get_stack_word(1)`.
-    let hash_arr: [Felt; 4] = *hash;
-    let hash_key = Word::new([hash_arr[3], hash_arr[2], hash_arr[1], hash_arr[0]]);
+    // Advice map key is the hash word
+    let hash_key = hash;
     let advice_map: &[(Word, Vec<Felt>)] = &[(hash_key, map_data)];
 
     let source = format!(
@@ -757,6 +740,7 @@ fn test_mmr_large_add_roundtrip() {
     new_peaks.resize(16, Word::default());
     expected_memory.extend(digests_to_ints(&new_peaks));
 
+    // Expected stack after pack+swapw+dropw: [h0, h1, h2, h3]
     let expect_stack = word_to_ints(&new_accumulator.hash_peaks());
 
     let test = build_test!(source, &stack, advice_stack, store, advice_map.iter().cloned());

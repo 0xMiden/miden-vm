@@ -74,10 +74,7 @@ pub fn build_trace_from_ops_with_inputs(
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    // StackInputs stores elements in "top-first" order (after reversal in its constructor).
-    // FastProcessor expects "bottom-first" order where the last element becomes top of stack.
-    // So we need to reverse the StackInputs elements.
-    let stack_values: Vec<Felt> = stack_inputs.iter().rev().copied().collect();
+    let stack_values: Vec<Felt> = stack_inputs.iter().copied().collect();
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(

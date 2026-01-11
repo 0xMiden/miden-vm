@@ -584,8 +584,8 @@ fn advice_push_u64div_conditional_execution() {
     // if branch: a=8 (lo=8, hi=0), b=4 (lo=4, hi=0), condition values 1, 1
     // Stack from top before eq: [cond1=1, cond2=1, b_lo=4, b_hi=0, a_lo=8, a_hi=0]
     // After eq (1==1 → true): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
-    // Input array (bottom to top): [0, 8, 0, 4, 1, 1]
-    let test = build_test!(&source, &[0, 8, 0, 4, 1, 1]);
+    // Input array (top to bottom): [1, 1, 4, 0, 8, 0]
+    let test = build_test!(&source, &[1, 1, 4, 0, 8, 0]);
     // Handler uses extend_stack_for_adv_push which reverses for proper ordering.
     // Advice stack (top-to-bottom): [q_hi, q_lo, r_hi, r_lo]
     // First adv_push.2: pops q_hi then q_lo → [q_lo, q_hi, ...]
@@ -597,7 +597,8 @@ fn advice_push_u64div_conditional_execution() {
     // Stack from top before eq: [cond1=0, cond2=1, ...]
     // After eq (0==1 → false): [b_lo=4, b_hi=0, a_lo=8, a_hi=0]
     // padw adds [0, 0, 0, 0], then movupw.2 dropw removes padding word at depth 2
-    let test = build_test!(&source, &[0, 8, 0, 4, 1, 0]);
+    // Input array (top to bottom): [0, 1, 4, 0, 8, 0]
+    let test = build_test!(&source, &[0, 1, 4, 0, 8, 0]);
     test.expect_stack(&[0, 0, 0, 0, 4, 0, 8, 0]);
 }
 

@@ -18,11 +18,8 @@ use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::Fast
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
-/// Returns the procedure hash that DYN and DYNCALL will call, in reverse order for stack inputs.
+/// Returns the procedure hash that DYN and DYNCALL will call.
 /// The digest is computed dynamically from the target basic block (single SWAP operation).
-///
-/// The elements are reversed because FastProcessor::new() reverses stack inputs, so to end up with
-/// `[d0, d1, d2, d3]` on the stack (correct order for LE MStoreW), we pass `[d3, d2, d1, d0]`.
 fn dyn_target_proc_hash() -> &'static [Felt] {
     use std::sync::LazyLock;
     static HASH: LazyLock<Vec<Felt>> = LazyLock::new(|| {
@@ -31,8 +28,8 @@ fn dyn_target_proc_hash() -> &'static [Felt] {
         let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
             .add_to_forest(&mut forest)
             .unwrap();
-        // Reverse for stack input (FastProcessor::new reverses inputs)
-        forest.get_node_by_id(target).unwrap().digest().iter().rev().copied().collect()
+        // FastProcessor::new now expects first element to be top of stack
+        forest.get_node_by_id(target).unwrap().digest().iter().copied().collect()
     });
     HASH.as_slice()
 }
@@ -52,12 +49,12 @@ fn external_lib_proc_digest() -> Word {
     *DIGEST
 }
 
-/// Returns the external library procedure digest elements in reverse order for stack inputs.
-/// The reversal is needed because FastProcessor::new() reverses stack inputs.
+/// Returns the external library procedure digest elements for stack inputs.
+/// FastProcessor::new now expects first element to be top of stack.
 fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
     use std::sync::LazyLock;
     static HASH: LazyLock<Vec<Felt>> =
-        LazyLock::new(|| external_lib_proc_digest().iter().rev().copied().collect());
+        LazyLock::new(|| external_lib_proc_digest().iter().copied().collect());
     HASH.as_slice()
 }
 

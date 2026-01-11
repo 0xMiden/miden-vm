@@ -1,4 +1,5 @@
 use miden_core_lib::handlers::smt_peek::SMT_PEEK_EVENT_NAME;
+use miden_utils_testing::PrimeField64;
 
 use super::*;
 
@@ -44,8 +45,8 @@ fn test_smt_get() {
         ";
         let root = smt.root();
         let mut initial_stack = Vec::new();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
         let expected_output = build_expected_stack(value, smt.root());
 
         let (store, advice_map) = build_advice_inputs(smt);
@@ -85,8 +86,8 @@ fn test_smt_get_multi() {
     fn expect_value_from_get(key: Word, value: Word, smt: &Smt) {
         let root = smt.root();
         let mut initial_stack: Vec<u64> = Default::default();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
         let expected_output = build_expected_stack(value, smt.root());
 
         let (store, advice_map) = build_advice_inputs(smt);
@@ -328,9 +329,9 @@ fn test_smt_set_single_to_multi() {
         let root = smt.root();
 
         let mut initial_stack: Vec<u64> = Default::default();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
-        push_word_le(&mut initial_stack, &value);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &value);
 
         // Will be an empty word for all cases except the no-op case (where V == V_old).
         let expected_old_value = smt_get_value(&smt, key);
@@ -373,9 +374,9 @@ fn test_smt_set_in_multi() {
         let root = smt.root();
 
         let mut initial_stack: Vec<u64> = Default::default();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
-        push_word_le(&mut initial_stack, &value);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &value);
 
         let expected_output = build_expected_stack(old_value, expected_smt.root());
 
@@ -409,9 +410,9 @@ fn test_smt_set_in_multi() {
     let root = smt.root();
 
     let mut initial_stack: Vec<u64> = Default::default();
-    push_word_le(&mut initial_stack, &root);
-    push_word_le(&mut initial_stack, &K);
-    push_word_le(&mut initial_stack, &V);
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &K);
+    push_word(&mut initial_stack, &V);
 
     let expected_output = build_expected_stack(EMPTY_WORD, expected_smt.root());
 
@@ -452,9 +453,9 @@ fn test_smt_set_replace_in_multi() {
     let root = smt.root();
 
     let mut initial_stack: Vec<u64> = Default::default();
-    push_word_le(&mut initial_stack, &root);
-    push_word_le(&mut initial_stack, &K0);
-    push_word_le(&mut initial_stack, &V2);
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &K0);
+    push_word(&mut initial_stack, &V2);
 
     let expected_output = build_expected_stack(V0, expected_smt.root());
 
@@ -480,9 +481,9 @@ fn test_smt_set_multi_to_single() {
     fn expect_remove_second_pair(smt: &Smt, key: Word) {
         let root = smt.root();
         let mut initial_stack: Vec<u64> = Default::default();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
-        push_word_le(&mut initial_stack, &EMPTY_WORD);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &EMPTY_WORD);
 
         let expected_value = smt_get_value(smt, key);
 
@@ -525,9 +526,9 @@ fn test_smt_set_remove_in_multi() {
     fn expect_remove(smt: &Smt, key: Word) {
         let root = smt.root();
         let mut initial_stack: Vec<u64> = Default::default();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
-        push_word_le(&mut initial_stack, &EMPTY_WORD);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &EMPTY_WORD);
 
         let expected_value = smt_get_value(smt, key);
 
@@ -578,8 +579,8 @@ fn test_smt_peek() {
         ";
         let root = smt.root();
         let mut initial_stack = Vec::new();
-        push_word_le(&mut initial_stack, &root);
-        push_word_le(&mut initial_stack, &key);
+        push_word(&mut initial_stack, &root);
+        push_word(&mut initial_stack, &key);
         let expected_output = build_expected_stack(value, smt.root());
 
         let (store, advice_map) = build_advice_inputs(smt);
@@ -641,9 +642,9 @@ fn prepare_insert_or_set(
     let root = smt.root();
 
     let mut initial_stack = Vec::new();
-    push_word_le(&mut initial_stack, &root);
-    push_word_le(&mut initial_stack, &key);
-    push_word_le(&mut initial_stack, &value);
+    push_word(&mut initial_stack, &root);
+    push_word(&mut initial_stack, &key);
+    push_word(&mut initial_stack, &value);
 
     // build a Merkle store for the test before the tree is updated, and then update the tree
     let (store, advice_map) = build_advice_inputs(smt);
@@ -768,12 +769,10 @@ fn random_u64(seed: &mut u64) -> u64 {
 // STACK ORDERING UTILS
 // ================================================================================================
 
-fn push_word_le(stack: &mut Vec<u64>, word: &Word) {
-    // Words should be pushed so that word[0] ends up on top of the stack.
-    // StackInputs::try_from_ints reverses the input vec, so we need to reverse here first.
-    let mut reversed = *word;
-    reversed.reverse();
-    append_word_to_vec(stack, reversed);
+fn push_word(stack: &mut Vec<u64>, word: &Word) {
+    for (i, felt) in word.iter().enumerate() {
+        stack.insert(i, felt.as_canonical_u64());
+    }
 }
 
 fn build_smt_from_pairs(pairs: &[(Word, Word)]) -> Smt {

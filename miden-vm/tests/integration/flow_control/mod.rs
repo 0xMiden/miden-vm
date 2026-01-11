@@ -18,7 +18,8 @@ fn conditional_execution() {
     // --- if without else ------------------------------------------------------------------------
     let source = "begin dup.1 dup.1 eq if.true add end end";
 
-    let test = build_test!(source, &[1, 2]);
+    // Stack [2, 1] with 2 on top - different values, no add
+    let test = build_test!(source, &[2, 1]);
     test.expect_stack(&[2, 1]);
 
     let test = build_test!(source, &[3, 3]);
@@ -216,10 +217,11 @@ fn local_fn_call_with_mem_access() {
             swap drop
         end";
 
-    let test = build_test!(source, &[3, 7]);
+    // Stack [7, 3] with 7 on top - stores 7 in outer context, 3 in foo's context
+    let test = build_test!(source, &[7, 3]);
     test.expect_stack(&[1]);
 
-    test.prove_and_verify(vec![3, 7], false);
+    test.prove_and_verify(vec![7, 3], false);
 }
 
 #[test]
@@ -270,7 +272,9 @@ fn simple_syscall_2() {
 
     // TODO: update and use macro?
     let mut test = Test::new(&format!("test{}", line!()), program_source, false);
-    test.stack_inputs = StackInputs::try_from_ints([2, 2, 3, 2, 1]).unwrap();
+    // Stack [1, 2, 3, 2, 2] with 1 on top
+    // foo(1+2=3), foo(3+3=6), bar(6*2=12), bar(12*2=24) => 24
+    test.stack_inputs = StackInputs::try_from_ints([1, 2, 3, 2, 2]).unwrap();
     test.kernel_source = Some(test.source_manager.load(
         SourceLanguage::Masm,
         format!("kernel{}", line!()).into(),
@@ -278,7 +282,7 @@ fn simple_syscall_2() {
     ));
     test.expect_stack(&[24]);
 
-    test.prove_and_verify(vec![2, 2, 3, 2, 1], false);
+    test.prove_and_verify(vec![1, 2, 3, 2, 2], false);
 }
 
 /// Tests that `CALL`ing from a syscall context works correctly, especially in terms of properly
@@ -430,19 +434,14 @@ fn simple_dyn_exec() {
     // We want the stack after call.foo + movdn.4 to be:
     //   [digest[0], digest[1], digest[2], digest[3], 3, 3, ...]
     // where digest[0] is on top.
-    //
-    // Initial stack needs: [2, 1, digest[0], digest[1], digest[2], digest[3], 3, ...]
-    // (2 on top, so call.foo computes 2+1=3)
-    // Since StackInputs::try_from_ints reverses, we provide:
-    //   [3, digest[3], digest[2], digest[1], digest[0], 1, 2]
     let stack_init: [u64; 7] = [
-        3,
-        foo_digest[3].as_canonical_u64(),
-        foo_digest[2].as_canonical_u64(),
-        foo_digest[1].as_canonical_u64(),
-        foo_digest[0].as_canonical_u64(),
-        1,
         2,
+        1,
+        foo_digest[0].as_canonical_u64(),
+        foo_digest[1].as_canonical_u64(),
+        foo_digest[2].as_canonical_u64(),
+        foo_digest[3].as_canonical_u64(),
+        3,
     ];
 
     let test = Test {
@@ -528,19 +527,14 @@ fn simple_dyncall() {
     let procedure_digests: Vec<Word> = program.mast_forest().procedure_digests().collect();
     let foo_digest = procedure_digests[0];
 
-    // Build stack inputs with foo's digest.
-    // Initial stack needs: [2, 1, digest[0], digest[1], digest[2], digest[3], 3, ...]
-    // (2 on top, so call.foo computes 2+1=3)
-    // Since StackInputs::try_from_ints reverses, we provide:
-    //   [3, digest[3], digest[2], digest[1], digest[0], 1, 2]
     let stack_init: [u64; 7] = [
-        3,
-        foo_digest[3].as_canonical_u64(),
-        foo_digest[2].as_canonical_u64(),
-        foo_digest[1].as_canonical_u64(),
-        foo_digest[0].as_canonical_u64(),
-        1,
         2,
+        1,
+        foo_digest[0].as_canonical_u64(),
+        foo_digest[1].as_canonical_u64(),
+        foo_digest[2].as_canonical_u64(),
+        foo_digest[3].as_canonical_u64(),
+        3,
     ];
 
     let mut test = Test {

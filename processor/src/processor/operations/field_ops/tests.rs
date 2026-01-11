@@ -20,7 +20,7 @@ use crate::fast::{FastProcessor, NoopTracer};
 fn test_op_add() {
     // initialize the stack with a few values
     let (a, b, c) = get_rand_values();
-    let mut processor = FastProcessor::new(&[c, b, a]);
+    let mut processor = FastProcessor::new(&[a, b, c]);
     let mut tracer = NoopTracer;
 
     // add the top two values
@@ -39,7 +39,7 @@ fn test_op_add() {
 fn test_op_neg() {
     // initialize the stack with a few values
     let (a, b, c) = get_rand_values();
-    let mut processor = FastProcessor::new(&[c, b, a]);
+    let mut processor = FastProcessor::new(&[a, b, c]);
 
     // negate the top value
     op_neg(&mut processor);
@@ -53,7 +53,7 @@ fn test_op_neg() {
 fn test_op_mul() {
     // initialize the stack with a few values
     let (a, b, c) = get_rand_values();
-    let mut processor = FastProcessor::new(&[c, b, a]);
+    let mut processor = FastProcessor::new(&[a, b, c]);
     let mut tracer = NoopTracer;
 
     // multiply the top two values
@@ -72,7 +72,7 @@ fn test_op_mul() {
 fn test_op_inv() {
     // initialize the stack with a few values
     let (a, b, c) = get_rand_values();
-    let mut processor = FastProcessor::new(&[c, b, a]);
+    let mut processor = FastProcessor::new(&[a, b, c]);
 
     // invert the top value
     if a != ZERO {
@@ -92,7 +92,7 @@ fn test_op_inv() {
 fn test_op_incr() {
     // initialize the stack with a few values
     let (a, b, c) = get_rand_values();
-    let mut processor = FastProcessor::new(&[c, b, a]);
+    let mut processor = FastProcessor::new(&[a, b, c]);
 
     // increment the top value
     op_incr(&mut processor);
@@ -111,25 +111,25 @@ fn test_op_and() {
     let two = Felt::new(2);
 
     // --- test 0 AND 0 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ZERO, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, ZERO, two]);
     op_and(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 1 AND 0 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ZERO, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, ZERO, two]);
     op_and(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 0 AND 1 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ONE, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, ONE, two]);
     op_and(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 1 AND 1 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ONE, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, ONE, two]);
     op_and(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ONE, two]);
     assert_eq!(expected, processor.stack_top());
@@ -139,7 +139,7 @@ fn test_op_and() {
     assert!(op_and(&mut processor, &(), &mut tracer).is_err());
 
     // --- second operand is not binary -----------------------------------
-    let mut processor = FastProcessor::new(&[two, two, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, two, two]);
     assert!(op_and(&mut processor, &(), &mut tracer).is_err());
 
     // --- calling AND with a stack of minimum depth is ok ----------------
@@ -153,25 +153,25 @@ fn test_op_or() {
     let two = Felt::new(2);
 
     // --- test 0 OR 0 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ZERO, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, ZERO, two]);
     op_or(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 1 OR 0 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ZERO, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, ZERO, two]);
     op_or(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ONE, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 0 OR 1 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ONE, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, ONE, two]);
     op_or(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ONE, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test 1 OR 1 ---------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ONE, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, ONE, two]);
     op_or(&mut processor, &(), &mut tracer).unwrap();
     let expected = build_expected(&[ONE, two]);
     assert_eq!(expected, processor.stack_top());
@@ -181,7 +181,7 @@ fn test_op_or() {
     assert!(op_or(&mut processor, &(), &mut tracer).is_err());
 
     // --- second operand is not binary -----------------------------------
-    let mut processor = FastProcessor::new(&[two, two, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, two, two]);
     assert!(op_or(&mut processor, &(), &mut tracer).is_err());
 
     // --- calling OR with a stack of minimum depth is ok ----------------
@@ -194,13 +194,13 @@ fn test_op_not() {
     let two = Felt::new(2);
 
     // --- test NOT 0 -----------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, two]);
     op_not(&mut processor, &()).unwrap();
     let expected = build_expected(&[ONE, two]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test NOT 1 ----------------------------------------------------
-    let mut processor = FastProcessor::new(&[two, ONE]);
+    let mut processor = FastProcessor::new(&[ONE, two]);
     op_not(&mut processor, &()).unwrap();
     let expected = build_expected(&[ZERO, two]);
     assert_eq!(expected, processor.stack_top());
@@ -221,13 +221,13 @@ fn test_op_eq() {
     let seven = Felt::new(7);
 
     // --- test when top two values are equal -----------------------------
-    let mut processor = FastProcessor::new(&[three, seven, seven]);
+    let mut processor = FastProcessor::new(&[seven, seven, three]);
     let _ = op_eq(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[ONE, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test when top two values are not equal -------------------------
-    let mut processor = FastProcessor::new(&[three, five, seven]);
+    let mut processor = FastProcessor::new(&[seven, five, three]);
     let _ = op_eq(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[ZERO, three]);
     assert_eq!(expected, processor.stack_top());
@@ -243,13 +243,13 @@ fn test_op_eqz() {
     let four = Felt::new(4);
 
     // --- test when top is zero ------------------------------------------
-    let mut processor = FastProcessor::new(&[three, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, three]);
     let _ = op_eqz(&mut processor);
     let expected = build_expected(&[ONE, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test when top is not zero --------------------------------------
-    let mut processor = FastProcessor::new(&[three, four]);
+    let mut processor = FastProcessor::new(&[four, three]);
     let _ = op_eqz(&mut processor);
     let expected = build_expected(&[ZERO, three]);
     assert_eq!(expected, processor.stack_top());
@@ -269,7 +269,8 @@ fn test_op_expacc() {
     let new_acc = Felt::new(1);
     let new_base = Felt::new(0);
 
-    let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
+    // Stack layout: [bit, base, acc, exp] with bit at position 0 (top)
+    let mut processor = FastProcessor::new(&[ZERO, old_base, old_acc, old_exp]);
     let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ZERO, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
@@ -283,7 +284,7 @@ fn test_op_expacc() {
     let new_acc = Felt::new(0);
     let new_base = Felt::new(0);
 
-    let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, old_base, old_acc, old_exp]);
     let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
@@ -297,7 +298,7 @@ fn test_op_expacc() {
     let new_acc = Felt::new(32);
     let new_base = Felt::new(16);
 
-    let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, old_base, old_acc, old_exp]);
     let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ZERO, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
@@ -312,7 +313,7 @@ fn test_op_expacc() {
     let new_acc = Felt::new(16);
     let new_base = Felt::new(16 * 16);
 
-    let mut processor = FastProcessor::new(&[old_exp, old_acc, old_base, ZERO]);
+    let mut processor = FastProcessor::new(&[ZERO, old_base, old_acc, old_exp]);
     let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
     assert_eq!(expected, processor.stack_top());
@@ -328,10 +329,10 @@ fn test_op_expacc() {
     let new_base = Felt::new(old_base_val) * Felt::new(old_base_val);
 
     let mut processor = FastProcessor::new(&[
-        Felt::new(old_exp_val),
-        Felt::new(old_acc_val),
-        Felt::new(old_base_val),
         ZERO,
+        Felt::new(old_base_val),
+        Felt::new(old_acc_val),
+        Felt::new(old_exp_val),
     ]);
     let _ = op_expacc(&mut processor);
     let expected = build_expected(&[ONE, new_base, new_acc, new_exp]);
@@ -343,13 +344,9 @@ fn test_op_expacc() {
 
 #[test]
 fn test_op_ext2mul() {
-    // initialize the stack with random values
-    // Low coefficient closer to top
     let [a0, a1, b0, b1] = [rand_value::<Felt>(); 4];
 
-    // For LE, stack should be [b0, b1, a0, a1] with b0 on top
-    // FastProcessor::new expects bottom-first, so pass [a1, a0, b1, b0]
-    let mut processor = FastProcessor::new(&[a1, a0, b1, b0]);
+    let mut processor = FastProcessor::new(&[b0, b1, a0, a1]);
 
     // multiply the top two extension field elements
     op_ext2mul(&mut processor);

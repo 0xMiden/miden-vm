@@ -53,7 +53,7 @@ fn advice_insert_mem() {
     # advice_stack: []
 
     end";
-    let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1];
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8];
     let test = build_test!(source, &stack_inputs);
     test.expect_stack(&[8, 7, 6, 5, 4, 3, 2, 1]);
 }
@@ -75,9 +75,8 @@ fn advice_push_mapval() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack is [4, 3, 2, 1, ...]
-    // The advice map key must match the actual stack key
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    // Stack key is [1, 2, 3, 4] with 1 on top
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(5), Felt::new(6), Felt::new(7), Felt::new(8)],
@@ -89,7 +88,7 @@ fn advice_push_mapval() {
     // --- test simple adv.push_mapval_count ---------------------------------------------
     let source: &str = "
     begin
-        # stack: [4, 3, 2, 1, ...]
+        # stack: [1, 2, 3, 4, ...]
 
         # load the advice stack with values from the advice map and drop the key
         adv.push_mapval_count
@@ -101,8 +100,7 @@ fn advice_push_mapval() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack is [4, 3, 2, 1, ...]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(9), Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
@@ -117,7 +115,7 @@ fn adv_push_mapvaln() {
     // --- test simple adv.push_mapvaln --------------------------------------------
     let source: &str = "
     begin
-        # stack: [4, 3, 2, 1, ...]
+        # stack: [1, 2, 3, 4, ...]
 
         # load the advice stack with values from the advice map (including the number
         # of elements) and drop the key
@@ -130,8 +128,7 @@ fn adv_push_mapvaln() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
@@ -146,7 +143,7 @@ fn adv_push_mapvaln_padding() {
     // --- test adv.push_mapvaln.0 -------------------------------------------------
     let source: &str = "
     begin
-        # stack: [4, 3, 2, 1, ...]
+        # stack: [1, 2, 3, 4, ...]
 
         # load the advice stack with values from the advice map (including the number
         # of elements) and drop the key
@@ -160,8 +157,7 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13), Felt::new(14), Felt::new(15)],
@@ -173,7 +169,7 @@ fn adv_push_mapvaln_padding() {
     // --- test adv.push_mapvaln.4 -------------------------------------------------
     let source: &str = "
     begin
-        # stack: [4, 3, 2, 1, ...]
+        # stack: [1, 2, 3, 4, ...]
 
         # load the advice stack with values from the advice map (including the number
         # of elements) and drop the key
@@ -188,8 +184,7 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(11), Felt::new(12), Felt::new(13)],
@@ -201,7 +196,7 @@ fn adv_push_mapvaln_padding() {
     // --- test adv.push_mapvaln.8 -------------------------------------------------
     let source: &str = "
     begin
-        # stack: [4, 3, 2, 1, ...]
+        # stack: [1, 2, 3, 4, ...]
 
         # load the advice stack with values from the advice map (including the number
         # of elements) and drop the key
@@ -216,8 +211,7 @@ fn adv_push_mapvaln_padding() {
     end";
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![
@@ -239,9 +233,9 @@ fn advice_has_mapkey() {
     // --- test adv.has_mapkey: key is present --------------------------------
     let source: &str = r#"
     begin
-        # stack: [4, 3, 2, 1] (after input reversal)
+        # stack: [1, 2, 3, 4]
 
-        # push the flag on the advice stack indicating if key [4, 3, 2, 1] exists in advice map
+        # push the flag on the advice stack indicating if key [1, 2, 3, 4] exists in advice map
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
@@ -255,22 +249,21 @@ fn advice_has_mapkey() {
     end"#;
 
     let stack_inputs = [1, 2, 3, 4];
-    // StackInputs::try_from_ints reverses, so actual stack key is [4, 3, 2, 1]
-    let stack_key: [u64; 4] = [4, 3, 2, 1];
+    let stack_key: [u64; 4] = [1, 2, 3, 4];
     let adv_map = [(
         Word::try_from(stack_key).unwrap(),
         vec![Felt::new(8), Felt::new(7), Felt::new(6), Felt::new(5)],
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
-    test.expect_stack(&[1, 4, 3, 2, 1]);
+    test.expect_stack(&[1, 1, 2, 3, 4]);
 
     // --- test adv.has_mapkey: key is not present ----------------------------
     let source: &str = r#"
     begin
-        # stack: [4, 3, 2, 1] (after input reversal)
+        # stack: [1, 2, 3, 4]
 
-        # push the flag on the advice stack indicating if key [4, 3, 2, 1] exists in advice map
+        # push the flag on the advice stack indicating if key [1, 2, 3, 4] exists in advice map
         adv.has_mapkey
 
         # move the the flag from the advice stack to the operand stack
@@ -291,7 +284,7 @@ fn advice_has_mapkey() {
     )];
 
     let test = build_test!(source, &stack_inputs, [], MerkleStore::default(), adv_map);
-    test.expect_stack(&[0, 4, 3, 2, 1]);
+    test.expect_stack(&[0, 1, 2, 3, 4]);
 }
 
 #[test]
@@ -319,7 +312,7 @@ fn advice_insert_hdword() {
         # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
         adv_loadw swapw adv_loadw swapw
     end";
-    let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1];
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8];
     let test = build_test!(source, &stack_inputs);
     // Values are stored as [W0, W1] in advice map.
     // Retrieval: adv_loadw swapw adv_loadw swapw produces [W0, W1].
@@ -353,7 +346,7 @@ fn advice_insert_hdword() {
         # adv_loadw gets W0, swapw moves it, adv_loadw gets W1, swapw produces [W0, W1]
         adv_loadw swapw adv_loadw swapw
     end";
-    let stack_inputs = [9, 8, 7, 6, 5, 4, 3, 2, 1];
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8, 9];
     let test = build_test!(source, &stack_inputs);
     // Values stored as [W0, W1], retrieval produces [W0, W1] on operand stack
     test.expect_stack(&[1, 2, 3, 4, 5, 6, 7, 8]);
@@ -401,8 +394,9 @@ fn advice_insert_hqword() {
             adv_loadw reversew
         end
     end";
+    // Stack needs [44..41, 34..31, 24..21, 14..11] with 44 on top (as per original test intent)
     let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
     let test = build_test!(source, &stack_inputs);
     // Values retrieved from advice map in LIFO order
-    test.expect_stack(&[44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11]);
+    test.expect_stack(&[11, 12, 13, 14, 21, 22, 23, 24, 31, 32, 33, 34, 41, 42, 43, 44]);
 }

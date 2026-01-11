@@ -89,14 +89,13 @@ fn test_mstorew_success() {
     let clk = 0_u32.into();
 
     // Store the word at address 40
-    // Stack layout: [word[0], word[1], word[2], word[3], addr] with word[0] at position 1
-    // Push in reverse order so word[0] ends up at position 1 after pushing addr
+    // Stack layout: [addr, word[0], word[1], word[2], word[3]] with addr at position 0 (top)
     let mut processor = FastProcessor::new(&[
-        word_to_store[3],
-        word_to_store[2],
-        word_to_store[1],
-        word_to_store[0],
         addr,
+        word_to_store[0],
+        word_to_store[1],
+        word_to_store[2],
+        word_to_store[3],
     ]);
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
@@ -116,8 +115,8 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let clk = 1_u32.into();
     let value_to_store = Felt::from(value_to_store);
 
-    // Store the value at address 40
-    let mut processor = FastProcessor::new(&[value_to_store, addr.into()]);
+    // Store the value at address - addr at top, value at position 1
+    let mut processor = FastProcessor::new(&[addr.into(), value_to_store]);
     let program = simple_program_with_ops(vec![Operation::MStore]);
     processor.execute_sync_mut(&program, &mut host).unwrap();
 
@@ -163,14 +162,11 @@ fn test_mstream() {
     let word_at_addr_40 = Word::from([ONE, 2_u32.into(), 3_u32.into(), 4_u32.into()]);
     let word_at_addr_44 = Word::from([Felt::from(5_u32), 6_u32.into(), 7_u32.into(), 8_u32.into()]);
     let ctx = 0_u32.into();
-    let clk = 1_u32.into();
+    let clk: RowIndex = 1_u32.into();
 
     let mut processor = {
-        let stack_init = {
-            let mut stack = vec![ZERO; 16];
-            stack[MIN_STACK_DEPTH - 1 - 12] = addr.into();
-            stack
-        };
+        let mut stack_init = vec![ZERO; 16];
+        stack_init[12] = addr.into();
         FastProcessor::new(&stack_init)
     };
     // Store values at addresses 40 and 44

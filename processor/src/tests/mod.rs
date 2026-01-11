@@ -104,7 +104,7 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 8",
-        "value for key 0x0200000000000000010000000000000000000000000000000000000000000000 not present in the advice map",
+        "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapval",
@@ -126,7 +126,7 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     assert_diagnostic_lines!(
         err,
         "advice provider error at clock cycle 8",
-        "value for key 0x0200000000000000010000000000000000000000000000000000000000000000 not present in the advice map",
+        "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
         regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapvaln",
@@ -420,7 +420,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let depth = 4;
     let index = 16;
 
-    let build_test = build_test_by_mode!(true, source, &[index, depth]);
+    let build_test = build_test_by_mode!(true, source, &[depth, index]);
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
@@ -678,13 +678,13 @@ fn test_diagnostic_merkle_store_lookup_failed() {
         let index = 0;
 
         &[
-            1,
-            merkle_root[0].as_canonical_u64(),
-            merkle_root[1].as_canonical_u64(),
-            merkle_root[2].as_canonical_u64(),
-            merkle_root[3].as_canonical_u64(),
+            log_depth, // depth at position 0 (top)
             index,
-            log_depth,
+            merkle_root[3].as_canonical_u64(),
+            merkle_root[2].as_canonical_u64(),
+            merkle_root[1].as_canonical_u64(),
+            merkle_root[0].as_canonical_u64(),
+            1, // new value V
         ]
     };
 

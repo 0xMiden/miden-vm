@@ -25,9 +25,7 @@
 #[macro_export]
 macro_rules! stack {
     ($($elem:expr),* $(,)?) => {{
-        let mut v: ::alloc::vec::Vec<u64> = ::alloc::vec![$($elem as u64),*];
-        v.reverse();
-        v
+        ::alloc::vec![$($elem as u64),*]
     }};
 }
 

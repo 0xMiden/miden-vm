@@ -277,7 +277,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
         let processor = if self.in_debug_mode {
             FastProcessor::new_debug(&stack_inputs, self.advice_inputs.clone())
         } else {
@@ -386,7 +386,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_stack_result = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_processor = FastProcessor::new_with_options(
                 &stack_inputs,
@@ -424,7 +424,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().rev().collect::<Vec<Felt>>(),
+            &self.stack_inputs.clone().into_iter().collect::<Vec<Felt>>(),
             self.advice_inputs.clone(),
         );
 
@@ -445,7 +445,7 @@ impl Test {
             .with_debug_handler(debug_handler);
 
         let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().rev().collect::<Vec<Felt>>(),
+            &self.stack_inputs.clone().into_iter().collect::<Vec<Felt>>(),
             self.advice_inputs.clone(),
         );
 
@@ -580,7 +580,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().rev().collect();
+            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_process = if self.in_debug_mode {
                 FastProcessor::new_debug(&stack_inputs, advice_inputs)

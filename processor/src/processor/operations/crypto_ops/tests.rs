@@ -51,24 +51,23 @@ proptest! {
     ) {
         // Build the initial stack state
         // Stack layout (top first): [s0, s1, s2, ..., s11, s12, s13, s14, s15]
-        // FastProcessor::new expects elements in "reverse" order: first element goes to bottom
         let stack_inputs = [
-            Felt::new(s15), // position 15 (bottom)
-            Felt::new(s14), // position 14
-            Felt::new(s13), // position 13
-            Felt::new(s12), // position 12
-            Felt::new(s11), // position 11
-            Felt::new(s10), // position 10
-            Felt::new(s9),  // position 9
-            Felt::new(s8),  // position 8
-            Felt::new(s7),  // position 7
-            Felt::new(s6),  // position 6
-            Felt::new(s5),  // position 5
-            Felt::new(s4),  // position 4
-            Felt::new(s3),  // position 3
-            Felt::new(s2),  // position 2
-            Felt::new(s1),  // position 1
             Felt::new(s0),  // position 0 (top)
+            Felt::new(s1),  // position 1
+            Felt::new(s2),  // position 2
+            Felt::new(s3),  // position 3
+            Felt::new(s4),  // position 4
+            Felt::new(s5),  // position 5
+            Felt::new(s6),  // position 6
+            Felt::new(s7),  // position 7
+            Felt::new(s8),  // position 8
+            Felt::new(s9),  // position 9
+            Felt::new(s10), // position 10
+            Felt::new(s11), // position 11
+            Felt::new(s12), // position 12
+            Felt::new(s13), // position 13
+            Felt::new(s14), // position 14
+            Felt::new(s15), // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -160,22 +159,22 @@ proptest! {
         // Build the initial stack state
         // Stack layout (top first): [r0, r1, r2, r3, r4, r5, r6, r7, c0, c1, c2, c3, src_ptr, dst_ptr, 0, 0]
         let stack_inputs = [
-            ZERO,                    // position 15 (bottom)
-            ZERO,                    // position 14
-            Felt::new(dst_addr),     // position 13 (dst_ptr)
-            Felt::new(src_addr),     // position 12 (src_ptr)
-            Felt::new(c3),           // position 11
-            Felt::new(c2),           // position 10
-            Felt::new(c1),           // position 9
-            Felt::new(c0),           // position 8
-            Felt::new(r7),           // position 7
-            Felt::new(r6),           // position 6
-            Felt::new(r5),           // position 5
-            Felt::new(r4),           // position 4
-            Felt::new(r3),           // position 3
-            Felt::new(r2),           // position 2
-            Felt::new(r1),           // position 1
             Felt::new(r0),           // position 0 (top)
+            Felt::new(r1),           // position 1
+            Felt::new(r2),           // position 2
+            Felt::new(r3),           // position 3
+            Felt::new(r4),           // position 4
+            Felt::new(r5),           // position 5
+            Felt::new(r6),           // position 6
+            Felt::new(r7),           // position 7
+            Felt::new(c0),           // position 8
+            Felt::new(c1),           // position 9
+            Felt::new(c2),           // position 10
+            Felt::new(c3),           // position 11
+            Felt::new(src_addr),     // position 12 (src_ptr)
+            Felt::new(dst_addr),     // position 13 (dst_ptr)
+            ZERO,                    // position 14
+            ZERO,                    // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -291,26 +290,23 @@ proptest! {
         // Build the initial stack state (low index coefficient at lower position)
         // Stack layout (top first): [c0, c1, c2, c3, c4, c5, c6, c7, s8, s9, s10, s11, s12, alpha_addr, acc0, acc1]
         // Position 0 (top) = c0, position 7 = c7, position 13 = alpha_addr, position 14 = acc0, position 15 = acc1
-        //
-        // FastProcessor::new expects elements in "reverse" order: first element goes to bottom, last to top.
-        // So we pass [acc1, acc0, alpha_addr, s12, s11, s10, s9, s8, c7, c6, c5, c4, c3, c2, c1, c0]
         let stack_inputs = [
-            Felt::new(acc_1),       // position 15 (bottom, acc high)
-            Felt::new(acc_0),       // position 14 (acc low)
-            Felt::new(ALPHA_ADDR),  // position 13
-            Felt::new(s12),         // position 12
-            Felt::new(s11),         // position 11
-            Felt::new(s10),         // position 10
-            Felt::new(s9),          // position 9
-            Felt::new(s8),          // position 8
-            Felt::new(c7),          // position 7
-            Felt::new(c6),          // position 6
-            Felt::new(c5),          // position 5
-            Felt::new(c4),          // position 4
-            Felt::new(c3),          // position 3
-            Felt::new(c2),          // position 2
-            Felt::new(c1),          // position 1
             Felt::new(c0),          // position 0 (top)
+            Felt::new(c1),          // position 1
+            Felt::new(c2),          // position 2
+            Felt::new(c3),          // position 3
+            Felt::new(c4),          // position 4
+            Felt::new(c5),          // position 5
+            Felt::new(c6),          // position 6
+            Felt::new(c7),          // position 7
+            Felt::new(s8),          // position 8
+            Felt::new(s9),          // position 9
+            Felt::new(s10),         // position 10
+            Felt::new(s11),         // position 11
+            Felt::new(s12),         // position 12
+            Felt::new(ALPHA_ADDR),  // position 13
+            Felt::new(acc_0),       // position 14 (acc low)
+            Felt::new(acc_1),       // position 15 (bottom, acc high)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -421,22 +417,22 @@ proptest! {
         // Position 6 = c3_0 (low), position 7 = c3_1 (high)
         // Position 13 = alpha_addr, position 14 = acc0 (low), position 15 = acc1 (high)
         let stack_inputs = [
-            Felt::new(acc_1),       // position 15 (bottom, high)
-            Felt::new(acc_0),       // position 14 (low)
-            Felt::new(ALPHA_ADDR),  // position 13
-            Felt::new(s12),         // position 12
-            Felt::new(s11),         // position 11
-            Felt::new(s10),         // position 10
-            Felt::new(s9),          // position 9
-            Felt::new(s8),          // position 8
-            Felt::new(c3_1),        // position 7 (c3 high)
-            Felt::new(c3_0),        // position 6 (c3 low)
-            Felt::new(c2_1),        // position 5 (c2 high)
-            Felt::new(c2_0),        // position 4 (c2 low)
-            Felt::new(c1_1),        // position 3 (c1 high)
-            Felt::new(c1_0),        // position 2 (c1 low)
-            Felt::new(c0_1),        // position 1 (c0 high)
             Felt::new(c0_0),        // position 0 (top, c0 low)
+            Felt::new(c0_1),        // position 1 (c0 high)
+            Felt::new(c1_0),        // position 2 (c1 low)
+            Felt::new(c1_1),        // position 3 (c1 high)
+            Felt::new(c2_0),        // position 4 (c2 low)
+            Felt::new(c2_1),        // position 5 (c2 high)
+            Felt::new(c3_0),        // position 6 (c3 low)
+            Felt::new(c3_1),        // position 7 (c3 high)
+            Felt::new(s8),          // position 8
+            Felt::new(s9),          // position 9
+            Felt::new(s10),         // position 10
+            Felt::new(s11),         // position 11
+            Felt::new(s12),         // position 12
+            Felt::new(ALPHA_ADDR),  // position 13
+            Felt::new(acc_0),       // position 14 (low)
+            Felt::new(acc_1),       // position 15 (bottom, high)
         ];
         let mut processor = FastProcessor::new(&stack_inputs);
         let mut tracer = NoopTracer;
@@ -547,22 +543,22 @@ proptest! {
         // word[0] at lowest position (closest to top)
         // Stack layout (top first): [node[0], node[1], node[2], node[3], depth, index, root[0], root[1], root[2], root[3], ...]
         let stack_inputs = [
-            ZERO,                  // position 15 (bottom)
-            ZERO,                  // position 14
-            ZERO,                  // position 13
-            ZERO,                  // position 12
-            ZERO,                  // position 11
-            ZERO,                  // position 10
-            root[3],               // position 9 (root[3] - LE: highest position)
-            root[2],               // position 8
-            root[1],               // position 7
-            root[0],               // position 6 (root[0] - LE: lowest position)
-            Felt::new(leaf_idx),   // position 5
-            Felt::new(depth),      // position 4
-            node[3],               // position 3 (node[3] - LE: highest position)
-            node[2],               // position 2
+            node[0],               // position 0 (top, node[0])
             node[1],               // position 1
-            node[0],               // position 0 (top, node[0] - LE: lowest position)
+            node[2],               // position 2
+            node[3],               // position 3 (node[3])
+            Felt::new(depth),      // position 4
+            Felt::new(leaf_idx),   // position 5
+            root[0],               // position 6 (root[0])
+            root[1],               // position 7
+            root[2],               // position 8
+            root[3],               // position 9 (root[3])
+            ZERO,                  // position 10
+            ZERO,                  // position 11
+            ZERO,                  // position 12
+            ZERO,                  // position 13
+            ZERO,                  // position 14
+            ZERO,                  // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let mut tracer = NoopTracer;
@@ -642,22 +638,22 @@ proptest! {
         // Stack layout (top first):
         // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
         let stack_inputs = [
-            ZERO,                     // position 15 (bottom)
-            ZERO,                     // position 14
-            new_leaf[3],              // position 13 (new_leaf[3] - LE: highest position)
-            new_leaf[2],              // position 12
-            new_leaf[1],              // position 11
-            new_leaf[0],              // position 10 (new_leaf[0] - LE: lowest position)
-            old_root[3],              // position 9 (old_root[3] - LE: highest position)
-            old_root[2],              // position 8
-            old_root[1],              // position 7
-            old_root[0],              // position 6 (old_root[0] - LE: lowest position)
-            Felt::new(leaf_idx),      // position 5
-            Felt::new(depth),         // position 4
-            old_node[3],              // position 3 (old_node[3] - LE: highest position)
-            old_node[2],              // position 2
+            old_node[0],              // position 0 (top, old_node[0])
             old_node[1],              // position 1
-            old_node[0],              // position 0 (top, old_node[0] - LE: lowest position)
+            old_node[2],              // position 2
+            old_node[3],              // position 3 (old_node[3])
+            Felt::new(depth),         // position 4
+            Felt::new(leaf_idx),      // position 5
+            old_root[0],              // position 6 (old_root[0])
+            old_root[1],              // position 7
+            old_root[2],              // position 8
+            old_root[3],              // position 9 (old_root[3])
+            new_leaf[0],              // position 10 (new_leaf[0])
+            new_leaf[1],              // position 11
+            new_leaf[2],              // position 12
+            new_leaf[3],              // position 13 (new_leaf[3])
+            ZERO,                     // position 14
+            ZERO,                     // position 15 (bottom)
         ];
         let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
         let mut tracer = NoopTracer;
@@ -746,22 +742,22 @@ fn test_op_mrupdate_merge_subtree() {
     // Stack layout (top first):
     // [old_node[0..3], depth, index, old_root[0..3], new_node[0..3], ...]
     let stack_inputs = [
-        ZERO,                    // position 15 (bottom)
-        ZERO,                    // position 14
-        target_node[3],          // position 13 (target_node[3] - LE: highest position)
-        target_node[2],          // position 12
-        target_node[1],          // position 11
-        target_node[0],          // position 10 (target_node[0] - LE: lowest position)
-        replaced_root[3],        // position 9 (replaced_root[3] - LE: highest position)
-        replaced_root[2],        // position 8
-        replaced_root[1],        // position 7
-        replaced_root[0],        // position 6 (replaced_root[0] - LE: lowest position)
-        Felt::new(target_index), // position 5
-        Felt::new(target_depth), // position 4
-        replaced_node[3],        // position 3 (replaced_node[3] - LE: highest position)
-        replaced_node[2],        // position 2
+        replaced_node[0],        // position 0 (top, replaced_node[0])
         replaced_node[1],        // position 1
-        replaced_node[0],        // position 0 (top, replaced_node[0] - LE: lowest position)
+        replaced_node[2],        // position 2
+        replaced_node[3],        // position 3 (replaced_node[3])
+        Felt::new(target_depth), // position 4
+        Felt::new(target_index), // position 5
+        replaced_root[0],        // position 6 (replaced_root[0])
+        replaced_root[1],        // position 7
+        replaced_root[2],        // position 8
+        replaced_root[3],        // position 9 (replaced_root[3])
+        target_node[0],          // position 10 (target_node[0])
+        target_node[1],          // position 11
+        target_node[2],          // position 12
+        target_node[3],          // position 13 (target_node[3])
+        ZERO,                    // position 14
+        ZERO,                    // position 15 (bottom)
     ];
     let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
     let mut tracer = NoopTracer;

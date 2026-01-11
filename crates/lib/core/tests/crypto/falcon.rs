@@ -131,8 +131,7 @@ fn test_falcon512_diff_mod_m() {
     // test largest possible value given v
     let w = J - 1;
     let u = 0;
-
-    let test1 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test1 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
     let expanded_answer = (v as i128
@@ -146,8 +145,7 @@ fn test_falcon512_diff_mod_m() {
     // test smallest possible value given v
     let w = 0;
     let u = J - 1;
-
-    let test2 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test2 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
     let expanded_answer = (v as i128
@@ -172,8 +170,7 @@ proptest! {
     ";
 
     let (v_lo, v_hi) = (v as u32, v >> 32);
-
-    let test1 = build_test!(source, &[v_lo as u64, v_hi, w + J, u]);
+    let test1 = build_test!(source, &[u, w + J, v_hi, v_lo as u64]);
 
     // Calculating (v - (u + (- w % M) % M) % M) should be the same as (v + w + J - u) % M.
     let expanded_answer = (v as i128
@@ -341,9 +338,7 @@ fn test_mod_12289_simple() {
         end
     ";
 
-    // Input: [a_hi, a_lo, ...] where a = a_hi * 2^32 + a_lo
-    // Test with a = 100000 (a_hi = 0, a_lo = 100000)
-    let op_stack = vec![100000u64, 0u64]; // Stack is [bottom, ..., top], so a_lo is first, a_hi is last (top)
+    let op_stack = vec![0u64, 100000u64];
 
     let test = build_test!(source, &op_stack, &[]);
 
@@ -363,9 +358,8 @@ fn test_mod_12289_larger_value() {
     ";
 
     // Test with a = 2^33 = 8589934592
-    // 8589934592 / 12289 = 698965 remainder 7507
     // a_hi = 2, a_lo = 0
-    let op_stack = vec![0u64, 2u64]; // a_lo = 0, a_hi = 2
+    let op_stack = vec![2u64, 0u64];
 
     let test = build_test!(source, &op_stack, &[]);
 
@@ -508,8 +502,5 @@ fn generate_data_probabilistic_product_test(
 /// This matches `stack![]` semantics: `stack_from_words(&[A, B])` results in stack `[A, B, ...]`
 /// with A at position 0 (top).
 fn stack_from_words(words: &[Word]) -> Vec<u64> {
-    let mut out: Vec<u64> =
-        words.iter().flat_map(|w| w.iter().map(|f| f.as_canonical_u64())).collect();
-    out.reverse();
-    out
+    words.iter().flat_map(|w| w.iter().map(|f| f.as_canonical_u64())).collect()
 }

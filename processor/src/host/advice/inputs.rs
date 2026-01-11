@@ -237,7 +237,6 @@ impl AdviceStackBuilder {
             slice.len()
         );
 
-        // Add all elements as-is (no reversal needed) to the back of the stack
         for elem in slice.iter() {
             self.stack.push_back(*elem);
         }
@@ -278,7 +277,7 @@ impl AdviceStackBuilder {
         self.stack.into_iter().collect()
     }
 
-    /// Extends the advice stack with u64 values converted to Felt (no reversal).
+    /// Extends the advice stack with u64 values converted to Felt.
     ///
     /// This is a convenience method for test data that is typically specified as u64.
     /// Elements are consumed in FIFO order: first element = first consumed.
@@ -372,8 +371,6 @@ mod tests {
 
     #[test]
     fn test_builder_push_for_adv_loadw() {
-        // push_for_adv_loadw does NOT reverse
-        // Input: [w0, w1, w2, w3] -> Builder stack: [w0, w1, w2, w3] (w0 on top)
         let word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
 
         let mut builder = AdviceStackBuilder::new();
@@ -386,7 +383,6 @@ mod tests {
 
     #[test]
     fn test_builder_push_for_adv_pipe() {
-        // push_for_adv_pipe does NOT reverse (but requires 8-alignment)
         let slice: Vec<Felt> = (1..=8).map(Felt::new).collect();
 
         let mut builder = AdviceStackBuilder::new();

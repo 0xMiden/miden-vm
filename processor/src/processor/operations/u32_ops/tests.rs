@@ -15,6 +15,7 @@ use crate::fast::{FastProcessor, NoopTracer};
 proptest! {
     #[test]
     fn test_op_u32split(a in any::<u64>()) {
+        // Stack: [a] with a at top
         let mut processor = FastProcessor::new(&[Felt::new(a)]);
         let mut tracer = NoopTracer;
 
@@ -29,15 +30,16 @@ proptest! {
 
     #[test]
     fn test_op_u32split_preserves_rest_of_stack(a in any::<u64>(), b in any::<u64>()) {
+        // Stack: [a, b] with a at top - operation acts on top element (a)
         let mut processor = FastProcessor::new(&[Felt::new(a), Felt::new(b)]);
         let mut tracer = NoopTracer;
 
-        let hi = b >> 32;
-        let lo = (b as u32) as u64;
+        let hi = a >> 32;
+        let lo = (a as u32) as u64;
 
         let _ = op_u32split(&mut processor, &mut tracer).unwrap();
-        // Output: [lo, hi, ...] - lo on top
-        let expected = build_expected(&[lo, hi, a]);
+        // Output: [lo, hi, b] - lo on top
+        let expected = build_expected(&[lo, hi, b]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 }
@@ -48,11 +50,12 @@ proptest! {
 proptest! {
     #[test]
     fn test_op_u32assert2(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - assert checks a and b are u32
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -64,8 +67,8 @@ proptest! {
 
 #[test]
 fn test_op_u32assert2_both_invalid() {
-    // Both values > u32::MAX (4294967296 = 2^32, 4294967297 = 2^32 + 1)
-    let mut processor = FastProcessor::new(&[Felt::new(4294967297u64), Felt::new(4294967296u64)]);
+    // Stack: [invalid1, invalid2] with invalid1 at top - both > u32::MAX
+    let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from(123u32), &(), &mut tracer);
@@ -74,8 +77,8 @@ fn test_op_u32assert2_both_invalid() {
 
 #[test]
 fn test_op_u32assert2_second_invalid() {
-    // First value valid, second invalid
-    let mut processor = FastProcessor::new(&[Felt::new(4294967297u64), Felt::new(1000u64)]);
+    // Stack: [valid, invalid] with valid at top - second value > u32::MAX
+    let mut processor = FastProcessor::new(&[Felt::new(1000u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from(456u32), &(), &mut tracer);
@@ -84,8 +87,8 @@ fn test_op_u32assert2_second_invalid() {
 
 #[test]
 fn test_op_u32assert2_first_invalid() {
-    // First value invalid, second valid
-    let mut processor = FastProcessor::new(&[Felt::new(2000u64), Felt::new(4294967296u64)]);
+    // Stack: [invalid, valid] with invalid at top - first value > u32::MAX
+    let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(2000u64)]);
     let mut tracer = NoopTracer;
 
     let result = op_u32assert2(&mut processor, Felt::from(789u32), &(), &mut tracer);
@@ -98,11 +101,12 @@ fn test_op_u32assert2_first_invalid() {
 proptest! {
     #[test]
     fn test_op_u32add(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a + b
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -115,11 +119,12 @@ proptest! {
 
     #[test]
     fn test_op_u32add3(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a + b + c
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -134,11 +139,12 @@ proptest! {
 
     #[test]
     fn test_op_u32sub(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes b - a
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -151,11 +157,12 @@ proptest! {
 
     #[test]
     fn test_op_u32mul(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a * b
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -171,11 +178,12 @@ proptest! {
 
     #[test]
     fn test_op_u32madd(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a * b + c
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -191,12 +199,13 @@ proptest! {
 
     #[test]
     fn test_op_u32div(a in 1u32..=u32::MAX, b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes b / a
         // a must be non-zero to avoid division by zero
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -212,9 +221,8 @@ proptest! {
 
 #[test]
 fn test_op_u32div_by_zero() {
-    // Stack: [c, b, a, 0] where a=0 is the divisor (top), b=10 is the numerator
-    // Division is b / a, so we're dividing 10 by 0
-    let mut processor = FastProcessor::new(&[Felt::new(10), Felt::new(0)]);
+    // Stack: [0, 10] with 0 at top - divides 10 by 0
+    let mut processor = FastProcessor::new(&[Felt::new(0), Felt::new(10)]);
     let mut tracer = NoopTracer;
 
     let result = op_u32div(&mut processor, &(), &mut tracer);
@@ -227,11 +235,12 @@ fn test_op_u32div_by_zero() {
 proptest! {
     #[test]
     fn test_op_u32and(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a & b
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 
@@ -242,11 +251,12 @@ proptest! {
 
     #[test]
     fn test_op_u32xor(a in any::<u32>(), b in any::<u32>(), c in any::<u32>(), d in any::<u32>()) {
+        // Stack: [a, b, c, d] with a at top - computes a ^ b
         let mut processor = FastProcessor::new(&[
-            Felt::new(d as u64),
-            Felt::new(c as u64),
-            Felt::new(b as u64),
             Felt::new(a as u64),
+            Felt::new(b as u64),
+            Felt::new(c as u64),
+            Felt::new(d as u64),
         ]);
         let mut tracer = NoopTracer;
 

@@ -21,7 +21,7 @@ fn mem_load() {
 
     // --- the rest of the stack is unchanged -----------------------------------------------------
     let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
-    test.expect_stack(&[0, 4, 3, 2, 1]);
+    test.expect_stack(&[0, 1, 2, 3, 4]);
 }
 
 // SAVING A SINGLE ELEMENT INTO MEMORY (MSTORE)
@@ -33,12 +33,12 @@ fn mem_store() {
     let addr = 0_u32;
 
     // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 2, 3, 4, addr as u64]);
+    let test = build_op_test!(asm_op, &[addr as u64, 4, 3, 2, 1]);
     test.expect_stack_and_memory(&[3, 2, 1], addr, &[4, 0, 0, 0]);
 
     // --- address provided as a parameter --------------------------------------------------------
     let asm_op = format!("{asm_op}.{addr}");
-    let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
+    let test = build_op_test!(&asm_op, &[4, 3, 2, 1]);
     test.expect_stack_and_memory(&[3, 2, 1], addr, &[4, 0, 0, 0]);
 }
 
@@ -62,8 +62,8 @@ fn mem_loadw() {
 
     // --- the rest of the stack is unchanged -----------------------------------------------------
 
-    let test = build_op_test!(asm_op, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    test.expect_stack(&[0, 0, 0, 0, 4, 3, 2, 1]);
+    let test = build_op_test!(asm_op, &[5, 6, 7, 8, 1, 2, 3, 4]);
+    test.expect_stack(&[0, 0, 0, 0, 1, 2, 3, 4]);
 }
 
 // SAVING A WORD INTO MEMORY (MSTOREW)
@@ -75,17 +75,17 @@ fn mem_storew() {
     let addr = 0_u32;
 
     // --- address provided via the stack ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[1, 2, 3, 4, addr as u64]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
+    let test = build_op_test!(asm_op, &[addr as u64, 1, 2, 3, 4]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
 
     // --- address provided as a parameter --------------------------------------------------------
     let asm_op = format!("mem_storew_be.{addr}");
     let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1], addr, &[1, 2, 3, 4]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
 
     // --- the rest of the stack is unchanged -----------------------------------------------------
-    let test = build_op_test!(&asm_op, &[0, 1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1, 0], addr, &[1, 2, 3, 4]);
+    let test = build_op_test!(&asm_op, &[1, 2, 3, 4, 0]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4, 0], addr, &[4, 3, 2, 1]);
 }
 
 // LOADING A WORD FROM MEMORY WITH ENDIANNESS (MEM_LOADW_BE/LE)
@@ -94,42 +94,42 @@ fn mem_storew() {
 #[test]
 fn mem_loadw_be_le() {
     const ADDR: u32 = 4;
-    const INPUT_BE_IMM: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
-    const INPUT_BE: [u64; 9] = [5, 6, 7, 8, 1, 2, 3, 4, ADDR as u64]; // reversed
-    const OUTPUT_BE: [u64; 8] = [0, 0, 0, 0, 8, 7, 6, 5];
+    const INPUT_IMM: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    const INPUT_ADDR: [u64; 9] = [ADDR as u64, 1, 2, 3, 4, 5, 6, 7, 8];
+    const OUTPUT: [u64; 8] = [0, 0, 0, 0, 5, 6, 7, 8];
     const MEM_EMPTY: [u64; 8] = [0, 0, 0, 0, 0, 0, 0, 0];
 
     // Classic
     {
         let asm_op = "mem_loadw_be";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
 
         let asm_op = format!("mem_loadw_be.{ADDR}");
-        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(&asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
     }
 
     // Big-endian (equivalent to classic)
     {
         let asm_op = "mem_loadw_be";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
 
         let asm_op = format!("mem_loadw_be.{ADDR}");
-        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(&asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
     }
 
     // Little-endian
     {
         let asm_op = "mem_loadw_le";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
 
         let asm_op = format!("mem_loadw_le.{ADDR}");
-        let test = build_op_test!(&asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_EMPTY);
+        let test = build_op_test!(&asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_EMPTY);
     }
 }
 
@@ -139,43 +139,45 @@ fn mem_loadw_be_le() {
 #[test]
 fn mem_storew_be_le() {
     const ADDR: u32 = 4;
-    const INPUT_BE_IMM: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
-    const INPUT_BE: [u64; 9] = [5, 6, 7, 8, 1, 2, 3, 4, ADDR as u64]; // reversed
-    const OUTPUT_BE: [u64; 8] = [4, 3, 2, 1, 8, 7, 6, 5];
+    // Stack [1,2,3,4,5,6,7,8] with 1 on top - word to store is [1,2,3,4]
+    const INPUT_IMM: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    // Stack [ADDR,1,2,3,4,5,6,7,8] with ADDR on top - word to store is [1,2,3,4]
+    const INPUT_ADDR: [u64; 9] = [ADDR as u64, 1, 2, 3, 4, 5, 6, 7, 8];
+    const OUTPUT: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
     const MEM_BE: [u64; 8] = [0, 0, 0, 0, 4, 3, 2, 1];
     const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
 
     // mem_storew_be
     {
         let asm_op = "mem_storew_be";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
 
         let asm_op = format!("mem_storew_be.{ADDR}");
-        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
     }
 
-    // mem_storew_be
+    // mem_storew_be (duplicate)
     {
         let asm_op = "mem_storew_be";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
 
         let asm_op = format!("mem_storew_be.{ADDR}");
-        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
     }
 
     // mem_storew_le
     {
         let asm_op = "mem_storew_le";
-        let test = build_op_test!(asm_op, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
+        let test = build_op_test!(asm_op, &INPUT_ADDR);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_LE);
 
         let asm_op = format!("mem_storew_le.{ADDR}");
-        let test = build_op_test!(asm_op, &INPUT_BE_IMM);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
+        let test = build_op_test!(asm_op, &INPUT_IMM);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_LE);
     }
 }
 
@@ -185,46 +187,47 @@ fn mem_storew_be_le() {
 #[test]
 fn mem_endianness_roundtrip() {
     const ADDR: u32 = 4;
-    const INPUT_BE: [u64; 8] = [5, 6, 7, 8, 1, 2, 3, 4]; // reversed
-    const OUTPUT_BE: [u64; 8] = [4, 3, 2, 1, 8, 7, 6, 5];
-    const OUTPUT_LE: [u64; 8] = [1, 2, 3, 4, 8, 7, 6, 5];
-    const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
+    // Stack [1,2,3,4,5,6,7,8] with 1 on top
+    const INPUT: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    const OUTPUT: [u64; 8] = [1, 2, 3, 4, 5, 6, 7, 8];
+    const OUTPUT_REVERSED_WORD: [u64; 8] = [4, 3, 2, 1, 5, 6, 7, 8];
     const MEM_BE: [u64; 8] = [0, 0, 0, 0, 4, 3, 2, 1];
+    const MEM_LE: [u64; 8] = [0, 0, 0, 0, 1, 2, 3, 4];
 
     // Sanity check for input/output constants
     {
         let ops = "nop";
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack(&OUTPUT_BE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack(&OUTPUT);
     }
 
     // Round trip with same ordering only affects memory
     {
-        // Classic
+        // Classic (big-endian)
         let ops = format!("mem_storew_be.{ADDR} mem_loadw_be.{ADDR}");
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
 
         // Big-endian (equivalent to classic)
         let ops = format!("mem_storew_be.{ADDR} mem_loadw_be.{ADDR}");
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_LE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_BE);
 
         // Little-endian
         let ops = format!("mem_storew_le.{ADDR} mem_loadw_le.{ADDR}");
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_BE, 0, &MEM_BE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack_and_memory(&OUTPUT, 0, &MEM_LE);
     }
 
     // Using opposite orderings reverses the top word on the stack
     {
         let ops = format!("mem_storew_be.{ADDR} mem_loadw_le.{ADDR}");
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_LE, 0, &MEM_LE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack_and_memory(&OUTPUT_REVERSED_WORD, 0, &MEM_BE);
 
         let ops = format!("mem_storew_le.{ADDR} mem_loadw_be.{ADDR}");
-        let test = build_op_test!(ops, &INPUT_BE);
-        test.expect_stack_and_memory(&OUTPUT_LE, 0, &MEM_BE);
+        let test = build_op_test!(ops, &INPUT);
+        test.expect_stack_and_memory(&OUTPUT_REVERSED_WORD, 0, &MEM_LE);
     }
 }
 
@@ -251,13 +254,13 @@ fn mem_stream() {
         end"
     );
 
+    // Stack [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
     // the state is built by replacing the values on the top of the stack with the values in memory
-    // addresses `[0..8)`. Thus, the first 8 elements on the stack will be 1
-    // through 8 (in stack order, with 1 at stack[0]), and the remaining 4 are
-    // untouched (i.e., 9, 10, 11, 12). Values are in natural order (no reversal needed).
-    let mut final_stack: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    // Memory stores words at addresses 0 and 4 which are loaded into the rate portion.
+    // Due to BE storage and load, the values are reversed when loaded back.
+    let mut final_stack: Vec<u64> = vec![8, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12];
     final_stack.push(8); // address after reading 2 words (8 elements)
 
     let test = build_test!(source, &inputs);
@@ -284,20 +287,19 @@ fn mem_stream_with_hperm() {
         end"
     );
 
+    // Stack [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
     // The state of the hasher is the first 12 elements of the stack. The state is built by
-    // replacing the values on the top of the stack with the values in memory addresses 0 and 4
-    // (i.e., 1 through 8). Thus, the first 8 elements on the stack will be 1 through 8 (in
-    // stack order, with 1 at stack[0]), and the remaining 4 are untouched (i.e., 9, 10, 11, 12).
-    // Stack order matches hasher state order (no reversal needed).
+    // replacing the values on the top of the stack with the values in memory addresses 0 and 4.
+    // Due to BE storage and load, the values are reversed when loaded back.
     let mut state: [Felt; 12] =
-        [1_u64, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
+        [8_u64, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
     // apply a hash permutation to the state
     apply_permutation(&mut state);
 
-    // Hasher state order matches stack order (no reversal needed)
+    // Hasher state order matches stack order
     let mut final_stack = state.iter().map(|&v| v.as_canonical_u64()).collect::<Vec<u64>>();
     final_stack.push(8); // address after reading 2 words (8 elements)
 
@@ -324,8 +326,7 @@ fn inverse_operations() {
         end";
 
     let inputs = [0, 1, 2, 3, 4];
-    let mut final_stack = inputs;
-    final_stack.reverse();
+    let final_stack = inputs;
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -342,8 +343,7 @@ fn inverse_operations() {
         end";
 
     let inputs = [0, 1, 2, 3, 4];
-    let mut final_stack = inputs;
-    final_stack.reverse();
+    let final_stack = inputs;
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -352,14 +352,17 @@ fn inverse_operations() {
 #[test]
 fn read_after_write() {
     // --- write to memory first, then test read with push --------------------------------------
+    // Stack [1, 2, 3, 4] with 1 on top - stores to memory, then reads back mem[0]
     let test = build_op_test!("mem_storew_be.0 mem_load.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[1, 4, 3, 2, 1]);
+    test.expect_stack(&[4, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with pushw --------------------------------------
+    // Stack [1, 2, 3, 4] - store then load whole word back
     let test = build_op_test!("mem_storew_be.0 push.0.0.0.0 mem_loadw_be.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1, 4, 3, 2, 1]);
+    test.expect_stack(&[1, 2, 3, 4, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with loadw --------------------------------------
+    // Stack [1, 2, 3, 4, 5, 6, 7, 8] - store first word, drop it, load it back
     let test = build_op_test!("mem_storew_be.0 dropw mem_loadw_be.0", &[1, 2, 3, 4, 5, 6, 7, 8]);
-    test.expect_stack(&[8, 7, 6, 5]);
+    test.expect_stack(&[1, 2, 3, 4]);
 }

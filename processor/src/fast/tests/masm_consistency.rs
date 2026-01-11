@@ -172,9 +172,11 @@ use super::*;
 // ---- loop --------------------------------
 
 // check that the loop is never entered if the condition is false (and that clk is properly updated)
-#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![3_u32.into(), 2_u32.into(), 1_u32.into(), ZERO])]
+// Stack: [ZERO, 1, 2, 3] with ZERO at top (for while.true condition)
+#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![ZERO, 1_u32.into(), 2_u32.into(), 3_u32.into()])]
 // check that the loop is entered if the condition is true, and that the stack and clock are managed
 // properly
+// Stack: [ONE, ONE, ONE, ONE, ZERO, 42] with first ONE at top (for while.true condition)
 #[case(None,
     "begin
         while.true
@@ -182,34 +184,30 @@ use super::*;
         end
         clk swap.8 drop
     end",
-    vec![42_u32.into(), ZERO, ONE, ONE, ONE, ONE]
+    vec![ONE, ONE, ONE, ONE, ZERO, 42_u32.into()]
 )]
 // ---- horner ops --------------------------------
 #[case(None,
-    "begin 
+    "begin
         push.1.2.3.4 mem_storew_le.40 dropw
         horner_eval_base
     end",
-    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
-    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
-        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
-        14_u32.into(), 15_u32.into(), 16_u32.into()]
+    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
+        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
+        40_u32.into(), 4_u32.into(), 100_u32.into()]
 )]
 #[case(None,
-    "begin 
+    "begin
         push.1.2.3.4 mem_storew_le.40 dropw
         horner_eval_ext
         end",
-    // first 3 addresses in the vec are the alpha_ptr, acc_high and acc_low, respectively.
-    vec![100_u32.into(), 4_u32.into(), 40_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(),
-        8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(),
-        14_u32.into(), 15_u32.into(), 16_u32.into()]
+    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
+        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
+        40_u32.into(), 4_u32.into(), 100_u32.into()]
 )]
 // ---- log precompile ops --------------------------------
-#[case(None,
-    "begin
-        log_precompile
-    end",
+// Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
+#[case(None, "begin log_precompile end",
     vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
          5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
 )]
@@ -363,9 +361,9 @@ fn test_masm_errors_consistency(
 fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Rpo256;
 
-    // Stack inputs: [1,2,3,4,5,6,7,8] (provided to both processors)
-    // Taking into account big-endian encoding, the stack is [COMM, TAG]
-    let stack_inputs = [8, 7, 6, 5, 4, 3, 2, 1].map(Felt::new);
+    // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
+    // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
+    let stack_inputs = [1, 2, 3, 4, 5, 6, 7, 8].map(Felt::new);
     let comm_calldata: Word = [1, 2, 3, 4].map(Felt::new).into();
     let tag: Word = [5, 6, 7, 8].map(Felt::new).into();
     let cap_prev = Word::empty();

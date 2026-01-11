@@ -20,7 +20,6 @@ fn test_inputs_simple() {
     expected_serialized.push(source.len() as u8);
     source
         .iter()
-        .rev()
         .for_each(|v| expected_serialized.append(&mut v.to_le_bytes().to_vec()));
 
     assert_eq!(serialized, expected_serialized);
@@ -42,7 +41,6 @@ fn test_inputs_full() {
     expected_serialized.push(source.len() as u8);
     source
         .iter()
-        .rev()
         .for_each(|v| expected_serialized.append(&mut v.to_le_bytes().to_vec()));
 
     assert_eq!(serialized, expected_serialized);

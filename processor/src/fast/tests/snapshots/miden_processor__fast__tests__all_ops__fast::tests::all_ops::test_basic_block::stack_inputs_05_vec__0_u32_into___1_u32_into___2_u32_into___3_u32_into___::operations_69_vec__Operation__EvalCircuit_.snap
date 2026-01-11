@@ -16,7 +16,7 @@ Err(
             ),
         },
         source_file: None,
-        error: NumEvalIsNotWordAlignedOrIsEmpty(
+        error: NumVarIsNotWordAlignedOrIsEmpty(
             1,
         ),
     },

@@ -19,25 +19,25 @@ use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vect
 #[test]
 fn truncate_stack() {
     let source = "use miden::core::sys begin repeat.12 push.0 end exec.sys::truncate_stack end";
-    let test = build_test!(source, &[16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
-    test.expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
+    // Input [1, 2, ..., 16] -> stack with 1 at top
+    // After 12 push.0 and truncate: [0, 0, ..., 0, 1, 2, 3, 4]
+    build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+        .expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
 }
 
 proptest! {
     #[test]
     fn truncate_stack_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH), n in 1_usize..100) {
-        let mut push_values = rand_vector::<u64>(n);
+        let push_values = rand_vector::<u64>(n);
         let mut source_vec = vec!["use miden::core::sys".to_string(), "begin".to_string()];
         for value in push_values.iter() {
-            let token = format!("push.{value}");
-            source_vec.push(token);
+            source_vec.push(format!("push.{value}"));
         }
         source_vec.push("exec.sys::truncate_stack".to_string());
         source_vec.push("end".to_string());
         let source = source_vec.join(" ");
-        let mut expected_values = test_values.clone();
-        expected_values.append(&mut push_values);
-        expected_values.reverse();
+        let mut expected_values: Vec<u64> = push_values.iter().rev().copied().collect();
+        expected_values.extend(test_values.iter());
         expected_values.truncate(MIN_STACK_DEPTH);
         build_test!(&source, &test_values).prop_expect_stack(&expected_values)?;
     }

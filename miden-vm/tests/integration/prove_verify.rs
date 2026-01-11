@@ -236,8 +236,7 @@ mod fast_parallel {
         let mut host =
             DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-        // Convert stack inputs for fast processor (reversed order)
-        let stack_inputs_vec: Vec<Felt> = stack_inputs.clone().into_iter().rev().collect();
+        let stack_inputs_vec: Vec<Felt> = stack_inputs.clone().into_iter().collect();
 
         let options = ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)

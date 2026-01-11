@@ -31,7 +31,7 @@ fn p1_trace() {
         Operation::Pad,    // right shift, clk 10
         Operation::Drop,   // left shift, clk 11
     ];
-    let init_stack = (1..17).collect::<Vec<_>>();
+    let init_stack = (1..17).rev().collect::<Vec<_>>();
     let trace = build_trace_from_ops(ops, &init_stack);
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();

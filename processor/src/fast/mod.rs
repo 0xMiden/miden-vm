@@ -181,9 +181,9 @@ impl FastProcessor {
 
     /// Most general constructor unifying all the other ones.
     ///
-    /// The stack inputs are expected to be stored in reverse order. For example, if `stack_inputs =
-    /// [1,2,3]`, then the stack will be initialized as `[3,2,1,0,0,...]`, with `3` being on
-    /// top.
+    /// Stack inputs are stored in natural order: the first element of `stack_inputs` will be at
+    /// position 0 (top of stack). For example, if `stack_inputs = [1, 2, 3]`, then the stack will
+    /// be initialized as `[1, 2, 3, 0, 0, ...]`, with `1` being on top.
     pub fn new_with_options(
         stack_inputs: &[Felt],
         advice_inputs: AdviceInputs,
@@ -198,9 +198,11 @@ impl FastProcessor {
             // stack overflow on some systems.
             let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
                 vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
-            let bottom_idx = stack_top_idx - stack_inputs.len();
 
-            stack[bottom_idx..stack_top_idx].copy_from_slice(stack_inputs);
+            // Copy inputs in reverse order so first element ends up at top of stack
+            for (i, &input) in stack_inputs.iter().enumerate() {
+                stack[stack_top_idx - 1 - i] = input;
+            }
             stack
         };
 

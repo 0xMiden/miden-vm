@@ -26,9 +26,7 @@ use super::{
 fn b_chip_trace_bitwise() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
-    // FastProcessor reverses inputs, so [b, a] becomes runtime stack [a, b, ...]
-    // with 'a' at position 0 (top) and 'b' at position 1.
-    let stack = [b as u64, a as u64];
+    let stack = [a as u64, b as u64];
     let operations = vec![
         Operation::U32and,
         Operation::Push(Felt::from(a)),

@@ -352,15 +352,11 @@ pub fn b_chip_permutation() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    // Stack inputs are reversed: last element ends up at top of stack (s0)
-    let stack = vec![8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+    let stack = vec![8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8];
     let trace = build_trace_from_program(&program, &stack);
 
-    // The actual stack has reversed order: [8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8]
-    // where s0=8 (top), s1=7, ..., s11=8 (first input element)
     let mut hperm_state: [Felt; STATE_WIDTH] = stack
         .iter()
-        .rev()
         .map(|v| Felt::new(*v))
         .collect::<Vec<_>>()
         .try_into()
@@ -587,14 +583,11 @@ fn b_chip_mpverify() {
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(&leaves).unwrap();
 
-    // Build runtime stack layout: [node(0-3), depth(4), index(5), root(6-9)]
-    // Element 0 (node[0]) is on top of stack
     let mut runtime_stack = Vec::new();
     runtime_stack.extend_from_slice(&word_to_ints(leaves[index]));
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(tree.root()));
-    runtime_stack.reverse();
     let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
@@ -713,15 +706,12 @@ fn b_chip_mrupdate() {
 
     let new_leaf_value = leaves[0];
 
-    // Build runtime stack layout: [old_leaf(0-3), depth(4), index(5), old_root(6-9),
-    // new_leaf(10-13)]. Element 0 (old_leaf[0]) is on top of stack.
     let mut runtime_stack = Vec::new();
     runtime_stack.extend_from_slice(&word_to_ints(old_leaf_value));
     runtime_stack.push(tree.depth() as u64);
     runtime_stack.push(index as u64);
     runtime_stack.extend_from_slice(&word_to_ints(old_root));
     runtime_stack.extend_from_slice(&word_to_ints(new_leaf_value));
-    runtime_stack.reverse();
     let stack_inputs = StackInputs::try_from_ints(runtime_stack).unwrap();
     let store = MerkleStore::from(&tree);
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);

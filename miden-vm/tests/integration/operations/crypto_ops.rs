@@ -16,12 +16,7 @@ fn hash() {
 
     // --- test hashing 4 random values -----------------------------------------------------------
     let random_values = rand_vector::<u64>(4);
-    // StackInputs::try_from_ints reverses the input, so the actual stack has values in reverse
-    // order. The hash instruction takes values from the stack, so we need to reverse when
-    // computing expected.
-    let mut stack_order = random_values.clone();
-    stack_order.reverse();
-    let expected = build_expected_hash(&stack_order);
+    let expected = build_expected_hash(&random_values);
 
     let test = build_op_test!(asm_op, &random_values);
     let last_state = test.get_last_stack_state();
@@ -37,10 +32,7 @@ fn hperm() {
     let mut values = rand_vector::<u64>(8);
     let capacity: Vec<u64> = vec![0, 0, 0, 0];
     values.extend_from_slice(&capacity);
-    // StackInputs::try_from_ints reverses the input, so reverse when computing expected.
-    let mut stack_order = values.clone();
-    stack_order.reverse();
-    let expected = build_expected_perm(&stack_order);
+    let expected = build_expected_perm(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -54,10 +46,7 @@ fn hperm() {
         1, 1,            // data: [ONE, ONE]
         1, 0, 0, 0, 0, 0 // padding: ONE followed by the necessary ZEROs
     ];
-    // StackInputs::try_from_ints reverses the input, so reverse when computing expected.
-    let mut stack_order = values.clone();
-    stack_order.reverse();
-    let expected = build_expected_perm(&stack_order);
+    let expected = build_expected_perm(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -65,14 +54,14 @@ fn hperm() {
     assert_eq!(expected, &last_state[0..12]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let mut stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
-    let expected_stack_slice =
-        stack_inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
+    let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0];
-    stack_inputs.extend_from_slice(&values_to_hash);
+    let mut full_inputs = values_to_hash.clone();
+    full_inputs.extend_from_slice(&stack_inputs);
 
-    let test = build_op_test!(asm_op, &stack_inputs);
+    let test = build_op_test!(asm_op, &full_inputs);
     let last_state = test.get_last_stack_state();
 
     assert_eq!(expected_stack_slice, &last_state[12..16]);
@@ -84,10 +73,7 @@ fn hmerge() {
 
     // --- test hashing [ONE, ONE, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO] ----------------------------
     let values = [1, 1, 0, 0, 0, 0, 0, 0];
-    // StackInputs::try_from_ints reverses the input, so reverse when computing expected.
-    let mut stack_order: Vec<u64> = values.to_vec();
-    stack_order.reverse();
-    let expected = build_expected_hash(&stack_order);
+    let expected = build_expected_hash(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -96,10 +82,7 @@ fn hmerge() {
 
     // --- test hashing 8 random values -----------------------------------------------------------
     let values = rand_vector::<u64>(8);
-    // StackInputs::try_from_ints reverses the input, so reverse when computing expected.
-    let mut stack_order = values.clone();
-    stack_order.reverse();
-    let expected = build_expected_hash(&stack_order);
+    let expected = build_expected_hash(&values);
 
     let test = build_op_test!(asm_op, &values);
     let last_state = test.get_last_stack_state();
@@ -107,14 +90,14 @@ fn hmerge() {
     assert_eq!(expected, &last_state[..4]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let mut stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
-    let expected_stack_slice =
-        stack_inputs.iter().rev().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
+    let stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
+    let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
 
     let values_to_hash: Vec<u64> = vec![1, 1, 0, 0, 0, 0, 0, 0];
-    stack_inputs.extend_from_slice(&values_to_hash);
+    let mut full_inputs = values_to_hash.clone();
+    full_inputs.extend_from_slice(&stack_inputs);
 
-    let test = build_op_test!(asm_op, &stack_inputs);
+    let test = build_op_test!(asm_op, &full_inputs);
     let last_state = test.get_last_stack_state();
 
     assert_eq!(expected_stack_slice, &last_state[4..8]);
@@ -128,18 +111,14 @@ fn mtree_get() {
     let (leaves, store) = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
-    // Pass root in reversed order so that after StackInputs reversal,
-    // the VM reads the correct Word from the stack.
-    // Input: [r3, r2, r1, r0, index, depth]
-    // After reversal: [depth, index, r0, r1, r2, r3]
-    // VM reads root word as [r0, r1, r2, r3] which matches tree.root()
+    // Input: [depth, index, r0, r1, r2, r3] with depth on top
     let stack_inputs = [
-        tree.root()[3].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[0].as_canonical_u64(),
-        index as u64,
         tree.depth() as u64,
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
     ];
 
     // Expected final stack after mtree_get:
@@ -168,34 +147,22 @@ fn mtree_verify() {
     let (leaves, store) = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
-    // Pass words in reversed order so that after StackInputs reversal,
-    // the VM reads the correct Words from the stack.
+    // Input: [V, d, i, R] with V0 on top
     let stack_inputs = [
-        tree.root()[3].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[0].as_canonical_u64(),
-        index as u64,
-        tree.depth() as u64,
-        leaves[index][3].as_canonical_u64(),
-        leaves[index][2].as_canonical_u64(),
-        leaves[index][1].as_canonical_u64(),
         leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
+        tree.depth() as u64,
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
     ];
 
-    // Expected: [V, d, i, R] in LE order
-    let final_stack = [
-        leaves[index][0].as_canonical_u64(),
-        leaves[index][1].as_canonical_u64(),
-        leaves[index][2].as_canonical_u64(),
-        leaves[index][3].as_canonical_u64(),
-        tree.depth() as u64,
-        index as u64,
-        tree.root()[0].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[3].as_canonical_u64(),
-    ];
+    // Expected: [V, d, i, R] unchanged
+    let final_stack = stack_inputs;
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store);
     test.expect_stack(&final_stack);
@@ -211,34 +178,22 @@ fn mtree_verify_negative() {
     let (leaves, store) = init_merkle_store(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
-    // Pass words in reversed order so that after StackInputs reversal,
-    // the VM reads the correct Words from the stack.
+    // Input: [V, d, i, R] with tampered index
     let stack_inputs = [
-        tree.root()[3].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[0].as_canonical_u64(),
-        tampered_index as u64,
-        tree.depth() as u64,
-        leaves[index][3].as_canonical_u64(),
-        leaves[index][2].as_canonical_u64(),
-        leaves[index][1].as_canonical_u64(),
         leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
+        tree.depth() as u64,
+        tampered_index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
     ];
 
-    // Expected: [V, d, i, R] in LE order (but test should panic due to tampered index)
-    let final_stack = [
-        leaves[index][0].as_canonical_u64(),
-        leaves[index][1].as_canonical_u64(),
-        leaves[index][2].as_canonical_u64(),
-        leaves[index][3].as_canonical_u64(),
-        tree.depth() as u64,
-        index as u64,
-        tree.root()[0].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[3].as_canonical_u64(),
-    ];
+    // Test should panic due to tampered index
+    let final_stack = stack_inputs;
 
     let test = build_op_test!(asm_op, &stack_inputs, &[], store);
     test.expect_stack(&final_stack);
@@ -255,19 +210,18 @@ fn mtree_update() {
     new_leaves[index] = new_node;
     let new_tree = MerkleTree::new(new_leaves).unwrap();
 
-    // Pass words in reversed order so that after StackInputs reversal,
-    // the VM reads the correct Words from the stack.
+    // Input: [d, i, R, V_new] with d on top
     let stack_inputs = [
-        new_node[3].as_canonical_u64(),
-        new_node[2].as_canonical_u64(),
-        new_node[1].as_canonical_u64(),
-        new_node[0].as_canonical_u64(),
-        tree.root()[3].as_canonical_u64(),
-        tree.root()[2].as_canonical_u64(),
-        tree.root()[1].as_canonical_u64(),
-        tree.root()[0].as_canonical_u64(),
-        index as u64,
         tree.depth() as u64,
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
+        new_node[0].as_canonical_u64(),
+        new_node[1].as_canonical_u64(),
+        new_node[2].as_canonical_u64(),
+        new_node[3].as_canonical_u64(),
     ];
 
     // --- mtree_set ----------------------------------------------------------------------
@@ -278,7 +232,7 @@ fn mtree_update() {
         .get_node(NodeIndex::new(tree.depth(), index as u64).unwrap())
         .expect("Value should have been set on initialization");
 
-    // Expected: [V_old, R_new] in LE order
+    // Expected: [V_old, R_new]
     let final_stack = [
         old_node[0].as_canonical_u64(),
         old_node[1].as_canonical_u64(),
@@ -628,24 +582,15 @@ proptest! {
             .iter()
             .fold(acc_old, |acc, &coef| QuadFelt::from(Felt::new(coef)) + alpha * acc);
 
-        // Reverse inputs for build_test! (it expects bottom-first order)
-        inputs.reverse();
-
         // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
         let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
 
-        // Create the expected operand stack (top-first order for expect_stack)
+        // Create the expected operand stack
         // The accumulator values are updated; rest of stack unchanged
-        let mut expected = Vec::new();
-        // Updated accumulators (at positions 14-15 after reverse: low at 14, high at 15)
-        // Since we reverse at the end, push in reverse order: high first, then low
         let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();
-        expected.push(acc_new_coeffs[1].as_canonical_u64()); // acc_high (will be at position 15 after reverse)
-        expected.push(acc_new_coeffs[0].as_canonical_u64()); // acc_low (will be at position 14 after reverse)
-        // The rest of the stack (from position 2 onwards in reversed inputs = positions 0-13 original)
-        expected.extend_from_slice(&inputs[2..]);
-        // Reverse to get top-first order
-        expected.reverse();
+        let mut expected = inputs.to_vec();
+        expected[ACC_LOW_INDEX] = acc_new_coeffs[0].as_canonical_u64();
+        expected[ACC_HIGH_INDEX] = acc_new_coeffs[1].as_canonical_u64();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);
@@ -727,20 +672,15 @@ proptest! {
             })
             .fold(acc_old, |acc, coef| coef + alpha * acc);
 
-        // Reverse inputs for build_test!
-        inputs.reverse();
-
         // Prepare the advice stack with alpha values: [alpha_0, alpha_1, 0, 0]
         let adv_stack: Vec<u64> = vec![alpha_0, alpha_1, 0, 0];
 
-        // Create the expected operand stack (low at position 14, high at position 15)
-        // Since we reverse at the end, push in reverse order: high first, then low
-        let mut expected = Vec::new();
+        // Create the expected operand stack
+        // The accumulator values are updated; rest of stack unchanged
         let acc_new_coeffs: &[Felt] = acc_new.as_basis_coefficients_slice();
-        expected.push(acc_new_coeffs[1].as_canonical_u64()); // acc_high (will be at position 15 after reverse)
-        expected.push(acc_new_coeffs[0].as_canonical_u64()); // acc_low (will be at position 14 after reverse)
-        expected.extend_from_slice(&inputs[2..]);
-        expected.reverse();
+        let mut expected = inputs.to_vec();
+        expected[ACC_LOW_INDEX] = acc_new_coeffs[0].as_canonical_u64();
+        expected[ACC_HIGH_INDEX] = acc_new_coeffs[1].as_canonical_u64();
 
         let test = build_test!(source, &inputs, &adv_stack);
         test.expect_stack(&expected);
