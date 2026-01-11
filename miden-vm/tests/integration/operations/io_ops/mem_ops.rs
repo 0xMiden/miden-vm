@@ -48,14 +48,14 @@ fn mem_store() {
 #[test]
 fn mem_loadw() {
     let addr = 4;
-    let asm_op = "mem_loadw_be";
+    let asm_op = "mem_loadw_le";
 
     // --- read from uninitialized memory - address provided via the stack ------------------------
     let test = build_op_test!(asm_op, &[addr, 5, 6, 7, 8]);
     test.expect_stack(&[0, 0, 0, 0]);
 
     // --- read from uninitialized memory - address provided as a parameter -----------------------
-    let asm_op = format!("mem_loadw_be.{addr}");
+    let asm_op = format!("mem_loadw_le.{addr}");
 
     let test = build_op_test!(asm_op, &[5, 6, 7, 8]);
     test.expect_stack(&[0, 0, 0, 0]);
@@ -71,21 +71,21 @@ fn mem_loadw() {
 
 #[test]
 fn mem_storew() {
-    let asm_op = "mem_storew_be";
+    let asm_op = "mem_storew_le";
     let addr = 0_u32;
 
     // --- address provided via the stack ---------------------------------------------------------
     let test = build_op_test!(asm_op, &[addr as u64, 1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[1, 2, 3, 4]);
 
     // --- address provided as a parameter --------------------------------------------------------
-    let asm_op = format!("mem_storew_be.{addr}");
+    let asm_op = format!("mem_storew_le.{addr}");
     let test = build_op_test!(&asm_op, &[1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[4, 3, 2, 1]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4], addr, &[1, 2, 3, 4]);
 
     // --- the rest of the stack is unchanged -----------------------------------------------------
     let test = build_op_test!(&asm_op, &[1, 2, 3, 4, 0]);
-    test.expect_stack_and_memory(&[1, 2, 3, 4, 0], addr, &[4, 3, 2, 1]);
+    test.expect_stack_and_memory(&[1, 2, 3, 4, 0], addr, &[1, 2, 3, 4]);
 }
 
 // LOADING A WORD FROM MEMORY WITH ENDIANNESS (MEM_LOADW_BE/LE)
@@ -241,11 +241,11 @@ fn mem_stream() {
         {TRUNCATE_STACK_PROC}
 
         begin
-            push.4
-            mem_storew_be
-            dropw
             push.0
-            mem_storew_be
+            mem_storew_le
+            dropw
+            push.4
+            mem_storew_le
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
             mem_stream
@@ -260,7 +260,7 @@ fn mem_stream() {
     // the state is built by replacing the values on the top of the stack with the values in memory
     // Memory stores words at addresses 0 and 4 which are loaded into the rate portion.
     // Due to BE storage and load, the values are reversed when loaded back.
-    let mut final_stack: Vec<u64> = vec![8, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12];
+    let mut final_stack: Vec<u64> = vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
     final_stack.push(8); // address after reading 2 words (8 elements)
 
     let test = build_test!(source, &inputs);
@@ -274,11 +274,11 @@ fn mem_stream_with_hperm() {
         {TRUNCATE_STACK_PROC}
 
         begin
-            push.4
-            mem_storew_be
-            dropw
             push.0
-            mem_storew_be
+            mem_storew_le
+            dropw
+            push.4
+            mem_storew_le
             dropw
             push.12.11.10.9.8.7.6.5.4.3.2.1
             mem_stream hperm
@@ -287,14 +287,10 @@ fn mem_stream_with_hperm() {
         end"
     );
 
-    // Stack [1, 2, 3, 4, 5, 6, 7, 8] with 1 on top
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
 
-    // The state of the hasher is the first 12 elements of the stack. The state is built by
-    // replacing the values on the top of the stack with the values in memory addresses 0 and 4.
-    // Due to BE storage and load, the values are reversed when loaded back.
     let mut state: [Felt; 12] =
-        [8_u64, 7, 6, 5, 4, 3, 2, 1, 9, 10, 11, 12].to_elements().try_into().unwrap();
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].to_elements().try_into().unwrap();
 
     // apply a hash permutation to the state
     apply_permutation(&mut state);
@@ -335,11 +331,11 @@ fn inverse_operations() {
     let source = "
         begin
             push.0
-            mem_storew_be
-            mem_storew_be.4
+            mem_storew_le
+            mem_storew_le.4
             push.4
-            mem_loadw_be
-            mem_loadw_be.0
+            mem_loadw_le
+            mem_loadw_le.0
         end";
 
     let inputs = [0, 1, 2, 3, 4];
@@ -353,16 +349,16 @@ fn inverse_operations() {
 fn read_after_write() {
     // --- write to memory first, then test read with push --------------------------------------
     // Stack [1, 2, 3, 4] with 1 on top - stores to memory, then reads back mem[0]
-    let test = build_op_test!("mem_storew_be.0 mem_load.0", &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_le.0 mem_load.0", &[1, 2, 3, 4]);
+    test.expect_stack(&[1, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with pushw --------------------------------------
     // Stack [1, 2, 3, 4] - store then load whole word back
-    let test = build_op_test!("mem_storew_be.0 push.0.0.0.0 mem_loadw_be.0", &[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_le.0 push.0.0.0.0 mem_loadw_le.0", &[1, 2, 3, 4]);
     test.expect_stack(&[1, 2, 3, 4, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with loadw --------------------------------------
     // Stack [1, 2, 3, 4, 5, 6, 7, 8] - store first word, drop it, load it back
-    let test = build_op_test!("mem_storew_be.0 dropw mem_loadw_be.0", &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let test = build_op_test!("mem_storew_le.0 dropw mem_loadw_le.0", &[1, 2, 3, 4, 5, 6, 7, 8]);
     test.expect_stack(&[1, 2, 3, 4]);
 }

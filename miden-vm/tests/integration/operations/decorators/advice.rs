@@ -394,7 +394,6 @@ fn advice_insert_hqword() {
             adv_loadw reversew
         end
     end";
-    // Stack needs [44..41, 34..31, 24..21, 14..11] with 44 on top (as per original test intent)
     let stack_inputs = [44, 43, 42, 41, 34, 33, 32, 31, 24, 23, 22, 21, 14, 13, 12, 11];
     let test = build_test!(source, &stack_inputs);
     // Values retrieved from advice map in LIFO order
