@@ -22,6 +22,7 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
     let depth = 3;
     let node = tree.get_node(NodeIndex::new(depth as u8, index).unwrap()).unwrap();
 
+    // build program inputs
     let mut init_stack = vec![];
     append_word(&mut init_stack, node);
     init_stack.extend_from_slice(&[depth, index]);
@@ -52,6 +53,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
     let new_node = init_leaf(11);
     let path = tree.get_path(NodeIndex::new(3, index).unwrap()).unwrap();
 
+    // build program inputs
     let mut init_stack = vec![];
     append_word(&mut init_stack, old_node);
     init_stack.extend_from_slice(&[3, index]);

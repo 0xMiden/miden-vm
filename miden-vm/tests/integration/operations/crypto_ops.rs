@@ -262,7 +262,7 @@ fn crypto_stream_basic() {
         # Rate is keystream [1,2,3,4,5,6,7,8]
         push.2000           # dst_ptr
         push.1000           # src_ptr
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -295,7 +295,7 @@ fn crypto_stream_rejects_in_place() {
 
         push.1000           # dst_ptr (in-place)
         push.1000           # src_ptr
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -326,7 +326,7 @@ fn crypto_stream_rejects_partial_overlap() {
 
         push.1004           # dst_ptr (partial overlap)
         push.1000           # src_ptr
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -350,7 +350,7 @@ fn crypto_stream_rejects_partial_overlap() {
 
         push.1000           # dst_ptr
         push.1004           # src_ptr (partial overlap)
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -375,7 +375,7 @@ fn crypto_stream_rejects_src_range_overflow() {
         # Setup stack: [rate(8), capacity(4), src, dst]
         push.0               # dst_ptr (valid)
         push.4294967292      # src_ptr (u32::MAX - 3, aligned), src+8 overflows
-        push.0.0.0.0         # capacity
+        padw                 # capacity
         push.1.2.3.4         # rate[0-3]
         push.5.6.7.8         # rate[4-7]
 
@@ -398,7 +398,7 @@ fn crypto_stream_rejects_dst_range_overflow() {
         # Setup stack: [rate(8), capacity(4), src, dst]
         push.4294967292      # dst_ptr (u32::MAX - 3, aligned), dst+8 overflows
         push.0               # src_ptr (valid)
-        push.0.0.0.0         # capacity
+        padw                 # capacity
         push.1.2.3.4         # rate[0-3]
         push.5.6.7.8         # rate[4-7]
 
@@ -419,7 +419,7 @@ fn crypto_stream_rejects_unaligned_src() {
     let asm_op = "
         push.2000           # dst_ptr (aligned)
         push.1002           # src_ptr (unaligned)
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -440,7 +440,7 @@ fn crypto_stream_rejects_unaligned_dst() {
     let asm_op = "
         push.2002           # dst_ptr (unaligned)
         push.1000           # src_ptr (aligned)
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -467,7 +467,7 @@ fn crypto_stream_allows_adjacent_after() {
         # Setup stack: [rate(8), capacity(4), src, dst]
         push.1008           # dst_ptr (adjacent after)
         push.1000           # src_ptr
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 
@@ -491,7 +491,7 @@ fn crypto_stream_allows_adjacent_before() {
         # Setup stack: [rate(8), capacity(4), src, dst]
         push.1000           # dst_ptr (adjacent before)
         push.1008           # src_ptr
-        push.0.0.0.0        # capacity
+        padw                # capacity
         push.1.2.3.4        # rate[0-3]
         push.5.6.7.8        # rate[4-7]
 

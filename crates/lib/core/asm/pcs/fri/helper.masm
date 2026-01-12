@@ -136,7 +136,7 @@ pub proc load_fri_layer_commitments
         exec.random_coin::reseed
         # => [num_layers, ptr_layer + 4, y, y, ...]
 
-        push.0.0.0.0
+        padw
         exec.random_coin::get_rate_1
         #=> [R1, ZERO, num_layers, ptr_layer + 4, y, y, ... ]
         push.0.0
@@ -219,9 +219,7 @@ pub proc load_and_verify_remainder
     eq
     if.true
         # Remainder polynomial degree less than 64
-        push.0.0.0.0
-        push.0.0.0.0
-        push.0.0.0.0
+        padw padw padw
         # => [Y, Y, 0, 0, 0, 0 remainder_poly_ptr, remainder_size, y, y]
 
         # adv_load remainder polynomial
@@ -239,9 +237,7 @@ pub proc load_and_verify_remainder
 
     else
         # Remainder polynomial degree less than 128
-        push.0.0.0.0
-        push.0.0.0.0
-        push.0.0.0.0
+        padw padw padw
         # => [Y, Y, 0, 0, 0, 0 remainder_poly_ptr, remainder_size, y, y]
 
         # adv_load remainder polynomial

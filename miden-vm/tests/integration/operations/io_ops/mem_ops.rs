@@ -354,7 +354,7 @@ fn read_after_write() {
 
     // --- write to memory first, then test read with pushw --------------------------------------
     // Stack [1, 2, 3, 4] - store then load whole word back
-    let test = build_op_test!("mem_storew_le.0 push.0.0.0.0 mem_loadw_le.0", &[1, 2, 3, 4]);
+    let test = build_op_test!("mem_storew_le.0 padw mem_loadw_le.0", &[1, 2, 3, 4]);
     test.expect_stack(&[1, 2, 3, 4, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with loadw --------------------------------------

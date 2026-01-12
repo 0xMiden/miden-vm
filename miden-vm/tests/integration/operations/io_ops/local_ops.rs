@@ -104,9 +104,9 @@ fn storew_local() {
             swapw
             loc_storew_be.4
             swapw
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
-            push.0.0.0.0
+            padw
             loc_loadw_be.4
         end
         begin
@@ -167,7 +167,7 @@ fn inverse_operations() {
         proc foo
             loc_storew_be.0
             dropw
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
 
@@ -221,7 +221,7 @@ fn read_after_write() {
         @locals(4)
         proc foo
             loc_storew_be.0
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
         begin
@@ -285,7 +285,7 @@ fn nested_procedures() {
             loc_storew_be.0
             dropw
             exec.foo
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
         begin

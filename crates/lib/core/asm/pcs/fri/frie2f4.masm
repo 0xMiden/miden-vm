@@ -21,7 +21,7 @@ pub proc preprocess
     dup exec.constants::set_fri_queries_address
     swap
     sub.1
-    push.0.0.0.0
+    padw
     push.1
     while.true
         adv_loadw                       #[Q, num_queries, ptr, ..]

@@ -7,7 +7,7 @@ extern crate std;
 
 use alloc::string::ToString;
 
-use miden_processor::{Program, fast::FastProcessor, math::Felt, parallel::build_trace};
+use miden_processor::{Program, fast::FastProcessor, parallel::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -54,10 +54,8 @@ pub async fn prove(
     options: ProvingOptions,
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
-    let stack_inputs_slice: alloc::vec::Vec<Felt> = stack_inputs.iter().copied().collect();
-
     let processor = FastProcessor::new_with_options(
-        &stack_inputs_slice,
+        stack_inputs.as_ref(),
         advice_inputs,
         *options.execution_options(),
     );

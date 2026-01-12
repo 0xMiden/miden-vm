@@ -282,9 +282,9 @@ proc prepare_message_schedule_and_consume
     swapw
 
     push.0x428a2f98
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[0]
 
@@ -343,9 +343,9 @@ proc prepare_message_schedule_and_consume
     movupw.2
 
     push.0x3956c25b
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[4]
 
@@ -400,9 +400,9 @@ proc prepare_message_schedule_and_consume
     movupw.3
 
     push.0xd807aa98
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[8]
 
@@ -461,9 +461,9 @@ proc prepare_message_schedule_and_consume
     movupw.2
 
     push.0x72be5d74
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[12]
 
@@ -522,9 +522,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xe49b69c1
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[16]
 
@@ -583,9 +583,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x2de92c6f
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[20]
 
@@ -644,9 +644,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x983e5152
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[24]
 
@@ -705,9 +705,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xc6e00bf3
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[28]
 
@@ -766,9 +766,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x27b70a85
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[32]
 
@@ -827,9 +827,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x650a7354
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[36]
 
@@ -888,9 +888,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xa2bfe8a1
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[40]
 
@@ -949,9 +949,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xd192e819
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[44]
 
@@ -979,9 +979,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x19a4c116
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[48]
 
@@ -1057,10 +1057,10 @@ proc prepare_message_schedule_and_consume
     movdn.8
     exec.consume_message_word # consume msg[63]
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.8
 
     repeat.8

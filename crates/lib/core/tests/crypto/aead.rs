@@ -189,7 +189,7 @@ fn test_decrypt_with_known_values() {
         push.[1,0,0,0] eqw assert dropw dropw
 
         padw push.2012 mem_loadw_le
-        push.[0,0,0,0] eqw assert dropw dropw
+        padw eqw assert dropw dropw
     end
     ",
         ciphertext_0 = &ciphertext[0..4],

@@ -37,7 +37,7 @@ proc init_state
     # Stack: [nonce(4), key(4), ...]
 
     # Initialize capacity with all zeros
-    push.[0,0,0,0]
+    padw
     # => [cap(4), nonce(4), key(4), ...]
 
     movdnw.2

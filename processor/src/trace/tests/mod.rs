@@ -73,12 +73,9 @@ pub fn build_trace_from_ops_with_inputs(
     mast_forest.make_root(basic_block_id);
 
     let program = Program::new(mast_forest.into(), basic_block_id);
-
-    let stack_values: Vec<Felt> = stack_inputs.iter().copied().collect();
-
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
-        &stack_values,
+        stack_inputs.as_ref(),
         advice_inputs,
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
