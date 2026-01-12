@@ -81,15 +81,16 @@ fn u32overflowing_add() {
 
     // --- (a + b) < 2^32 -------------------------------------------------------------------------
     // c = a + b and d should be unset, since there was no overflow.
+    // Output is [sum, carry] with sum on top
     let test = build_op_test!(asm_op, &[2, 1]);
-    test.expect_stack(&[0, 3]);
+    test.expect_stack(&[3, 0]);
 
     // --- (a + b) = 2^32 -------------------------------------------------------------------------
     let a = u32::MAX;
     let b = 1_u64;
     // c should be the sum mod 2^32 and d should be set to signal overflow.
     let test = build_op_test!(asm_op, &[b, a as u64]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
 
     // --- (a + b) > 2^32 -------------------------------------------------------------------------
     let a = 2_u64;
@@ -104,12 +105,12 @@ fn u32overflowing_add() {
     let (c, overflow) = a.overflowing_add(b);
     let d = if overflow { 1 } else { 0 };
     let test = build_op_test!(asm_op, &[b as u64, a as u64]);
-    test.expect_stack(&[d, c as u64]);
+    test.expect_stack(&[c as u64, d]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let e = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
-    test.expect_stack(&[d, c as u64, e]);
+    test.expect_stack(&[c as u64, d, e]);
 }
 
 #[test]
@@ -119,20 +120,21 @@ fn u32overflowing_add3() {
     // --- test correct execution -----------------------------------------------------------------
     // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
     // d = a + b + c and e should be unset, since there was no overflow.
+    // Output is [sum, carry] with sum on top
     let test = build_op_test!(asm_op, &[2, 1, 0]);
-    test.expect_stack(&[0, 3]);
+    test.expect_stack(&[3, 0]);
 
     // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
     // d = a + b + c and e should be unset, since there was no overflow.
     let test = build_op_test!(asm_op, &[3, 2, 1]);
-    test.expect_stack(&[0, 6]);
+    test.expect_stack(&[6, 0]);
 
     // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
     let a = u32::MAX;
     let b = 1_u64;
     // d should be the sum mod 2^32 and e should be set to signal overflow.
     let test = build_op_test!(asm_op, &[b, a as u64, 0]);
-    test.expect_stack(&[1, 0]);
+    test.expect_stack(&[0, 1]);
 
     // --- (a + b + c) > 2^32 ---------------------------------------------------------------------
     let a = 1_u64;
@@ -148,7 +150,7 @@ fn u32overflowing_add3() {
     let (d, overflow) = a.overflowing_add(b);
     let e = if overflow { 1 } else { 0 };
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
-    test.expect_stack(&[e, d as u64]);
+    test.expect_stack(&[d as u64, e]);
 
     // --- random u32 values with c = 1 -----------------------------------------------------------
     let a = rand_value::<u32>();
@@ -158,12 +160,12 @@ fn u32overflowing_add3() {
     let (d, overflow_c) = d.overflowing_add(c);
     let e = if overflow_b || overflow_c { 1 } else { 0 };
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[e, d as u64]);
+    test.expect_stack(&[d as u64, e]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let f = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[e, d as u64, f]);
+    test.expect_stack(&[d as u64, e, f]);
 }
 
 #[test]
@@ -491,17 +493,17 @@ fn u32mod_fail() {
 #[test]
 fn u32divmod() {
     // --- simple cases ---------------------------------------------------------------------------
-    // Output is [quotient, remainder] with quotient on top
+    // Output is [remainder, quotient] with remainder on top
     let test = build_op_test!("u32divmod", &[1, 0]);
     test.expect_stack(&[0, 0]);
 
     // division with no remainder: 2 / 1 = 2 remainder 0
     let test = build_op_test!("u32divmod", &[1, 2]);
-    test.expect_stack(&[2, 0]);
+    test.expect_stack(&[0, 2]);
 
     // division with remainder: 1 / 2 = 0 remainder 1
     let test = build_op_test!("u32divmod", &[2, 1]);
-    test.expect_stack(&[0, 1]);
+    test.expect_stack(&[1, 0]);
     // 3 / 2 = 1 remainder 1
     let test = build_op_test!("u32divmod", &[2, 3]);
     test.expect_stack(&[1, 1]);
@@ -516,12 +518,12 @@ fn u32divmod() {
     let quot = (a / b) as u64;
     let rem = (a % b) as u64;
     let test = build_op_test!("u32divmod", &[b as u64, a as u64]);
-    test.expect_stack(&[quot, rem]);
+    test.expect_stack(&[rem, quot]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let e = rand_value::<u64>();
     let test = build_op_test!("u32divmod", &[b as u64, a as u64, e]);
-    test.expect_stack(&[quot, rem, e]);
+    test.expect_stack(&[rem, quot, e]);
 }
 
 #[test]
@@ -551,20 +553,22 @@ proptest! {
         let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64]);
         test.prop_expect_stack(&[c as u64])?;
 
+        // Output is [sum, carry] with sum on top
         let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[d, c as u64])?;
+        test.prop_expect_stack(&[c as u64, d])?;
     }
 
     #[test]
     fn u32overflowing_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
         let asm_op = "u32overflowing_add3";
 
+        // Output is [sum, carry] with sum on top
         let sum: u64 = u64::from(a) + u64::from(b) + u64::from(c);
         let lo = (sum as u32) as u64;
         let hi = sum >> 32;
 
         let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-        test.prop_expect_stack(&[hi, lo])?;
+        test.prop_expect_stack(&[lo, hi])?;
     }
 
     #[test]
@@ -634,18 +638,18 @@ proptest! {
     fn u32divmod_proptest(a in any::<u32>(), b in 1..u32::MAX) {
         let asm_op = "u32divmod";
 
-        // Output is [quotient, remainder] with quotient on top
+        // Output is [remainder, quotient] with remainder on top
         let quot = (a / b) as u64;
         let rem = (a % b) as u64;
 
         // b provided via the stack.
         let test = build_op_test!(&asm_op, &[b as u64, a as u64]);
-        test.prop_expect_stack(&[quot, rem])?;
+        test.prop_expect_stack(&[rem, quot])?;
 
         // b provided as a parameter.
         let asm_op = format!("{asm_op}.{b}");
         let test = build_op_test!(&asm_op, &[a as u64]);
-        test.prop_expect_stack(&[quot, rem])?;
+        test.prop_expect_stack(&[rem, quot])?;
     }
 
     #[test]

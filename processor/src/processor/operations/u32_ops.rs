@@ -63,7 +63,7 @@ pub(super) fn op_u32split<P: Processor>(
 /// Adds the top two elements of the stack and pushes the result onto the stack.
 ///
 /// Input: [a, b, ...] where a is on top
-/// Output: [carry, sum, ...] where carry is on top
+/// Output: [sum, carry, ...] where sum is on top
 #[inline(always)]
 pub(super) fn op_u32add<P: Processor>(
     processor: &mut P,
@@ -78,17 +78,17 @@ pub(super) fn op_u32add<P: Processor>(
     };
     tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
 
-    processor.stack().set(0, carry);
-    processor.stack().set(1, sum);
+    processor.stack().set(0, sum);
+    processor.stack().set(1, carry);
 
-    Ok(P::HelperRegisters::op_u32add_registers(carry, sum))
+    Ok(P::HelperRegisters::op_u32add_registers(sum, carry))
 }
 
 /// Pops three elements off the stack, adds them, splits the result into low and high 32-bit
 /// values, and pushes these values back onto the stack.
 ///
 /// Input: [a, b, c, ...] where a is on top
-/// Output: [carry, sum, ...] where carry is on top
+/// Output: [sum, carry, ...] where sum is on top
 ///
 /// The size of the stack is decremented by 1.
 #[inline(always)]
@@ -105,12 +105,12 @@ pub(super) fn op_u32add3<P: Processor>(
     };
     tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
 
-    // write carry to the new top of the stack, and sum after
+    // write sum to the new top of the stack, and carry after
     processor.stack().decrement_size(tracer);
-    processor.stack().set(0, carry);
-    processor.stack().set(1, sum);
+    processor.stack().set(0, sum);
+    processor.stack().set(1, carry);
 
-    Ok(P::HelperRegisters::op_u32add3_registers(carry, sum))
+    Ok(P::HelperRegisters::op_u32add3_registers(sum, carry))
 }
 
 /// Pops two elements off the stack, subtracts the top element from the second element, and
@@ -189,10 +189,10 @@ pub(super) fn op_u32madd<P: Processor>(
 }
 
 /// Pops two elements off the stack, divides the second element by the top element, and pushes
-/// the quotient and the remainder back onto the stack.
+/// the remainder and the quotient back onto the stack.
 ///
 /// Input: [b, a, ...] where b (divisor) is on top, a (dividend) is below
-/// Output: [quotient, remainder, ...] where quotient is on top, computes a / b
+/// Output: [remainder, quotient, ...] where remainder is on top, computes a / b
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO.
@@ -217,9 +217,9 @@ pub(super) fn op_u32div<P: Processor>(
     let quotient = numerator / denominator;
     let remainder = numerator - quotient * denominator;
 
-    // quotient is placed on top of the stack, followed by remainder
-    processor.stack().set(0, Felt::new(quotient));
-    processor.stack().set(1, Felt::new(remainder));
+    // remainder is placed on top of the stack, followed by quotient
+    processor.stack().set(0, Felt::new(remainder));
+    processor.stack().set(1, Felt::new(quotient));
 
     // These range checks help enforce that quotient <= numerator.
     let lo = Felt::new(numerator - quotient);

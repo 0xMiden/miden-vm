@@ -66,10 +66,12 @@ pub proc mod_12289
     dup
     movup.3
     u32overflowing_add
+    swap
     # => [flag, (res_lo + r) % 2^32, r, res_hi, a_hi, a_lo, ...] where u = uhi * 2^32 + ulo and u = (res_lo + r) / 2^32
 
     movup.3
     u32overflowing_add
+    swap
     # => [flag, final_res_hi, final_res_lo, r, a_hi, a_lo, ...] flag should be 0 by the bound on inputs
     drop
     # => [final_res_hi, final_res_lo, r, a_hi, a_lo, ...]

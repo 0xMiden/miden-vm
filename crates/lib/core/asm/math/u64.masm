@@ -18,22 +18,20 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [overflow, c_lo, c_hi, ...], where c = (a + b) % 2^64
-#! This takes 7 cycles.
+#! This takes 5 cycles.
 pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
     movup.2             # => [a_lo, b_lo, b_hi, a_hi]
-    u32overflowing_add  # => [carry, sum_lo, b_hi, a_hi]
-    movup.2             # => [b_hi, carry, sum_lo, a_hi]
-    movup.3             # => [a_hi, b_hi, carry, sum_lo]
-    u32overflowing_add3 # => [overflow, sum_hi, sum_lo]
-    movup.2             # => [sum_lo, overflow, sum_hi]
-    swap                # => [overflow, sum_lo, sum_hi]
+    u32overflowing_add  # => [sum_lo, carry, b_hi, a_hi]
+    movdn.3             # => [carry, b_hi, a_hi, sum_lo]
+    u32overflowing_add3 # => [sum_hi, overflow, sum_lo]
+    movdn.2             # => [overflow, sum_lo, sum_hi]
 end
 
 #! Performs addition of two unsigned 64 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = (a + b) % 2^64
-#! This takes 8 cycles.
+#! This takes 6 cycles.
 pub proc wrapping_add(b: u64, a: u64) -> u64
     exec.overflowing_add
     drop
@@ -148,7 +146,9 @@ pub proc overflowing_mul(b: u64, a: u64) -> u128
     movup.2
     # => [t3_lo, t1_hi, t3_hi, t2_lo, p0_lo, ...]
     u32overflowing_add
-    # => [carry, sum, t3_hi, t2_lo, p0_lo, ...] where sum = (t3_lo + t1_hi) mod 2^32
+    # => [sum, carry, t3_hi, t2_lo, p0_lo, ...] where sum = (t3_lo + t1_hi) mod 2^32
+    swap
+    # => [carry, sum, t3_hi, t2_lo, p0_lo, ...]
     movup.2
     # => [t3_hi, carry, sum, t2_lo, p0_lo, ...]
     add
@@ -449,9 +449,7 @@ pub proc div(b: u64, a: u64) -> u64
     movup.3
     # => [prod_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add
-    # outputs [carry, sum]: computes prod_lo + r_lo
-    # => [carry_lo, sum_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    swap
+    # outputs [sum, carry]: computes prod_lo + r_lo
     # => [sum_lo, carry_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
     # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
@@ -465,7 +463,9 @@ pub proc div(b: u64, a: u64) -> u64
     movup.3
     # => [carry_lo, prod_hi, r_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add3
-    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
+    # => [sum_hi, carry_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
     # => [carry_hi, sum_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
     eq.0
     assert
@@ -597,11 +597,13 @@ pub proc mod(b: u64, a: u64) -> u64
     movup.4
     # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
     u32overflowing_add
-    # outputs [carry, sum]: computes prod_lo + r_lo
-    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
+    # outputs [sum, carry]: computes prod_lo + r_lo
+    # => [sum_lo, carry_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
 
     # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
     # Duplicate r_hi for the add (we'll need it in output)
+    swap
+    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
     dup.3
     # => [r_hi, carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
     movup.5
@@ -609,7 +611,9 @@ pub proc mod(b: u64, a: u64) -> u64
     movup.2
     # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     u32overflowing_add3
-    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
+    # => [sum_hi, carry_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
+    swap
     # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     eq.0
     assert
@@ -740,11 +744,13 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     movup.4
     # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add
-    # outputs [carry, sum]: computes prod_lo + r_lo
-    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
+    # outputs [sum, carry]: computes prod_lo + r_lo
+    # => [sum_lo, carry_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
     # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
     # Duplicate r_hi for the add (we'll need it in output)
+    swap
+    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     dup.3
     # => [r_hi, carry_lo, sum_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
     movup.5
@@ -752,7 +758,9 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     movup.2
     # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     u32overflowing_add3
-    # outputs [carry, sum]: computes carry_lo + prod_hi + r_hi
+    # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
+    # => [sum_hi, carry_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
+    swap
     # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     eq.0
     assert
@@ -874,8 +882,9 @@ pub proc shr(n: u32, a: u64) -> u64
     # [a_hi, pow_hi+pow_lo, pow_lo, a_lo, ...]
     swap
     # [pow_hi+pow_lo, a_hi, pow_lo, a_lo, ...]
-    # u32divmod: [divisor, dividend, ...] -> [quotient, remainder, ...]
+    # u32divmod: [divisor, dividend, ...] -> [remainder, quotient, ...]
     u32divmod
+    swap
     # [quot1, rem1, pow_lo, a_lo, ...]
     # quot1 = a_hi / divisor
     # rem1 = a_hi % divisor
@@ -920,8 +929,9 @@ pub proc shr(n: u32, a: u64) -> u64
 
     # --- STEP 6: Second division - a_lo / adjusted_div ---
     # => [adjusted_div, a_lo, quot1, rem1, adjusted_div, !borrow, ...]
-    # u32divmod: [divisor, dividend, ...] -> [quotient, remainder, ...]
+    # u32divmod: [divisor, dividend, ...] -> [remainder, quotient, ...]
     u32divmod
+    swap
     # [quot2, rem2, quot1, rem1, adjusted_div, !borrow, ...]
     # quot2 = a_lo / adjusted_div
     # rem2 = a_lo % adjusted_div

@@ -199,27 +199,27 @@ proc columnar_mixing
     movup.8
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.8
     dup.6
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     dup.6
     movup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     dup.7
     movup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movup.9
@@ -304,27 +304,27 @@ proc columnar_mixing
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movupw.3
@@ -439,27 +439,27 @@ proc diagonal_mixing
     movup.8
     dup.6
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.8
     dup.7
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.8
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.8
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movup.9
@@ -544,27 +544,27 @@ proc diagonal_mixing
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.4
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movupw.3

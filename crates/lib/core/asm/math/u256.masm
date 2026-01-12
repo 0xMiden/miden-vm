@@ -5,27 +5,34 @@ pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
     movup.3
     movup.7
     u32overflowing_add
+    swap
     movup.4
     movup.7
     u32overflowing_add3
+    swap
     movup.4
     movup.6
     u32overflowing_add3
+    swap
     movup.4
     movup.5
     u32overflowing_add3
+    swap
     movdn.12
     swapw.2
     movup.12
     movup.4
     movup.8
     u32overflowing_add3
+    swap
     movup.4
     movup.7
     u32overflowing_add3
+    swap
     movup.4
     movup.6
     u32overflowing_add3
+    swap
     movup.4
     movup.5
     u32overflowing_add3
@@ -39,21 +46,18 @@ pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     u32overflowing_sub
     movup.7
     u32overflowing_add
-    swap
     movup.5
     u32overflowing_sub
     movup.2
     add
     movup.6
     u32overflowing_add
-    swap
     movup.5
     u32overflowing_sub
     movup.2
     add
     movup.5
     u32overflowing_add
-    swap
     movup.5
     u32overflowing_sub
     movup.2
@@ -63,21 +67,18 @@ pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     movup.12
     movup.4
     u32overflowing_add
-    swap
     movup.8
     u32overflowing_sub
     movup.2
     add
     movup.4
     u32overflowing_add
-    swap
     movup.7
     u32overflowing_sub
     movup.2
     add
     movup.4
     u32overflowing_add
-    swap
     movup.6
     u32overflowing_sub
     movup.2
@@ -214,7 +215,8 @@ proc mulstep
     movdn.2                    # [c, b, k, a, ...]
     u32overflowing_madd        # [lo, hi, a, ...]  (computes c*b+k)
     movup.2                    # [a, lo, hi, ...]
-    u32overflowing_add         # [carry, result, hi, ...]  (computes a+lo)
+    u32overflowing_add         # [result, carry, hi, ...]  (computes a+lo)
+    swap                       # [carry, result, hi, ...]
     movup.2                    # [hi, carry, result, ...]
     add                        # [new_k, result, ...]  (computes hi+carry)
 end

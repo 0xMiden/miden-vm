@@ -222,7 +222,7 @@ use super::*;
 // check that overflowing add properly sets the overflow bit
 #[case(None,"
     begin
-        u32overflowing_add sub.1 assertz
+        u32overflowing_add swap sub.1 assertz
     end",
     vec![Felt::from(u32::MAX), ONE]
 )]

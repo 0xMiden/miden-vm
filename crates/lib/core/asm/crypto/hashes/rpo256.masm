@@ -198,6 +198,7 @@ pub proc prepare_hasher_state
 
     # get the number of double words
     u32divmod.8
+    swap
     # => [num_elements/8, num_elements%8, ptr, pad_inputs_flag]
 
     # get the end address for absorb_double_words_from_memory procedure (end address for pairs of

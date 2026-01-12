@@ -113,7 +113,8 @@ proptest! {
         let (result, over) = a.overflowing_add(b);
 
         let _ = op_u32add(&mut processor, &(), &mut tracer).unwrap();
-        let expected = build_expected(&[over as u64, result as u64, c as u64, d as u64]);
+        // Output: [sum, carry, ...] - sum on top
+        let expected = build_expected(&[result as u64, over as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 
@@ -133,7 +134,8 @@ proptest! {
         let lo = (result as u32) as u64;
 
         let _ = op_u32add3(&mut processor, &(), &mut tracer).unwrap();
-        let expected = build_expected(&[hi, lo, d as u64]);
+        // Output: [sum, carry, ...] - sum (lo) on top
+        let expected = build_expected(&[lo, hi, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 
@@ -213,8 +215,8 @@ proptest! {
         let r = b % a;
 
         let _ = op_u32div(&mut processor, &(), &mut tracer).unwrap();
-        // Output: [quotient, remainder, ...] - quotient on top
-        let expected = build_expected(&[q as u64, r as u64, c as u64, d as u64]);
+        // Output: [remainder, quotient, ...] - remainder on top
+        let expected = build_expected(&[r as u64, q as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
 }

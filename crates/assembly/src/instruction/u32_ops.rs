@@ -80,8 +80,8 @@ pub fn u32assertw(span_builder: &mut BasicBlockBuilder, err_code: Felt) {
 /// inserted. Please refer to the docs of `handle_arithmetic_operation` for more details.
 ///
 /// VM cycles per mode:
-/// - u32wrapping_add: 2 cycles
-/// - u32wrapping_add.b: 3 cycles
+/// - u32wrapping_add: 3 cycles
+/// - u32wrapping_add.b: 4 cycles
 /// - u32overflowing_add: 1 cycles
 /// - u32overflowing_add.b: 2 cycles
 pub fn u32add(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Option<u32>) {
@@ -119,36 +119,36 @@ pub fn u32mul(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Opt
 /// Translates u32div assembly instructions to VM operations.
 ///
 /// VM cycles per mode:
-/// - u32div: 3 cycles
+/// - u32div: 2 cycles
 /// - u32div.b:
-///    - 5 cycles if b is 1
-///    - 4 cycles if b is not 1
+///    - 4 cycles if b is 1
+///    - 3 cycles if b is not 1
 pub fn u32div(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
     imm: Option<Span<u32>>,
 ) -> Result<(), Report> {
     handle_division(span_builder, proc_ctx, imm)?;
-    // U32div outputs [quotient, remainder], swap before drop to keep quotient
-    span_builder.push_ops([Swap, Drop]);
+    // U32div outputs [remainder, quotient], drop remainder to keep quotient
+    span_builder.push_op(Drop);
     Ok(())
 }
 
 /// Translates u32mod assembly instructions to VM operations.
 ///
 /// VM cycles per mode:
-/// - u32mod: 2 cycles
+/// - u32mod: 3 cycles
 /// - u32mod.b:
-///    - 4 cycles if b is 1
-///    - 3 cycles if b is not 1
+///    - 5 cycles if b is 1
+///    - 4 cycles if b is not 1
 pub fn u32mod(
     span_builder: &mut BasicBlockBuilder,
     proc_ctx: &ProcedureContext,
     imm: Option<Span<u32>>,
 ) -> Result<(), Report> {
     handle_division(span_builder, proc_ctx, imm)?;
-    // U32div outputs [quotient, remainder], drop quotient to keep remainder
-    span_builder.push_op(Drop);
+    // U32div outputs [remainder, quotient], swap and drop to keep remainder
+    span_builder.push_ops([Swap, Drop]);
     Ok(())
 }
 
@@ -233,8 +233,8 @@ pub fn u32shr(
         // After prepare_bitwise, stack is [2^b, value, ...]
         // U32div takes [divisor, dividend] and computes dividend/divisor (second/top)
         // So with [2^b, value], it computes value / 2^b = value >> b
-        // U32div outputs [quotient, remainder], swap before drop to keep quotient
-        span_builder.push_ops([U32div, Swap, Drop]);
+        // U32div outputs [remainder, quotient], drop remainder to keep quotient
+        span_builder.push_ops([U32div, Drop]);
     }
     Ok(())
 }
@@ -310,33 +310,35 @@ pub fn u32popcnt(span_builder: &mut BasicBlockBuilder) {
     let ops = [
         // i = i - ((i >> 1) & 0x55555555);
         // U32div computes second/top. Stack: [i, ...], push 2 to get [2, i, ...].
-        // U32div gives i/2. Output [quotient, remainder], swap drop to keep quotient.
+        // U32div gives i/2. Output [remainder, quotient], drop remainder to keep quotient.
         Dup0,
-        Push(Felt::new(1 << 1)), U32div, Swap, Drop,
+        Push(Felt::new(1 << 1)), U32div, Drop,
         Push(Felt::new(0x55555555)),
         U32and,
         // U32sub computes second - top. Stack: [masked, i], gives i - masked
         U32sub, Drop,
         // i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
         Dup0,
-        Push(Felt::new(1 << 2)), U32div, Swap, Drop,
+        Push(Felt::new(1 << 2)), U32div, Drop,
         Push(Felt::new(0x33333333)),
         U32and,
         Swap,
         Push(Felt::new(0x33333333)),
         U32and,
-        U32add, Drop,
+        // U32add outputs [sum, carry], swap to drop carry and keep sum
+        U32add, Swap, Drop,
         // i = (i + (i >> 4)) & 0x0F0F0F0F;
         Dup0,
-        Push(Felt::new(1 << 4)), U32div, Swap, Drop,
-        U32add, Drop,
+        Push(Felt::new(1 << 4)), U32div, Drop,
+        // U32add outputs [sum, carry], swap to drop carry and keep sum
+        U32add, Swap, Drop,
         Push(Felt::new(0x0F0F0F0F)),
         U32and,
         // return (i * 0x01010101) >> 24;
         // U32mul outputs [lo, hi], swap before drop to keep lo
         Push(Felt::new(0x01010101)),
         U32mul, Swap, Drop,
-        Push(Felt::new(1 << 24)), U32div, Swap, Drop
+        Push(Felt::new(1 << 24)), U32div, Drop
     ];
     span_builder.push_ops(ops);
 }
@@ -408,7 +410,10 @@ fn handle_arithmetic_operation(
 
     // in the wrapping mode, drop overflow/carry bits
     if matches!(op_mode, U32OpMode::Wrapping) {
-        if matches!(op, U32mul) {
+        // U32add outputs [sum, carry] with sum on top - swap to drop carry and keep sum
+        // U32mul outputs [lo, hi] with lo on top - swap to drop hi and keep lo
+        // U32sub outputs [borrow, diff] with borrow on top - just drop borrow to keep diff
+        if matches!(op, U32mul | U32add) {
             block_builder.push_ops([Swap, Drop]);
         } else {
             block_builder.push_op(Drop);
@@ -534,8 +539,8 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         //
         // #=> [(2^(32 - clz) - 1) / 2, clz, n, ...]
         // U32div computes second/top. Stack: [mask, ...], push 2 to get [2, mask, ...].
-        // U32div gives mask/2. Output [quotient, remainder], swap drop to keep quotient.
-        Push(2u8.into()), U32div, Swap, Drop,
+        // U32div gives mask/2. Output [remainder, quotient], drop remainder to keep quotient.
+        Push(2u8.into()), U32div, Drop,
         // Save the intermediate result of dividing by 2 for reuse in the next step
         //
         // #=> [((2^(32 - clz) - 1) / 2) + 1, (2^(32 - clz) - 1) / 2, clz, n, ...]
@@ -613,8 +618,8 @@ fn verify_clo(block_builder: &mut BasicBlockBuilder) {
         //
         // #=> [(2^(32 - clo) - 1) / 2, 2^(32 - clo) - 1, clo, n]
         // U32div computes second/top. Stack: [mask, ...], Dup0 push 2 to get [2, mask, mask, ...].
-        // U32div gives mask/2. Output [quotient, remainder], swap drop to keep quotient.
-        Dup0, Push(2u8.into()), U32div, Swap, Drop,
+        // U32div gives mask/2. Output [remainder, quotient], drop remainder to keep quotient.
+        Dup0, Push(2u8.into()), U32div, Drop,
         // 3. Invert the mask from Step 2, to get one that covers `clo + 1` leading bits
         //
         // #=> [u32::MAX - ((2^(32 - clo) - 1) / 2), 2^(32 - clo) - 1, clo, n]

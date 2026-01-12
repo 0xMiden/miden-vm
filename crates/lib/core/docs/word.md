@@ -2,6 +2,7 @@
 ## miden::core::word
 | Procedure | Description |
 | ----------- | ------------- |
+| reverse | Reverses order of the first four elements on the stack<br /><br />Note: This functionality is also available as the `reversew` instruction<br /><br />Inputs:  [a, b, c, d, ...]<br />Outputs: [d, c, b, a, ...]<br /><br />Cycles: 3<br /> |
 | store_word_u32s_le | Writes the components of a word to memory as eight u32 limbs in little-endian order.<br /><br />Inputs:  [w0, w1, w2, w3, out_ptr, ...]<br />Outputs: [...]<br /><br />Where:<br />- `w*` are the felts of the input word. Each felt is split into a low and high 32-bit limb.<br />- `out_ptr` is an element address in memory.<br />- Memory layout after the call: `[w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi]`.<br /><br />Cycles: 8 * (split + store pair) ~= 176<br /> |
 | eqz | Returns a boolean indicating whether the input word is [0, 0, 0, 0].<br /><br />Inputs:  [INPUT_WORD]<br />Outputs: [is_empty_word]<br /><br />Where:<br />- INPUT_WORD is the word to compare against [0, 0, 0, 0].<br />- is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.<br /><br />Cycles: 10<br /> |
 | testz | Returns a boolean indicating whether the input word is [0, 0, 0, 0]. Unlike eqz, this does not<br />consume the inputs.<br /><br />Inputs:  [INPUT_WORD]<br />Outputs: [is_empty_word, INPUT_WORD]<br /><br />Where:<br />- INPUT_WORD is the word to compare against [0, 0, 0, 0].<br />- is_empty_word is a boolean indicating whether INPUT_WORD is all zeros.<br /><br />Cycles: 11<br /> |
