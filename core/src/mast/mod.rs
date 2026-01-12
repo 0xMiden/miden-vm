@@ -29,7 +29,10 @@ pub use node::{
 
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    utils::{
+        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        hash_string_to_word,
+    },
 };
 
 mod debuginfo;
@@ -163,29 +166,22 @@ impl MastForest {
         id_remappings
     }
 
-    /// Removes all decorators from this MAST forest.
+    /// Clears all [`DebugInfo`] from this forest: decorators, error codes, and procedure names.
     ///
-    /// This method modifies the forest in-place, removing all decorator information
-    /// including operation-indexed decorators, before-enter decorators, after-exit
-    /// decorators, and error codes while keeping the CSR structure valid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let mut forest = MastForest::new();
-    /// // Add decorators and nodes to the forest
-    /// forest.strip_decorators(); // forest is now stripped
     /// ```
-    pub fn strip_decorators(&mut self) {
+    /// # use miden_core::mast::MastForest;
+    /// let mut forest = MastForest::new();
+    /// forest.clear_debug_info();
+    /// assert!(forest.decorators().is_empty());
+    /// ```
+    pub fn clear_debug_info(&mut self) {
         self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.
-    /// The method assumes that decorators have already been stripped if that is desired.
+    /// The method assumes that debug info has already been cleared if that is desired.
     /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
@@ -201,8 +197,8 @@ impl MastForest {
     /// let mut forest = MastForest::new();
     /// // Add nodes to the forest
     ///
-    /// // First strip decorators if needed
-    /// forest.strip_decorators();
+    /// // First clear debug info if needed
+    /// forest.clear_debug_info();
     ///
     /// // Then compact the forest (consumes the original)
     /// let (compacted_forest, root_map) = forest.compact();
@@ -440,6 +436,39 @@ impl MastForest {
     pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
         &mut self.advice_map
     }
+
+    // SERIALIZATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Serializes this MastForest without debug information.
+    ///
+    /// This produces a smaller output by omitting decorators, error codes, and procedure names.
+    /// The resulting bytes can be deserialized with the standard [`Deserializable`] impl,
+    /// which auto-detects the format and creates an empty [`DebugInfo`].
+    ///
+    /// Use this for production builds where debug info is not needed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use miden_core::{mast::MastForest, utils::Serializable};
+    ///
+    /// let forest = MastForest::new();
+    ///
+    /// // Full serialization (with debug info)
+    /// let full_bytes = forest.to_bytes();
+    ///
+    /// // Stripped serialization (without debug info)
+    /// let mut stripped_bytes = Vec::new();
+    /// forest.write_stripped(&mut stripped_bytes);
+    ///
+    /// // Both can be deserialized the same way
+    /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+    /// ```
+    pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
+        use serialization::StrippedMastForest;
+        StrippedMastForest(self).write_into(target);
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -617,6 +646,7 @@ impl MastForest {
     /// at assembly time rather than dynamically during execution, and adds comprehensive
     /// structural validation to prevent deserialization-time panics.
     pub fn validate(&self) -> Result<(), MastForestError> {
+        // Validate basic block batch invariants
         for (node_id_idx, node) in self.nodes.iter().enumerate() {
             let node_id =
                 MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
@@ -626,6 +656,14 @@ impl MastForest {
                 })?;
             }
         }
+
+        // Validate that all procedure name digests correspond to procedure roots in the forest
+        for (digest, _) in self.debug_info.procedure_names() {
+            if self.find_procedure_root(digest).is_none() {
+                return Err(MastForestError::InvalidProcedureNameDigest(digest));
+            }
+        }
+
         Ok(())
     }
 }
@@ -980,6 +1018,13 @@ impl Serializable for DecoratorId {
     }
 }
 
+impl Deserializable for DecoratorId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
@@ -1015,6 +1060,8 @@ pub enum MastForestError {
     DigestRequiredForDeserialization,
     #[error("invalid batch in basic block node {0:?}: {1}")]
     InvalidBatchPadding(MastNodeId, String),
+    #[error("procedure name references digest that is not a procedure root: {0:?}")]
+    InvalidProcedureNameDigest(Word),
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly

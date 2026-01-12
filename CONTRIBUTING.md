@@ -2,7 +2,7 @@
 
 #### First off, thanks for taking the time to contribute!
 
-You can find a detailed explanation of main project concepts in [docs](https://0xMiden.github.io/miden-vm/).
+You can find a detailed explanation of main project concepts in [docs](https://docs.miden.xyz/miden-vm/).
 
 We want to make contributing to this project as easy and transparent as possible, whether it's:
 

@@ -307,6 +307,50 @@ impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
     }
 }
 
+impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
+    type Error = IndexedVecError;
+
+    /// Create an IndexVec from a Vec.
+    ///
+    /// Returns an error if the Vec length exceeds u32::MAX.
+    fn try_from(raw: Vec<T>) -> Result<Self, Self::Error> {
+        if raw.len() > u32::MAX as usize {
+            return Err(IndexedVecError::TooManyItems);
+        }
+        Ok(Self { raw, _m: PhantomData })
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
+
+impl<I, T> Serializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_slice().write_into(target);
+    }
+}
+
+impl<I, T> Deserializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let vec: Vec<T> = Deserializable::read_from(source)?;
+        IndexVec::try_from(vec).map_err(|_| {
+            DeserializationError::InvalidValue("IndexVec length exceeds u32::MAX".into())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::string::{String, ToString};

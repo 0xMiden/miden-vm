@@ -1,4 +1,7 @@
-use alloc::vec::Vec;
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -33,19 +36,19 @@ use crate::{
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct NodeToDecoratorIds {
     /// All `before_enter` decorators, concatenated across all nodes.
-    pub before_enter_decorators: Vec<DecoratorId>,
+    before_enter_decorators: Vec<DecoratorId>,
     /// All `after_exit` decorators, concatenated across all nodes.
-    pub after_exit_decorators: Vec<DecoratorId>,
+    after_exit_decorators: Vec<DecoratorId>,
     /// Index pointers for before_enter decorators: the range for node `i` is
     /// ```text
     /// node_indptr_for_before[i]..node_indptr_for_before[i+1]
     /// ```
-    pub node_indptr_for_before: IndexVec<MastNodeId, usize>,
+    node_indptr_for_before: IndexVec<MastNodeId, usize>,
     /// Index pointers for after_exit decorators: the range for node `i` is
     /// ```text
     /// node_indptr_for_after[i]..node_indptr_for_after[i+1]
     /// ```
-    pub node_indptr_for_after: IndexVec<MastNodeId, usize>,
+    node_indptr_for_after: IndexVec<MastNodeId, usize>,
 }
 
 impl NodeToDecoratorIds {
@@ -57,6 +60,117 @@ impl NodeToDecoratorIds {
             node_indptr_for_before: IndexVec::new(),
             node_indptr_for_after: IndexVec::new(),
         }
+    }
+
+    /// Create a NodeToDecoratorIds from raw components.
+    ///
+    /// Used during deserialization. Validation happens separately via `validate_csr()`.
+    pub fn from_components(
+        before_enter_decorators: Vec<DecoratorId>,
+        after_exit_decorators: Vec<DecoratorId>,
+        node_indptr_for_before: IndexVec<MastNodeId, usize>,
+        node_indptr_for_after: IndexVec<MastNodeId, usize>,
+    ) -> Result<Self, String> {
+        let storage = Self {
+            before_enter_decorators,
+            after_exit_decorators,
+            node_indptr_for_before,
+            node_indptr_for_after,
+        };
+
+        // Basic structural validation (full validation happens via validate_csr)
+        let before_slice = storage.node_indptr_for_before.as_slice();
+        let after_slice = storage.node_indptr_for_after.as_slice();
+
+        if !before_slice.is_empty() && before_slice[0] != 0 {
+            return Err("node_indptr_for_before must start at 0".to_string());
+        }
+
+        if !after_slice.is_empty() && after_slice[0] != 0 {
+            return Err("node_indptr_for_after must start at 0".to_string());
+        }
+
+        Ok(storage)
+    }
+
+    /// Validate CSR structure integrity.
+    ///
+    /// Checks:
+    /// - All decorator IDs are valid (< decorator_count)
+    /// - Both indptr arrays are monotonic, start at 0, end at respective decorator vector lengths
+    pub(super) fn validate_csr(&self, decorator_count: usize) -> Result<(), String> {
+        // Completely empty structures are valid (no nodes, no decorators)
+        if self.before_enter_decorators.is_empty()
+            && self.after_exit_decorators.is_empty()
+            && self.node_indptr_for_before.is_empty()
+            && self.node_indptr_for_after.is_empty()
+        {
+            return Ok(());
+        }
+
+        // Validate all decorator IDs
+        for &dec_id in self.before_enter_decorators.iter().chain(self.after_exit_decorators.iter())
+        {
+            if dec_id.to_usize() >= decorator_count {
+                return Err(format!(
+                    "Invalid decorator ID {}: exceeds decorator count {}",
+                    dec_id.to_usize(),
+                    decorator_count
+                ));
+            }
+        }
+
+        // Validate before_enter CSR
+        let before_slice = self.node_indptr_for_before.as_slice();
+        if !before_slice.is_empty() {
+            if before_slice[0] != 0 {
+                return Err("node_indptr_for_before must start at 0".to_string());
+            }
+
+            for window in before_slice.windows(2) {
+                if window[0] > window[1] {
+                    return Err(format!(
+                        "node_indptr_for_before not monotonic: {} > {}",
+                        window[0], window[1]
+                    ));
+                }
+            }
+
+            if *before_slice.last().unwrap() != self.before_enter_decorators.len() {
+                return Err(format!(
+                    "node_indptr_for_before end {} doesn't match before_enter_decorators length {}",
+                    before_slice.last().unwrap(),
+                    self.before_enter_decorators.len()
+                ));
+            }
+        }
+
+        // Validate after_exit CSR
+        let after_slice = self.node_indptr_for_after.as_slice();
+        if !after_slice.is_empty() {
+            if after_slice[0] != 0 {
+                return Err("node_indptr_for_after must start at 0".to_string());
+            }
+
+            for window in after_slice.windows(2) {
+                if window[0] > window[1] {
+                    return Err(format!(
+                        "node_indptr_for_after not monotonic: {} > {}",
+                        window[0], window[1]
+                    ));
+                }
+            }
+
+            if *after_slice.last().unwrap() != self.after_exit_decorators.len() {
+                return Err(format!(
+                    "node_indptr_for_after end {} doesn't match after_exit_decorators length {}",
+                    after_slice.last().unwrap(),
+                    self.after_exit_decorators.len()
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     /// Creates a new empty `NodeToDecoratorIds` with specified capacity.
@@ -199,10 +313,126 @@ impl NodeToDecoratorIds {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    // SERIALIZATION HELPERS
+    // --------------------------------------------------------------------------------------------
+
+    /// Write this CSR structure to a target using dense representation.
+    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
+        use crate::utils::Serializable;
+
+        self.before_enter_decorators.write_into(target);
+        self.after_exit_decorators.write_into(target);
+        self.node_indptr_for_before.write_into(target);
+        self.node_indptr_for_after.write_into(target);
+    }
+
+    /// Read this CSR structure from a source, validating decorator IDs against decorator_count.
+    pub(super) fn read_from<R: crate::utils::ByteReader>(
+        source: &mut R,
+        decorator_count: usize,
+    ) -> Result<Self, crate::utils::DeserializationError> {
+        use crate::utils::Deserializable;
+
+        let before_enter_decorators: Vec<DecoratorId> = Deserializable::read_from(source)?;
+        let after_exit_decorators: Vec<DecoratorId> = Deserializable::read_from(source)?;
+
+        let node_indptr_for_before: IndexVec<MastNodeId, usize> =
+            Deserializable::read_from(source)?;
+        let node_indptr_for_after: IndexVec<MastNodeId, usize> = Deserializable::read_from(source)?;
+
+        let result = Self::from_components(
+            before_enter_decorators,
+            after_exit_decorators,
+            node_indptr_for_before,
+            node_indptr_for_after,
+        )
+        .map_err(|e| crate::utils::DeserializationError::InvalidValue(e.to_string()))?;
+
+        result.validate_csr(decorator_count).map_err(|e| {
+            crate::utils::DeserializationError::InvalidValue(format!(
+                "NodeToDecoratorIds validation failed: {e}"
+            ))
+        })?;
+
+        Ok(result)
+    }
 }
 
 impl Default for NodeToDecoratorIds {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_decorator_id(value: u32) -> DecoratorId {
+        DecoratorId(value)
+    }
+
+    #[test]
+    fn test_from_components_valid() {
+        let before = vec![test_decorator_id(0), test_decorator_id(1)];
+        let after = vec![test_decorator_id(2)];
+
+        let mut before_indptr = IndexVec::new();
+        before_indptr.push(0).unwrap();
+        before_indptr.push(2).unwrap();
+
+        let mut after_indptr = IndexVec::new();
+        after_indptr.push(0).unwrap();
+        after_indptr.push(1).unwrap();
+
+        let storage =
+            NodeToDecoratorIds::from_components(before, after, before_indptr, after_indptr);
+
+        assert!(storage.is_ok());
+    }
+
+    #[test]
+    fn test_validate_csr_valid() {
+        let mut before_indptr = IndexVec::new();
+        before_indptr.push(0).unwrap();
+        before_indptr.push(1).unwrap();
+
+        let mut after_indptr = IndexVec::new();
+        after_indptr.push(0).unwrap();
+        after_indptr.push(1).unwrap();
+
+        let storage = NodeToDecoratorIds::from_components(
+            vec![test_decorator_id(0)],
+            vec![test_decorator_id(1)],
+            before_indptr,
+            after_indptr,
+        )
+        .unwrap();
+
+        assert!(storage.validate_csr(3).is_ok());
+    }
+
+    #[test]
+    fn test_validate_csr_invalid_decorator_id() {
+        let mut before_indptr = IndexVec::new();
+        before_indptr.push(0).unwrap();
+        before_indptr.push(1).unwrap();
+
+        let mut after_indptr = IndexVec::new();
+        after_indptr.push(0).unwrap();
+        after_indptr.push(0).unwrap();
+
+        let storage = NodeToDecoratorIds::from_components(
+            vec![test_decorator_id(5)], // ID too high
+            vec![],
+            before_indptr,
+            after_indptr,
+        )
+        .unwrap();
+
+        let result = storage.validate_csr(3);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Invalid decorator ID"));
     }
 }

@@ -27,6 +27,13 @@
 - [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
 - Added validation of `core_trace_fragment_size` in `ExecutionOptions` ([#2528](https://github.com/0xMiden/miden-vm/pull/2528)).
 - [BREAKING] Standardizes operand-stack ordering around a unified little-endian (LE) convention (low limb/coeff closest to the top). This includes updating multi-limb integer ops, extension field elements, and streaming memory operations. Also remaps the sponge state and adjusts hperm/digest extraction plus advice hash-insert instructions for consistent LE semantics. ([#2547](https://github.com/0xMiden/miden-vm/pull/2547)).
+- [BREAKING] Change serialization of `BasicBlockNode`s to use padded indices ([#2466](https://github.com/0xMiden/miden-vm/pull/2466/)).
+- Change padded serialization of `BasicBlockNode`s to use delta-encoded metadata ([#2469](https://github.com/0xMiden/miden-vm/pull/2469/)).
+- Change (de)serialization of `MastForest` to directly (de)serialize DebugInfo ([#2470](https://github.com/0xMiden/miden-vm/pull/2470/)).
+- Add `MastForest::write_stripped()` to serialize without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
+- [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
+- Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
+- Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
 
 ## 0.20.2 (TBD)
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).

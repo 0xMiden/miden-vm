@@ -407,8 +407,8 @@ impl proptest::arbitrary::Arbitrary for IntValue {
             num::u8::ANY.prop_map(IntValue::U8),
             // U16 values that don't overlap with U8 to preserve variant during serialization
             (u8::MAX as u16 + 1..=u16::MAX).prop_map(IntValue::U16),
-            // U32 values - full range
-            num::u32::ANY.prop_map(IntValue::U32),
+            // U32 values that don't overlap with U8/U16 to preserve variant during serialization
+            (u16::MAX as u32 + 1..=u32::MAX).prop_map(IntValue::U32),
             // Felt values - values that don't fit in u32 but are within field modulus
             (num::u64::ANY)
                 .prop_filter_map("valid felt value", |n| {
