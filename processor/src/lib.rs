@@ -12,11 +12,11 @@ use core::fmt::{Display, LowerHex};
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
 pub use miden_air::{ExecutionOptions, ExecutionOptionsError, trace::RowIndex};
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, PrimeCharacteristicRing, Program,
-    ProgramInfo, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
+    StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
-    field::{PrimeField64, QuadFelt},
+    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
     sys_events::SystemEvent,
@@ -84,7 +84,7 @@ use crate::{fast::FastProcessor, parallel::build_trace};
 // ================================================================================================
 
 pub mod math {
-    pub use miden_core::{Felt, PrimeField64};
+    pub use miden_core::{Felt, field::PrimeField64};
 }
 
 pub mod crypto {

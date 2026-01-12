@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Kernel, ONE, Operation, PrimeCharacteristicRing, Program, Word, ZERO,
+    Kernel, ONE, Operation, Program, Word, ZERO,
+    field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 use miden_utils_testing::rand::rand_array;

@@ -1,4 +1,4 @@
-use miden_core::{Felt, ONE, PrimeCharacteristicRing, mast::MastForest};
+use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError,

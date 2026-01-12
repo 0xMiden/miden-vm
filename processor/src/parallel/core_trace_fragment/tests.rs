@@ -13,8 +13,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, PrimeCharacteristicRing, Program,
-    WORD_SIZE, ZERO,
+    EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,

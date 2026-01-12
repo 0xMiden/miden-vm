@@ -16,7 +16,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, PrimeCharacteristicRing, Word, ZERO,
+    Kernel, ONE, Operation, Word, ZERO,
+    field::PrimeCharacteristicRing,
     stack::MIN_STACK_DEPTH,
     utils::{ColMatrix, uninit_vector},
 };

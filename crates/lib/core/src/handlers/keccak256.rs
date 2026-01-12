@@ -27,8 +27,8 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, PrimeCharacteristicRing, Word, ZERO,
-    field::PrimeField64,
+    EventName, Felt, Word, ZERO,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };

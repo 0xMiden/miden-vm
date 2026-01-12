@@ -9,7 +9,8 @@
 use core::array;
 
 use miden_core::{
-    Felt, PrimeField64,
+    Felt,
+    field::PrimeField64,
     precompile::{PrecompileCommitment, PrecompileVerifier},
 };
 use miden_core_lib::handlers::keccak256::{

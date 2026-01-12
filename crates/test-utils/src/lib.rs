@@ -20,10 +20,9 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, PrimeCharacteristicRing, StackInputs, StackOutputs, WORD_SIZE, Word,
-    ZERO,
+    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
-    field::{Field, PrimeField64, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };

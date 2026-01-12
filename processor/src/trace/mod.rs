@@ -12,7 +12,7 @@ use miden_air::{
     },
 };
 #[cfg(feature = "std")]
-use miden_core::PrimeField64;
+use miden_core::field::PrimeField64;
 use miden_core::{
     Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     field::ExtensionField,

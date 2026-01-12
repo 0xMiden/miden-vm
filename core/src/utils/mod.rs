@@ -170,7 +170,7 @@ const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
 ///
 /// # Examples
 /// ```
-/// # use miden_core::{Felt, PrimeCharacteristicRing, utils::bytes_to_packed_u32_elements};
+/// # use miden_core::{Felt, field::PrimeCharacteristicRing, utils::bytes_to_packed_u32_elements};
 /// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
 /// let felts = bytes_to_packed_u32_elements(&bytes);
 /// assert_eq!(felts, vec![Felt::new(0x04030201), Felt::new(0x00000005)]);

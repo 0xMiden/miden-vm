@@ -6,7 +6,8 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt,
     Operation::{self, *},
-    PrimeCharacteristicRing, ZERO,
+    ZERO,
+    field::PrimeCharacteristicRing,
     sys_events::SystemEvent,
 };
 

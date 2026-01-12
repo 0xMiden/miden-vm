@@ -10,7 +10,10 @@ use miden_air::trace::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{PrimeCharacteristicRing, WORD_SIZE, ZERO, field::Field};
+use miden_core::{
+    WORD_SIZE, ZERO,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
     EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,

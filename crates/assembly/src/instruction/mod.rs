@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
     parser::{IntValue, PushValue},
 };
 use miden_core::{
-    Decorator, Felt, Operation, PrimeCharacteristicRing, WORD_SIZE, ZERO, mast::MastNodeId,
+    Decorator, Felt, Operation, WORD_SIZE, ZERO, field::PrimeCharacteristicRing, mast::MastNodeId,
 };
 
 use crate::{

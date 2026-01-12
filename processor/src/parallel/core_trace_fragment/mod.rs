@@ -8,8 +8,8 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ONE, OPCODE_PUSH, Operation, PrimeCharacteristicRing, WORD_SIZE, Word, ZERO,
-    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
+    ONE, OPCODE_PUSH, Operation, WORD_SIZE, Word, ZERO,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,

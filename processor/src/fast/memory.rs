@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
-use miden_core::{EMPTY_WORD, Felt, PrimeCharacteristicRing, WORD_SIZE, Word, ZERO};
+use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO, field::PrimeCharacteristicRing};
 
 use crate::{
     ContextId, ErrorContext, MemoryAddress, MemoryError, PrimeField64, processor::MemoryInterface,

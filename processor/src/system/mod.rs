@@ -1,7 +1,7 @@
 use core::fmt::{self, Display};
 
 use miden_air::{Felt, trace::RowIndex};
-use miden_core::PrimeCharacteristicRing;
+use miden_core::field::PrimeCharacteristicRing;
 
 // EXECUTION CONTEXT
 // ================================================================================================

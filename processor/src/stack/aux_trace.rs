@@ -1,7 +1,10 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{MainTrace, RowIndex};
-use miden_core::{OPCODE_DYNCALL, PrimeCharacteristicRing, field::ExtensionField};
+use miden_core::{
+    OPCODE_DYNCALL,
+    field::{ExtensionField, PrimeCharacteristicRing},
+};
 
 use super::Felt;
 use crate::{debug::BusDebugger, trace::AuxColumnBuilder};
