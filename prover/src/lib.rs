@@ -55,7 +55,7 @@ pub async fn prove(
 ) -> Result<(StackOutputs, ExecutionProof), ExecutionError> {
     // execute the program to create an execution trace using FastProcessor
     let processor = FastProcessor::new_with_options(
-        stack_inputs.as_ref(),
+        &*stack_inputs,
         advice_inputs,
         *options.execution_options(),
     );

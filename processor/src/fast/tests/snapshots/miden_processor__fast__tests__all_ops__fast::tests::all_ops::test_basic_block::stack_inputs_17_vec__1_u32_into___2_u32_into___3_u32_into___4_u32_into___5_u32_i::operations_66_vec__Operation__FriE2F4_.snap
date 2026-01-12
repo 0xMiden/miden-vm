@@ -1,0 +1,9 @@
+---
+source: processor/src/fast/tests/all_ops.rs
+expression: fast_stack_outputs
+---
+Err(
+    InvalidFriDomainSegment(
+        10,
+    ),
+)

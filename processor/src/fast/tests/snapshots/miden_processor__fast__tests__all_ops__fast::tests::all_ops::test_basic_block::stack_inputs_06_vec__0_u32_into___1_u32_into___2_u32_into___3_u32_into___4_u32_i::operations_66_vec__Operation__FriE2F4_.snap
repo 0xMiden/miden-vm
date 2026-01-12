@@ -1,8 +1,0 @@
----
-source: processor/src/fast/tests/all_ops.rs
-assertion_line: 133
-expression: fast_stack_outputs
----
-Err(
-    InvalidFriDomainGenerator,
-)

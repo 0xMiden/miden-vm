@@ -1,0 +1,23 @@
+---
+source: processor/src/fast/tests/all_ops.rs
+expression: fast_stack_outputs
+---
+Err(
+    AceChipError {
+        label: SourceSpan {
+            source_id: SourceId(
+                4294967295,
+            ),
+            start: ByteIndex(
+                0,
+            ),
+            end: ByteIndex(
+                0,
+            ),
+        },
+        source_file: None,
+        error: NumEvalIsNotWordAlignedOrIsEmpty(
+            3,
+        ),
+    },
+)
