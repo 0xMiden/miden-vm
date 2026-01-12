@@ -166,23 +166,6 @@ impl AdviceStackBuilder {
         self
     }
 
-    /// Adds a word for consumption by `adv_push.4`.
-    ///
-    /// After `adv_push.4`, the operand stack will have `word[0]` on top.
-    /// This is a convenience wrapper around [`Self::push_for_adv_push`] for Word types.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// builder.push_word_for_adv_push(merkle_root);
-    /// // MASM: adv_push.4
-    /// // Result: operand stack = [root[0], root[1], root[2], root[3], ...]
-    /// ```
-    pub fn push_word_for_adv_push(&mut self, word: Word) -> &mut Self {
-        let arr: [Felt; 4] = word.into();
-        self.push_for_adv_push(&arr)
-    }
-
     /// Adds a word for consumption by `padw adv_loadw`.
     ///
     /// After `adv_loadw`, the operand stack will have the structural word loaded directly.
