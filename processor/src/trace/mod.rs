@@ -11,8 +11,10 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
+#[cfg(feature = "std")]
+use miden_core::PrimeField64;
 use miden_core::{
-    Kernel, PrimeField64, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::MIN_STACK_DEPTH,

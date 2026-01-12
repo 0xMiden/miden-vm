@@ -61,16 +61,13 @@ skip-tree = [
     { name = "rand_core", version = "=0.6.4" },
     # Allow rustc_version v0.2.x - build dependency
     { name = "rustc_version", version = "=0.2.3" },
-    # Allow windows-targets v0.48.x - older Windows target
-    { name = "windows-targets", version = "=0.48.5" },
     # Allow unicode-width v0.1.x - miden-miette vs miden-formatting conflict (complex to fix)
     { name = "unicode-width", version = "=0.1.14" },
-    # Allow windows-sys v0.48.x/v0.59.x - multiple Windows system libraries (hard to converge)
-    { name = "windows-sys", version = "=0.48.0" },
+    # Allow windows-sys v0.59.x - multiple Windows system libraries (hard to converge)
     { name = "windows-sys", version = "=0.59.0" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
-    { name = "syn", version = "=2.0.111" },
+    { name = "syn", version = "=2.0.113" },
 ]
 
 # Sources configuration
@@ -78,4 +75,8 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = []
+allow-git = [
+    # Tracking branches for Plonky3 v0.4.2 upgrade
+    "https://github.com/0xMiden/p3-miden",
+    "https://github.com/0xMiden/crypto",
+]
