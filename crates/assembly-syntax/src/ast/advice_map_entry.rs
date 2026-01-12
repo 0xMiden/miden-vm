@@ -52,7 +52,7 @@ impl AdviceMapEntry {
         self.docs.as_ref().map(|docstring| docstring.as_spanned_str())
     }
 
-    /// Returns the visibility of this alias
+    /// Returns the visibility of this entry
     pub const fn visibility(&self) -> Visibility {
         Visibility::Public
     }

@@ -114,7 +114,7 @@ impl Export {
             Self::Constant(_) => panic!("attempted to unwrap constant as procedure definition"),
             Self::Type(_) => panic!("attempted to unwrap type as procedure definition"),
             Self::Alias(_) => panic!("attempted to unwrap alias as procedure definition"),
-            Self::AdviceMapEntry(_) => panic!("attempted to unwrap alias as procedure definition"),
+            Self::AdviceMapEntry(_) => panic!("attempted to unwrap entry as procedure definition"),
         }
     }
 
