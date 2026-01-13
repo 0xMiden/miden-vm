@@ -111,10 +111,11 @@ fn test_op_dup() {
         op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
         expected_arr[16 - i as usize] = Felt::new(i);
     }
-    // expected_arr now is [16, 15, 14, ..., 2, 1, 1] in "old test order" (top at index 0)
-    // We need to reverse for comparison with stack_top()
-    let expected: Vec<Felt> = expected_arr.iter().rev().cloned().collect();
-    assert_eq!(&expected[..], processor.stack_top());
+    // expected_arr now is [16, 15, 14, ..., 2, 1] (top at index 0). Use the shared helper to
+    // build the expected `stack_top()` view (top at the last index) to avoid duplicating layout
+    // logic in this test.
+    let expected = build_expected(&[16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
+    assert_eq!(expected, processor.stack_top());
 
     // duplicate last stack item (dup15)
     dup_nth(&mut processor, 15, &mut tracer).unwrap();
