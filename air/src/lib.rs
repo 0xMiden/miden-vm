@@ -72,11 +72,11 @@ impl PublicInputs {
     }
 
     pub fn stack_inputs(&self) -> StackInputs {
-        self.stack_inputs.clone()
+        self.stack_inputs
     }
 
     pub fn stack_outputs(&self) -> StackOutputs {
-        self.stack_outputs.clone()
+        self.stack_outputs
     }
 
     pub fn program_info(&self) -> ProgramInfo {
