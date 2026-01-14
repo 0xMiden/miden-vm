@@ -94,15 +94,15 @@ rand = { version = "0.9", default-features = false }
 sha2 = { version = "0.10", default-features = false }
 
 # Upstream Plonky3 dependencies
-p3-blake3        = { version = "0.4", default-features = false }
-p3-commit        = { version = "0.4", default-features = false }
-p3-dft           = { version = "0.4", default-features = false }
-p3-keccak        = { version = "0.4", default-features = false }
-p3-matrix        = { version = "0.4", default-features = false }
-p3-merkle-tree   = { version = "0.4", default-features = false }
+p3-blake3        = { version = "=0.4.1", default-features = false }
+p3-commit        = { version = "=0.4.1", default-features = false }
+p3-dft           = { version = "=0.4.1", default-features = false }
+p3-keccak        = { version = "=0.4.1", default-features = false }
+p3-matrix        = { version = "=0.4.1", default-features = false }
+p3-merkle-tree   = { version = "=0.4.1", default-features = false }
 
 # Miden-specific Plonky3 crates
-p3-miden-fri     = { version = "0.4", default-features = false }
+p3-miden-fri     = { version = "=0.4.0", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }

@@ -338,8 +338,8 @@ impl PrecompileTranscript {
         let comm = commitment.comm_calldata();
         let tag = commitment.tag();
 
-        state[Rpo256::INPUT1_RANGE].copy_from_slice(comm.as_elements());
-        state[Rpo256::INPUT2_RANGE].copy_from_slice(tag.as_elements());
+        state[Rpo256::RATE0_RANGE].copy_from_slice(comm.as_elements());
+        state[Rpo256::RATE1_RANGE].copy_from_slice(tag.as_elements());
         state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
         Rpo256::apply_permutation(&mut state);
