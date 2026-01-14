@@ -75,8 +75,3 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = [
-    # Tracking branches for Plonky3 v0.4.2 upgrade
-    "https://github.com/0xMiden/p3-miden",
-    "https://github.com/0xMiden/crypto",
-]

@@ -620,7 +620,7 @@ fn build_advice_inputs(smt: &Smt) -> (MerkleStore, Vec<(Word, Vec<Felt>)>) {
         .leaves()
         .map(|(_, leaf)| {
             let leaf_hash = leaf.hash();
-            (leaf_hash, leaf.to_elements())
+            (leaf_hash, leaf.to_elements().collect())
         })
         .collect::<Vec<_>>();
 

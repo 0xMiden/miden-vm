@@ -176,7 +176,8 @@ impl Deserializable for StackOutputs {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_elements = source.read_u8()?;
 
-        let elements = source.read_many::<Felt>(num_elements.into())?;
+        let elements =
+            source.read_many_iter::<Felt>(num_elements.into())?.collect::<Result<_, _>>()?;
 
         StackOutputs::new(elements).map_err(|err| {
             DeserializationError::InvalidValue(format!("failed to create stack outputs: {err}",))

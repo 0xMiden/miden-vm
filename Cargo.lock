@@ -1311,7 +1311,8 @@ dependencies = [
 [[package]]
 name = "miden-crypto"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#438e75a4d70dbbe1187eb34fafce68486569e110"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06a55991cd502d1f9e844b379e3188cbf00b03f0a2ea0c5a1d6072e5ad8a572a"
 dependencies = [
  "blake3",
  "cc",
@@ -1330,6 +1331,7 @@ dependencies = [
  "p3-challenger",
  "p3-field",
  "p3-goldilocks",
+ "p3-maybe-rayon",
  "p3-miden-air",
  "p3-miden-prover",
  "p3-symmetric",
@@ -1349,7 +1351,8 @@ dependencies = [
 [[package]]
 name = "miden-crypto-derive"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#438e75a4d70dbbe1187eb34fafce68486569e110"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a16c0062cd1004963e722559eb4850281fe779df1a85b38a264f603ad983bcdd"
 dependencies = [
  "quote",
  "syn 2.0.113",
@@ -1475,7 +1478,8 @@ dependencies = [
 [[package]]
 name = "miden-serde-utils"
 version = "0.21.0"
-source = "git+https://github.com/0xMiden/crypto?branch=tracking-p3-0.4.2#438e75a4d70dbbe1187eb34fafce68486569e110"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20a8e15adcc44de7f7260a0f324663dc993f805b4c2ab1a8769eb477df46eca5"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -1947,7 +1951,8 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#134c14d3b438e3c077cd0fba28903d41fe189e52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45a88e6ee9c92ff6c0b64f1ec0d61eda72fb432bda45337d876c46bd43748508"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -1957,7 +1962,8 @@ dependencies = [
 [[package]]
 name = "p3-miden-fri"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#134c14d3b438e3c077cd0fba28903d41fe189e52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e282998bc1d12dceaa0ed8979fa507b8369d663fa377da695d578f5f3a035935"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -1976,7 +1982,8 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#134c14d3b438e3c077cd0fba28903d41fe189e52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f05a61c10cc2d6a73e192ac34a9884e4f26bd877f3eaea441d7b7ebfdffdf6c7"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -1996,7 +2003,8 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=tracking-0.4.2#134c14d3b438e3c077cd0fba28903d41fe189e52"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a78b6a5b5f6bdc55439d343d2a0a2a8e7cb6544b03296f54d2214a84e91e130"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",

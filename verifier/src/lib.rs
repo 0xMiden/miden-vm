@@ -140,35 +140,35 @@ fn verify_stark(
             let config = config::create_blake3_256_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
+            stark::verify(&config, &air, &proof, &public_values, &[])
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpo256 => {
             let config = config::create_rpo_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
+            stark::verify(&config, &air, &proof, &public_values, &[])
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Rpx256 => {
             let config = config::create_rpx_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
+            stark::verify(&config, &air, &proof, &public_values, &[])
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Poseidon2 => {
             let config = config::create_poseidon2_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
+            stark::verify(&config, &air, &proof, &public_values, &[])
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
         HashFunction::Keccak => {
             let config = config::create_keccak_config();
             let proof = bincode::deserialize(&proof_bytes)
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))?;
-            stark::verify(&config, &air, &proof, &public_values)
+            stark::verify(&config, &air, &proof, &public_values, &[])
                 .map_err(|_| VerificationError::ProgramVerificationError(program_hash))
         },
     }?;

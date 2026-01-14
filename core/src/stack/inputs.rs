@@ -105,7 +105,9 @@ impl Deserializable for StackInputs {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_elements = source.read_u8()?;
 
-        let mut elements = source.read_many::<Felt>(num_elements.into())?;
+        let mut elements = source
+            .read_many_iter::<Felt>(num_elements.into())?
+            .collect::<Result<Vec<_>, _>>()?;
         elements.reverse();
 
         StackInputs::new(elements).map_err(|err| {
