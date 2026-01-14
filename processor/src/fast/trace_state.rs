@@ -1,9 +1,10 @@
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
-
-use miden_air::trace::{
-    RowIndex,
-    chiplets::hasher::{HasherState, STATE_WIDTH},
+use alloc::{
+    collections::{BTreeMap, VecDeque, btree_map::Entry},
+    sync::Arc,
+    vec::Vec,
 };
+
+use miden_air::trace::chiplets::hasher::{HasherState, STATE_WIDTH};
 use miden_core::{
     Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
@@ -13,7 +14,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ErrorContext, ExecutionError,
+    AdviceError, ContextId, ErrorContext, ExecutionError, RowIndex,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     fast::FastProcessor,
@@ -978,7 +979,7 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<OpBatch>, Word)),
+    HashBasicBlock(Word), // Only stores the digest; op_batches are looked up from op_batches_map
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -988,9 +989,22 @@ pub enum HasherOp {
 ///
 /// The hasher requests are recorded during fast processor execution and then replayed during hasher
 /// chiplet trace generation.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct HasherRequestReplay {
     hasher_ops: VecDeque<HasherOp>,
+    /// Deduplication map for basic block operation batches.
+    /// Maps from basic block digest to its operation batches, avoiding duplication when the same
+    /// basic block is entered multiple times.
+    op_batches_map: BTreeMap<Word, Vec<OpBatch>>,
+}
+
+impl core::fmt::Debug for HasherRequestReplay {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("HasherRequestReplay")
+            .field("hasher_ops", &self.hasher_ops)
+            // Exclude op_batches_map from Debug output to maintain snapshot compatibility
+            .finish()
+    }
 }
 
 impl HasherRequestReplay {
@@ -1012,8 +1026,40 @@ impl HasherRequestReplay {
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
+    ///
+    /// Deduplicates operation batches by storing them in a map keyed by the basic block digest.
+    /// If the same basic block is entered multiple times, only one copy of the operation batches
+    /// is stored.
     pub fn record_hash_basic_block(&mut self, op_batches: Vec<OpBatch>, expected_hash: Word) {
-        self.hasher_ops.push_back(HasherOp::HashBasicBlock((op_batches, expected_hash)));
+        // Only store the op_batches if we haven't seen this digest before
+        // If the digest already exists, we verify that the op_batches match (they should, since
+        // the digest is computed from the op_batches)
+        match self.op_batches_map.entry(expected_hash) {
+            Entry::Vacant(entry) => {
+                entry.insert(op_batches);
+            },
+            Entry::Occupied(entry) => {
+                // Digest already exists, skip storing (deduplication)
+                debug_assert_eq!(
+                    entry.get(),
+                    &op_batches,
+                    "Same digest should always map to same op_batches"
+                );
+            },
+        }
+        // Store only the digest in the operation record
+        self.hasher_ops.push_back(HasherOp::HashBasicBlock(expected_hash));
+    }
+
+    /// Returns a reference to the operation batches map for looking up batches during replay.
+    pub fn op_batches_map(&self) -> &BTreeMap<Word, Vec<OpBatch>> {
+        &self.op_batches_map
+    }
+
+    /// Consumes `HasherRequestReplay` and returns both the hasher operations and the operation
+    /// batches map. This allows accessing the map during iteration without cloning.
+    pub fn into_parts(self) -> (VecDeque<HasherOp>, BTreeMap<Word, Vec<OpBatch>>) {
+        (self.hasher_ops, self.op_batches_map)
     }
 
     /// Records a `Hasher::build_merkle_root()` request.
@@ -1031,15 +1077,6 @@ impl HasherRequestReplay {
     ) {
         self.hasher_ops
             .push_back(HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)));
-    }
-}
-
-impl IntoIterator for HasherRequestReplay {
-    type Item = HasherOp;
-    type IntoIter = <VecDeque<HasherOp> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.hasher_ops.into_iter()
     }
 }
 
@@ -1174,4 +1211,41 @@ pub enum NodeExecutionState {
     /// Execute the END phase of a control flow node (JOIN, SPLIT, LOOP, etc.).
     /// This is used when completing execution of a control flow construct.
     End(MastNodeId),
+}
+
+#[cfg(test)]
+mod tests {
+    use miden_core::{Operation, mast::BasicBlockNodeBuilder};
+
+    use super::*;
+
+    #[test]
+    fn test_hasher_request_replay_deduplicates_basic_blocks() {
+        let mut replay = HasherRequestReplay::default();
+        let digest = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
+
+        // Create a simple basic block with one operation to get op_batches
+        let basic_block =
+            BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new()).build().unwrap();
+        let op_batches = basic_block.op_batches().to_vec();
+
+        // Record the same digest three times
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+        replay.record_hash_basic_block(op_batches.clone(), digest);
+
+        // Verify that the map has only one entry (deduplication worked)
+        assert_eq!(replay.op_batches_map().len(), 1);
+
+        // Verify that hasher_ops has three entries (one for each record call)
+        let (hasher_ops, _) = replay.into_parts();
+        assert_eq!(hasher_ops.len(), 3);
+
+        // Verify all three entries are HashBasicBlock with the same digest
+        let mut iter = hasher_ops.into_iter();
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(matches!(iter.next(), Some(HasherOp::HashBasicBlock(h)) if h == digest));
+        assert!(iter.next().is_none());
+    }
 }

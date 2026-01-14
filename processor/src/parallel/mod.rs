@@ -5,27 +5,27 @@ use miden_air::{
     Felt,
     trace::{
         CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, DECODER_TRACE_WIDTH, FN_HASH_RANGE,
-        MIN_TRACE_LEN, MainTrace, PADDED_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, TRACE_WIDTH,
+        MIN_TRACE_LEN, PADDED_TRACE_WIDTH, STACK_TRACE_OFFSET, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        TRACE_WIDTH,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_FLAGS_OFFSET,
             OP_BITS_EXTRA_COLS_OFFSET, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
         },
+        MainTrace,
         stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET},
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO,
-    stack::MIN_STACK_DEPTH,
-    utils::{ColMatrix, uninit_vector},
+    Kernel, ONE, Operation, Word, ZERO, stack::MIN_STACK_DEPTH, utils::uninit_vector,
 };
 use rayon::prelude::*;
-use tracing::instrument;
 
 use crate::{
-    ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
+    ChipletsLengths, ContextId, ExecutionTrace, RowIndex,
+    TraceLenSummary,
     chiplets::Chiplets,
+    crypto::RpoRandomCoin,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -39,10 +39,15 @@ use crate::{
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::AuxTraceBuilders,
-    utils::invert_column_allow_zeros,
+    utils::{ColMatrix, invert_column_allow_zeros},
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
+
+/// Number of random rows to inject at the end of the trace.
+/// This matches the RPO permutation rate (8 elements).
+const NUM_RAND_ROWS: usize = 8;
+
 
 mod core_trace_fragment;
 
@@ -53,7 +58,6 @@ mod tests;
 // ================================================================================================
 
 /// Builds the main trace from the provided trace states in parallel.
-#[instrument(name = "build_trace", skip_all)]
 pub fn build_trace(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
@@ -95,7 +99,7 @@ pub fn build_trace(
     let trace_len_summary =
         TraceLenSummary::new(core_trace_len, range_table_len, ChipletsLengths::new(&chiplets));
 
-    // Compute the final main trace length
+    // Compute the final main trace length, after accounting for random rows
     let main_trace_len =
         compute_main_trace_length(core_trace_len, range_table_len, chiplets.trace_len());
 
@@ -103,7 +107,12 @@ pub fn build_trace(
         || pad_trace_columns(&mut core_trace_columns, main_trace_len),
         || {
             rayon::join(
-                || range_checker.into_trace_with_table(range_table_len, main_trace_len),
+                || {
+                    range_checker.into_trace_with_table(
+                        range_table_len,
+                        main_trace_len,
+                    )
+                },
                 || chiplets.into_trace(main_trace_len, final_pc_transcript.state()),
             )
         },
@@ -113,12 +122,22 @@ pub fn build_trace(
     let padding_columns = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
     // Chain all trace columns together
-    let trace_columns: Vec<Vec<Felt>> = core_trace_columns
+    let mut trace_columns: Vec<Vec<Felt>> = core_trace_columns
         .into_iter()
         .chain(range_checker_trace.trace)
         .chain(chiplets_trace.trace)
         .chain(padding_columns)
         .collect();
+
+    // Initialize random element generator using program hash
+    let mut rng = RpoRandomCoin::new(program_hash);
+
+    // Inject random values into the last NUM_RAND_ROWS rows for all columns
+    for i in main_trace_len - NUM_RAND_ROWS..main_trace_len {
+        for column in trace_columns.iter_mut() {
+            column[i] = rng.draw();
+        }
+    }
 
     // Create the MainTrace
     let main_trace = {
@@ -156,8 +175,9 @@ fn compute_main_trace_length(
     // Get the trace length required to hold all execution trace steps
     let max_len = range_table_len.max(core_trace_len).max(chiplets_trace_len);
 
-    // Pad the trace length to the next power of two
-    let trace_len = max_len.next_power_of_two();
+    // Pad the trace length to the next power of two and ensure that there is space for random
+    // rows
+    let trace_len = (max_len + NUM_RAND_ROWS).next_power_of_two();
     core::cmp::max(trace_len, MIN_TRACE_LEN)
 }
 
@@ -213,9 +233,13 @@ fn generate_core_trace_columns(
     // Run batch inversion on stack's H0 helper column, processing each fragment in parallel.
     // This must be done after fixup_stack_and_system_rows since that function overwrites the first
     // row of each fragment with non-inverted values.
+    // Note: We need to handle zeros properly, so we use a helper function that processes chunks
+    // and handles zeros by leaving them unchanged.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
-        h0_column.par_chunks_mut(fragment_size).for_each(invert_column_allow_zeros);
+        h0_column.par_chunks_mut(fragment_size).for_each(|chunk| {
+            invert_column_allow_zeros(chunk);
+        });
     }
 
     // Truncate the core trace columns. After this point, there is no more uninitialized memory.
@@ -413,7 +437,7 @@ fn initialize_range_checker(
 
     // Add all u32 range checks recorded during execution
     for (clk, values) in range_checker_replay.into_iter() {
-        range_checker.add_range_checks(clk, &values);
+        range_checker.add_range_checks(clk, &values[..]);
     }
 
     // Add all memory-related range checks
@@ -433,8 +457,11 @@ fn initialize_chiplets(
 ) -> Chiplets {
     let mut chiplets = Chiplets::new(kernel);
 
+    // Extract both the hasher operations and the op_batches_map to avoid cloning
+    let (hasher_ops, op_batches_map) = hasher_for_chiplet.into_parts();
+
     // populate hasher chiplet
-    for hasher_op in hasher_for_chiplet.into_iter() {
+    for hasher_op in hasher_ops.into_iter() {
         match hasher_op {
             HasherOp::Permute(input_state) => {
                 let _ = chiplets.hasher.permute(input_state);
@@ -442,14 +469,24 @@ fn initialize_chiplets(
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
-            HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+            HasherOp::HashBasicBlock(expected_hash) => {
+                // Look up the operation batches from the deduplication map
+                let op_batches = op_batches_map.get(&expected_hash).unwrap_or_else(|| {
+                    panic!(
+                        "op_batches should exist in map for recorded digest {:?}. Map contains {} entries with keys: {:?}",
+                        expected_hash,
+                        op_batches_map.len(),
+                        op_batches_map.keys().collect::<Vec<_>>()
+                    );
+                });
+                // Convert &Vec<OpBatch> to &[OpBatch] for hash_basic_block
+                let _ = chiplets.hasher.hash_basic_block(op_batches.as_slice(), expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
                 let _ = chiplets.hasher.build_merkle_root(value, &path, index);
             },
             HasherOp::UpdateMerkleRoot((old_value, new_value, path, index)) => {
-                chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
+                let _ = chiplets.hasher.update_merkle_root(old_value, new_value, &path, index);
             },
         }
     }
@@ -513,19 +550,19 @@ fn initialize_chiplets(
                         .expect("memory read element failed when populating chiplet");
                 },
                 MemoryAccess::WriteElement(addr, element, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .write(ctx, addr, clk, element, &())
                         .expect("memory write element failed when populating chiplet");
                 },
                 MemoryAccess::ReadWord(addr, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .read_word(ctx, addr, clk, &())
                         .expect("memory read word failed when populating chiplet");
                 },
                 MemoryAccess::WriteWord(addr, word, ctx, clk) => {
-                    chiplets
+                    let _ = chiplets
                         .memory
                         .write_word(ctx, addr, clk, word, &())
                         .expect("memory write word failed when populating chiplet");
@@ -558,7 +595,7 @@ fn initialize_chiplets(
 
     // populate kernel ROM
     for proc_hash in kernel_replay.into_iter() {
-        chiplets
+        let _ = chiplets
             .kernel_rom
             .access_proc(proc_hash, &())
             .expect("kernel proc access failed when populating chiplet");
@@ -569,7 +606,7 @@ fn initialize_chiplets(
 
 fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     let total_program_rows = trace_columns[0].len();
-    assert!(total_program_rows <= main_trace_len);
+    assert!(total_program_rows + NUM_RAND_ROWS - 1 <= main_trace_len);
 
     let num_padding_rows = main_trace_len - total_program_rows;
 

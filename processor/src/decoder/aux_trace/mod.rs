@@ -40,17 +40,17 @@ impl AuxTraceBuilder {
         let p2 = block_hash_column_builder.build_aux_column(main_trace, rand_elements);
         let p3 = op_group_table_column_builder.build_aux_column(main_trace, rand_elements);
 
-        debug_assert_eq!(
+        assert_eq!(
             *p1.last().unwrap(),
             E::ONE,
             "block stack table is not empty at the end of program execution"
         );
-        debug_assert_eq!(
+        assert_eq!(
             *p2.last().unwrap(),
             E::ONE,
             "block hash table is not empty at the end of program execution"
         );
-        debug_assert_eq!(
+        assert_eq!(
             *p3.last().unwrap(),
             E::ONE,
             "op group table is not empty at the end of program execution"
