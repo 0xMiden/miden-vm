@@ -11,7 +11,12 @@ use crate::{Felt, chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 // TRACE FRAGMENT
 // ================================================================================================
 
-/// TODO: add docs
+/// A view into a subset of columns from an execution trace.
+///
+/// Represents a contiguous segment of rows from one or more columns of the execution trace.
+/// Allows chiplet trace generators to fill their trace data into pre-allocated memory without
+/// copying data. The `'a` lifetime ensures the fragment does not outlive the underlying trace
+/// data it references.
 pub struct TraceFragment<'a> {
     data: Vec<&'a mut [Felt]>,
     num_rows: usize,
