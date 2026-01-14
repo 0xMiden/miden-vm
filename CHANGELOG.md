@@ -34,6 +34,7 @@
 - Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
 
 - Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
+- Made `StackInputs` and `StackOutputs` implement `Copy` trait ([#2581](https://github.com/0xMiden/miden-vm/pull/2581)).
 ## 0.20.2 (TBD)
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
 
