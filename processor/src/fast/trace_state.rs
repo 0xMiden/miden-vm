@@ -30,26 +30,22 @@ use crate::{
 /// builder. That is, as core trace generation progresses, this struct can be mutated to represent
 /// the generation context at any clock cycle within the fragment.
 ///
-/// This struct is conceptually divided into 4 main components:
+/// This struct is conceptually divided into 4 components:
 /// 1. core trace state: the state of the processor at any clock cycle in the fragment, initialized
 ///    to the state at the first clock cycle in the fragment,
 /// 2. execution replay: information needed to replay the execution of the processor for the
 ///    remainder of the fragment,
 /// 3. continuation: a stack of continuations for the processor representing the nodes in the MAST
 ///    forest to execute when the current node is done executing,
-/// 4. initial state: some information about the state of the execution at the start of the
-///    fragment. This includes the [`MastForest`] that is being executed at the start of the
-///    fragment (which can change when encountering an [`miden_core::mast::ExternalNode`] or
-///    [`miden_core::mast::DynNode`]), and the current node's execution state, which contains
-///    additional information to pinpoint exactly where in the processing of the node we're at when
-///    this fragment begins.
+/// 4. initial MAST forest: the MAST forest being executed at the start of the fragment (which can
+///    change during execution when encountering an [`miden_core::mast::ExternalNode`] or
+///    [`miden_core::mast::DynNode`]).
 #[derive(Debug)]
 pub struct CoreTraceFragmentContext {
     pub state: CoreTraceState,
     pub replay: ExecutionReplay,
     pub continuation: ContinuationStack,
     pub initial_mast_forest: Arc<MastForest>,
-    pub initial_execution_state: NodeExecutionState,
 }
 
 // CORE TRACE STATE

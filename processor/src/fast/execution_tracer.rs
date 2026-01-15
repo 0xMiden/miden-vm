@@ -15,7 +15,7 @@ use miden_core::{
 
 use crate::{
     chiplets::CircuitEvaluation,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
         FastProcessor,
@@ -38,7 +38,6 @@ use crate::{
 struct StateSnapshot {
     state: CoreTraceState,
     continuation_stack: ContinuationStack,
-    execution_state: NodeExecutionState,
     initial_mast_forest: Arc<MastForest>,
 }
 
@@ -176,7 +175,7 @@ impl ExecutionTracer {
         &mut self,
         system_state: SystemState,
         stack_top: [Felt; MIN_STACK_DEPTH],
-        continuation_stack: ContinuationStack,
+        mut continuation_stack: ContinuationStack,
         execution_state: NodeExecutionState,
         current_forest: Arc<MastForest>,
     ) {
@@ -204,6 +203,13 @@ impl ExecutionTracer {
                 StackState::new(stack_top, stack_depth, last_overflow_addr)
             };
 
+            // Push new continuation corresponding to the current execution state
+            {
+                let top_continuation =
+                    continuation_from_execution_state(execution_state, &current_forest);
+                continuation_stack.push_continuation(top_continuation);
+            }
+
             Some(StateSnapshot {
                 state: CoreTraceState {
                     system: system_state,
@@ -211,7 +217,6 @@ impl ExecutionTracer {
                     stack,
                 },
                 continuation_stack,
-                execution_state,
                 initial_mast_forest: current_forest,
             })
         };
@@ -411,13 +416,50 @@ impl ExecutionTracer {
                     block_stack: block_stack_replay,
                 },
                 continuation: snapshot.continuation_stack,
-                initial_execution_state: snapshot.execution_state,
                 initial_mast_forest: snapshot.initial_mast_forest,
             };
 
             self.fragment_contexts.push(trace_state);
         }
     }
+}
+
+/// Converts a [NodeExecutionState] into the corresponding [Continuation].
+///
+/// The [NodeExecutionState] represents the execution state at a given point in time, while the
+/// [Continuation] represents the next action to be taken in the execution. This function maps
+/// between the two representations.
+fn continuation_from_execution_state(
+    execution_state: NodeExecutionState,
+    current_forest: &Arc<MastForest>,
+) -> Continuation {
+    let top_continuation = match execution_state {
+        NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch } => {
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
+        },
+        NodeExecutionState::Start(node_id) => Continuation::StartNode(node_id),
+        NodeExecutionState::Respan { node_id, batch_index } => {
+            Continuation::Respan { node_id, batch_index }
+        },
+        NodeExecutionState::LoopRepeat(node_id) => Continuation::FinishLoop(node_id),
+        NodeExecutionState::End(node_id) => {
+            let node = current_forest
+                .get_node_by_id(node_id)
+                .expect("Node ID expected to exist in current forest");
+            match node {
+                MastNode::Block(_basic_block_node) => Continuation::FinishBasicBlock(node_id),
+                MastNode::Join(_join_node) => Continuation::FinishJoin(node_id),
+                MastNode::Split(_split_node) => Continuation::FinishSplit(node_id),
+                MastNode::Loop(_loop_node) => Continuation::FinishLoop(node_id),
+                MastNode::Call(_call_node) => Continuation::FinishCall(node_id),
+                MastNode::Dyn(_dyn_node) => Continuation::FinishDyn(node_id),
+                MastNode::External(_external_node) => {
+                    panic!("External nodes are guaranteed to be resolved")
+                },
+            }
+        },
+    };
+    top_continuation
 }
 
 impl Tracer for ExecutionTracer {
