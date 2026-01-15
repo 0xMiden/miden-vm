@@ -189,11 +189,11 @@ fn wrapping_mul() {
 }
 
 #[test]
-fn overflowing_mul() {
+fn widening_mul() {
     let source = "
     use miden::core::math::u64
     begin
-        exec.u64::overflowing_mul
+        exec.u64::widening_mul
     end";
 
     let a = u64::MAX as u128;

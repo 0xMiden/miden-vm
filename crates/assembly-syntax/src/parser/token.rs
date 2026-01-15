@@ -609,8 +609,8 @@ pub enum Token<'input> {
     U32Or,
     U32OverflowingAdd,
     U32OverflowingAdd3,
-    U32OverflowingMadd,
-    U32OverflowingMul,
+    U32WideningMadd,
+    U32WideningMul,
     U32OverflowingSub,
     U32Popcnt,
     U32Clz,
@@ -835,8 +835,8 @@ impl fmt::Display for Token<'_> {
             Token::U32Or => write!(f, "u32or"),
             Token::U32OverflowingAdd => write!(f, "u32overflowing_add"),
             Token::U32OverflowingAdd3 => write!(f, "u32overflowing_add3"),
-            Token::U32OverflowingMadd => write!(f, "u32overflowing_madd"),
-            Token::U32OverflowingMul => write!(f, "u32overflowing_mul"),
+            Token::U32WideningMadd => write!(f, "u32widening_madd"),
+            Token::U32WideningMul => write!(f, "u32widening_mul"),
             Token::U32OverflowingSub => write!(f, "u32overflowing_sub"),
             Token::U32Popcnt => write!(f, "u32popcnt"),
             Token::U32Clz => write!(f, "u32clz"),
@@ -1040,8 +1040,8 @@ impl<'input> Token<'input> {
                 | Token::U32Or
                 | Token::U32OverflowingAdd
                 | Token::U32OverflowingAdd3
-                | Token::U32OverflowingMadd
-                | Token::U32OverflowingMul
+                | Token::U32WideningMadd
+                | Token::U32WideningMul
                 | Token::U32OverflowingSub
                 | Token::U32Popcnt
                 | Token::U32Clz
@@ -1253,8 +1253,8 @@ impl<'input> Token<'input> {
         ("u32or", Token::U32Or),
         ("u32overflowing_add", Token::U32OverflowingAdd),
         ("u32overflowing_add3", Token::U32OverflowingAdd3),
-        ("u32overflowing_madd", Token::U32OverflowingMadd),
-        ("u32overflowing_mul", Token::U32OverflowingMul),
+        ("u32widening_madd", Token::U32WideningMadd),
+        ("u32widening_mul", Token::U32WideningMul),
         ("u32overflowing_sub", Token::U32OverflowingSub),
         ("u32popcnt", Token::U32Popcnt),
         ("u32clz", Token::U32Clz),

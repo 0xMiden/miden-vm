@@ -89,16 +89,16 @@ end
 pub proc wrapping_mul(b: u64, a: u64) -> u64
     dup.2               # => [a_lo, b_lo, b_hi, a_lo, a_hi]
     dup.1               # => [b_lo, a_lo, b_lo, b_hi, a_lo, a_hi]
-    u32overflowing_mul  # => [p0_lo, p0_hi, b_lo, b_hi, a_lo, a_hi]
+    u32widening_mul  # => [p0_lo, p0_hi, b_lo, b_hi, a_lo, a_hi]
     swap                # => [p0_hi, p0_lo, b_lo, b_hi, a_lo, a_hi]
     movup.3             # => [b_hi, p0_hi, p0_lo, b_lo, a_lo, a_hi]
     movup.4             # => [a_lo, b_hi, p0_hi, p0_lo, b_lo, a_hi]
-    u32overflowing_madd # => [t1_lo, t1_hi, p0_lo, b_lo, a_hi]
+    u32widening_madd # => [t1_lo, t1_hi, p0_lo, b_lo, a_hi]
     swap                # => [t1_hi, t1_lo, p0_lo, b_lo, a_hi]
     drop                # => [t1_lo, p0_lo, b_lo, a_hi]
     movup.2             # => [b_lo, t1_lo, p0_lo, a_hi]
     movup.3             # => [a_hi, b_lo, t1_lo, p0_lo]
-    u32overflowing_madd # => [t2_lo, t2_hi, p0_lo]
+    u32widening_madd # => [t2_lo, t2_hi, p0_lo]
     swap                # => [t2_hi, t2_lo, p0_lo]
     drop                # => [t2_lo, p0_lo]
     swap                # => [p0_lo, t2_lo] = [c_lo, c_hi]
@@ -110,7 +110,7 @@ end
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_mid_lo, c_mid_hi, c_hi, ...], where
 #! c = a * b is represented as a 128-bit value split into 4 32-bit limbs.
 #! This takes 22 cycles.
-pub proc overflowing_mul(b: u64, a: u64) -> u128
+pub proc widening_mul(b: u64, a: u64) -> u128
     # => [b_lo, b_hi, a_lo, a_hi, ...]
     reversew
     # => [a_hi, a_lo, b_hi, b_lo, ...] (effectively [x_hi, x_lo, y_hi, y_lo] for x*y)
@@ -119,26 +119,26 @@ pub proc overflowing_mul(b: u64, a: u64) -> u128
     dup.3
     dup.2
     # => [x_lo, y_lo, x_hi, x_lo, y_hi, y_lo, ...]
-    u32overflowing_mul
+    u32widening_mul
     # => [p0_lo, p0_hi, x_hi, x_lo, y_hi, y_lo, ...]
     swap
     # => [p0_hi, p0_lo, x_hi, x_lo, y_hi, y_lo, ...]
     dup.4
     movup.4
     # => [x_lo, y_hi, p0_hi, p0_lo, x_hi, y_hi, y_lo, ...]
-    u32overflowing_madd
+    u32widening_madd
     # => [t1_lo, t1_hi, p0_lo, x_hi, y_hi, y_lo, ...] where t1 = y_hi * x_lo + p0_hi
     movup.5
     dup.4
     # => [y_hi, y_lo, t1_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # => [t2_lo, t2_hi, t1_hi, p0_lo, x_hi, y_hi, ...] where t2 = y_lo * y_hi + t1_lo
     swap
     # => [t2_hi, t2_lo, t1_hi, p0_lo, x_hi, y_hi, ...]
     movup.5
     movup.5
     # => [y_hi, x_hi, t2_hi, t2_lo, t1_hi, p0_lo, ...]
-    u32overflowing_madd
+    u32widening_madd
     # => [t3_lo, t3_hi, t2_lo, t1_hi, p0_lo, ...] where t3 = x_hi * y_hi + t2_hi
     swap
     # => [t3_hi, t3_lo, t2_lo, t1_hi, p0_lo, ...]
@@ -360,7 +360,7 @@ pub proc div(b: u64, a: u64) -> u64
     # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
     # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_mul
+    u32widening_mul
     # outputs [lo, hi]: prod1 = q_lo * b_lo
     # => [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
@@ -371,7 +371,7 @@ pub proc div(b: u64, a: u64) -> u64
     # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.3
     # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: p2 = q_lo * b_hi + p1_hi
     # => [p2_lo, p2_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
@@ -385,7 +385,7 @@ pub proc div(b: u64, a: u64) -> u64
     # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.4
     # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: p3 = q_hi * b_lo + p2_lo
     # => [p3_lo, p3_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
@@ -515,7 +515,7 @@ pub proc mod(b: u64, a: u64) -> u64
     # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
     # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_mul
+    u32widening_mul
     # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -524,7 +524,7 @@ pub proc mod(b: u64, a: u64) -> u64
     # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     movup.3
     # => [q_lo, b_hi, p1_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p2_hi, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -536,7 +536,7 @@ pub proc mod(b: u64, a: u64) -> u64
     # => [b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.3
     # => [q_hi, b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p3_hi, p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -662,7 +662,7 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.1
     # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_mul
+    u32widening_mul
     # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -671,7 +671,7 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.3
     # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -683,7 +683,7 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     dup.4
     # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32overflowing_madd
+    u32widening_madd
     # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     swap
     # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
@@ -1037,7 +1037,7 @@ pub proc rotl(n: u32, a: u64) -> u64
     # [a_lo, 2^shift_amt, 2^shift_amt, a_hi, borrow, ...]
 
     # --- STEP 3: Shift the low limb: a_lo * 2^shift_amt ---
-    u32overflowing_mul
+    u32widening_mul
     # outputs [lo, hi]: lo = (a_lo * 2^shift_amt) mod 2^32, hi = overflow
     # [lo1, hi1, 2^shift_amt, a_hi, borrow, ...]
 
@@ -1051,11 +1051,11 @@ pub proc rotl(n: u32, a: u64) -> u64
     movup.3
     # [2^shift_amt, a_hi, hi1, lo1, borrow, ...]
 
-    # u32overflowing_madd: computes top * second + third
+    # u32widening_madd: computes top * second + third
     # Input: [2^shift_amt, a_hi, hi1, ...]
     # Computes: 2^shift_amt * a_hi + hi1
     # outputs [lo, hi]
-    u32overflowing_madd
+    u32widening_madd
     # [lo2, hi2, lo1, borrow, ...]
     # lo2 = (a_hi * 2^shift_amt + hi1) mod 2^32
     # hi2 = overflow (bits that wrap around)

@@ -1580,8 +1580,8 @@ pub proc hash_bytes
     loc_load.8 u32assert u32div.4 loc_load.0 u32wrapping_add u32wrapping_sub.4 loc_store.12
 
     # loc.4 (u32 aligned padding byte): 0x80000000 >> ((input_length % 4) * 8)
-    # Note: u32overflowing_mul returns [lo, hi] with lo on top, swap to get hi for assertz
-    loc_load.4 u32assert u32mod.4 u32assert u32overflowing_mul.8 swap assertz push.0x80000000 swap u32shr loc_store.16
+    # Note: u32widening_mul returns [lo, hi] with lo on top, swap to get hi for assertz
+    loc_load.4 u32assert u32mod.4 u32assert u32widening_mul.8 swap assertz push.0x80000000 swap u32shr loc_store.16
 
     # loc.5 (memory offset of first padding byte): (input_length / 4) % 4
     loc_load.4 u32assert u32div.4 u32mod.4 loc_store.20
@@ -1603,8 +1603,8 @@ pub proc hash_bytes
 
     # Set message length in bits at end of padding
     padw loc_load.12 mem_loadw_be
-    # Note: u32overflowing_mul returns [lo, hi] with lo on top, swap to get hi for assertz
-    movup.3 drop loc_load.4 u32assert u32overflowing_mul.8 swap assertz movdn.3
+    # Note: u32widening_mul returns [lo, hi] with lo on top, swap to get hi for assertz
+    movup.3 drop loc_load.4 u32assert u32widening_mul.8 swap assertz movdn.3
     loc_load.12 mem_storew_be dropw
 
     # Sha256 init

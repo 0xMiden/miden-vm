@@ -41,13 +41,13 @@ pub proc mod_12289
     # => [qlo, qhi, a_hi, a_lo, ...]
 
     push.M
-    u32overflowing_mul swap
+    u32widening_mul swap
     # => [overflow, M * qlo % 2^32, qhi, a_hi, a_lo, ...]
 
     movup.2
     push.M
     # => [M, qhi, overflow, M * qlo % 2^32, a_hi, a_lo, ...]
-    u32overflowing_madd swap
+    u32widening_madd swap
     # => [t1, t0, M * qlo % 32, a_hi, a_lo, ...] where t = t1 * 2^32 + t0 and t = M * qhi + overflow
     # Note by the bound on x - r = q * M, we are guaranteed that t1 = 0
     drop
