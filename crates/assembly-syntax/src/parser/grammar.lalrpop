@@ -5,7 +5,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
+use core::{marker::PhantomData, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
@@ -948,16 +948,9 @@ While: Op = {
 }
 
 Repeat: Op = {
-    <l:@L> "repeat" "." <count:uint> <body:Block> "end" <r:@R> =>? {
-        let span = span!(source_id, l, r);
-        u32::try_from(count)
-            .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
-            .and_then(|count| {
-                NonZeroU32::try_from(count)
-                    .map(|count| Op::Repeat { span, count: count.get(), body })
-                    .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
-            })
-    }
+  <l:@L> "repeat" <imm:Imm<U32>> <body:Block> "end" <r:@R> => {
+    Op::Repeat { span: span!(source_id, l, r), count: imm, body }
+  }
 }
 
 #[inline]

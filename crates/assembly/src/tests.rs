@@ -156,6 +156,16 @@ fn repeat_basic_blocks_merged() -> TestResult {
     Ok(())
 }
 
+/// Ensures `repeat` supports dynamic iteration counts provided via constants.
+#[test]
+fn repeat_dynamic_iteration_count() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
+    Ok(())
+}
+
 #[test]
 fn single_basic_block() -> TestResult {
     let context = TestContext::default();
@@ -3327,6 +3337,34 @@ fn invalid_repeat() -> TestResult {
         r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
     );
 
+    // Overflow iter count
+    let count: u64 = u32::MAX as u64 + 1;
+    let source = source_file!(
+        &context,
+        format!(
+            "\
+            const CONSTANT = {count}
+            begin
+                repeat.CONSTANT
+                    add
+                end
+            end
+            "
+        )
+    );
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid immediate: value is larger than expected range",
+        regex!(r#",-\[test[\d]+:3:24\]"#),
+        "2 |             begin",
+        "3 |                 repeat.CONSTANT",
+        "  :                        ^^^^^^^^",
+        "4 |                     add",
+        "  `----"
+    );
     Ok(())
 }
 

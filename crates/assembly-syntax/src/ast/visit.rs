@@ -1012,8 +1012,12 @@ where
             visitor.visit_mut_block(then_blk)?;
             visitor.visit_mut_block(else_blk)
         },
-        Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_mut_block(body),
+        Op::While { body, .. } => visitor.visit_mut_block(body),
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
+        Op::Repeat { count, body, .. } => {
+            visitor.visit_mut_immediate_u32(count)?;
+            visitor.visit_mut_block(body)
+        },
     }
 }
 
