@@ -1391,6 +1391,7 @@ dependencies = [
  "derive_more",
  "miden-assembly-syntax",
  "miden-core",
+ "miden-debug-types",
  "miden-test-serde-macros",
  "proptest",
  "proptest-derive",

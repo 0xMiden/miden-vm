@@ -796,6 +796,17 @@ impl FastProcessor {
                     }
                 }
             },
+            Decorator::DebugVar(_debug_var) => {
+                // DebugVar is strictly a metadata-carrying decorator used by downstream
+                // tooling (e.g., debuggers). It is non-actionable in the processor itself.
+                //
+                // TODO: Consider adding a mechanism for debugger notification when variable
+                // info changes. Options include:
+                // - A raw trace event
+                // - Modifying the on_debug callback
+                // - A new on_variable callback specific to DebugVar
+                // Any such callback should only be invoked when tracing is enabled.
+            },
         };
         ControlFlow::Continue(())
     }
