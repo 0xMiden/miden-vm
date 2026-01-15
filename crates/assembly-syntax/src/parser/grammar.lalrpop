@@ -216,8 +216,8 @@ extern {
         "u32or" => Token::U32Or,
         "u32overflowing_add" => Token::U32OverflowingAdd,
         "u32overflowing_add3" => Token::U32OverflowingAdd3,
-        "u32overflowing_madd" => Token::U32OverflowingMadd,
-        "u32overflowing_mul" => Token::U32OverflowingMul,
+        "u32widening_madd" => Token::U32WideningMadd,
+        "u32widening_mul" => Token::U32WideningMul,
         "u32overflowing_sub" => Token::U32OverflowingSub,
         "u32popcnt" => Token::U32Popcnt,
         "u32clz" => Token::U32Clz,
@@ -1039,7 +1039,7 @@ Inst: Instruction = {
     "swapdw" => Instruction::SwapDw,
     "u32cast" => Instruction::U32Cast,
     "u32overflowing_add3" => Instruction::U32OverflowingAdd3,
-    "u32overflowing_madd" => Instruction::U32OverflowingMadd,
+    "u32widening_madd" => Instruction::U32WideningMadd,
     "u32popcnt" => Instruction::U32Popcnt,
     "u32clz" => Instruction::U32Clz,
     "u32ctz" => Instruction::U32Ctz,
@@ -1381,11 +1381,11 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSub))],
         }
     },
-    <l:@L> "u32overflowing_mul" <imm:MaybeImm<U32>> <r:@R> => {
+    <l:@L> "u32widening_mul" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_id, l, r);
         match imm {
-            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMulImm(imm)))],
-            None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMul))],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningMulImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningMul))],
         }
     },
     <l:@L> "u32shl" <imm:MaybeImm<Shift32>> <r:@R> => {
@@ -2263,8 +2263,8 @@ Opcode: &'static str = {
     "u32or" => "u32or",
     "u32overflowing_add" => "u32overflowing_add",
     "u32overflowing_add3" => "u32overflowing_add3",
-    "u32overflowing_madd" => "u32overflowing_madd",
-    "u32overflowing_mul" => "u32overflowing_mul",
+    "u32widening_madd" => "u32widening_madd",
+    "u32widening_mul" => "u32widening_mul",
     "u32overflowing_sub" => "u32overflowing_sub",
     "u32popcnt" => "u32popcnt",
     "u32clz" => "u32clz",

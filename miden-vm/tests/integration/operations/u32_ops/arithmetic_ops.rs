@@ -330,8 +330,8 @@ fn u32wrapping_mul_b() {
 }
 
 #[test]
-fn u32overflowing_mul() {
-    let asm_op = "u32overflowing_mul";
+fn u32widening_mul() {
+    let asm_op = "u32widening_mul";
 
     // --- no overflow ----------------------------------------------------------------------------
     // c = a * b and d should be unset, since there was no arithmetic overflow.
@@ -365,8 +365,8 @@ fn u32overflowing_mul() {
 }
 
 #[test]
-fn u32overflowing_madd() {
-    let asm_op = "u32overflowing_madd";
+fn u32widening_madd() {
+    let asm_op = "u32widening_madd";
 
     // --- no overflow ----------------------------------------------------------------------------
     // d = a * b + c and e should be unset, since there was no arithmetic overflow.
@@ -590,7 +590,7 @@ proptest! {
     #[test]
     fn u32unchecked_mul_proptest(a in any::<u32>(), b in any::<u32>()) {
         let wrapping_asm_op = "u32wrapping_mul";
-        let overflowing_asm_op = "u32overflowing_mul";
+        let overflowing_asm_op = "u32widening_mul";
 
         // Output is [lo, hi] in LE order with lo on top
         let result = a as u64 * b as u64;
@@ -653,8 +653,8 @@ proptest! {
     }
 
     #[test]
-    fn u32overflowing_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
-        let asm_op = "u32overflowing_madd";
+    fn u32widening_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let asm_op = "u32widening_madd";
 
         // Output is [lo, hi] in LE order with lo on top
         let madd = a as u64 * b as u64 + c as u64;
