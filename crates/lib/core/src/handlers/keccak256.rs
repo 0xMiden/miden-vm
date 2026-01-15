@@ -28,7 +28,7 @@ use core::array;
 
 use miden_core::{
     EventName, Felt, Word, ZERO,
-    field::PrimeField64,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
@@ -115,7 +115,7 @@ impl KeccakFeltDigest {
             let limbs = array::from_fn(|j| bytes[BYTES_PER_U32 * i + j]);
             u32::from_le_bytes(limbs)
         });
-        Self(packed.map(Felt::from))
+        Self(packed.map(Felt::from_u32))
     }
 
     /// Creates a commitment of the digest using Rpo256 over `[d_0, ..., d_7]`.
@@ -230,6 +230,8 @@ impl AsRef<[Felt]> for KeccakFeltDigest {
 
 #[cfg(test)]
 mod tests {
+    use miden_core::field::PrimeCharacteristicRing;
+
     use super::*;
 
     // KECCAK FELT DIGEST TESTS
@@ -254,7 +256,7 @@ mod tests {
             u32::from_le_bytes([25, 26, 27, 28]),
             u32::from_le_bytes([29, 30, 31, 32]),
         ]
-        .map(Felt::from);
+        .map(Felt::from_u32);
 
         assert_eq!(digest.0, expected);
     }
@@ -277,7 +279,7 @@ mod tests {
             let felts = preimage.as_felts();
             assert_eq!(felts.len(), expected_u32.len());
             for (felt, &u) in felts.iter().zip((*expected_u32).iter()) {
-                assert_eq!(*felt, Felt::from(u));
+                assert_eq!(*felt, Felt::from_u32(u));
             }
 
             if input.is_empty() {
@@ -290,8 +292,8 @@ mod tests {
         let preimage = KeccakPreimage::new(input);
         let felts = preimage.as_felts();
         assert_eq!(felts.len(), 8);
-        assert_eq!(felts[0], Felt::from(u32::from_le_bytes([1, 2, 3, 4])));
-        assert_eq!(felts[7], Felt::from(u32::from_le_bytes([29, 30, 31, 32])));
+        assert_eq!(felts[0], Felt::from_u32(u32::from_le_bytes([1, 2, 3, 4])));
+        assert_eq!(felts[7], Felt::from_u32(u32::from_le_bytes([29, 30, 31, 32])));
     }
 
     #[test]

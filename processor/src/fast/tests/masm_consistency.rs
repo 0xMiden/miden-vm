@@ -1,5 +1,6 @@
 use alloc::string::String;
 
+use miden_core::field::PrimeCharacteristicRing;
 use rstest::fixture;
 
 use super::*;
@@ -8,29 +9,29 @@ use super::*;
 // ---- syscalls --------------------------------
 
 // check stack is preserved after syscall
-#[case(Some("pub proc foo add end"), "begin push.1 syscall.foo swap.8 drop end", vec![16_u32.into(); 16])]
+#[case(Some("pub proc foo add end"), "begin push.1 syscall.foo swap.8 drop end", vec![Felt::from_u32(16); 16])]
 // check that `fn_hash` register is updated correctly
-#[case(Some("pub proc foo caller end"), "begin syscall.foo end", vec![16_u32.into(); 16])]
-#[case(Some("pub proc foo caller end"), "proc bar syscall.foo end begin call.bar end", vec![16_u32.into(); 16])]
+#[case(Some("pub proc foo caller end"), "begin syscall.foo end", vec![Felt::from_u32(16); 16])]
+#[case(Some("pub proc foo caller end"), "proc bar syscall.foo end begin call.bar end", vec![Felt::from_u32(16); 16])]
 // check that clk works correctly through syscalls
-#[case(Some("pub proc foo clk add end"), "begin syscall.foo end", vec![16_u32.into(); 16])]
+#[case(Some("pub proc foo clk add end"), "begin syscall.foo end", vec![Felt::from_u32(16); 16])]
 // check that fmp register is updated correctly after syscall
-#[case(Some("@locals(2) pub proc foo locaddr.0 locaddr.1 swap.8 drop swap.8 drop end"), "proc bar syscall.foo end begin call.bar end", vec![16_u32.into(); 16])]
+#[case(Some("@locals(2) pub proc foo locaddr.0 locaddr.1 swap.8 drop swap.8 drop end"), "proc bar syscall.foo end begin call.bar end", vec![Felt::from_u32(16); 16])]
 // check that memory context is updated correctly across a syscall (i.e. anything stored before the
 // syscall is retrievable after, but not during)
-#[case(Some("pub proc foo add end"), "proc bar push.100 mem_store.44 syscall.foo mem_load.44 swap.8 drop end begin call.bar end", vec![16_u32.into(); 16])]
+#[case(Some("pub proc foo add end"), "proc bar push.100 mem_store.44 syscall.foo mem_load.44 swap.8 drop end begin call.bar end", vec![Felt::from_u32(16); 16])]
 // check that syscalls share the same memory context
 #[case(Some("pub proc foo push.100 mem_store.44 end pub proc baz mem_load.44 swap.8 drop end"),
     "proc bar
         syscall.foo syscall.baz
     end
     begin call.bar end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // ---- calls ------------------------
 
 // check stack is preserved after call
-#[case(None, "proc foo add end begin push.1 call.foo swap.8 drop end", vec![16_u32.into(); 16])]
+#[case(None, "proc foo add end begin push.1 call.foo swap.8 drop end", vec![Felt::from_u32(16); 16])]
 // check that `clk` works correctly though calls
 #[case(None, "
     proc foo clk add end
@@ -38,20 +39,20 @@ use super::*;
     if.true call.foo else swap end
     clk swap.8 drop
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that fmp register is updated correctly after call
 #[case(None,"
     @locals(2) proc foo locaddr.0 locaddr.1 swap.8 drop swap.8 drop end
     begin call.foo end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that 2 functions creating different memory contexts don't interfere with each other
 #[case(None,"
     proc foo push.100 mem_store.44 end
     proc bar mem_load.44 assertz end
     begin call.foo mem_load.44 assertz call.bar end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that memory context is updated correctly across a call (i.e. anything stored before the
 // call is retrievable after, but not during)
@@ -59,7 +60,7 @@ use super::*;
     proc foo mem_load.44 assertz end
     proc bar push.100 mem_store.44 call.foo mem_load.44 swap.8 drop end
     begin call.bar end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // ---- dyncalls ------------------------
 
@@ -70,7 +71,7 @@ use super::*;
         procref.foo mem_storew_le.100 dropw push.100
         dyncall swap.8 drop
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that `clk` works correctly though dyncalls
 #[case(None, "
@@ -86,7 +87,7 @@ use super::*;
         end
         clk swap.8 drop
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that fmp register is updated correctly after dyncall
 #[case(None,"
@@ -95,7 +96,7 @@ use super::*;
         procref.foo mem_storew_le.100 dropw push.100
         dyncall
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that 2 functions creating different memory contexts don't interfere with each other
 #[case(None,"
@@ -106,7 +107,7 @@ use super::*;
         mem_load.44 assertz
         procref.bar mem_storew_le.104 dropw push.104 dyncall
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that memory context is updated correctly across a dyncall (i.e. anything stored before the
 // call is retrievable after, but not during)
@@ -120,7 +121,7 @@ use super::*;
     begin
         procref.bar mem_storew_le.104 dropw push.104 dyncall
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // ---- dyn ------------------------
 
@@ -131,7 +132,7 @@ use super::*;
         procref.foo mem_storew_le.100 dropw push.100
         dynexec swap.8 drop
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that `clk` works correctly though dynexecs
 #[case(None, "
@@ -147,7 +148,7 @@ use super::*;
         end
         clk swap.8 drop
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that fmp register is updated correctly after dynexec
 #[case(None,"
@@ -156,7 +157,7 @@ use super::*;
         procref.foo mem_storew_le.100 dropw push.100
         dynexec
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that dynexec doesn't create a new memory context
 #[case(None,"
@@ -167,13 +168,13 @@ use super::*;
         mem_load.44 sub.100 assertz
         procref.bar mem_storew_le.108 dropw push.108 dynexec
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // ---- loop --------------------------------
 
 // check that the loop is never entered if the condition is false (and that clk is properly updated)
 // Stack: [ZERO, 1, 2, 3] with ZERO at top (for while.true condition)
-#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![ZERO, 1_u32.into(), 2_u32.into(), 3_u32.into()])]
+#[case(None, "begin while.true push.1 assertz end clk swap.8 drop end", vec![ZERO, Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3)])]
 // check that the loop is entered if the condition is true, and that the stack and clock are managed
 // properly
 // Stack: [ONE, ONE, ONE, ONE, ZERO, 42] with first ONE at top (for while.true condition)
@@ -184,7 +185,7 @@ use super::*;
         end
         clk swap.8 drop
     end",
-    vec![ONE, ONE, ONE, ONE, ZERO, 42_u32.into()]
+    vec![ONE, ONE, ONE, ONE, ZERO, Felt::from_u32(42)]
 )]
 // ---- horner ops --------------------------------
 #[case(None,
@@ -192,24 +193,24 @@ use super::*;
         push.1.2.3.4 mem_storew_le.40 dropw
         horner_eval_base
     end",
-    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
-        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
-        40_u32.into(), 4_u32.into(), 100_u32.into()]
+    vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),
+        Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6), Felt::from_u32(5), Felt::from_u32(4),
+        Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
 #[case(None,
     "begin
         push.1.2.3.4 mem_storew_le.40 dropw
         horner_eval_ext
         end",
-    vec![16_u32.into(), 15_u32.into(), 14_u32.into(), 13_u32.into(), 12_u32.into(), 11_u32.into(), 10_u32.into(),
-        9_u32.into(), 8_u32.into(), 7_u32.into(), 6_u32.into(), 5_u32.into(), 4_u32.into(),
-        40_u32.into(), 4_u32.into(), 100_u32.into()]
+    vec![Felt::from_u32(16), Felt::from_u32(15), Felt::from_u32(14), Felt::from_u32(13), Felt::from_u32(12), Felt::from_u32(11), Felt::from_u32(10),
+        Felt::from_u32(9), Felt::from_u32(8), Felt::from_u32(7), Felt::from_u32(6), Felt::from_u32(5), Felt::from_u32(4),
+        Felt::from_u32(40), Felt::from_u32(4), Felt::from_u32(100)]
 )]
 // ---- log precompile ops --------------------------------
 // Stack: [1, 2, 3, 4, 5, 6, 7, 8] with 1 at top
 #[case(None, "begin log_precompile end",
-    vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(),
-         5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
+    vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4),
+         Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
 )]
 // ---- u32 ops --------------------------------
 // check that u32 6/3 works as expected
@@ -217,14 +218,14 @@ use super::*;
     begin
         u32divmod
     end",
-    vec![6_u32.into(), 3_u32.into()]
+    vec![Felt::from_u32(6), Felt::from_u32(3)]
 )]
 // check that overflowing add properly sets the overflow bit
 #[case(None,"
     begin
         u32overflowing_add swap sub.1 assertz
     end",
-    vec![Felt::from(u32::MAX), ONE]
+    vec![Felt::from_u32(u32::MAX), ONE]
 )]
 fn test_masm_consistency(
     testname: String,
@@ -275,21 +276,21 @@ fn test_masm_consistency(
 /// Tests that emitted errors are consistent between the fast and slow processors.
 #[rstest]
 // check that error is returned if condition is not a boolean
-#[case(None, "begin while.true swap end end", vec![2_u32.into(); 16])]
+#[case(None, "begin while.true swap end end", vec![Felt::from_u32(2); 16])]
 #[case(None, "begin while.true push.100 end end", vec![ONE; 16])]
 // check that dynamically calling a hash that doesn't exist fails
 #[case(None,"
     begin
         dyncall
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that dynamically calling a hash that doesn't exist fails
 #[case(None,"
     begin
         dynexec
     end",
-    vec![16_u32.into(); 16]
+    vec![Felt::from_u32(16); 16]
 )]
 // check that u32 division by 0 results in an error
 #[case(None,"
@@ -303,7 +304,7 @@ fn test_masm_consistency(
     begin
         u32overflowing_add
     end",
-    vec![Felt::from(u32::MAX) + ONE, ZERO]
+    vec![Felt::from_u32(u32::MAX) + ONE, ZERO]
 )]
 fn test_masm_errors_consistency(
     testname: String,

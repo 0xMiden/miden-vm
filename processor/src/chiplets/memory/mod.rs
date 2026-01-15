@@ -10,7 +10,10 @@ use miden_air::trace::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{WORD_SIZE, ZERO, field::Field};
+use miden_core::{
+    WORD_SIZE, ZERO,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
     EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
@@ -305,7 +308,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from(addr), clk - ONE),
+            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
         };
 
@@ -318,7 +321,7 @@ impl Memory {
             for (addr, addr_trace) in segment.into_inner() {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
-                let felt_addr = Felt::from(addr);
+                let felt_addr = Felt::from_u32(addr);
                 for memory_access in addr_trace {
                     let clk = memory_access.clk();
                     let value = memory_access.word();

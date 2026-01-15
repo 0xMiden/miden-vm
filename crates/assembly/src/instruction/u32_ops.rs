@@ -7,6 +7,7 @@ use miden_core::{
     Felt,
     Operation::{self, *},
     ZERO,
+    field::PrimeCharacteristicRing,
     sys_events::SystemEvent,
 };
 
@@ -181,7 +182,7 @@ pub fn u32not(span_builder: &mut BasicBlockBuilder) {
     let ops = [
         // Perform the operation: compute MAX - value
         // U32sub computes second - top (a - b for [b, a]), so we need [value, MAX, ...]
-        Push(Felt::from(u32::MAX)),
+        Push(Felt::from_u32(u32::MAX)),
         U32assert2(ZERO),
         Swap,
         U32sub,
@@ -519,7 +520,7 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
     // [clz, n, ...]
     #[rustfmt::skip]
     let ops_group_1 = [
-        Push(32u8.into()), Dup1, Neg, Add // [32 - clz, clz, n, ...]
+        Push(Felt::from_u8(32)), Dup1, Neg, Add // [32 - clz, clz, n, ...]
     ];
     block_builder.push_ops(ops_group_1);
 
@@ -530,7 +531,7 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         // 1. Obtain a mask for all `32 - clz` trailing bits
         //
         // #=> [2^(32 - clz) - 1, clz, n]
-        Push(1u8.into()), Neg, Add,
+        Push(Felt::from_u8(1)), Neg, Add,
         // 2. Compute a value that represents setting the first non-zero bit to 1, i.e. if there
         // are 2 leading zeros, this would set the 3rd most significant bit to 1, with all other
         // bits set to zero.
@@ -540,7 +541,7 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         // #=> [(2^(32 - clz) - 1) / 2, clz, n, ...]
         // U32div computes second/top. Stack: [mask, ...], push 2 to get [2, mask, ...].
         // U32div gives mask/2. Output [remainder, quotient], drop remainder to keep quotient.
-        Push(2u8.into()), U32div, Drop,
+        Push(Felt::from_u8(2)), U32div, Drop,
         // Save the intermediate result of dividing by 2 for reuse in the next step
         //
         // #=> [((2^(32 - clz) - 1) / 2) + 1, (2^(32 - clz) - 1) / 2, clz, n, ...]
@@ -548,7 +549,7 @@ fn verify_clz(block_builder: &mut BasicBlockBuilder) {
         // 3. Obtain a mask for `clz + 1` leading bits
         //
         // #=> [u32::MAX - (2^(32 - clz) - 1 / 2), ((2^(32 - clz) - 1) / 2) + 1, clz, n, ...]
-        Push(u32::MAX.into()), MovUp2, Neg, Add,
+        Push(Felt::from_u32(u32::MAX)), MovUp2, Neg, Add,
         // 4. Set zero flag if input was zero, and apply the mask to the input value
         //
         // #=> [n & mask, (2^(32 - clz) - 1 / 2) + 1, clz, is_zero]
@@ -602,7 +603,7 @@ fn verify_clo(block_builder: &mut BasicBlockBuilder) {
     // [clo, n, ...]
     #[rustfmt::skip]
     let ops_group_1 = [
-        Push(32u8.into()), Dup1, Neg, Add // [32 - clo, clo, n, ...]
+        Push(Felt::from_u8(32)), Dup1, Neg, Add // [32 - clo, clo, n, ...]
     ];
     block_builder.push_ops(ops_group_1);
 
@@ -613,17 +614,17 @@ fn verify_clo(block_builder: &mut BasicBlockBuilder) {
         // 1. Obtain a mask for all `32 - clo` trailing bits
         //
         // #=> [2^(32 - clo) - 1, clo, n]
-        Push(1u8.into()), Neg, Add,
+        Push(Felt::from_u8(1)), Neg, Add,
         // 2. Obtain a mask for `32 - clo - 1` trailing bits
         //
         // #=> [(2^(32 - clo) - 1) / 2, 2^(32 - clo) - 1, clo, n]
         // U32div computes second/top. Stack: [mask, ...], Dup0 push 2 to get [2, mask, mask, ...].
         // U32div gives mask/2. Output [remainder, quotient], drop remainder to keep quotient.
-        Dup0, Push(2u8.into()), U32div, Drop,
+        Dup0, Push(Felt::from_u8(2)), U32div, Drop,
         // 3. Invert the mask from Step 2, to get one that covers `clo + 1` leading bits
         //
         // #=> [u32::MAX - ((2^(32 - clo) - 1) / 2), 2^(32 - clo) - 1, clo, n]
-        Push(u32::MAX.into()), Swap, Neg, Add,
+        Push(Felt::from_u32(u32::MAX)), Swap, Neg, Add,
         // 4. Apply the mask to the input value
         //
         // #=> [n & mask, 2^(32 - clo) - 1, clo]
@@ -631,7 +632,7 @@ fn verify_clo(block_builder: &mut BasicBlockBuilder) {
         // 5. Invert the mask from Step 1, to get one  that covers `clo` leading bits
         //
         // #=> [u32::MAX - 2^(32 - clo) - 1, n & mask, clo]
-        Push(u32::MAX.into()), MovUp2, Neg, Add,
+        Push(Felt::from_u32(u32::MAX)), MovUp2, Neg, Add,
         // 6. Assert that the masked input, and the mask representing `clo` leading ones, are equal
         Eq, Assert(ZERO),
     ];

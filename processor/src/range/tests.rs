@@ -64,8 +64,8 @@ fn range_checks_rand() {
 // ================================================================================================
 
 fn validate_row(trace: &[Vec<Felt>], row_idx: &mut usize, value: u64, num_lookups: u64) {
-    assert_eq!(trace[0][*row_idx], Felt::from(num_lookups));
-    assert_eq!(trace[1][*row_idx], Felt::from(value));
+    assert_eq!(trace[0][*row_idx], Felt::new(num_lookups));
+    assert_eq!(trace[1][*row_idx], Felt::new(value));
     *row_idx += 1;
 }
 

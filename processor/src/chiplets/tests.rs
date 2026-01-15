@@ -15,6 +15,7 @@ use miden_air::{
 };
 use miden_core::{
     Felt, ONE, Program, Word, ZERO,
+    field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 
@@ -55,7 +56,7 @@ fn bitwise_chiplet_trace() {
 #[test]
 fn memory_chiplet_trace() {
     // --- single memory operation with no stack manipulation -------------------------------------
-    let addr = Felt::from(4_u32);
+    let addr = Felt::from_u32(4);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
     let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());

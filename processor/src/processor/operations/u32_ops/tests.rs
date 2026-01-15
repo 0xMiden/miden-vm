@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ZERO, stack::MIN_STACK_DEPTH};
+use miden_core::{Felt, ZERO, field::PrimeCharacteristicRing, stack::MIN_STACK_DEPTH};
 use proptest::prelude::*;
 
 use super::{
@@ -71,7 +71,7 @@ fn test_op_u32assert2_both_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(123u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(123u32), &(), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -81,7 +81,7 @@ fn test_op_u32assert2_second_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(1000u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(456u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(456u32), &(), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -91,7 +91,7 @@ fn test_op_u32assert2_first_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(2000u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from(789u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(789), &(), &mut tracer);
     assert!(result.is_err());
 }
 

@@ -172,10 +172,10 @@ const BYTES_PER_U32: usize = core::mem::size_of::<u32>();
 ///
 /// # Examples
 /// ```
-/// # use miden_core::{Felt, utils::bytes_to_packed_u32_elements};
+/// # use miden_core::{Felt, utils::bytes_to_packed_u32_elements, field::PrimeCharacteristicRing};
 /// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
 /// let felts = bytes_to_packed_u32_elements(&bytes);
-/// assert_eq!(felts, vec![Felt::from(0x04030201_u32), Felt::from(0x00000005_u32)]);
+/// assert_eq!(felts, vec![Felt::from_u32(0x04030201_u32), Felt::from_u32(0x00000005_u32)]);
 /// ```
 pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
     bytes
@@ -184,7 +184,7 @@ pub fn bytes_to_packed_u32_elements(bytes: &[u8]) -> Vec<Felt> {
             // Pack up to 4 bytes into a u32 in little-endian format
             let mut packed = [0u8; BYTES_PER_U32];
             packed[..chunk.len()].copy_from_slice(chunk);
-            Felt::from(u32::from_le_bytes(packed))
+            Felt::from_u32(u32::from_le_bytes(packed))
         })
         .collect()
 }
@@ -226,12 +226,13 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use crate::field::PrimeCharacteristicRing;
 
     proptest! {
         #[test]
         fn proptest_packed_u32_elements_roundtrip(values in prop::collection::vec(any::<u32>(), 0..100)) {
             // Convert u32 values to Felts
-            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from(v)).collect();
+            let felts: Vec<Felt> = values.iter().map(|&v| Felt::from_u32(v)).collect();
 
             // Roundtrip: Felts -> bytes -> Felts
             let bytes = packed_u32_elements_to_bytes(&felts);

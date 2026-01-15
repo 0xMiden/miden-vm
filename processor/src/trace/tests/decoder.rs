@@ -6,7 +6,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     ONE, Operation, Program, Word, ZERO,
-    field::{ExtensionField, Field},
+    field::{ExtensionField, Field, PrimeCharacteristicRing},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
@@ -886,9 +886,9 @@ impl BlockStackTableRow {
             + alphas[1] * self.block_id
             + alphas[2] * self.parent_id
             + alphas[3] * is_loop
-            + alphas[4] * Felt::from(self.parent_ctx)
+            + alphas[4] * Felt::from_u32(u32::from(self.parent_ctx))
             + alphas[5] * self.parent_fmp
-            + alphas[6] * Felt::from(self.parent_stack_depth)
+            + alphas[6] * Felt::from_u32(self.parent_stack_depth)
             + alphas[7] * self.parent_next_overflow_addr
             + alphas[8] * self.parent_fn_hash[0]
             + alphas[9] * self.parent_fn_hash[1]

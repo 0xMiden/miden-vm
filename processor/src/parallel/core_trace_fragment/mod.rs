@@ -9,7 +9,7 @@ use miden_air::{
 };
 use miden_core::{
     ONE, OPCODE_PUSH, Operation, WORD_SIZE, Word, ZERO,
-    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
@@ -748,9 +748,16 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
-        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -787,7 +794,14 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
         // For u32add, check_element_validity is false
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -796,7 +810,14 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -804,7 +825,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks (only `second_new` needs range checking)
         let (t1, t0) = split_u32_into_u16(second_new.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), ZERO, ZERO, ZERO, ZERO]
+        [Felt::from_u16(t0), Felt::from_u16(t1), ZERO, ZERO, ZERO, ZERO]
     }
 
     #[inline(always)]
@@ -812,9 +833,16 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
-        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -822,9 +850,16 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
-        let m = (Felt::from(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -833,7 +868,14 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -842,7 +884,14 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let (t1, t0) = split_u32_into_u16(second.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(first.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
@@ -1017,7 +1066,7 @@ impl BasicBlockContext {
             // *after* being done with the current group)
             groups_consumed += current_op_group_idx + 1;
 
-            Felt::from((total_groups - groups_consumed) as u32)
+            Felt::from_u32((total_groups - groups_consumed) as u32)
         };
 
         Self { current_op_group, group_count_in_block }

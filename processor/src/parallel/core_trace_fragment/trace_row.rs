@@ -14,7 +14,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, Operation, Word, ZERO,
-    field::PrimeField64,
+    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },
@@ -127,7 +127,7 @@ impl DecoderRow {
             addr: current_addr,
             in_basic_block: true,
             group_count: basic_block_ctx.group_count_in_block,
-            op_index: Felt::from(op_idx_in_group as u32),
+            op_index: Felt::from_u32(op_idx_in_group as u32),
             op_batch_flags: [ZERO; NUM_OP_BATCH_FLAGS],
         }
     }
@@ -145,7 +145,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         basic_block_node: &BasicBlockNode,
     ) -> ControlFlow<()> {
-        let group_count_for_block = Felt::from(basic_block_node.num_op_groups() as u32);
+        let group_count_for_block = Felt::from_u32(basic_block_node.num_op_groups() as u32);
         let first_op_batch = basic_block_node
             .op_batches()
             .first()
@@ -309,7 +309,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         ctx_info: ExecutionContextInfo,
     ) -> ControlFlow<()> {
         let second_hasher_state: Word = [
-            Felt::from(ctx_info.parent_stack_depth),
+            Felt::from_u32(ctx_info.parent_stack_depth),
             ctx_info.parent_next_overflow_addr,
             ZERO,
             ZERO,
@@ -487,8 +487,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Now populate the buffer with current system state for the next row
         let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
 
-        new_system_rows[CLK_COL_IDX] = Felt::from(self.context.state.system.clk + 1);
-        new_system_rows[CTX_COL_IDX] = Felt::from(self.context.state.system.ctx);
+        new_system_rows[CLK_COL_IDX] = (self.context.state.system.clk + 1).into();
+        new_system_rows[CTX_COL_IDX] = self.context.state.system.ctx.into();
         new_system_rows[FN_HASH_OFFSET] = self.context.state.system.fn_hash[0];
         new_system_rows[FN_HASH_OFFSET + 1] = self.context.state.system.fn_hash[1];
         new_system_rows[FN_HASH_OFFSET + 2] = self.context.state.system.fn_hash[2];
@@ -506,7 +506,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Decompose operation into bits
         let opcode = row.opcode;
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from((opcode >> i) & 1);
+            let bit = Felt::from_u8((opcode >> i) & 1);
             self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
         }
 

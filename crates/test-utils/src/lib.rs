@@ -22,7 +22,7 @@ pub use miden_assembly::{
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
-    field::{Field, PrimeField64, QuadFelt},
+    field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
@@ -291,7 +291,7 @@ impl Test {
         {
             let mem_state = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::from(addr as u32), &())
+                .read_element(ContextId::root(), Felt::from_u32(addr as u32), &())
                 .unwrap();
             assert_eq!(
                 *mem_value,

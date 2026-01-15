@@ -1,5 +1,6 @@
 use alloc::string::String;
 
+use miden_core::field::PrimeCharacteristicRing;
 use rstest::fixture;
 
 use super::*;
@@ -15,22 +16,22 @@ fn test_basic_block(
     // Stack inputs start from 1 so that moved elements are distinguishable from padding zeros
     #[values(
         vec![],
-        vec![1_u32.into()],
-        vec![1_u32.into(), 2_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(), 14_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(), 14_u32.into(), 15_u32.into()],
-        vec![1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(), 14_u32.into(), 15_u32.into(), 16_u32.into()],
+        vec![Felt::from_u32(1)],
+        vec![Felt::from_u32(1), Felt::from_u32(2)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14), Felt::from_u32(15)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14), Felt::from_u32(15), Felt::from_u32(16)],
     )]
     stack_inputs: Vec<Felt>,
     #[values(
@@ -60,7 +61,7 @@ fn test_basic_block(
         vec![Operation::U32and],
         vec![Operation::U32xor],
         vec![Operation::U32madd],
-        vec![Operation::U32assert2(Felt::from(5u32))],
+        vec![Operation::U32assert2(Felt::from_u32(5))],
         vec![Operation::Pad, Operation::MovUp8, Operation::Drop],
         // for the dups, we drop an element that was not duplicated, and hence we are still testing
         // that the `dup` works as expected
@@ -97,7 +98,7 @@ fn test_basic_block(
         vec![Operation::MovDn8],
         vec![Operation::CSwap],
         vec![Operation::CSwapW],
-        vec![Operation::Push(42_u32.into()), Operation::MovUp8, Operation::Drop],
+        vec![Operation::Push(Felt::from_u32(42)), Operation::MovUp8, Operation::Drop],
         // the memory operations here are more to ensure e.g. that unaligned word accesses are
         // reported correctly.
         vec![Operation::MLoadW],

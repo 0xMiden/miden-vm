@@ -1,7 +1,7 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
 use miden_air::trace::RowIndex;
-use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO};
+use miden_core::{EMPTY_WORD, Felt, WORD_SIZE, Word, ZERO, field::PrimeCharacteristicRing};
 
 use crate::{
     ContextId, ErrorContext, MemoryAddress, MemoryError, PrimeField64, processor::MemoryInterface,
@@ -210,7 +210,7 @@ fn enforce_word_aligned_addr(
             Some(clk) => Err(MemoryError::unaligned_word_access(
                 addr,
                 ctx,
-                Felt::from(clk.as_u32()),
+                Felt::from_u32(clk.as_u32()),
                 err_ctx,
             )),
             None => Err(MemoryError::UnalignedWordAccessNoClk { addr, ctx }),

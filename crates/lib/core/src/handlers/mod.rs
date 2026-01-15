@@ -1,4 +1,7 @@
-use miden_core::{Felt, WORD_SIZE, field::PrimeField64};
+use miden_core::{
+    Felt, WORD_SIZE,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
 use miden_processor::ProcessState;
 
 pub mod aead_decrypt;
@@ -24,8 +27,8 @@ pub mod u64_div;
 
 /// Converts a u64 value into two u32 elements (high and low parts).
 fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
+    let hi = Felt::from_u32((value >> 32) as u32);
+    let lo = Felt::from_u32(value as u32);
     (hi, lo)
 }
 

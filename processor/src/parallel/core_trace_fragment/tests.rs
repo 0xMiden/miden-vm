@@ -14,6 +14,7 @@ use miden_air::{
 };
 use miden_core::{
     EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
@@ -1720,9 +1721,9 @@ fn check_op_decoding(
     }
 
     // make sure the op bit extra columns for degree reduction are set correctly
-    let bit6 = Felt::from((opcode >> 6) & 1);
-    let bit5 = Felt::from((opcode >> 5) & 1);
-    let bit4 = Felt::from((opcode >> 4) & 1);
+    let bit6 = Felt::from_u8((opcode >> 6) & 1);
+    let bit5 = Felt::from_u8((opcode >> 5) & 1);
+    let bit4 = Felt::from_u8((opcode >> 4) & 1);
     assert_eq!(
         trace[OP_BITS_EXTRA_COLS_RANGE.start][row_idx],
         bit6 * (ONE - bit5) * bit4,

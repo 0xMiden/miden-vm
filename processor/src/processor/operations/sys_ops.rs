@@ -1,4 +1,4 @@
-use miden_core::{Felt, ONE, mast::MastForest};
+use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError,
@@ -41,7 +41,7 @@ pub(super) fn op_sdepth<P: Processor>(
 ) -> Result<(), ExecutionError> {
     let depth = processor.stack().depth();
     processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, depth.into());
+    processor.stack().set(0, Felt::from_u32(depth));
 
     Ok(())
 }

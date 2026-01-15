@@ -74,7 +74,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         (1..8_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
                 + alphas[1] * block_id
-                + alphas[2] * (group_count - Felt::from(k))
+                + alphas[2] * (group_count - Felt::from_u8(k))
                 + alphas[3] * (h[k as usize]))
         })
     } else if op_batch_flag == OP_BATCH_4_GROUPS {
@@ -82,7 +82,7 @@ fn get_op_group_table_inclusion_multiplicand<E: ExtensionField<Felt>>(
         (1..4_u8).fold(E::ONE, |acc, k| {
             acc * (alphas[0]
                 + alphas[1] * block_id
-                + alphas[2] * (group_count - Felt::from(k))
+                + alphas[2] * (group_count - Felt::from_u8(k))
                 + alphas[3] * (h[k as usize]))
         })
     } else if op_batch_flag == OP_BATCH_2_GROUPS {
@@ -104,7 +104,7 @@ fn get_op_group_table_removal_multiplicand<E: ExtensionField<Felt>>(
     let group_value = {
         let op_code = main_trace.get_op_code(i);
 
-        if op_code == Felt::from(OPCODE_PUSH) {
+        if op_code == Felt::from_u8(OPCODE_PUSH) {
             main_trace.stack_element(0, i + 1)
         } else {
             let h0 = main_trace.decoder_hasher_state_first_half(i + 1)[0];

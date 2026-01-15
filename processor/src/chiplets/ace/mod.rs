@@ -173,14 +173,14 @@ impl AceHints {
                 let wire_1 = main_trace.chiplet_ace_wire_1(trace_row.into());
 
                 let value_0 = alphas[0]
-                    + alphas[1] * Felt::from(clk)
-                    + alphas[2] * Felt::from(ctx)
+                    + alphas[1] * Felt::from_u32(clk)
+                    + alphas[2] * Felt::from_u32(ctx)
                     + alphas[3] * wire_0[0]
                     + alphas[4] * wire_0[1]
                     + alphas[5] * wire_0[2];
                 let value_1 = alphas[0]
-                    + alphas[1] * Felt::from(clk)
-                    + alphas[2] * Felt::from(ctx)
+                    + alphas[1] * Felt::from_u32(clk)
+                    + alphas[2] * Felt::from_u32(ctx)
                     + alphas[3] * wire_1[0]
                     + alphas[4] * wire_1[1]
                     + alphas[5] * wire_1[2];
@@ -213,22 +213,22 @@ impl AceHints {
                 let wire_2 = main_trace.chiplet_ace_wire_2(trace_row.into());
 
                 let value_0 = alphas[0]
-                    + alphas[1] * Felt::from(clk)
-                    + alphas[2] * Felt::from(ctx)
+                    + alphas[1] * Felt::from_u32(clk)
+                    + alphas[2] * Felt::from_u32(ctx)
                     + alphas[3] * wire_0[0]
                     + alphas[4] * wire_0[1]
                     + alphas[5] * wire_0[2];
 
                 let value_1 = alphas[0]
-                    + alphas[1] * Felt::from(clk)
-                    + alphas[2] * Felt::from(ctx)
+                    + alphas[1] * Felt::from_u32(clk)
+                    + alphas[2] * Felt::from_u32(ctx)
                     + alphas[3] * wire_1[0]
                     + alphas[4] * wire_1[1]
                     + alphas[5] * wire_1[2];
 
                 let value_2 = alphas[0]
-                    + alphas[1] * Felt::from(clk)
-                    + alphas[2] * Felt::from(ctx)
+                    + alphas[1] * Felt::from_u32(clk)
+                    + alphas[2] * Felt::from_u32(ctx)
                     + alphas[3] * wire_2[0]
                     + alphas[4] * wire_2[1]
                     + alphas[5] * wire_2[2];

@@ -1,4 +1,6 @@
-use miden_core::{Felt, Operation::*, ZERO, sys_events::SystemEvent};
+use miden_core::{
+    Felt, Operation::*, ZERO, field::PrimeCharacteristicRing, sys_events::SystemEvent,
+};
 
 use super::BasicBlockBuilder;
 use crate::Report;
@@ -24,7 +26,7 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
 
         // Add capacity word [4, 0, 0, 0] on top.
         // => [[4,0,0,0], 0, A, ...]  i.e. [CAP, RATE1, RATE0]
-        Pad, Pad, Pad, Push(Felt::from(4_u32)),
+        Pad, Pad, Pad, Push(Felt::from_u32(4_u32)),
 
         // Reorder to [RATE0, RATE1, CAP] required by hperm:
         // => [A, 0, [4,0,0,0], ...]

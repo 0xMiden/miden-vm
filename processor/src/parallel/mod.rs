@@ -17,6 +17,7 @@ use miden_air::{
 };
 use miden_core::{
     Kernel, ONE, Operation, Word, ZERO,
+    field::PrimeCharacteristicRing,
     stack::MIN_STACK_DEPTH,
     utils::{ColMatrix, uninit_vector},
 };
@@ -363,7 +364,7 @@ fn push_halt_opcode_row(
     // Pad op_bits columns with HALT opcode bits
     let halt_opcode = Operation::Halt.op_code();
     for bit_idx in 0..NUM_OP_BITS {
-        let bit_value = Felt::from((halt_opcode >> bit_idx) & 1);
+        let bit_value = Felt::from_u8((halt_opcode >> bit_idx) & 1);
         core_trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + bit_idx].push(bit_value);
     }
 
@@ -578,7 +579,8 @@ fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
 
     // Pad CLK trace - fill with index values
     for padding_row_idx in 0..num_padding_rows {
-        trace_columns[CLK_COL_IDX].push(Felt::from((total_program_rows + padding_row_idx) as u32));
+        trace_columns[CLK_COL_IDX]
+            .push(Felt::from_u32((total_program_rows + padding_row_idx) as u32));
     }
 
     // Pad CTX trace - fill with ZEROs (root context)
@@ -599,7 +601,7 @@ fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
     // Pad op_bits columns with HALT opcode bits
     let halt_opcode = Operation::Halt.op_code();
     for i in 0..NUM_OP_BITS {
-        let bit_value = Felt::from((halt_opcode >> i) & 1);
+        let bit_value = Felt::from_u8((halt_opcode >> i) & 1);
         trace_columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i].resize(main_trace_len, bit_value);
     }
 

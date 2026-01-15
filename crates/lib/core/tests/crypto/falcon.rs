@@ -295,39 +295,6 @@ fn falcon_execution() {
 }
 
 #[test]
-fn test_felt_conversion() {
-    // Test that Felt conversion to u64 works correctly
-    let f = Felt::new(12345);
-    let via_into: u64 = f.into();
-    let via_canonical = f.as_canonical_u64();
-
-    assert_eq!(via_into, via_canonical, "Felt conversion methods should match!");
-
-    // Test with small values < M
-    const M: u64 = 12289;
-    for val in [100, 1000, 5000, 10000, 12288] {
-        let f = Felt::new(val);
-        let via_into: u64 = f.into();
-        let via_canonical = f.as_canonical_u64();
-        assert_eq!(
-            via_into, via_canonical,
-            "Felt conversion methods should match for value {}",
-            val
-        );
-        assert!(via_into < M, "Converted value should be < M for input {}", val);
-    }
-
-    // Test with values from a hash digest
-    let test_values = vec![Felt::new(123), Felt::new(456), Felt::new(789)];
-    let digest = Rpo256::hash_elements(&test_values);
-    for &elem in digest.as_elements().iter() {
-        let via_into: u64 = elem.into();
-        let via_canonical = elem.as_canonical_u64();
-        assert_eq!(via_into, via_canonical, "Hash element conversion should match!");
-    }
-}
-
-#[test]
 fn test_mod_12289_simple() {
     // Simple test to debug mod_12289 with a known input
     let source = "

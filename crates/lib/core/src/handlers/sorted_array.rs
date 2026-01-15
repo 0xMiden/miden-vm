@@ -118,7 +118,7 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            Felt::from(addr_range.end),
+            Felt::from_u32(addr_range.end),
             Felt::from_bool(false),
         ])]);
     }
@@ -161,7 +161,7 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::from(result.unwrap_or(addr_range.end)),
+        Felt::from_u32(result.unwrap_or(addr_range.end)),
         Felt::from_bool(was_key_found),
     ])])
 }

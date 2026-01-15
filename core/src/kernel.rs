@@ -77,7 +77,7 @@ impl Serializable for Kernel {
 impl Deserializable for Kernel {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let len = source.read_u8()? as usize;
-        let kernel = source.read_many::<Word>(len)?;
+        let kernel = source.read_many_iter::<Word>(len)?.collect::<Result<_, _>>()?;
         Ok(Self(kernel))
     }
 }

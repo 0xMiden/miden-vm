@@ -2,7 +2,8 @@ use alloc::{string::String, sync::Arc};
 use std::string::ToString;
 
 use miden_core::{
-    Kernel, Operation, Program,
+    Felt, Kernel, Operation, Program,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
@@ -565,7 +566,7 @@ fn basic_block_program_small() -> Program {
 
     let root_join_node = {
         let target_basic_block = BasicBlockNodeBuilder::new(
-            vec![Operation::Swap, Operation::Push(42_u32.into())],
+            vec![Operation::Swap, Operation::Push(Felt::from_u32(42))],
             Vec::new(),
         )
         .add_to_forest(&mut program)

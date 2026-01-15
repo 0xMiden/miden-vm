@@ -18,7 +18,7 @@ use miden_core::{
     Program, Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-    field::Field,
+    field::{Field, PrimeCharacteristicRing},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     utils::range,
 };
@@ -879,8 +879,10 @@ fn build_expected(
 ) -> Felt {
     let first_cycle_row = addr_to_cycle_row(addr) == 0;
     let transition_label = if first_cycle_row { label + 16_u8 } else { label + 32_u8 };
-    let header =
-        alphas[0] + alphas[1] * Felt::from(transition_label) + alphas[2] * addr + alphas[3] * index;
+    let header = alphas[0]
+        + alphas[1] * Felt::from_u8(transition_label)
+        + alphas[2] * addr
+        + alphas[3] * index;
     let mut value = header;
 
     if (first_cycle_row && label == LINEAR_HASH_LABEL) || label == RETURN_STATE_LABEL {
@@ -1010,7 +1012,7 @@ fn extract_control_block_domain_from_trace(trace: &ExecutionTrace, row: RowIndex
     ];
 
     if control_block_initializers.contains(&opcode_value) {
-        Felt::from(opcode_value)
+        Felt::from_u8(opcode_value)
     } else {
         ZERO
     }

@@ -6,7 +6,9 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
 };
-use miden_core::{Decorator, Felt, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miden_core::{
+    Decorator, Felt, Operation, WORD_SIZE, ZERO, field::PrimeCharacteristicRing, mast::MastNodeId,
+};
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
@@ -362,9 +364,9 @@ impl Assembler {
             // ----- input / output instructions --------------------------------------------------
             Instruction::Push(imm) => match (*imm).expect_value() {
                 PushValue::Int(value) => match value {
-                    IntValue::U8(v) => env_ops::push_one(v, block_builder),
-                    IntValue::U16(v) => env_ops::push_one(v, block_builder),
-                    IntValue::U32(v) => env_ops::push_one(v, block_builder),
+                    IntValue::U8(v) => env_ops::push_one(Felt::from_u8(v), block_builder),
+                    IntValue::U16(v) => env_ops::push_one(Felt::from_u16(v), block_builder),
+                    IntValue::U32(v) => env_ops::push_one(Felt::from_u32(v), block_builder),
                     IntValue::Felt(v) => env_ops::push_one(v, block_builder),
                 },
                 PushValue::Word(v) => env_ops::push_word(&v.0, block_builder),
@@ -629,7 +631,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
         span_builder.push_op(Pad);
         span_builder.push_op(Incr);
     } else {
-        span_builder.push_op(Push(Felt::from(value)));
+        span_builder.push_op(Push(Felt::from_u32(value)));
     }
 }
 

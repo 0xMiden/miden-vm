@@ -4,7 +4,9 @@ use miden_air::trace::{
     log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 use miden_core::{
-    Felt, OPCODE_LOGPRECOMPILE, field::ExtensionField, precompile::PrecompileTranscriptState,
+    Felt, OPCODE_LOGPRECOMPILE,
+    field::{ExtensionField, PrimeCharacteristicRing},
+    precompile::PrecompileTranscriptState,
 };
 
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
@@ -275,7 +277,7 @@ where
     fn value(&self, alphas: &[E]) -> E {
         let state_elements: [Felt; 4] = self.state.into();
         alphas[0]
-            + alphas[1] * Felt::from(LOG_PRECOMPILE_LABEL)
+            + alphas[1] * Felt::from_u8(LOG_PRECOMPILE_LABEL)
             + build_value(&alphas[2..6], state_elements)
     }
 

@@ -5,7 +5,7 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation::*,
-    field::{Field, PrimeField64},
+    field::{Field, PrimeCharacteristicRing, PrimeField64},
     sys_events::SystemEvent,
 };
 
@@ -131,7 +131,7 @@ pub fn pow2(span_builder: &mut BasicBlockBuilder) {
 /// VM cycles: 16 cycles
 pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
     // push base 2 onto the stack: [exp, ...] -> [2, exp, ...]
-    span_builder.push_op(Push(2_u8.into()));
+    span_builder.push_op(Push(Felt::from_u8(2)));
     // introduce initial value of acc onto the stack: [2, exp, ...] -> [1, 2, exp, ...]
     span_builder.push_ops([Pad, Incr]);
     // arrange the top of the stack for EXPACC operation: [1, 2, exp, ...] -> [0, 2, 1, exp, ...]

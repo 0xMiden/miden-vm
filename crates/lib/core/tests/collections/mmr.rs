@@ -269,7 +269,7 @@ fn test_mmr_unpack() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::new(number_of_leaves), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Advice map key is the hash word (positions 0-3 on stack)
@@ -395,7 +395,7 @@ fn test_mmr_unpack_large_mmr() {
     let store = MerkleStore::new();
 
     let mut mmr_mem_repr: Vec<Felt> = Vec::with_capacity(peaks.len() + 1);
-    mmr_mem_repr.extend_from_slice(&[number_of_leaves.into(), ZERO, ZERO, ZERO]);
+    mmr_mem_repr.extend_from_slice(&[Felt::new(number_of_leaves), ZERO, ZERO, ZERO]);
     mmr_mem_repr.extend_from_slice(&peaks.as_slice().concat());
 
     // Advice map key is the hash word (positions 0-3 on stack)

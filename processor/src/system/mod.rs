@@ -1,6 +1,7 @@
 use core::fmt::{self, Display};
 
 use miden_air::{Felt, trace::RowIndex};
+use miden_core::field::PrimeCharacteristicRing;
 
 // EXECUTION CONTEXT
 // ================================================================================================
@@ -47,7 +48,7 @@ impl From<ContextId> for u64 {
 
 impl From<ContextId> for Felt {
     fn from(context_id: ContextId) -> Self {
-        context_id.0.into()
+        Felt::from_u32(context_id.0)
     }
 }
 

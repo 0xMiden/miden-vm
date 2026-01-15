@@ -196,14 +196,14 @@ fn test_op_mstream() {
     // Word at addr 4 (word1) goes to positions 0-3, word at addr 8 (word2) to 4-7.
     // word[0] at lowest position.
     let expected = build_expected(&[
-        word1[0].into(),
-        word1[1].into(),
-        word1[2].into(),
-        word1[3].into(),
-        word2[0].into(),
-        word2[1].into(),
-        word2[2].into(),
-        word2[3].into(),
+        word1[0].as_canonical_u64(),
+        word1[1].as_canonical_u64(),
+        word1[2].as_canonical_u64(),
+        word1[3].as_canonical_u64(),
+        word2[0].as_canonical_u64(),
+        word2[1].as_canonical_u64(),
+        word2[2].as_canonical_u64(),
+        word2[3].as_canonical_u64(),
         4,
         3,
         2,

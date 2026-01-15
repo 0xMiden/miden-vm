@@ -4,7 +4,7 @@ use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH};
 use miden_core::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    field::PrimeField64,
+    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,
@@ -667,7 +667,7 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_control_block()`.
     pub fn record_hash_control_block(&mut self) -> Felt {
-        let block_addr = self.addr.into();
+        let block_addr = Felt::from_u32(self.addr);
 
         self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
@@ -677,7 +677,7 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_basic_block()`.
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
-        let block_addr = self.addr.into();
+        let block_addr = Felt::from_u32(self.addr);
 
         self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
@@ -686,19 +686,20 @@ impl HasherChipletShim {
     }
     /// Records the result of a call to `Hasher::permute()`.
     pub fn record_permute_output(&mut self, hashed_state: [Felt; 12]) {
-        self.replay.record_permute(self.addr.into(), hashed_state);
+        self.replay.record_permute(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
-        self.replay.record_build_merkle_root(self.addr.into(), computed_root);
+        self.replay.record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
-        self.replay.record_update_merkle_root(self.addr.into(), old_root, new_root);
+        self.replay
+            .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
         self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
