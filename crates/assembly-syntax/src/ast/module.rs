@@ -1,9 +1,9 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::fmt;
+use std::collections::BTreeSet;
 
-use miden_core::{
-    AdviceMap,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use miden_core::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;
@@ -15,7 +15,7 @@ use super::{
     SymbolResolutionError, TypeAlias, TypeDecl, TypeResolver, Variant,
 };
 use crate::{
-    PathBuf,
+    PathBuf, Word,
     ast::{self, Ident, types},
     parser::ModuleParser,
     sema::SemanticAnalysisError,
@@ -126,8 +126,8 @@ pub struct Module {
     kind: ModuleKind,
     /// The items (defined or re-exported) in the module body.
     pub(crate) items: Vec<Export>,
-    /// AdviceMap that this module expects to be loaded in the host before executing.
-    pub(crate) advice_map: AdviceMap,
+    /// This item is used to check duplicate keys.
+    pub(crate) advice_map: BTreeSet<Word>,
 }
 
 /// Constants
@@ -154,7 +154,7 @@ impl Module {
             path,
             kind,
             items: Default::default(),
-            advice_map: Default::default(),
+            advice_map: BTreeSet::default(),
         }
     }
 
@@ -421,11 +421,6 @@ impl Module {
     /// i.e. a `begin`..`end` block.
     pub fn has_entrypoint(&self) -> bool {
         self.index_of(|p| p.is_main()).is_some()
-    }
-
-    /// Returns a reference to the advice map derived from this module
-    pub fn advice_map(&self) -> &AdviceMap {
-        &self.advice_map
     }
 
     /// Get an iterator over the constants defined in this module.
