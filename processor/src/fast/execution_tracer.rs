@@ -441,7 +441,9 @@ fn continuation_from_execution_state(
         NodeExecutionState::Respan { node_id, batch_index } => {
             Continuation::Respan { node_id, batch_index }
         },
-        NodeExecutionState::LoopRepeat(node_id) => Continuation::FinishLoop(node_id),
+        NodeExecutionState::LoopRepeat(node_id) => {
+            Continuation::FinishLoop { node_id, was_entered: true }
+        },
         NodeExecutionState::End(node_id) => {
             let node = current_forest
                 .get_node_by_id(node_id)
@@ -450,7 +452,9 @@ fn continuation_from_execution_state(
                 MastNode::Block(_basic_block_node) => Continuation::FinishBasicBlock(node_id),
                 MastNode::Join(_join_node) => Continuation::FinishJoin(node_id),
                 MastNode::Split(_split_node) => Continuation::FinishSplit(node_id),
-                MastNode::Loop(_loop_node) => Continuation::FinishLoop(node_id),
+                MastNode::Loop(_loop_node) => {
+                    Continuation::FinishLoop { node_id, was_entered: true }
+                },
                 MastNode::Call(_call_node) => Continuation::FinishCall(node_id),
                 MastNode::Dyn(_dyn_node) => Continuation::FinishDyn(node_id),
                 MastNode::External(_external_node) => {

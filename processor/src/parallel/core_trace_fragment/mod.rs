@@ -108,11 +108,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                         current_forest.get_node_by_id(node_id).expect("node should exist");
                     self.add_end_trace_row(mast_node.digest())?;
                 },
-                Continuation::FinishLoop(node_id) => {
-                    self.finish_loop_node(node_id, &current_forest, None)?;
-                },
-                Continuation::FinishLoopUnentered(_node_id) => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                Continuation::FinishLoop { node_id, was_entered } => {
+                    self.finish_loop_node(node_id, &current_forest, was_entered)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let call_node = current_forest
@@ -257,7 +254,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
                 // Read condition from the stack and decrement stack size. This happens as part of
                 // the LOOP operation, and so is done before writing that trace row.
-                let mut condition = self.get(0);
+                let condition = self.get(0);
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
@@ -270,11 +267,12 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 if condition == ONE {
                     self.execute_mast_node(loop_node.body(), current_forest)?;
 
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
+                    // Let finish_loop_node read the new condition from the stack
+                    self.finish_loop_node(node_id, current_forest, true)
+                } else {
+                    // Loop was never entered (condition was ZERO)
+                    self.finish_loop_node(node_id, current_forest, false)
                 }
-
-                self.finish_loop_node(node_id, current_forest, Some(condition))
             },
             MastNode::Call(call_node) => {
                 self.context.state.decoder.replay_node_start(&mut self.context.replay);

@@ -21,9 +21,10 @@ pub enum Continuation {
     /// Process the finish phase of a Split node.
     FinishSplit(MastNodeId),
     /// Process the finish phase of a Loop node.
-    FinishLoop(MastNodeId),
-    /// Process the finish phase of a Loop node that was never entered.
-    FinishLoopUnentered(MastNodeId),
+    ///
+    /// The `was_entered` field indicates whether the loop body was entered at least once. When
+    /// `was_entered == false`, the loop condition was `ZERO` and the loop body was never executed.
+    FinishLoop { node_id: MastNodeId, was_entered: bool },
     /// Process the finish phase of a Call node.
     FinishCall(MastNodeId),
     /// Process the finish phase of a Dyn node.
@@ -73,8 +74,7 @@ impl Continuation {
             StartNode(_)
             | FinishJoin(_)
             | FinishSplit(_)
-            | FinishLoop(_)
-            | FinishLoopUnentered(_)
+            | FinishLoop { node_id: _, was_entered: _ }
             | FinishCall(_)
             | FinishDyn(_)
             | ResumeBasicBlock {
@@ -139,9 +139,9 @@ impl ContinuationStack {
         self.stack.push(Continuation::FinishSplit(node_id));
     }
 
-    /// Pushes a loop finish continuation onto the stack.
-    pub fn push_finish_loop(&mut self, node_id: MastNodeId) {
-        self.stack.push(Continuation::FinishLoop(node_id));
+    /// Pushes a loop finish continuation onto the stack, for which the loop was entered.
+    pub fn push_finish_loop_entered(&mut self, node_id: MastNodeId) {
+        self.stack.push(Continuation::FinishLoop { node_id, was_entered: true });
     }
 
     /// Pushes a call finish continuation onto the stack.
