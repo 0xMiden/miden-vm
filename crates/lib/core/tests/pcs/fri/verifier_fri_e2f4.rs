@@ -128,7 +128,7 @@ pub fn build_prover_channel(
 pub fn build_evaluations(trace_length: usize, lde_blowup: usize) -> Vec<QuadFelt> {
     let mut p = (0..trace_length as u32)
         .map(|i| (i, i))
-        .map(|(i, j)| QuadFelt::new_complex(i.into(), j.into()))
+        .map(|(i, j)| QuadFelt::new([i.into(), j.into()]))
         .collect::<Vec<_>>();
     let domain_size = trace_length * lde_blowup;
     p.resize(domain_size, QuadFelt::ZERO);
@@ -346,10 +346,10 @@ fn iterate_query_fold_4_quad_ext(
             .1;
 
         let query_values = [
-            QuadFelt::new_complex(query_values[0], query_values[1]),
-            QuadFelt::new_complex(query_values[2], query_values[3]),
-            QuadFelt::new_complex(query_values[4], query_values[5]),
-            QuadFelt::new_complex(query_values[6], query_values[7]),
+            QuadFelt::new([query_values[0], query_values[1]]),
+            QuadFelt::new([query_values[2], query_values[3]]),
+            QuadFelt::new([query_values[4], query_values[5]]),
+            QuadFelt::new([query_values[6], query_values[7]]),
         ];
 
         let query_value = query_values[cur_pos / target_domain_size];

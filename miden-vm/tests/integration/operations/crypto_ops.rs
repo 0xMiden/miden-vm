@@ -574,8 +574,8 @@ proptest! {
         // Compute expected result using Horner's method
         // P(α) = c0*α^7 + c1*α^6 + c2*α^5 + c3*α^4 + c4*α^3 + c5*α^2 + c6*α + c7
         // Horner form: (...((c0*α + c1)*α + c2)*α + ...)*α + c7
-        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
         // Fold from c0 to c7: acc = acc_old, then acc = c0 + α*acc, acc = c1 + α*acc, etc.
         let acc_new = inputs[0..8]
@@ -660,15 +660,15 @@ proptest! {
         inputs[ACC_LOW_INDEX] = acc_0;
 
         // Compute expected result
-        let alpha = QuadFelt::new_complex(Felt::new(alpha_0), Felt::new(alpha_1));
-        let acc_old = QuadFelt::new_complex(Felt::new(acc_0), Felt::new(acc_1));
+        let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
+        let acc_old = QuadFelt::new([Felt::new(acc_0), Felt::new(acc_1)]);
 
         // Build extension field coefficients: chunks of 2 [low, high]
         // Horner: P(α) = c0*α^3 + c1*α^2 + c2*α + c3
         let acc_new = inputs[0..8]
             .chunks(2)
             .map(|chunk| {
-                QuadFelt::new_complex(Felt::new(chunk[0]), Felt::new(chunk[1]))
+                QuadFelt::new([Felt::new(chunk[0]), Felt::new(chunk[1])])
             })
             .fold(acc_old, |acc, coef| coef + alpha * acc);
 
