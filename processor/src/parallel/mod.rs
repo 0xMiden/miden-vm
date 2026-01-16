@@ -510,25 +510,25 @@ fn initialize_chiplets(
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
                     let _ = chiplets
                         .memory
-                        .read(ctx, addr, clk, &())
+                        .read(ctx, addr, clk)
                         .expect("memory read element failed when populating chiplet");
                 },
                 MemoryAccess::WriteElement(addr, element, ctx, clk) => {
                     chiplets
                         .memory
-                        .write(ctx, addr, clk, element, &())
+                        .write(ctx, addr, clk, element)
                         .expect("memory write element failed when populating chiplet");
                 },
                 MemoryAccess::ReadWord(addr, ctx, clk) => {
                     chiplets
                         .memory
-                        .read_word(ctx, addr, clk, &())
+                        .read_word(ctx, addr, clk)
                         .expect("memory read word failed when populating chiplet");
                 },
                 MemoryAccess::WriteWord(addr, word, ctx, clk) => {
                     chiplets
                         .memory
-                        .write_word(ctx, addr, clk, word, &())
+                        .write_word(ctx, addr, clk, word)
                         .expect("memory write word failed when populating chiplet");
                 },
             });

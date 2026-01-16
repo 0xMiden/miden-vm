@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ExecutionError, PrimeField64, ProcessState,
+    AdviceError, ExecutionError, MemoryResultExt, PrimeField64, ProcessState,
     errors::{AdviceResultExt, ErrorContext, OperationError, OperationResultExt},
 };
 
@@ -70,7 +70,7 @@ fn insert_mem_values_into_adv_map(
     process: &mut ProcessState,
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
-    let addr_range = process.get_mem_addr_range(5, 6).map_err(ExecutionError::MemoryError)?;
+    let addr_range = process.get_mem_addr_range(5, 6).map_mem_err(err_ctx)?;
     let ctx = process.ctx();
 
     let mut values = Vec::with_capacity(addr_range.len() * WORD_SIZE);

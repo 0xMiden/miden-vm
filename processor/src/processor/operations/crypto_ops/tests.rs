@@ -188,7 +188,6 @@ proptest! {
             Felt::new(src_addr),
             processor.clk,
             plaintext_word1,
-            &(),
         ).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -197,7 +196,6 @@ proptest! {
             Felt::new(src_addr + 4),
             processor.clk,
             plaintext_word2,
-            &(),
         ).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -222,8 +220,8 @@ proptest! {
 
         // Check that ciphertext was written to destination memory
         let clk = processor.clk;
-        let cipher_word1 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr), clk, &()).unwrap();
-        let cipher_word2 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr + 4), clk, &()).unwrap();
+        let cipher_word1 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr), clk).unwrap();
+        let cipher_word2 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr + 4), clk).unwrap();
 
         prop_assert_eq!(cipher_word1[0], expected_cipher1[0], "cipher word1[0]");
         prop_assert_eq!(cipher_word1[1], expected_cipher1[1], "cipher word1[1]");
@@ -319,7 +317,6 @@ proptest! {
             Felt::new(ALPHA_ADDR),
             processor.clk,
             alpha_word,
-            &(),
         ).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -327,7 +324,7 @@ proptest! {
         //
         // Note that we don't check the correctness of the helper registers here, since the
         // `FastProcessor` does not generate them (as they are only relevant in trace generation).
-        let result = op_horner_eval_base(&mut processor, &(), &mut tracer);
+        let result = op_horner_eval_base(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -445,12 +442,11 @@ proptest! {
             Felt::new(ALPHA_ADDR),
             processor.clk,
             alpha_word,
-            &(),
         ).unwrap();
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Execute the operation
-        let result = op_horner_eval_ext(&mut processor, &(), &mut tracer);
+        let result = op_horner_eval_ext(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 

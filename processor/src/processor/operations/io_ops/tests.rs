@@ -95,8 +95,7 @@ fn test_op_mloadw() {
     // check memory state
     assert_eq!(1, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
+    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
@@ -135,8 +134,7 @@ fn test_op_mload() {
     // check memory state
     assert_eq!(1, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
+    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
@@ -163,11 +161,9 @@ fn test_op_mstream() {
     // check memory state
     assert_eq!(2, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word1 =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
+    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 =
-        processor.memory.read_word(ContextId::root(), Felt::new(8), clk, &()).unwrap();
+    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(8), clk).unwrap();
     assert_eq!(word2, stored_word2);
 
     // clear the stack (drop the 8 elements we pushed while storing)
@@ -232,8 +228,7 @@ fn test_op_mstorew() {
     // check memory state
     assert_eq!(1, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word =
-        processor.memory.read_word(ContextId::root(), Felt::new(0), clk, &()).unwrap();
+    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(word1, stored_word);
 
     // push the second word onto the stack and save it at address 4
@@ -247,11 +242,9 @@ fn test_op_mstorew() {
     // check memory state
     assert_eq!(2, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word1 =
-        processor.memory.read_word(ContextId::root(), Felt::new(0), clk, &()).unwrap();
+    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
+    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word2, stored_word2);
 
     // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
@@ -284,8 +277,7 @@ fn test_op_mstore() {
     let expected_word: Word = [element, ZERO, ZERO, ZERO].into();
     assert_eq!(1, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word =
-        processor.memory.read_word(ContextId::root(), Felt::new(0), clk, &()).unwrap();
+    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(expected_word, stored_word);
 
     // push a word onto the stack and save it at address 4
@@ -305,8 +297,7 @@ fn test_op_mstore() {
     let expected_word2: Word = [element2, Felt::new(3), Felt::new(5), Felt::new(7)].into();
     assert_eq!(2, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word2 =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
+    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(expected_word2, stored_word2);
 
     // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
@@ -351,10 +342,8 @@ fn test_op_pipe() {
     // words[0] stored at addr 4, words[1] at addr 8
     assert_eq!(2, processor.memory.num_accessed_words());
     let clk = processor.clk;
-    let stored_word1 =
-        processor.memory.read_word(ContextId::root(), Felt::new(4), clk, &()).unwrap();
-    let stored_word2 =
-        processor.memory.read_word(ContextId::root(), Felt::new(8), clk, &()).unwrap();
+    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(8), clk).unwrap();
 
     let word1 = stored_word1;
     let word2 = stored_word2;

@@ -2,7 +2,7 @@ use miden_air::Felt;
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ErrorContext, ExecutionError,
+    ErrorContext, ExecutionError, MemoryResultExt,
     errors::AdviceResultExt,
     fast::Tracer,
     processor::{
@@ -83,10 +83,7 @@ pub(super) fn op_mloadw<P: Processor>(
 
     processor.stack().decrement_size(tracer);
 
-    let word = processor
-        .memory()
-        .read_word(ctx, addr, clk, err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+    let word = processor.memory().read_word(ctx, addr, clk).map_mem_err(err_ctx)?;
     tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     // Set word on stack (word[0] at top).
@@ -126,10 +123,7 @@ pub(super) fn op_mstorew<P: Processor>(
 
     processor.stack().decrement_size(tracer);
 
-    processor
-        .memory()
-        .write_word(ctx, addr, clk, word, err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+    processor.memory().write_word(ctx, addr, clk, word).map_mem_err(err_ctx)?;
     tracer.record_memory_write_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     Ok(())
@@ -152,10 +146,7 @@ pub(super) fn op_mload<P: Processor>(
     let ctx = processor.system().ctx();
     let addr = processor.stack().get(0);
 
-    let element = processor
-        .memory()
-        .read_element(ctx, addr, err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+    let element = processor.memory().read_element(ctx, addr).map_mem_err(err_ctx)?;
     tracer.record_memory_read_element(
         element,
         addr,
@@ -188,10 +179,7 @@ pub(super) fn op_mstore<P: Processor>(
 
     processor.stack().decrement_size(tracer);
 
-    processor
-        .memory()
-        .write_element(ctx, addr, value, err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+    processor.memory().write_element(ctx, addr, value).map_mem_err(err_ctx)?;
     tracer.record_memory_write_element(
         value,
         addr,
@@ -232,10 +220,8 @@ pub(super) fn op_mstream<P: Processor>(
     let words = {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
-        let first_word = processor
-            .memory()
-            .read_word(ctx, addr_first_word, clk, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+        let first_word =
+            processor.memory().read_word(ctx, addr_first_word, clk).map_mem_err(err_ctx)?;
         tracer.record_memory_read_word(
             first_word,
             addr_first_word,
@@ -243,10 +229,8 @@ pub(super) fn op_mstream<P: Processor>(
             processor.system().clk(),
         );
 
-        let second_word = processor
-            .memory()
-            .read_word(ctx, addr_second_word, clk, err_ctx)
-            .map_err(ExecutionError::MemoryError)?;
+        let second_word =
+            processor.memory().read_word(ctx, addr_second_word, clk).map_mem_err(err_ctx)?;
         tracer.record_memory_read_word(
             second_word,
             addr_second_word,
@@ -307,8 +291,8 @@ pub(super) fn op_pipe<P: Processor>(
     // write the words to memory
     processor
         .memory()
-        .write_word(ctx, addr_first_word, clk, words[0], err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+        .write_word(ctx, addr_first_word, clk, words[0])
+        .map_mem_err(err_ctx)?;
     tracer.record_memory_write_word(
         words[0],
         addr_first_word,
@@ -318,8 +302,8 @@ pub(super) fn op_pipe<P: Processor>(
 
     processor
         .memory()
-        .write_word(ctx, addr_second_word, clk, words[1], err_ctx)
-        .map_err(ExecutionError::MemoryError)?;
+        .write_word(ctx, addr_second_word, clk, words[1])
+        .map_mem_err(err_ctx)?;
     tracer.record_memory_write_word(
         words[1],
         addr_second_word,

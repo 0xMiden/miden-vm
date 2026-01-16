@@ -10,7 +10,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceProvider, ContextId, ErrorContext, ExecutionError, MemoryResultExt, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, AceResultExt},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
@@ -434,15 +434,14 @@ pub fn eval_circuit_fast_(
     // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
     // evaluation completely
     for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let word = mem.read_word(ctx, ptr, clk).map_mem_err(err_ctx)?;
         tracer.record_memory_read_word(word, ptr, ctx, clk);
         evaluation_context.do_read(ptr, word)?;
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let instruction = mem.read_element(ctx, ptr).map_mem_err(err_ctx)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
         evaluation_context.do_eval(ptr, instruction, err_ctx)?;
         ptr += PTR_OFFSET_ELEM;

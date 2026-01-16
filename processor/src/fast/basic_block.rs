@@ -257,6 +257,7 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
+                #[allow(clippy::let_unit_value)]
                 let err_ctx =
                     err_ctx!(current_forest, node_id, host, self.in_debug_mode(), op_idx_in_block);
                 match op {
