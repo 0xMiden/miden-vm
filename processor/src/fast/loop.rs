@@ -10,7 +10,7 @@ use crate::{
     AsyncHost, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
 };
 
 impl FastProcessor {
@@ -28,7 +28,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(current_node_id),
+            Continuation::StartNode(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -106,7 +106,10 @@ impl FastProcessor {
             // Add REPEAT row and continue looping
             tracer.start_clock_cycle(
                 self,
-                NodeExecutionState::LoopRepeat(current_node_id),
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: true,
+                },
                 continuation_stack,
                 current_forest,
             );
@@ -124,7 +127,10 @@ impl FastProcessor {
             // Exit the loop - add END row
             tracer.start_clock_cycle(
                 self,
-                NodeExecutionState::End(current_node_id),
+                Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: loop_was_entered,
+                },
                 continuation_stack,
                 current_forest,
             );

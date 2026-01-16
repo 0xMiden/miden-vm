@@ -23,8 +23,8 @@ use crate::{
             AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
             CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
             HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, MemoryWritesReplay, NodeExecutionState, NodeFlags,
-            RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+            MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay,
+            StackOverflowReplay, StackState, SystemState,
         },
         tracer::Tracer,
     },
@@ -176,7 +176,7 @@ impl ExecutionTracer {
         system_state: SystemState,
         stack_top: [Felt; MIN_STACK_DEPTH],
         mut continuation_stack: ContinuationStack,
-        execution_state: NodeExecutionState,
+        continuation: Continuation,
         current_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
@@ -204,11 +204,7 @@ impl ExecutionTracer {
             };
 
             // Push new continuation corresponding to the current execution state
-            {
-                let top_continuation =
-                    continuation_from_execution_state(execution_state, &current_forest);
-                continuation_stack.push_continuation(top_continuation);
-            }
+            continuation_stack.push_continuation(continuation);
 
             Some(StateSnapshot {
                 state: CoreTraceState {
@@ -424,55 +420,13 @@ impl ExecutionTracer {
     }
 }
 
-/// Converts a [NodeExecutionState] into the corresponding [Continuation].
-///
-/// The [NodeExecutionState] represents the execution state at a given point in time, while the
-/// [Continuation] represents the next action to be taken in the execution. This function maps
-/// between the two representations.
-fn continuation_from_execution_state(
-    execution_state: NodeExecutionState,
-    current_forest: &Arc<MastForest>,
-) -> Continuation {
-    let top_continuation = match execution_state {
-        NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch } => {
-            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch }
-        },
-        NodeExecutionState::Start(node_id) => Continuation::StartNode(node_id),
-        NodeExecutionState::Respan { node_id, batch_index } => {
-            Continuation::Respan { node_id, batch_index }
-        },
-        NodeExecutionState::LoopRepeat(node_id) => {
-            Continuation::FinishLoop { node_id, was_entered: true }
-        },
-        NodeExecutionState::End(node_id) => {
-            let node = current_forest
-                .get_node_by_id(node_id)
-                .expect("Node ID expected to exist in current forest");
-            match node {
-                MastNode::Block(_basic_block_node) => Continuation::FinishBasicBlock(node_id),
-                MastNode::Join(_join_node) => Continuation::FinishJoin(node_id),
-                MastNode::Split(_split_node) => Continuation::FinishSplit(node_id),
-                MastNode::Loop(_loop_node) => {
-                    Continuation::FinishLoop { node_id, was_entered: true }
-                },
-                MastNode::Call(_call_node) => Continuation::FinishCall(node_id),
-                MastNode::Dyn(_dyn_node) => Continuation::FinishDyn(node_id),
-                MastNode::External(_external_node) => {
-                    panic!("External nodes are guaranteed to be resolved")
-                },
-            }
-        },
-    };
-    top_continuation
-}
-
 impl Tracer for ExecutionTracer {
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
-        execution_state: NodeExecutionState,
+        continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
@@ -485,24 +439,24 @@ impl Tracer for ExecutionTracer {
                     .try_into()
                     .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
                 continuation_stack.clone(),
-                execution_state.clone(),
+                continuation.clone(),
                 current_forest.clone(),
             );
         }
 
         // Update block stack
-        match &execution_state {
-            NodeExecutionState::BasicBlock { .. } => {
+        match continuation {
+            Continuation::ResumeBasicBlock { .. } => {
                 // do nothing, since operations in a basic block don't update the block stack
             },
-            NodeExecutionState::Start(mast_node_id) => match &current_forest[*mast_node_id] {
+            Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
                 MastNode::Join(_)
                 | MastNode::Split(_)
                 | MastNode::Loop(_)
                 | MastNode::Dyn(_)
                 | MastNode::Call(_) => {
                     self.record_control_node_start(
-                        &current_forest[*mast_node_id],
+                        &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
@@ -522,13 +476,21 @@ impl Tracer for ExecutionTracer {
                     "start_clock_cycle is guaranteed not to be called on external nodes"
                 ),
             },
-            NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
+            Continuation::Respan { node_id: _, batch_index: _ } => {
                 self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
-            NodeExecutionState::LoopRepeat(_) => {
-                // do nothing, REPEAT doesn't affect the block stack
+            Continuation::FinishLoop { node_id: _, was_entered }
+                if was_entered && processor.stack_get(0) == ONE =>
+            {
+                // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
             },
-            NodeExecutionState::End(_) => {
+            Continuation::FinishJoin(_)
+            | Continuation::FinishSplit(_)
+            | Continuation::FinishCall(_)
+            | Continuation::FinishDyn(_)
+            | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
+            | Continuation::FinishBasicBlock(_) => {
+                // This is an END operation; pop the block stack and record the node end
                 let block_info = self.block_stack.pop();
                 self.record_node_end(&block_info);
 
@@ -538,6 +500,14 @@ impl Tracer for ExecutionTracer {
                         parent_fn_hash: ctx_info.parent_fn_hash,
                     });
                 }
+            },
+            Continuation::FinishExternal(_)
+            | Continuation::EnterForest(_)
+            | Continuation::AfterExitDecorators(_)
+            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+                panic!(
+                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                )
             },
         }
     }

@@ -15,7 +15,6 @@ use crate::{
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         step::{BreakReason, Stopper},
-        trace_state::NodeExecutionState,
     },
 };
 
@@ -35,7 +34,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(current_node_id),
+            Continuation::StartNode(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -97,7 +96,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::End(node_id),
+            Continuation::FinishCall(node_id),
             continuation_stack,
             current_forest,
         );
@@ -135,7 +134,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(current_node_id),
+            Continuation::StartNode(current_node_id),
             continuation_stack,
             current_forest,
         );
@@ -242,7 +241,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::End(node_id),
+            Continuation::FinishDyn(node_id),
             continuation_stack,
             current_forest,
         );
