@@ -337,23 +337,20 @@ pub struct MerklePathVerificationFailedInner {
 
 /// Computes the label and source file for error context.
 ///
-/// When not in debug mode, returns `(SourceSpan::UNKNOWN, None)` to skip the expensive
-/// decorator traversal. This function is called by the extension traits to lazily
-/// compute source location only when an error occurs.
+/// This function is called by the extension traits to compute source location
+/// only when an error occurs. Since errors are rare, the cost of decorator
+/// traversal is acceptable.
+///
+/// Note: The `_in_debug_mode` parameter is kept for API compatibility but is
+/// no longer used for gating. We always attempt to provide source context for
+/// better error diagnostics in production.
 fn get_label_and_source_file(
     op_idx: Option<usize>,
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
-    in_debug_mode: bool,
+    _in_debug_mode: bool,
 ) -> (SourceSpan, Option<Arc<SourceFile>>) {
-    // When not in debug mode, skip the expensive decorator traversal entirely.
-    // Decorators (including AsmOp decorators used for error context) should only
-    // be accessed when debugging is enabled.
-    if !in_debug_mode {
-        return (SourceSpan::UNKNOWN, None);
-    }
-
     mast_forest
         .get_assembly_op(node_id, op_idx)
         .and_then(|assembly_op| assembly_op.location())
