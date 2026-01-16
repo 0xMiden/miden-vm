@@ -166,6 +166,7 @@ Instructions for moving data between the stack and other sources like program co
 | Instruction | Stack Input | Stack Output     | Cycles | Notes                                                                                                                                                                                                     |
 | ----------- | ----------- | ---------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push.a...` | `[ ... ]`   | `[c, b, a, ...]` | 1-2    | Pushes up to 16 field elements (decimal or hex) onto the stack. Hex words (32 bytes) are little-endian; short hex values are big-endian. Example: `push.0x1234.0x5678` or `push.0x34120000...78560000...` |
+| `push.[a,b,c,d]` | `[ ... ]` | `[a, b, c, d, ...]` | 4 | Pushes a word (4 field elements) onto the stack. Element `a` ends up on top. Example: `push.[1,2,3,4]` results in `[1, 2, 3, 4, ...]`. |
 
 ### Environment Inputs
 
