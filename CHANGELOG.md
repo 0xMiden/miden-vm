@@ -33,6 +33,9 @@
 - Add `MastForest::write_stripped()` to serialize without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
 - [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
 - Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
+- Add API to serialize the `MastForest` without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
+- Removed `ErrorContext` trait and `err_ctx!` macro; error context is now computed lazily by passing raw parameters to error extension traits ([#2544](https://github.com/0xMiden/miden-vm/pull/2544)).
+
 - Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
 
 ## 0.20.2 (TBD)
