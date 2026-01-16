@@ -1,5 +1,6 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 135
 expression: fast_stack_outputs
 ---
 Err(
