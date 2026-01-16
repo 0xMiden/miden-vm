@@ -11,7 +11,7 @@ use crate::{
     AsyncHost, ErrorContext,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
-    errors::{AdviceResultExt, EventResultExt},
+    errors::{AdviceResultExt, EventResultExt, SystemEventResultExt},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -351,7 +351,10 @@ impl FastProcessor {
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event, err_ctx) {
+            let clk = process.clk();
+            if let Err(err) =
+                handle_system_event(&mut process, system_event).map_sys_event_err(err_ctx, clk)
+            {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
         } else {
