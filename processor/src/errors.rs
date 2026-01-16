@@ -68,15 +68,13 @@ pub enum ExecutionError {
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
-    #[error("memory error")]
-    #[diagnostic()]
+    #[error("{err}")]
+    #[diagnostic(forward(err))]
     MemoryError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[source]
-        #[diagnostic_source]
         err: MemoryError,
     },
     /// Memory error without source context (for internal operations like FMP initialization).

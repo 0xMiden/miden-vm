@@ -19,8 +19,7 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(&[Felt::from_u32(43)])
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        // The error is wrapped: "memory error" is the outer message
-        assert_eq!(err.to_string(), "memory error");
+        assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
     }
 
     // mstorew
@@ -36,8 +35,7 @@ fn test_memory_word_access_alignment() {
         let err = FastProcessor::new(&[Felt::from_u32(43)])
             .execute_sync(&program, &mut host)
             .unwrap_err();
-        // The error is wrapped: "memory error" is the outer message
-        assert_eq!(err.to_string(), "memory error");
+        assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
     }
 }
 

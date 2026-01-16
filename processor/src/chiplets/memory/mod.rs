@@ -134,7 +134,7 @@ impl Memory {
         match self.trace.get(&ctx) {
             Some(segment) => segment
                 .get_word(addr)
-                .map_err(|_| MemoryError::UnalignedWordAccessNoClk { addr, ctx }),
+                .map_err(|_| MemoryError::UnalignedWordAccess { addr, ctx }),
             None => Ok(None),
         }
     }
@@ -193,7 +193,7 @@ impl Memory {
             .try_into()
             .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::UnalignedWordAccess { addr, ctx, clk: Felt::from(clk) });
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;
@@ -238,7 +238,7 @@ impl Memory {
             .try_into()
             .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::UnalignedWordAccess { addr, ctx, clk: Felt::from(clk) });
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;

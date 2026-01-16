@@ -553,7 +553,8 @@ fn test_diagnostic_unaligned_word_access() {
         " 4 |             exec.foo mem_storew_be.3",
         "   :                      ^^^^^^^^^^^^^^^",
         " 5 |         end",
-        "   `----"
+        "   `----",
+        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     );
 
     // mem_loadw_be
@@ -567,15 +568,14 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "memory error",
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 6",
-        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)",
+        "word access at memory address 3 in context 0 is unaligned",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mem_loadw_be.3",
         "   :             ^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "help: ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
     );
 }
 
@@ -592,7 +592,6 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory error",
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
@@ -613,7 +612,6 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory error",
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
@@ -634,7 +632,6 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory error",
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",
@@ -655,7 +652,6 @@ fn test_diagnostic_address_out_of_bounds() {
 
     assert_diagnostic_lines!(
         err,
-        "memory error",
         "memory address cannot exceed 2^32 but was 4294967296",
         regex!(r#",-\[test[\d]+:3:23\]"#),
         " 2 |         begin",

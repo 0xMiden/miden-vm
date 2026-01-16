@@ -118,7 +118,7 @@ fn mem_read_word_unaligned() {
     let ctx = ContextId::root();
     let ret = mem.read_word(ctx, addr, clk);
 
-    assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ }));
+    assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _ }));
 }
 
 #[test]
@@ -247,7 +247,7 @@ fn mem_write_word_unaligned() {
     let ctx = ContextId::root();
     let ret = mem.write_word(ctx, addr, clk, word1);
 
-    assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _, clk: _ }));
+    assert_matches!(ret, Err(MemoryError::UnalignedWordAccess { addr: _, ctx: _ }));
 }
 
 /// Tests that values written are properly read back.
