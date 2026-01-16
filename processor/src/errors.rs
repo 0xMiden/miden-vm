@@ -227,8 +227,8 @@ pub enum CryptoError {
 /// ```
 ///
 /// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the
-/// corresponding extension traits: `AdviceResultExt`, `EventResultExt`,
-/// `AceResultExt`.
+/// corresponding extension traits (`AdviceResultExt`, `AceResultExt`) or
+/// helper functions (`advice_error_with_context`, `event_error_with_context`).
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
@@ -445,9 +445,7 @@ impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
         in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-            ExecutionError::AdviceError { label, source_file, err }
+            advice_error_with_context(err, mast_forest, node_id, host, in_debug_mode)
         })
     }
 
@@ -460,41 +458,43 @@ impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
     }
 }
 
-/// Extension trait for converting `Result<T, EventError>` to `Result<T, ExecutionError>`.
-pub trait EventResultExt<T> {
-    /// Maps an `EventError` to an `ExecutionError` with the provided context.
-    fn map_event_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        in_debug_mode: bool,
-        event_id: EventId,
-        event_name: Option<EventName>,
-    ) -> Result<T, ExecutionError>;
+/// Wraps an `AdviceError` with execution context to produce an `ExecutionError`.
+///
+/// This is useful when working with `ControlFlow` or other non-`Result` return types
+/// where the `AdviceResultExt::map_advice_err` extension trait cannot be used directly.
+pub fn advice_error_with_context(
+    err: AdviceError,
+    mast_forest: &MastForest,
+    node_id: MastNodeId,
+    host: &impl BaseHost,
+    in_debug_mode: bool,
+) -> ExecutionError {
+    let (label, source_file) =
+        get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+    ExecutionError::AdviceError { label, source_file, err }
 }
 
-impl<T> EventResultExt<T> for Result<T, EventError> {
-    fn map_event_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        in_debug_mode: bool,
-        event_id: EventId,
-        event_name: Option<EventName>,
-    ) -> Result<T, ExecutionError> {
-        self.map_err(|error| {
-            let (label, source_file) =
-                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-            ExecutionError::EventError {
-                label,
-                source_file,
-                event_id,
-                event_name,
-                error,
-            }
-        })
+/// Wraps an `EventError` with execution context to produce an `ExecutionError`.
+///
+/// This is useful when working with `ControlFlow` or other non-`Result` return types
+/// where an extension trait on `Result` cannot be used directly.
+pub fn event_error_with_context(
+    error: EventError,
+    mast_forest: &MastForest,
+    node_id: MastNodeId,
+    host: &impl BaseHost,
+    in_debug_mode: bool,
+    event_id: EventId,
+    event_name: Option<EventName>,
+) -> ExecutionError {
+    let (label, source_file) =
+        get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+    ExecutionError::EventError {
+        label,
+        source_file,
+        event_id,
+        event_name,
+        error,
     }
 }
 
