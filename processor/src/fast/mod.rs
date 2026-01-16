@@ -592,15 +592,8 @@ impl FastProcessor {
                     tracer,
                     stopper,
                 )?,
-                Continuation::FinishLoop(node_id) => self.finish_loop_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishLoopUnentered(node_id) => self.finish_loop_node_unentered(
+                Continuation::FinishLoop { node_id, was_entered } => self.finish_loop_node(
+                    was_entered,
                     node_id,
                     current_forest,
                     continuation_stack,

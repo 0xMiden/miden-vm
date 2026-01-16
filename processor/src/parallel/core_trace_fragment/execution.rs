@@ -1,8 +1,7 @@
 use core::ops::ControlFlow;
 
-use miden_air::Felt;
 use miden_core::{
-    ONE,
+    ONE, ZERO,
     mast::{BasicBlockNode, CallNode, DynNode, MastForest, MastNodeExt, MastNodeId},
 };
 
@@ -66,18 +65,19 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         node_id: MastNodeId,
         mast_forest: &MastForest,
-        condition: Option<Felt>,
+        was_entered: bool,
     ) -> ControlFlow<()> {
         let loop_node =
             mast_forest.get_node_by_id(node_id).expect("node should exist").unwrap_loop();
 
-        // If no condition is provided, read it from the stack
-        let mut condition = if let Some(cond) = condition {
-            cond
-        } else {
+        // If the loop was never entered, we know the condition is ZERO. Otherwise, read it from the
+        // stack.
+        let mut condition = if was_entered {
             let cond = self.get(0);
             self.decrement_size(&mut NoopTracer);
             cond
+        } else {
+            ZERO
         };
 
         while condition == ONE {

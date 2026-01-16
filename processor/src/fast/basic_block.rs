@@ -11,7 +11,7 @@ use crate::{
     AsyncHost, ErrorContext, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
 };
@@ -35,7 +35,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(node_id),
+            Continuation::StartNode(node_id),
             continuation_stack,
             current_forest,
         );
@@ -110,7 +110,7 @@ impl FastProcessor {
             {
                 tracer.start_clock_cycle(
                     self,
-                    NodeExecutionState::Respan { node_id, batch_index },
+                    Continuation::Respan { node_id, batch_index },
                     continuation_stack,
                     current_forest,
                 );
@@ -245,7 +245,7 @@ impl FastProcessor {
             // operation
             tracer.start_clock_cycle(
                 self,
-                NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch },
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch },
                 continuation_stack,
                 current_forest,
             );
@@ -298,7 +298,7 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::End(node_id),
+            Continuation::FinishBasicBlock(node_id),
             continuation_stack,
             current_forest,
         );

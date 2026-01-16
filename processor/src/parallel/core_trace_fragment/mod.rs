@@ -25,7 +25,7 @@ use crate::{
         NoopTracer, Tracer, eval_circuit_fast_,
         trace_state::{
             AdviceReplay, CoreTraceFragmentContext, ExecutionContextSystemInfo,
-            HasherResponseReplay, MemoryReadsReplay, NodeExecutionState,
+            HasherResponseReplay, MemoryReadsReplay,
         },
     },
     host::default::NoopHost,
@@ -80,9 +80,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
     /// Fills the fragment and returns the final stack rows, system rows, and number of rows built.
     pub fn fill_fragment(mut self) -> ([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize) {
-        let execution_state = self.context.initial_execution_state.clone();
         // Execute fragment generation and always finalize at the end
-        let _ = self.fill_fragment_impl(execution_state);
+        let _ = self.fill_fragment_impl();
 
         let num_rows_built = self.num_rows_built();
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
@@ -91,88 +90,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
     }
 
     /// Internal method that fills the fragment with automatic early returns
-    fn fill_fragment_impl(&mut self, execution_state: NodeExecutionState) -> ControlFlow<()> {
-        let initial_mast_forest = self.context.initial_mast_forest.clone();
-
-        // Finish the current node given its execution state
-        match execution_state {
-            NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_basic_block();
-
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_op(basic_block_node, batch_index, op_idx_in_batch);
-                self.finish_basic_block_node_from_op(
-                    basic_block_node,
-                    &initial_mast_forest,
-                    batch_index,
-                    op_idx_in_batch,
-                    &mut basic_block_context,
-                )?;
-            },
-            NodeExecutionState::Start(node_id) => {
-                self.execute_mast_node(node_id, &initial_mast_forest)?;
-            },
-            NodeExecutionState::Respan { node_id, batch_index } => {
-                let basic_block_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_basic_block();
-
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_batch_start(basic_block_node, batch_index);
-
-                self.add_respan_trace_row(
-                    &basic_block_node.op_batches()[batch_index],
-                    &mut basic_block_context,
-                )?;
-
-                self.finish_basic_block_node_from_op(
-                    basic_block_node,
-                    &initial_mast_forest,
-                    batch_index,
-                    0,
-                    &mut basic_block_context,
-                )?;
-            },
-            NodeExecutionState::LoopRepeat(node_id) => {
-                self.finish_loop_node(node_id, &initial_mast_forest, None)?;
-            },
-            NodeExecutionState::End(node_id) => {
-                let mast_node =
-                    initial_mast_forest.get_node_by_id(node_id).expect("node should exist");
-
-                match mast_node {
-                    MastNode::Join(join_node) => {
-                        self.add_end_trace_row(join_node.digest())?;
-                    },
-                    MastNode::Split(split_node) => {
-                        self.add_end_trace_row(split_node.digest())?;
-                    },
-                    MastNode::Loop(_loop_node) => {
-                        self.finish_loop_node(node_id, &initial_mast_forest, None)?;
-                    },
-                    MastNode::Call(call_node) => {
-                        self.finish_call_node(call_node)?;
-                    },
-                    MastNode::Dyn(dyn_node) => {
-                        self.finish_dyn_node(dyn_node)?;
-                    },
-                    MastNode::Block(basic_block_node) => {
-                        self.add_basic_block_end_trace_row(basic_block_node)?;
-                    },
-                    MastNode::External(_external_node) => {
-                        // External nodes don't generate trace rows directly, and hence will never
-                        // show up in the END execution state.
-                        panic!("Unexpected external node in END execution state")
-                    },
-                }
-            },
-        }
-
-        // Start of main execution loop.
+    fn fill_fragment_impl(&mut self) -> ControlFlow<()> {
         let mut current_forest = self.context.initial_mast_forest.clone();
 
         while let Some(continuation) = self.context.continuation.pop_continuation() {
@@ -190,11 +108,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                         current_forest.get_node_by_id(node_id).expect("node should exist");
                     self.add_end_trace_row(mast_node.digest())?;
                 },
-                Continuation::FinishLoop(node_id) => {
-                    self.finish_loop_node(node_id, &current_forest, None)?;
-                },
-                Continuation::FinishLoopUnentered(_node_id) => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                Continuation::FinishLoop { node_id, was_entered } => {
+                    self.finish_loop_node(node_id, &current_forest, was_entered)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let call_node = current_forest
@@ -217,28 +132,64 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                     // External nodes don't generate END trace rows in the parallel processor
                     // as they only execute after_exit decorators
                 },
-                Continuation::ResumeBasicBlock {
-                    node_id: _,
-                    batch_index: _,
-                    op_idx_in_batch: _,
-                } => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    let mut basic_block_context = BasicBlockContext::new_at_op(
+                        basic_block_node,
+                        batch_index,
+                        op_idx_in_batch,
+                    );
+                    self.finish_basic_block_node_from_op(
+                        basic_block_node,
+                        &current_forest,
+                        batch_index,
+                        op_idx_in_batch,
+                        &mut basic_block_context,
+                    )?;
                 },
-                Continuation::Respan { node_id: _, batch_index: _ } => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                Continuation::Respan { node_id, batch_index } => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    let mut basic_block_context =
+                        BasicBlockContext::new_at_batch_start(basic_block_node, batch_index);
+
+                    self.add_respan_trace_row(
+                        &basic_block_node.op_batches()[batch_index],
+                        &mut basic_block_context,
+                    )?;
+
+                    self.finish_basic_block_node_from_op(
+                        basic_block_node,
+                        &current_forest,
+                        batch_index,
+                        0,
+                        &mut basic_block_context,
+                    )?;
                 },
-                Continuation::FinishBasicBlock(_node_id) => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                Continuation::FinishBasicBlock(node_id) => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    self.add_basic_block_end_trace_row(basic_block_node)?;
                 },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
                 },
                 Continuation::AfterExitDecorators(_node_id) => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                    // do nothing - we don't execute decorators in this processor
                 },
                 Continuation::AfterExitDecoratorsBasicBlock(_node_id) => {
-                    unimplemented!("`ExecutionTracer` doesn't generate this variant yet")
+                    // do nothing - we don't execute decorators in this processor
                 },
             }
         }
@@ -303,7 +254,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
                 // Read condition from the stack and decrement stack size. This happens as part of
                 // the LOOP operation, and so is done before writing that trace row.
-                let mut condition = self.get(0);
+                let condition = self.get(0);
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
@@ -316,11 +267,12 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 if condition == ONE {
                     self.execute_mast_node(loop_node.body(), current_forest)?;
 
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
+                    // Let finish_loop_node read the new condition from the stack
+                    self.finish_loop_node(node_id, current_forest, true)
+                } else {
+                    // Loop was never entered (condition was ZERO)
+                    self.finish_loop_node(node_id, current_forest, false)
                 }
-
-                self.finish_loop_node(node_id, current_forest, Some(condition))
             },
             MastNode::Call(call_node) => {
                 self.context.state.decoder.replay_node_start(&mut self.context.replay);

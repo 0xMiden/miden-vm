@@ -11,6 +11,7 @@
 - `FastProcessor` now correctly returns an error if the maximum number of cycles was exceeded during execution ([#2537](https://github.com/0xMiden/miden-vm/pull/2537))
 - `FastProcessor` now correctly only executes `trace` decorators when tracing is enabled (with `ExecutionOptions`) ([#2539](https://github.com/0xMiden/miden-vm/pull/2539))
 - Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484))
+- Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 
 #### Changes
 
@@ -34,6 +35,7 @@
 - [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
 - Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
 - Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
+- [BREAKING] Remove `NodeExecutionState` in favor of `Continuation` ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 
 ## 0.20.2 (TBD)
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
