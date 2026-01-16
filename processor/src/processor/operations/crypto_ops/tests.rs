@@ -561,7 +561,7 @@ proptest! {
         let program = MastForest::default();
 
         // Execute the operation
-        let result = op_mpverify(&mut processor, ZERO, &program, &(), &mut tracer);
+        let result = op_mpverify(&mut processor, ZERO, &program, &mut tracer);
         prop_assert!(result.is_ok(), "op_mpverify failed: {:?}", result.err());
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -655,7 +655,7 @@ proptest! {
         let mut tracer = NoopTracer;
 
         // Execute the operation
-        let result = op_mrupdate(&mut processor, &(), &mut tracer);
+        let result = op_mrupdate(&mut processor, &mut tracer);
         prop_assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
@@ -759,7 +759,7 @@ fn test_op_mrupdate_merge_subtree() {
     let mut tracer = NoopTracer;
 
     // Execute the operation
-    let result = op_mrupdate(&mut processor, &(), &mut tracer);
+    let result = op_mrupdate(&mut processor, &mut tracer);
     assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
     let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 

@@ -3,7 +3,7 @@ use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError, OperationResultExt,
-    errors::IoResultExt,
+    errors::{CryptoResultExt, IoResultExt},
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -248,12 +248,16 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(hperm_helpers);
         },
         Operation::MpVerify(err_code) => {
+            let clk = processor.system().clk();
             let mpverify_helpers =
-                crypto_ops::op_mpverify(processor, *err_code, current_forest, err_ctx, tracer)?;
+                crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
+                    .map_crypto_err(err_ctx, clk)?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
-            let mrupdate_helpers = crypto_ops::op_mrupdate(processor, err_ctx, tracer)?;
+            let clk = processor.system().clk();
+            let mrupdate_helpers =
+                crypto_ops::op_mrupdate(processor, tracer).map_crypto_err(err_ctx, clk)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
