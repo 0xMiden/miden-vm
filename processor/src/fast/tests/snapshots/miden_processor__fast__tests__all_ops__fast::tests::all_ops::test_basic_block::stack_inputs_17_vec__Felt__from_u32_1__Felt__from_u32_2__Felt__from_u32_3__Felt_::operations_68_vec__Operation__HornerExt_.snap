@@ -4,12 +4,24 @@ assertion_line: 135
 expression: fast_stack_outputs
 ---
 Err(
-    MemoryErrorNoCtx(
-        UnalignedWordAccess {
+    MemoryError {
+        label: SourceSpan {
+            source_id: SourceId(
+                4294967295,
+            ),
+            start: ByteIndex(
+                0,
+            ),
+            end: ByteIndex(
+                0,
+            ),
+        },
+        source_file: None,
+        err: UnalignedWordAccess {
             addr: 14,
             ctx: ContextId(
                 0,
             ),
         },
-    ),
+    },
 )

@@ -522,6 +522,26 @@ impl<T> MapExecErr<T> for Result<T, MemoryError> {
     }
 }
 
+impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
+    #[inline(always)]
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(ExecutionError::MemoryError { label, source_file, err })
+            },
+        }
+    }
+}
+
 // SystemEventError implementations
 impl<T> MapExecErr<T>
     for Result<T, crate::operations::sys_ops::sys_event_handlers::SystemEventError>
@@ -573,8 +593,8 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
                 Err(match err {
                     IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
-                    // Execution errors are already fully formed, just unwrap
-                    IoError::Execution(err) => *err,
+                    // Execution errors are already fully formed with their own message.
+                    IoError::Execution(boxed_err) => *boxed_err,
                 })
             },
         }

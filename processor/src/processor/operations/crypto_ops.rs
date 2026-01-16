@@ -13,7 +13,7 @@ use miden_core::{
 
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ExecutionError, ONE,
+    ONE,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
@@ -266,7 +266,7 @@ pub(super) fn op_mrupdate<P: Processor>(
 pub(super) fn op_horner_eval_base<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], crate::MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -278,14 +278,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     // Read the evaluation point alpha from memory
     let alpha = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let eval_point_0 = processor
-            .memory()
-            .read_element(ctx, addr)
-            .map_err(ExecutionError::MemoryErrorNoCtx)?;
-        let eval_point_1 = processor
-            .memory()
-            .read_element(ctx, addr + ONE)
-            .map_err(ExecutionError::MemoryErrorNoCtx)?;
+        let eval_point_0 = processor.memory().read_element(ctx, addr)?;
+        let eval_point_1 = processor.memory().read_element(ctx, addr + ONE)?;
 
         tracer.record_memory_read_element(eval_point_0, addr, ctx, clk);
 
@@ -377,7 +371,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 pub(super) fn op_horner_eval_ext<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> Result<[Felt; NUM_USER_OP_HELPERS], crate::MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -398,10 +392,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor
-            .memory()
-            .read_word(ctx, addr, clk)
-            .map_err(ExecutionError::MemoryErrorNoCtx)?;
+        let word = processor.memory().read_word(ctx, addr, clk)?;
         tracer.record_memory_read_word(
             word,
             addr,
@@ -520,7 +511,7 @@ pub(super) fn op_log_precompile<P: Processor>(
 pub(super) fn op_crypto_stream<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), crate::MemoryError> {
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
     const SRC_PTR_IDX: usize = 12;
     const DST_PTR_IDX: usize = 13;
@@ -537,16 +528,10 @@ pub(super) fn op_crypto_stream<P: Processor>(
 
     // Load plaintext from source memory (2 words = 8 elements)
     let src_addr_word2 = src_addr + WORD_SIZE_FELT;
-    let plaintext_word1 = processor
-        .memory()
-        .read_word(ctx, src_addr, clk)
-        .map_err(ExecutionError::MemoryErrorNoCtx)?;
+    let plaintext_word1 = processor.memory().read_word(ctx, src_addr, clk)?;
     tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
 
-    let plaintext_word2 = processor
-        .memory()
-        .read_word(ctx, src_addr_word2, clk)
-        .map_err(ExecutionError::MemoryErrorNoCtx)?;
+    let plaintext_word2 = processor.memory().read_word(ctx, src_addr_word2, clk)?;
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
     // Get rate (keystream) from stack[0..7]
@@ -570,16 +555,10 @@ pub(super) fn op_crypto_stream<P: Processor>(
 
     // Write ciphertext to destination memory
     let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
-    processor
-        .memory()
-        .write_word(ctx, dst_addr, clk, ciphertext_word1)
-        .map_err(ExecutionError::MemoryErrorNoCtx)?;
+    processor.memory().write_word(ctx, dst_addr, clk, ciphertext_word1)?;
     tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
 
-    processor
-        .memory()
-        .write_word(ctx, dst_addr_word2, clk, ciphertext_word2)
-        .map_err(ExecutionError::MemoryErrorNoCtx)?;
+    processor.memory().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)?;
     tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)

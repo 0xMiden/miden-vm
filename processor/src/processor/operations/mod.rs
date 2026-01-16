@@ -317,11 +317,13 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
-            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, tracer)?;
+            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(horner_base_helpers);
         },
         Operation::HornerExt => {
-            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, tracer)?;
+            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
@@ -336,7 +338,8 @@ pub(super) fn execute_sync_op(
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
             user_op_helpers = Some(log_precompile_helpers);
         },
-        Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)?,
+        Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
     }
 
     Ok(user_op_helpers)
