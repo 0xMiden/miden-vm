@@ -20,6 +20,15 @@ use crate::{AdviceError, BaseHost, DebugError, EventError, MemoryError, TraceErr
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
+    #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
+    #[diagnostic()]
+    AceChipError {
+        #[label("this call failed")]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        error: AceError,
+    },
     #[error("{err}")]
     #[diagnostic(forward(err))]
     AdviceError {
@@ -29,17 +38,15 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         err: AdviceError,
     },
+    #[error("exceeded the allowed number of max cycles {0}")]
+    CycleLimitExceeded(u32),
     #[error("debug handler error: {err}")]
     DebugHandlerError {
         #[source]
         err: DebugError,
     },
-    #[error("trace handler error for trace ID {trace_id}: {err}")]
-    TraceHandlerError {
-        trace_id: u32,
-        #[source]
-        err: TraceError,
-    },
+    #[error("attempted to add event handler for '{event}' (already registered)")]
+    DuplicateEventHandler { event: EventName },
     #[error("error during processing of event {}", match event_name {
         Some(name) => format!("'{}' (ID: {})", name, event_id),
         None => format!("with ID: {}", event_id),
@@ -55,14 +62,8 @@ pub enum ExecutionError {
         #[source]
         error: EventError,
     },
-    #[error("attempted to add event handler for '{event}' (already registered)")]
-    DuplicateEventHandler { event: EventName },
-    #[error("attempted to add event handler for '{event}' (reserved system event)")]
-    ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
-    #[error("exceeded the allowed number of max cycles {0}")]
-    CycleLimitExceeded(u32),
     /// Memory error with source context for diagnostics.
     ///
     /// Use `MemoryResultExt::map_mem_err` to convert `Result<T, MemoryError>` with context.
@@ -82,19 +83,6 @@ pub enum ExecutionError {
     #[error(transparent)]
     #[diagnostic(transparent)]
     MemoryErrorNoCtx(MemoryError),
-    #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
-    OutputStackOverflow(usize),
-    #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
-    #[diagnostic()]
-    AceChipError {
-        #[label("this call failed")]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        error: AceError,
-    },
-    #[error("failed to serialize proof: {0}")]
-    ProofSerializationError(String),
     #[error("{err}")]
     #[diagnostic(forward(err))]
     OperationError {
@@ -103,6 +91,18 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         err: OperationError,
+    },
+    #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
+    OutputStackOverflow(usize),
+    #[error("failed to serialize proof: {0}")]
+    ProofSerializationError(String),
+    #[error("attempted to add event handler for '{event}' (reserved system event)")]
+    ReservedEventNamespace { event: EventName },
+    #[error("trace handler error for trace ID {trace_id}: {err}")]
+    TraceHandlerError {
+        trace_id: u32,
+        #[source]
+        err: TraceError,
     },
 }
 
