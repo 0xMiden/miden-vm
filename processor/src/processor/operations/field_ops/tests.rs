@@ -222,19 +222,19 @@ fn test_op_eq() {
 
     // --- test when top two values are equal -----------------------------
     let mut processor = FastProcessor::new(&[seven, seven, three]);
-    let _ = op_eq(&mut processor, &mut tracer).unwrap();
+    let _ = op_eq(&mut processor, &mut tracer);
     let expected = build_expected(&[ONE, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- test when top two values are not equal -------------------------
     let mut processor = FastProcessor::new(&[seven, five, three]);
-    let _ = op_eq(&mut processor, &mut tracer).unwrap();
+    let _ = op_eq(&mut processor, &mut tracer);
     let expected = build_expected(&[ZERO, three]);
     assert_eq!(expected, processor.stack_top());
 
     // --- calling EQ with a stack of minimum depth is ok ---------------
     let mut processor = FastProcessor::new(&[]);
-    assert!(op_eq(&mut processor, &mut tracer).is_ok());
+    let _ = op_eq(&mut processor, &mut tracer);
 }
 
 #[test]

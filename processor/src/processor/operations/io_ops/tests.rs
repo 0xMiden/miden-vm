@@ -428,7 +428,7 @@ fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut
     op_push(processor, Felt::new(addr), tracer).unwrap();
     let _ = processor.increment_clk(tracer, &NeverStopper);
     // Store the word (LE: stack pos 1-4 -> word[0-3])
-    op_mstorew(processor, &(), tracer).unwrap();
+    op_mstorew(processor, tracer).unwrap();
     let _ = processor.increment_clk(tracer, &NeverStopper);
 }
 

@@ -111,6 +111,10 @@ fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), Syst
 fn insert_hdword_into_adv_map(
     process: &mut ProcessState,
     domain: Felt,
+) -> Result<(), SystemEventError> {
+    // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
+    let a = process.get_stack_word(1);
+    let b = process.get_stack_word(5);
 
     // Hash as [A, B] to match `hmerge` behavior directly.
     let key = Rpo256::merge_in_domain(&[a, b], domain);
@@ -137,6 +141,14 @@ fn insert_hdword_into_adv_map(
 ///   Advice map: {KEY: [A, B, C, D]} (16 elements)
 /// ```
 ///
+/// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
+/// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
+fn insert_hqword_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
+    let a = process.get_stack_word(1);
+    let b = process.get_stack_word(5);
+    let c = process.get_stack_word(9);
+    let d = process.get_stack_word(13);
 
     // Hash in natural stack order [A, B, C, D].
     let key = Rpo256::hash_elements(&[*a, *b, *c, *d].concat());
@@ -164,6 +176,12 @@ fn insert_hdword_into_adv_map(
 ///   Advice map: {KEY: [RATE1, RATE2]} (8 elements from rate portion)
 /// ```
 ///
+/// Where `KEY` is computed by applying `hperm` to the 12-element state and extracting the digest.
+/// The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
+fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    // Read the 12-element state from stack positions 1-12.
+    // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
+    // We read in reverse order to build the state array.
     let mut state = [
         process.get_stack_item(12),
         process.get_stack_item(11),
@@ -241,6 +259,11 @@ fn merge_merkle_nodes(process: &mut ProcessState) -> Result<(), SystemEventError
 /// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
 ///   the specified root.
 /// - Value of the node at the specified depth and index is not known to the advice provider.
+fn copy_merkle_node_to_adv_stack(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    // Stack at this point is `[event_id, d, i, R, ...]` where:
+    // - `d` is depth,
+    // - `i` is index,
+    // - `R` is the Merkle root as it appears on the operand stack.
     let depth = process.get_stack_item(1);
     let index = process.get_stack_item(2);
     // Read the root in structural (little-endian) word order from the operand stack.
@@ -281,6 +304,8 @@ fn copy_map_value_to_adv_stack(
     process: &mut ProcessState,
     include_len: bool,
     pad_to: u8,
+) -> Result<(), SystemEventError> {
+    let key = process.get_stack_word(1);
 
     process.advice_provider_mut().push_from_map(key, include_len, pad_to)?;
 
@@ -303,6 +328,8 @@ fn copy_map_value_to_adv_stack(
 ///
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
+fn copy_map_value_length_to_adv_stack(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    let key = process.get_stack_word(1);
     let advice_provider = process.advice_provider_mut();
 
     let values_len = advice_provider
@@ -330,6 +357,8 @@ fn copy_map_value_to_adv_stack(
 /// Outputs:
 ///   Advice stack: [has_mapkey, ...]
 /// ```
+pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
     process.advice_provider_mut().push_stack(Felt::from_bool(presence_flag));
@@ -387,6 +416,8 @@ fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [leading_zeros, ...]
 /// ```
+fn push_leading_zeros(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.leading_zeros()))
 }
 
 /// Pushes the number of the trailing zeros of the top stack element onto the advice stack.
@@ -399,6 +430,8 @@ fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [trailing_zeros, ...]
 /// ```
+fn push_trailing_zeros(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.trailing_zeros()))
 }
 
 /// Pushes the number of the leading ones of the top stack element onto the advice stack.
@@ -411,6 +444,8 @@ fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [leading_ones, ...]
 /// ```
+fn push_leading_ones(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.leading_ones()))
 }
 
 /// Pushes the number of the trailing ones of the top stack element onto the advice stack.
@@ -423,6 +458,8 @@ fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [trailing_ones, ...]
 /// ```
+fn push_trailing_ones(process: &mut ProcessState) -> Result<(), SystemEventError> {
+    push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.trailing_ones()))
 }
 
 /// Pushes the base 2 logarithm of the top stack element, rounded down.

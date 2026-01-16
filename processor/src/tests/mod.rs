@@ -105,9 +105,8 @@ fn test_diagnostic_advice_map_key_not_found_1() {
     // system event errors currently don't have access to the specific operation index.
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 8",
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:31\]"#),
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapval",
         "   :             ^^^^",
@@ -129,6 +128,8 @@ fn test_diagnostic_advice_map_key_not_found_2() {
     // system event errors currently don't have access to the specific operation index.
     assert_diagnostic_lines!(
         err,
+        "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
+        regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapvaln",
         "   :             ^^^^",
@@ -358,6 +359,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
     // verification
     assert_diagnostic_lines!(
         err,
+        "failed to lookup value in Merkle store",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_verify",
@@ -395,6 +397,7 @@ fn test_diagnostic_merkle_path_verification_failed() {
     // With LE sponge, the root hash changes and lookup fails at root level
     assert_diagnostic_lines!(
         err,
+        "failed to lookup value in Merkle store",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
@@ -535,7 +538,7 @@ fn test_diagnostic_unaligned_word_access() {
 
     assert_diagnostic_lines!(
         err,
-        "word memory access at address 3 in context 0 is unaligned at clock cycle 10",
+        "word access at memory address 3 in context 0 is unaligned",
         regex!(r#",-\[test[\d]+:4:22\]"#),
         " 3 |         begin",
         " 4 |             exec.foo mem_storew_be.3",
@@ -685,6 +688,7 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
+        "failed to lookup value in Merkle store",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_set",

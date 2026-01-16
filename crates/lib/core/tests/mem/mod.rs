@@ -44,7 +44,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1000), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1000), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 1000"
@@ -60,6 +60,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(1008), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 1008"
@@ -67,6 +68,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(1012), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 1012"
@@ -74,6 +76,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(1016), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 1016"
@@ -82,6 +85,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(2000), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 2000"
@@ -89,6 +93,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(2004), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 2004"
@@ -96,6 +101,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(2008), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 2008"
@@ -103,6 +109,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
+            .read_word(ContextId::root(), Felt::from_u32(2012), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 2012"
@@ -150,6 +157,11 @@ fn test_memcopy_elements() {
 
     for addr in 2002_u32..2020_u32 {
         assert_eq!(
+            exec_output
+                .memory
+                .read_element(ContextId::root(), Felt::from_u32(addr))
+                .unwrap(),
+            Felt::from_u32(addr - 2000),
             "Address {}",
             addr
         );

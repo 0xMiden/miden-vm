@@ -97,6 +97,7 @@ pub(super) fn op_mpverify<P: Processor>(
     let root = processor.stack().get_word(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
+    let path = processor.advice_provider().get_merkle_path(root, depth, index)?;
 
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
@@ -153,6 +154,8 @@ pub(super) fn op_mpverify<P: Processor>(
 pub(super) fn op_mrupdate<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
+) -> Result<[Felt; NUM_USER_OP_HELPERS], CryptoError> {
+    // read old node value, depth, index, tree root and new node values from the stack
     let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
     let index = processor.stack().get(5);

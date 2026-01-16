@@ -127,6 +127,8 @@ impl CircuitEvaluation {
         self.col_wire_left.push(id_l, v_l);
 
         // Read value of id_r from wire bus, increasing its multiplicity
+        let v_r = self.wire_bus.read_value(id_r).ok_or(AceError::FailedWireBusRead)?;
+        let id_r = Felt::from_u32(id_r);
         self.col_wire_right.push(id_r, v_r);
 
         // Compute v_out and insert it into the wire bus.

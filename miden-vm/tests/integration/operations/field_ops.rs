@@ -217,7 +217,7 @@ fn div_fail() {
     let test = build_op_test!(asm_op, &[0, 1]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 

@@ -233,7 +233,7 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
 
     let mut ptr_curr = ptr;
     for word in circuit_mem {
-        mem.write_word(ctx, ptr_curr, clk, word, &err_ctx).unwrap();
+        mem.write_word(ctx, ptr_curr, clk, word).unwrap();
         ptr_curr += Felt::from_u8(4);
     }
 
