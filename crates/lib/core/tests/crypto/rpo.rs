@@ -1,6 +1,6 @@
 use miden_air::trace::RowIndex;
 use miden_core::field::PrimeField64;
-use miden_processor::{ExecutionError, ZERO};
+use miden_processor::{ExecutionError, OperationError, ZERO};
 use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 
 #[test]
@@ -20,7 +20,7 @@ fn test_invalid_end_addr() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{ clk, err_code, err_msg , .. }
+        ExecutionError::OperationError{ clk, err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
         if clk == RowIndex::from(24) && err_code == ZERO && err_msg.is_none()
     );
 }

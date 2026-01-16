@@ -5,8 +5,8 @@ use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{EventName, ZERO, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, ProcessState, Program,
-    ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
+    ProcessState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
@@ -238,7 +238,7 @@ fn test_falcon512_probabilistic_product_failure() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
+        ExecutionError::OperationError{clk, err: OperationError::FailedAssertion{err_code, err_msg}, .. }
         if clk == RowIndex::from(3202) && err_code == ZERO && err_msg.is_none()
     );
 }

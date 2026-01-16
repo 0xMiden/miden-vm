@@ -14,10 +14,7 @@ use miden_core::{
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{
-    AssertError, BaseHost, DebugError, EventError, MemoryError, TraceError,
-    host::advice::AdviceError,
-};
+use crate::{BaseHost, DebugError, EventError, MemoryError, TraceError, host::advice::AdviceError};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -83,28 +80,6 @@ pub enum ExecutionError {
     DuplicateEventHandler { event: EventName },
     #[error("attempted to add event handler for '{event}' (reserved system event)")]
     ReservedEventNamespace { event: EventName },
-    #[error("assertion failed at clock cycle {clk} with error {}{}",
-      match err_msg {
-        Some(msg) => format!("message: {msg}"),
-        None => format!("code: {err_code}"),
-      },
-      match err {
-        Some(err) => format!(" (host error: {err})"),
-        None => String::new(),
-      }
-    )]
-    #[diagnostic()]
-    FailedAssertion {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-        #[source]
-        err: Option<AssertError>,
-    },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
@@ -267,25 +242,6 @@ impl ExecutionError {
             event_id,
             event_name,
             error,
-        }
-    }
-
-    pub fn failed_assertion(
-        clk: RowIndex,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-        err: Option<AssertError>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::FailedAssertion {
-            label,
-            source_file,
-            clk,
-            err_code,
-            err_msg,
-            err,
         }
     }
 

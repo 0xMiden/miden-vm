@@ -14,7 +14,7 @@ use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost};
+use crate::{AdviceInputs, DefaultHost, OperationError};
 
 mod advice_provider;
 mod all_ops;
@@ -175,7 +175,13 @@ fn test_assert() {
         let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
-        assert_matches!(err, ExecutionError::FailedAssertion { .. });
+        assert_matches!(
+            err,
+            ExecutionError::OperationError {
+                err: OperationError::FailedAssertion { .. },
+                ..
+            }
+        );
     }
 }
 

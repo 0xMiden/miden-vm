@@ -1,6 +1,8 @@
 use miden_air::trace::RowIndex;
 use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing};
-use miden_processor::{ContextId, DefaultHost, ExecutionError, Program, fast::FastProcessor};
+use miden_processor::{
+    ContextId, DefaultHost, ExecutionError, OperationError, Program, fast::FastProcessor,
+};
 use miden_utils_testing::{
     AdviceStackBuilder, Felt, ONE, ZERO, build_expected_hash, build_expected_perm,
     felt_slice_to_ints,
@@ -364,7 +366,13 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    assert_matches!(
+        execution_result,
+        Err(ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { .. },
+            ..
+        })
+    );
 }
 
 #[test]
@@ -388,5 +396,11 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    assert_matches!(
+        execution_result,
+        Err(ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { .. },
+            ..
+        })
+    );
 }
