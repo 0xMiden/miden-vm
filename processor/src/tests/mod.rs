@@ -515,13 +515,16 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "attempted to calculate integer logarithm with zero argument at clock cycle 6",
+        "operation error at clock cycle 6",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
         "   :                     ^^^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "",
+        "Error: attempted to calculate integer logarithm with zero argument",
+        "help: ilog2 requires a non-zero argument"
     );
 }
 

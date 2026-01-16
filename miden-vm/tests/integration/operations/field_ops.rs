@@ -409,7 +409,7 @@ fn ilog2_fail() {
     let test = build_op_test!(asm_op, &[0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::LogArgumentZero{ clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(7)
+        ExecutionError::OperationError{ clk: row_idx, err: OperationError::LogArgumentZero, .. } if row_idx == RowIndex::from(7)
     );
 }
 

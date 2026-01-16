@@ -124,15 +124,6 @@ pub enum ExecutionError {
         source_file: Option<Arc<SourceFile>>,
         depth: usize,
     },
-    #[error("attempted to calculate integer logarithm with zero argument at clock cycle {clk}")]
-    #[diagnostic()]
-    LogArgumentZero {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-    },
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
@@ -303,11 +294,6 @@ impl ExecutionError {
         Self::InvalidStackDepthOnReturn { label, source_file, depth }
     }
 
-    pub fn log_argument_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::LogArgumentZero { label, source_file, clk }
-    }
-
     pub fn malformed_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::MalformedMastForestInHost { label, source_file, root_digest }
@@ -423,7 +409,27 @@ pub enum OperationError {
     #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values { values: Vec<Felt> },
     #[error("division by zero")]
+    #[diagnostic(help(
+        "ensure the divisor (second stack element) is non-zero before division or modulo operations"
+    ))]
     DivideByZero,
+    #[error(
+        "assertion failed with error {}",
+        match err_msg {
+            Some(msg) => format!("message: {msg}"),
+            None => format!("code: {err_code}"),
+        }
+    )]
+    #[diagnostic(help(
+        "assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
+    ))]
+    FailedAssertion {
+        err_code: Felt,
+        err_msg: Option<Arc<str>>,
+    },
+    #[error("attempted to calculate integer logarithm with zero argument")]
+    #[diagnostic(help("ilog2 requires a non-zero argument"))]
+    LogArgumentZero,
 }
 
 /// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.

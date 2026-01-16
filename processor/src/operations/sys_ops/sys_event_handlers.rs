@@ -543,7 +543,9 @@ fn push_ilog2(
 ) -> Result<(), ExecutionError> {
     let n = process.get_stack_item(1).as_canonical_u64();
     if n == 0 {
-        return Err(ExecutionError::log_argument_zero(process.clk(), err_ctx));
+        return Err(Err::<(), _>(OperationError::LogArgumentZero)
+            .map_exec_err(err_ctx, process.clk())
+            .unwrap_err());
     }
     let ilog2 = Felt::from_u32(n.ilog2());
     process.advice_provider_mut().push_stack(ilog2);
