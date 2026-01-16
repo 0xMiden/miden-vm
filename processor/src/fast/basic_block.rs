@@ -228,9 +228,6 @@ impl FastProcessor {
             .linked_id()
             .expect("basic block node should be linked when executing operations");
 
-        // Cache debug mode check outside the loop - it doesn't change during batch execution
-        let in_debug_mode = self.in_debug_mode();
-
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
@@ -260,9 +257,7 @@ impl FastProcessor {
             // performance improvement).
             {
                 match op {
-                    Operation::Emit => {
-                        self.op_emit(host, current_forest, node_id, in_debug_mode).await?
-                    },
+                    Operation::Emit => self.op_emit(host, current_forest, node_id).await?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
                         if let Err(err) = self.execute_sync_op(
@@ -270,7 +265,6 @@ impl FastProcessor {
                             current_forest,
                             node_id,
                             host,
-                            in_debug_mode,
                             tracer,
                             op_idx_in_block,
                         ) {
@@ -353,7 +347,6 @@ impl FastProcessor {
         host: &mut impl AsyncHost,
         current_forest: &MastForest,
         node_id: MastNodeId,
-        in_debug_mode: bool,
     ) -> ControlFlow<BreakReason> {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
@@ -364,7 +357,6 @@ impl FastProcessor {
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
             ) {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
@@ -373,22 +365,23 @@ impl FastProcessor {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();
-                    let exec_err = event_error_with_context(
+                    return ControlFlow::Break(BreakReason::Err(event_error_with_context(
                         err,
                         current_forest,
                         node_id,
                         host,
-                        in_debug_mode,
                         event_id,
                         event_name,
-                    );
-                    return ControlFlow::Break(BreakReason::Err(exec_err));
+                    )));
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
-                let exec_err =
-                    advice_error_with_context(err, current_forest, node_id, host, in_debug_mode);
-                return ControlFlow::Break(BreakReason::Err(exec_err));
+                return ControlFlow::Break(BreakReason::Err(advice_error_with_context(
+                    err,
+                    current_forest,
+                    node_id,
+                    host,
+                )));
             }
         }
         ControlFlow::Continue(())

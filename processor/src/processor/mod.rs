@@ -98,11 +98,10 @@ pub trait Processor: Sized {
         current_forest: &MastForest,
         node_id: MastNodeId,
         host: &mut impl BaseHost,
-        in_debug_mode: bool,
         tracer: &mut impl Tracer,
         op_idx: usize,
     ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, current_forest, node_id, host, in_debug_mode, tracer, op_idx)
+        execute_sync_op(self, op, current_forest, node_id, host, tracer, op_idx)
     }
 }
 

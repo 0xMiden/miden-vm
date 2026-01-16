@@ -39,7 +39,6 @@ pub(super) fn execute_sync_op(
     current_forest: &MastForest,
     node_id: MastNodeId,
     host: &mut impl BaseHost,
-    in_debug_mode: bool,
     tracer: &mut impl Tracer,
     op_idx: usize,
 ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
@@ -52,7 +51,7 @@ pub(super) fn execute_sync_op(
         },
         Operation::Assert(err_code) => {
             sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
         },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
         Operation::Caller => sys_ops::op_caller(processor)?,
@@ -84,7 +83,6 @@ pub(super) fn execute_sync_op(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::Incr => field_ops::op_incr(processor),
@@ -92,21 +90,18 @@ pub(super) fn execute_sync_op(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::Or => field_ops::op_or(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::Not => field_ops::op_not(processor).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::Eq => {
@@ -135,7 +130,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32add_helpers);
@@ -145,7 +139,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32add3_helpers);
@@ -155,7 +148,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32sub_helpers);
@@ -165,7 +157,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32mul_helpers);
@@ -175,7 +166,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32madd_helpers);
@@ -185,7 +175,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
             user_op_helpers = Some(u32div_helpers);
@@ -194,19 +183,17 @@ pub(super) fn execute_sync_op(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::U32xor => u32_ops::op_u32xor(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
-        Operation::U32assert2(_err_code) => {
-            let u32assert2_helpers = u32_ops::op_u32assert2(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
+        Operation::U32assert2(err_code) => {
+            let u32assert2_helpers = u32_ops::op_u32assert2(processor, *err_code, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(u32assert2_helpers);
         },
 
@@ -248,14 +235,12 @@ pub(super) fn execute_sync_op(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::CSwapW => stack_ops::op_cswapw(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
 
@@ -265,56 +250,48 @@ pub(super) fn execute_sync_op(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::AdvPopW => io_ops::op_advpopw(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::MLoadW => io_ops::op_mloadw(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::MStoreW => io_ops::op_mstorew(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::MLoad => io_ops::op_mload(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::MStore => io_ops::op_mstore(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::MStream => io_ops::op_mstream(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
         Operation::Pipe => io_ops::op_pipe(processor, tracer).map_io_err_with_op_idx(
             current_forest,
             node_id,
             host,
-            in_debug_mode,
             op_idx,
         )?,
 
@@ -326,23 +303,17 @@ pub(super) fn execute_sync_op(
         Operation::MpVerify(err_code) => {
             let mpverify_helpers =
                 crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
-                    .map_crypto_err_with_op_idx(
-                        current_forest,
-                        node_id,
-                        host,
-                        in_debug_mode,
-                        op_idx,
-                    )?;
+                    .map_crypto_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
             let mrupdate_helpers = crypto_ops::op_mrupdate(processor, tracer)
-                .map_crypto_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
+                .map_crypto_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
             let frie2f4_helpers = fri_ops::op_fri_ext2fold4(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, in_debug_mode, op_idx)?;
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(frie2f4_helpers);
         },
         Operation::HornerBase => {
@@ -358,7 +329,6 @@ pub(super) fn execute_sync_op(
                 current_forest,
                 node_id,
                 host,
-                in_debug_mode,
                 op_idx,
             )?;
         },

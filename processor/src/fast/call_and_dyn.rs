@@ -55,7 +55,6 @@ impl FastProcessor {
                     current_forest,
                     current_node_id,
                     host,
-                    self.in_debug_mode(),
                 )));
             }
             tracer.record_kernel_proc_access(callee_hash);
@@ -73,7 +72,7 @@ impl FastProcessor {
             if let Err(err) = self
                 .memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_mem_err(current_forest, current_node_id, host, self.in_debug_mode())
+                .map_mem_err(current_forest, current_node_id, host)
             {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
@@ -115,7 +114,6 @@ impl FastProcessor {
                 current_forest,
                 node_id,
                 host,
-                self.in_debug_mode(),
             )));
         }
 
@@ -160,7 +158,6 @@ impl FastProcessor {
                 current_forest,
                 current_node_id,
                 host,
-                self.in_debug_mode(),
             ) {
                 Ok(w) => w,
                 Err(err) => {
@@ -191,7 +188,7 @@ impl FastProcessor {
             if let Err(err) = self
                 .memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_mem_err(current_forest, current_node_id, host, self.in_debug_mode())
+                .map_mem_err(current_forest, current_node_id, host)
             {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
@@ -210,7 +207,6 @@ impl FastProcessor {
                 continuation_stack.push_start_node(callee_id);
             },
             None => {
-                let in_debug_mode = self.in_debug_mode();
                 let (root_id, new_forest) = match self
                     .load_mast_forest(
                         callee_hash,
@@ -218,7 +214,6 @@ impl FastProcessor {
                         |digest| OperationError::DynamicNodeNotFound { digest },
                         current_forest,
                         current_node_id,
-                        in_debug_mode,
                     )
                     .await
                 {
@@ -270,7 +265,6 @@ impl FastProcessor {
                 current_forest,
                 node_id,
                 host,
-                self.in_debug_mode(),
             )));
         }
 

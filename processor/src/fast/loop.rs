@@ -74,7 +74,6 @@ impl FastProcessor {
                 current_forest,
                 current_node_id,
                 host,
-                self.in_debug_mode(),
             )))
         }
     }
@@ -134,7 +133,6 @@ impl FastProcessor {
                 current_forest,
                 current_node_id,
                 host,
-                self.in_debug_mode(),
             )))
         }
     }

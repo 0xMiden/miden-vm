@@ -451,8 +451,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             {
                 // `execute_sync_op` does not support executing `Emit`, so we only call it for all
                 // other operations.
-                // Note: we pass `NoopHost` and `in_debug_mode: false` since errors should never
-                // occur here - the program already ran successfully in FastProcessor.
+                // Note: we pass `NoopHost` since errors should never occur here - the program
+                // already ran successfully in FastProcessor.
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
@@ -461,7 +461,6 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                         current_forest,
                         node_id,
                         &mut NoopHost,
-                        false,
                         &mut NoopTracer,
                         // Note: op_idx is only used for error context, which should never
                         // happen here since the program already ran successfully in FastProcessor.

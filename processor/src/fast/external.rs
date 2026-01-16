@@ -64,7 +64,6 @@ impl FastProcessor {
         current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let in_debug_mode = self.in_debug_mode();
         let (root_id, mast_forest) = self
             .load_mast_forest(
                 external_node.digest(),
@@ -72,7 +71,6 @@ impl FastProcessor {
                 |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
                 current_forest,
                 external_node_id,
-                in_debug_mode,
             )
             .await?;
 
@@ -83,7 +81,6 @@ impl FastProcessor {
                 current_forest,
                 external_node_id,
                 host,
-                in_debug_mode,
             ));
         }
 

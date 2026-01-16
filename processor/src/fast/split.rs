@@ -53,7 +53,6 @@ impl FastProcessor {
                 current_forest,
                 node_id,
                 host,
-                self.in_debug_mode(),
             )));
         };
 

@@ -223,7 +223,7 @@ pub enum CryptoError {
 /// }
 ///
 /// // Caller wraps with context lazily:
-/// some_op().map_exec_err(mast_forest, node_id, host, in_debug_mode)?;
+/// some_op().map_exec_err(mast_forest, node_id, host)?;
 /// ```
 ///
 /// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the
@@ -312,10 +312,8 @@ impl OperationError {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> ExecutionError {
-        let (label, source_file) =
-            get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+        let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
         ExecutionError::OperationError { label, source_file, err: self }
     }
 }
@@ -340,16 +338,11 @@ pub struct MerklePathVerificationFailedInner {
 /// This function is called by the extension traits to compute source location
 /// only when an error occurs. Since errors are rare, the cost of decorator
 /// traversal is acceptable.
-///
-/// Note: The `_in_debug_mode` parameter is kept for API compatibility but is
-/// no longer used for gating. We always attempt to provide source context for
-/// better error diagnostics in production.
 fn get_label_and_source_file(
     op_idx: Option<usize>,
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
-    _in_debug_mode: bool,
 ) -> (SourceSpan, Option<Arc<SourceFile>>) {
     mast_forest
         .get_assembly_op(node_id, op_idx)
@@ -371,7 +364,6 @@ pub trait OperationResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
 
     /// Maps an `OperationError` to an `ExecutionError` with op index context.
@@ -380,7 +372,6 @@ pub trait OperationResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
@@ -392,13 +383,12 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
                 let (label, source_file) =
-                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                    get_label_and_source_file(None, mast_forest, node_id, host);
                 Err(ExecutionError::OperationError { label, source_file, err })
             },
         }
@@ -410,19 +400,13 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file(
-                    Some(op_idx),
-                    mast_forest,
-                    node_id,
-                    host,
-                    in_debug_mode,
-                );
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(ExecutionError::OperationError { label, source_file, err })
             },
         }
@@ -437,7 +421,6 @@ pub trait AdviceResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
 
     /// Maps an `AdviceError` to an `ExecutionError` without context.
@@ -453,13 +436,10 @@ impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
-            Err(err) => {
-                Err(advice_error_with_context(err, mast_forest, node_id, host, in_debug_mode))
-            },
+            Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host)),
         }
     }
 
@@ -485,10 +465,8 @@ pub fn advice_error_with_context(
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
-    in_debug_mode: bool,
 ) -> ExecutionError {
-    let (label, source_file) =
-        get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+    let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
     ExecutionError::AdviceError { label, source_file, err }
 }
 
@@ -501,12 +479,10 @@ pub fn event_error_with_context(
     mast_forest: &MastForest,
     node_id: MastNodeId,
     host: &impl BaseHost,
-    in_debug_mode: bool,
     event_id: EventId,
     event_name: Option<EventName>,
 ) -> ExecutionError {
-    let (label, source_file) =
-        get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+    let (label, source_file) = get_label_and_source_file(None, mast_forest, node_id, host);
     ExecutionError::EventError {
         label,
         source_file,
@@ -524,7 +500,6 @@ pub trait MemoryResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
 }
 
@@ -535,13 +510,12 @@ impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
                 let (label, source_file) =
-                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                    get_label_and_source_file(None, mast_forest, node_id, host);
                 Err(ExecutionError::MemoryError { label, source_file, err })
             },
         }
@@ -556,7 +530,6 @@ pub trait SystemEventResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError>;
 }
 
@@ -569,14 +542,13 @@ impl<T> SystemEventResultExt<T>
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         use crate::operations::sys_ops::sys_event_handlers::SystemEventError;
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
                 let (label, source_file) =
-                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                    get_label_and_source_file(None, mast_forest, node_id, host);
                 Err(match err {
                     SystemEventError::Advice(err) => {
                         ExecutionError::AdviceError { label, source_file, err }
@@ -601,7 +573,6 @@ pub trait IoResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
@@ -613,19 +584,13 @@ impl<T> IoResultExt<T> for Result<T, IoError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file(
-                    Some(op_idx),
-                    mast_forest,
-                    node_id,
-                    host,
-                    in_debug_mode,
-                );
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(match err {
                     IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
                     IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
@@ -645,7 +610,6 @@ pub trait CryptoResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
@@ -657,19 +621,13 @@ impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file(
-                    Some(op_idx),
-                    mast_forest,
-                    node_id,
-                    host,
-                    in_debug_mode,
-                );
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(match err {
                     CryptoError::Advice(err) => {
                         ExecutionError::AdviceError { label, source_file, err }
@@ -691,7 +649,6 @@ pub trait AceEvalResultExt<T> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError>;
 }
@@ -703,19 +660,13 @@ impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
         mast_forest: &MastForest,
         node_id: MastNodeId,
         host: &impl BaseHost,
-        in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
         match self {
             Ok(v) => Ok(v),
             Err(err) => {
-                let (label, source_file) = get_label_and_source_file(
-                    Some(op_idx),
-                    mast_forest,
-                    node_id,
-                    host,
-                    in_debug_mode,
-                );
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
                 Err(match err {
                     AceEvalError::Ace(error) => {
                         ExecutionError::AceChipError { label, source_file, error }

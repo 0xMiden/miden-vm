@@ -843,19 +843,18 @@ impl FastProcessor {
         get_mast_forest_failed: impl Fn(Word) -> OperationError,
         current_forest: &MastForest,
         node_id: MastNodeId,
-        in_debug_mode: bool,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
             .ok_or_else(|| get_mast_forest_failed(node_digest))
-            .map_exec_err(current_forest, node_id, host, in_debug_mode)?;
+            .map_exec_err(current_forest, node_id, host)?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
         let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
             Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
-                .map_exec_err(current_forest, node_id, host, in_debug_mode)
+                .map_exec_err(current_forest, node_id, host)
                 .unwrap_err()
         })?;
 
@@ -868,7 +867,6 @@ impl FastProcessor {
             current_forest,
             node_id,
             host,
-            in_debug_mode,
         )?;
 
         Ok((root_id, mast_forest))
