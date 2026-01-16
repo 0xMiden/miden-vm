@@ -11,7 +11,7 @@ use miden_core::{
 use crate::{
     AsyncHost, ContextId,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{MemoryResultExt, OperationError},
+    errors::{MapExecErr, OperationError},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         step::{BreakReason, Stopper},
@@ -72,7 +72,7 @@ impl FastProcessor {
             if let Err(err) = self
                 .memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_mem_err(current_forest, current_node_id, host)
+                .map_exec_err(current_forest, current_node_id, host)
             {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
@@ -154,7 +154,7 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk).map_mem_err(
+            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk).map_exec_err(
                 current_forest,
                 current_node_id,
                 host,
@@ -188,7 +188,7 @@ impl FastProcessor {
             if let Err(err) = self
                 .memory
                 .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
-                .map_mem_err(current_forest, current_node_id, host)
+                .map_exec_err(current_forest, current_node_id, host)
             {
                 return ControlFlow::Break(BreakReason::Err(err));
             }

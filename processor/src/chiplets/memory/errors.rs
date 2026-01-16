@@ -11,7 +11,7 @@ use crate::ContextId;
 /// This enum captures error conditions without expensive context information (no
 /// source location, no file references). When a `MemoryError` propagates up to
 /// become an `ExecutionError`, the context is resolved lazily via
-/// `MemoryResultExt::map_mem_err`.
+/// `MapExecErr::map_exec_err`.
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum MemoryError {
     #[error("memory address cannot exceed 2^32 but was {addr}")]

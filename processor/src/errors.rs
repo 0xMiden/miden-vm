@@ -353,113 +353,10 @@ fn get_label_and_source_file(
         )
 }
 
-/// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.
-///
-/// This trait provides methods to wrap an `OperationError` with execution context
-/// (source location) at the point where the error needs to be propagated.
-pub trait OperationResultExt<T> {
-    /// Maps an `OperationError` to an `ExecutionError` with the provided context.
-    fn map_exec_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Result<T, ExecutionError>;
-
-    /// Maps an `OperationError` to an `ExecutionError` with op index context.
-    fn map_exec_err_with_op_idx(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        op_idx: usize,
-    ) -> Result<T, ExecutionError>;
-}
-
-impl<T> OperationResultExt<T> for Result<T, OperationError> {
-    #[inline(always)]
-    fn map_exec_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) =
-                    get_label_and_source_file(None, mast_forest, node_id, host);
-                Err(ExecutionError::OperationError { label, source_file, err })
-            },
-        }
-    }
-
-    #[inline(always)]
-    fn map_exec_err_with_op_idx(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        op_idx: usize,
-    ) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => {
-                let (label, source_file) =
-                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
-                Err(ExecutionError::OperationError { label, source_file, err })
-            },
-        }
-    }
-}
-
-/// Extension trait for converting `Result<T, AdviceError>` to `Result<T, ExecutionError>`.
-pub trait AdviceResultExt<T> {
-    /// Maps an `AdviceError` to an `ExecutionError` with the provided context.
-    fn map_advice_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Result<T, ExecutionError>;
-
-    /// Maps an `AdviceError` to an `ExecutionError` without context.
-    ///
-    /// Use this when no error context is available (e.g., during initialization).
-    fn map_advice_err_no_ctx(self) -> Result<T, ExecutionError>;
-}
-
-impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
-    #[inline(always)]
-    fn map_advice_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host)),
-        }
-    }
-
-    #[inline(always)]
-    fn map_advice_err_no_ctx(self) -> Result<T, ExecutionError> {
-        match self {
-            Ok(v) => Ok(v),
-            Err(err) => Err(ExecutionError::AdviceError {
-                label: SourceSpan::UNKNOWN,
-                source_file: None,
-                err,
-            }),
-        }
-    }
-}
-
 /// Wraps an `AdviceError` with execution context to produce an `ExecutionError`.
 ///
 /// This is useful when working with `ControlFlow` or other non-`Result` return types
-/// where the `AdviceResultExt::map_advice_err` extension trait cannot be used directly.
+/// where the extension traits cannot be used directly.
 pub fn advice_error_with_context(
     err: AdviceError,
     mast_forest: &MastForest,
@@ -492,10 +389,20 @@ pub fn event_error_with_context(
     }
 }
 
-/// Extension trait for converting `Result<T, MemoryError>` to `Result<T, ExecutionError>`.
-pub trait MemoryResultExt<T> {
-    /// Maps a `MemoryError` to an `ExecutionError` with the provided context.
-    fn map_mem_err(
+// CONSOLIDATED EXTENSION TRAITS (plafer's approach)
+// ================================================================================================
+//
+// Three traits organized by method signature rather than by error type:
+// 1. MapExecErr - for errors with basic context (forest, node_id, host)
+// 2. MapExecErrWithOpIdx - for errors in basic blocks that need op_idx
+// 3. MapExecErrNoCtx - for errors without any context
+
+/// Extension trait for mapping errors to `ExecutionError` with basic context.
+///
+/// Implement this for error types that can be converted to `ExecutionError` using
+/// just the MAST forest, node ID, and host for source location lookup.
+pub trait MapExecErr<T> {
+    fn map_exec_err(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
@@ -503,9 +410,102 @@ pub trait MemoryResultExt<T> {
     ) -> Result<T, ExecutionError>;
 }
 
-impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
+/// Extension trait for mapping errors to `ExecutionError` with op index context.
+///
+/// Implement this for error types that occur within basic blocks where the
+/// operation index is available for more precise source location.
+pub trait MapExecErrWithOpIdx<T> {
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError>;
+}
+
+/// Extension trait for mapping errors to `ExecutionError` without context.
+///
+/// Implement this for error types that may need to be converted when no
+/// error context is available (e.g., during initialization).
+pub trait MapExecErrNoCtx<T> {
+    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError>;
+}
+
+// OperationError implementations
+impl<T> MapExecErr<T> for Result<T, OperationError> {
     #[inline(always)]
-    fn map_mem_err(
+    fn map_exec_err(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+    ) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(None, mast_forest, node_id, host);
+                Err(ExecutionError::OperationError { label, source_file, err })
+            },
+        }
+    }
+}
+
+impl<T> MapExecErrWithOpIdx<T> for Result<T, OperationError> {
+    #[inline(always)]
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(ExecutionError::OperationError { label, source_file, err })
+            },
+        }
+    }
+}
+
+// AdviceError implementations
+impl<T> MapExecErr<T> for Result<T, AdviceError> {
+    #[inline(always)]
+    fn map_exec_err(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl BaseHost,
+    ) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(advice_error_with_context(err, mast_forest, node_id, host)),
+        }
+    }
+}
+
+impl<T> MapExecErrNoCtx<T> for Result<T, AdviceError> {
+    #[inline(always)]
+    fn map_exec_err_no_ctx(self) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(ExecutionError::AdviceError {
+                label: SourceSpan::UNKNOWN,
+                source_file: None,
+                err,
+            }),
+        }
+    }
+}
+
+// MemoryError implementations
+impl<T> MapExecErr<T> for Result<T, MemoryError> {
+    #[inline(always)]
+    fn map_exec_err(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
@@ -522,22 +522,12 @@ impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
     }
 }
 
-/// Extension trait for converting `Result<T, SystemEventError>` to `Result<T, ExecutionError>`.
-pub trait SystemEventResultExt<T> {
-    /// Maps a `SystemEventError` to an `ExecutionError` with the provided context.
-    fn map_sys_event_err(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-    ) -> Result<T, ExecutionError>;
-}
-
-impl<T> SystemEventResultExt<T>
+// SystemEventError implementations
+impl<T> MapExecErr<T>
     for Result<T, crate::operations::sys_ops::sys_event_handlers::SystemEventError>
 {
     #[inline(always)]
-    fn map_sys_event_err(
+    fn map_exec_err(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
@@ -565,21 +555,10 @@ impl<T> SystemEventResultExt<T>
     }
 }
 
-/// Extension trait for converting `Result<T, IoError>` to `Result<T, ExecutionError>`.
-pub trait IoResultExt<T> {
-    /// Maps an `IoError` to an `ExecutionError` with the provided context.
-    fn map_io_err_with_op_idx(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        op_idx: usize,
-    ) -> Result<T, ExecutionError>;
-}
-
-impl<T> IoResultExt<T> for Result<T, IoError> {
+// IoError implementations
+impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
     #[inline(always)]
-    fn map_io_err_with_op_idx(
+    fn map_exec_err_with_op_idx(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
@@ -602,21 +581,10 @@ impl<T> IoResultExt<T> for Result<T, IoError> {
     }
 }
 
-/// Extension trait for converting `Result<T, CryptoError>` to `Result<T, ExecutionError>`.
-pub trait CryptoResultExt<T> {
-    /// Maps a `CryptoError` to an `ExecutionError` with the provided context.
-    fn map_crypto_err_with_op_idx(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        op_idx: usize,
-    ) -> Result<T, ExecutionError>;
-}
-
-impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
+// CryptoError implementations
+impl<T> MapExecErrWithOpIdx<T> for Result<T, CryptoError> {
     #[inline(always)]
-    fn map_crypto_err_with_op_idx(
+    fn map_exec_err_with_op_idx(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,
@@ -641,21 +609,10 @@ impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
     }
 }
 
-/// Extension trait for converting `Result<T, AceEvalError>` to `Result<T, ExecutionError>`.
-pub trait AceEvalResultExt<T> {
-    /// Maps an `AceEvalError` to an `ExecutionError` with the provided context.
-    fn map_ace_eval_err_with_op_idx(
-        self,
-        mast_forest: &MastForest,
-        node_id: MastNodeId,
-        host: &impl BaseHost,
-        op_idx: usize,
-    ) -> Result<T, ExecutionError>;
-}
-
-impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
+// AceEvalError implementations
+impl<T> MapExecErrWithOpIdx<T> for Result<T, AceEvalError> {
     #[inline(always)]
-    fn map_ace_eval_err_with_op_idx(
+    fn map_exec_err_with_op_idx(
         self,
         mast_forest: &MastForest,
         node_id: MastNodeId,

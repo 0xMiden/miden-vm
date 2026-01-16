@@ -19,7 +19,7 @@ use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{AdviceResultExt, OperationError, OperationResultExt},
+    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
@@ -232,7 +232,7 @@ impl FastProcessor {
     ) -> Result<ResumeContext, ExecutionError> {
         self.advice
             .extend_map(program.mast_forest().advice_map())
-            .map_advice_err_no_ctx()?;
+            .map_exec_err_no_ctx()?;
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
@@ -414,7 +414,7 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_advice_err_no_ctx()?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         match self
             .execute_impl(
@@ -863,7 +863,7 @@ impl FastProcessor {
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice.extend_map(mast_forest.advice_map()).map_advice_err(
+        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
             current_forest,
             node_id,
             host,
@@ -1064,7 +1064,7 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_advice_err_no_ctx()?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         let execute_fut = async {
             match self

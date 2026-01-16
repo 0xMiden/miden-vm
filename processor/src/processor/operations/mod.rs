@@ -5,8 +5,8 @@ use miden_core::{
 };
 
 use crate::{
-    BaseHost, ExecutionError, OperationResultExt,
-    errors::{AceEvalResultExt, CryptoResultExt, IoResultExt},
+    BaseHost, ExecutionError,
+    errors::MapExecErrWithOpIdx,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
@@ -246,49 +246,49 @@ pub(super) fn execute_sync_op(
 
         // ----- input / output ---------------------------------------------------------------
         Operation::Push(value) => stack_ops::op_push(processor, *value, tracer)?,
-        Operation::AdvPop => io_ops::op_advpop(processor, tracer).map_io_err_with_op_idx(
+        Operation::AdvPop => io_ops::op_advpop(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer).map_io_err_with_op_idx(
+        Operation::AdvPopW => io_ops::op_advpopw(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::MLoadW => io_ops::op_mloadw(processor, tracer).map_io_err_with_op_idx(
+        Operation::MLoadW => io_ops::op_mloadw(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::MStoreW => io_ops::op_mstorew(processor, tracer).map_io_err_with_op_idx(
+        Operation::MStoreW => io_ops::op_mstorew(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::MLoad => io_ops::op_mload(processor, tracer).map_io_err_with_op_idx(
+        Operation::MLoad => io_ops::op_mload(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::MStore => io_ops::op_mstore(processor, tracer).map_io_err_with_op_idx(
+        Operation::MStore => io_ops::op_mstore(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::MStream => io_ops::op_mstream(processor, tracer).map_io_err_with_op_idx(
+        Operation::MStream => io_ops::op_mstream(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
             op_idx,
         )?,
-        Operation::Pipe => io_ops::op_pipe(processor, tracer).map_io_err_with_op_idx(
+        Operation::Pipe => io_ops::op_pipe(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
             host,
@@ -303,12 +303,12 @@ pub(super) fn execute_sync_op(
         Operation::MpVerify(err_code) => {
             let mpverify_helpers =
                 crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
-                    .map_crypto_err_with_op_idx(current_forest, node_id, host, op_idx)?;
+                    .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(mpverify_helpers);
         },
         Operation::MrUpdate => {
             let mrupdate_helpers = crypto_ops::op_mrupdate(processor, tracer)
-                .map_crypto_err_with_op_idx(current_forest, node_id, host, op_idx)?;
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
             user_op_helpers = Some(mrupdate_helpers);
         },
         Operation::FriE2F4 => {
@@ -325,7 +325,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(tracer).map_ace_eval_err_with_op_idx(
+            processor.op_eval_circuit(tracer).map_exec_err_with_op_idx(
                 current_forest,
                 node_id,
                 host,

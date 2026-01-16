@@ -10,7 +10,7 @@ use miden_core::{
 use crate::{
     AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{SystemEventResultExt, advice_error_with_context, event_error_with_context},
+    errors::{MapExecErr, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -353,7 +353,7 @@ impl FastProcessor {
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event).map_sys_event_err(
+            if let Err(err) = handle_system_event(&mut process, system_event).map_exec_err(
                 current_forest,
                 node_id,
                 host,
