@@ -21,6 +21,7 @@ use crate::{
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
+    errors::AceEvalResultExt,
     fast::{
         NoopTracer, Tracer, eval_circuit_fast_,
         trace_state::{
@@ -961,7 +962,8 @@ fn eval_circuit_parallel_(
 ) -> Result<CircuitEvaluation, ExecutionError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), err_ctx, tracer)
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), tracer)
+        .map_ace_eval_err(err_ctx)
 }
 
 // BASIC BLOCK CONTEXT

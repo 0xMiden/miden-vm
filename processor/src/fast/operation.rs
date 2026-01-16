@@ -10,9 +10,9 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, MemoryResultExt, ProcessState,
+    AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::{AceError, AceResultExt, OperationError},
+    errors::{AceError, AceEvalError, AceEvalResultExt, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
@@ -99,16 +99,9 @@ impl Processor for FastProcessor {
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
-        let circuit_evaluation = eval_circuit_fast_(
-            ctx,
-            ptr,
-            self.clk,
-            num_read,
-            num_eval,
-            &mut self.memory,
-            err_ctx,
-            tracer,
-        )?;
+        let circuit_evaluation =
+            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)
+                .map_ace_eval_err(err_ctx)?;
         self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
@@ -400,27 +393,24 @@ pub fn eval_circuit_fast_(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut impl MemoryInterface,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
+) -> Result<CircuitEvaluation, AceEvalError> {
     let num_vars = num_vars.as_canonical_u64();
     let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err::<_, _>(AceError::TooManyWires(num_wires)).map_ace_err(err_ctx)?;
+        return Err(AceError::TooManyWires(num_wires).into());
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err::<_, _>(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars))
-            .map_ace_err(err_ctx)?;
+        return Err(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars).into());
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err::<_, _>(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval))
-            .map_ace_err(err_ctx)?;
+        return Err(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval).into());
     }
 
     // Ensure instructions are word-aligned and non-empty
@@ -434,22 +424,22 @@ pub fn eval_circuit_fast_(
     // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
     // evaluation completely
     for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk).map_mem_err(err_ctx)?;
+        let word = mem.read_word(ctx, ptr, clk)?;
         tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word)?;
+        evaluation_context.do_read(ptr, word);
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction = mem.read_element(ctx, ptr).map_mem_err(err_ctx)?;
+        let instruction = mem.read_element(ctx, ptr)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
+        evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;
     }
 
     // Ensure the circuit evaluated to zero.
     if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
-        return Err::<_, _>(AceError::CircuitNotEvaluateZero).map_ace_err(err_ctx)?;
+        return Err(AceError::CircuitNotEvaluateZero.into());
     }
 
     Ok(evaluation_context)

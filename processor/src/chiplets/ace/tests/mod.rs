@@ -22,7 +22,7 @@ use crate::{
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },
-    errors::ErrorContext,
+    errors::AceEvalResultExt,
     fast::{Memory, NoopTracer, eval_circuit_fast_},
 };
 
@@ -49,8 +49,7 @@ fn test_var_plus_one() {
     }
 
     let valid_input = &[-QuadFelt::ONE, QuadFelt::ZERO];
-    let err_ctx = ();
-    let encoded_circuit = verify_encoded_circuit_eval(&circuit, valid_input, &err_ctx);
+    let encoded_circuit = verify_encoded_circuit_eval(&circuit, valid_input);
     verify_eval_circuit(&encoded_circuit, valid_input);
 }
 
@@ -81,10 +80,9 @@ fn test_bool_check() {
             [x, result]
         })
         .collect();
-    let err_ctx = ();
     for input in &inputs {
         let _ = verify_circuit_eval(&circuit, input, |_| QuadFelt::ZERO);
-        let encoded_circuit = verify_encoded_circuit_eval(&circuit, input, &err_ctx);
+        let encoded_circuit = verify_encoded_circuit_eval(&circuit, input);
         verify_eval_circuit(&encoded_circuit, input);
     }
 }
@@ -188,11 +186,7 @@ fn verify_circuit_eval(
 }
 
 /// Performs encoding of circuit and evaluate it by the ACE chiplet.
-fn verify_encoded_circuit_eval(
-    circuit: &Circuit,
-    inputs: &[QuadFelt],
-    err_ctx: &impl ErrorContext,
-) -> EncodedCircuit {
+fn verify_encoded_circuit_eval(circuit: &Circuit, inputs: &[QuadFelt]) -> EncodedCircuit {
     let encoded_circuit = EncodedCircuit::try_from_circuit(circuit).expect("cannot encode");
 
     let num_read_rows = encoded_circuit.num_vars() as u32 / 2;
@@ -207,13 +201,13 @@ fn verify_encoded_circuit_eval(
     let mut mem_iter = circuit_mem.iter();
     let mut ptr = Felt::ZERO;
     for word in mem_iter.by_ref().take(num_read_rows as usize) {
-        evaluator.do_read(ptr, *word).expect("failed to read a word during `READ`");
+        evaluator.do_read(ptr, *word);
         ptr += PTR_OFFSET_WORD;
     }
     for &instruction_group in mem_iter {
         for instruction in Into::<[Felt; WORD_SIZE]>::into(instruction_group) {
             evaluator
-                .do_eval(ptr, instruction, err_ctx)
+                .do_eval(ptr, instruction)
                 .expect("failed to read an element during `EVAL`");
             ptr += PTR_OFFSET_ELEM;
         }
@@ -252,9 +246,9 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         Felt::from_u32(circuit.num_vars() as u32),
         Felt::from_u32(circuit.num_eval() as u32),
         &mut mem,
-        &err_ctx,
         &mut tracer,
     )
+    .map_ace_eval_err(&err_ctx)
     .unwrap();
 }
 
