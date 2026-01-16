@@ -53,15 +53,6 @@ pub enum ExecutionError {
         #[source]
         err: TraceError,
     },
-    #[error("division by zero at clock cycle {clk}")]
-    #[diagnostic()]
-    DivideByZero {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-    },
     #[error("failed to execute the dynamic code block provided by the stack with root {hex}; the block could not be found",
       hex = .digest.to_hex()
     )]
@@ -184,43 +175,6 @@ pub enum ExecutionError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
-    #[diagnostic()]
-    NotBinaryValueIf {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("operation expected a binary value, but got {value}")]
-    #[diagnostic()]
-    NotBinaryValueOp {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("loop condition must be a binary value, but got {value}")]
-    #[diagnostic(help(
-        "this could happen either when first entering the loop, or any subsequent iteration"
-    ))]
-    NotBinaryValueLoop {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Felt,
-    },
-    #[error("operation expected u32 values, but got values: {values:?}")]
-    NotU32Values {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        values: Vec<Felt>,
-    },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("smt node {node_hex} not found", node_hex = to_hex(node.as_bytes()))]
@@ -300,11 +254,6 @@ impl ExecutionError {
     ) -> ExecutionError {
         let (label, source_file) = err_ctx.label_and_source_file();
         ExecutionError::AdviceError { label, source_file, err, clk }
-    }
-
-    pub fn divide_by_zero(clk: RowIndex, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::DivideByZero { clk, label, source_file }
     }
 
     pub fn dynamic_node_not_found(digest: Word, err_ctx: &impl ErrorContext) -> Self {
@@ -390,31 +339,6 @@ impl ExecutionError {
         Self::NoMastForestWithProcedure { label, source_file, root_digest }
     }
 
-    pub fn not_binary_value_if(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueIf { label, source_file, value }
-    }
-
-    pub fn not_binary_value_op(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueOp { label, source_file, value }
-    }
-
-    pub fn not_binary_value_loop(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotBinaryValueLoop { label, source_file, value }
-    }
-
-    pub fn not_u32_value(value: Felt, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values { label, source_file, values: vec![value] }
-    }
-
-    pub fn not_u32_values(values: Vec<Felt>, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::NotU32Values { label, source_file, values }
-    }
-
     pub fn smt_node_not_found(node: Word, err_ctx: &impl ErrorContext) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::SmtNodeNotFound { label, source_file, node }
@@ -489,6 +413,13 @@ pub enum AceError {
 pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
     NotBinaryValue { value: Felt },
+    #[error("if statement expected a binary value on top of the stack, but got {value}")]
+    NotBinaryValueIf { value: Felt },
+    #[error("loop condition must be a binary value, but got {value}")]
+    #[diagnostic(help(
+        "this could happen either when first entering the loop, or any subsequent iteration"
+    ))]
+    NotBinaryValueLoop { value: Felt },
     #[error("operation expected u32 values, but got values: {values:?}")]
     NotU32Values { values: Vec<Felt> },
     #[error("division by zero")]

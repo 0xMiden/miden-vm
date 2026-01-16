@@ -7,7 +7,10 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{AdviceError, ExecutionError, PrimeField64, ProcessState, errors::ErrorContext};
+use crate::{
+    AdviceError, ExecutionError, PrimeField64, ProcessState,
+    errors::{ErrorContext, OperationError, OperationResultExt},
+};
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
 /// Offset accounts for the event ID at position 0 on the stack.
@@ -421,7 +424,9 @@ fn push_ext2_inv_result(
 
     let element = QuadFelt::from_basis_coefficients_fn(|i: usize| [coef0, coef1][i]);
     if element == QuadFelt::ZERO {
-        return Err(ExecutionError::divide_by_zero(process.clk(), err_ctx));
+        return Err(Err::<(), _>(OperationError::DivideByZero)
+            .map_exec_err(err_ctx, process.clk())
+            .unwrap_err());
     }
     let result = element.inverse();
     let result = result.as_basis_coefficients_slice();
@@ -557,10 +562,11 @@ fn push_transformed_stack_top(
     err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     let stack_top = process.get_stack_item(1);
-    let stack_top: u32 = stack_top
-        .as_canonical_u64()
-        .try_into()
-        .map_err(|_| ExecutionError::not_u32_value(stack_top, err_ctx))?;
+    let stack_top: u32 = stack_top.as_canonical_u64().try_into().map_err(|_| {
+        Err::<(), _>(OperationError::NotU32Values { values: vec![stack_top] })
+            .map_exec_err(err_ctx, process.clk())
+            .unwrap_err()
+    })?;
     let transformed_stack_top = f(stack_top);
     process.advice_provider_mut().push_stack(transformed_stack_top);
     Ok(())

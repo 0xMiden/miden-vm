@@ -7,10 +7,12 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ExecutionError,
+    AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
+    errors::OperationError,
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
+    processor::Processor,
 };
 
 impl FastProcessor {
@@ -48,10 +50,11 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
+            let clk = self.system().clk;
+            #[allow(clippy::let_unit_value)]
             let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
-            return ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_if(
-                condition, &err_ctx,
-            )));
+            let err = OperationError::NotBinaryValueIf { value: condition };
+            return ControlFlow::Break(BreakReason::Err(err.with_context(&err_ctx, clk)));
         };
 
         // Corresponds to the row inserted for the SPLIT operation added
