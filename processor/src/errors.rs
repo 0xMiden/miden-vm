@@ -20,15 +20,13 @@ use crate::{AdviceError, BaseHost, DebugError, EventError, MemoryError, TraceErr
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum ExecutionError {
-    #[error("advice provider error")]
-    #[diagnostic()]
+    #[error("{err}")]
+    #[diagnostic(forward(err))]
     AdviceError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[source]
-        #[diagnostic_source]
         err: AdviceError,
     },
     #[error("debug handler error: {err}")]
@@ -97,15 +95,13 @@ pub enum ExecutionError {
     },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
-    #[error("operation error")]
-    #[diagnostic()]
+    #[error("{err}")]
+    #[diagnostic(forward(err))]
     OperationError {
         #[label]
         label: SourceSpan,
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
-        #[source]
-        #[diagnostic_source]
         err: OperationError,
     },
 }

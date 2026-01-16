@@ -151,8 +151,7 @@ fn test_diagnostic_advice_stack_read_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error",
-        "stack read failed",
+        "  x advice stack read failed",
         regex!(r#",-\[test[\d]+:3:18\]"#),
         " 2 |         begin",
         " 3 |             swap adv_push.1 trace.2",
@@ -176,15 +175,14 @@ fn test_diagnostic_divide_by_zero_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x division by zero",
-        "        help: ensure the divisor (second stack element) is non-zero before division or modulo operations",
+        "  x division by zero",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 div",
         "   :                     ^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
     );
 }
 
@@ -199,15 +197,14 @@ fn test_diagnostic_divide_by_zero_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x division by zero",
-        "        help: ensure the divisor (second stack element) is non-zero before division or modulo operations",
+        "  x division by zero",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 u32div",
         "   :                     ^^^^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "  help: ensure the divisor (second stack element) is non-zero before division or modulo operations"
     );
 }
 
@@ -225,8 +222,7 @@ fn test_diagnostic_dynamic_node_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
+        "  x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dynexec",
@@ -247,8 +243,7 @@ fn test_diagnostic_dynamic_node_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
+        "  x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dyncall",
@@ -275,15 +270,14 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x assertion failed with error code: 0",
-        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
+        "  x assertion failed with error code: 0",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
         "   :             ^^^^^^^",
         " 5 |             push.3.4",
-        "   `----"
+        "   `----",
+        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 
     // With error message
@@ -298,15 +292,14 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x assertion failed with error message: some error message",
-        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
+        "  x assertion failed with error message: some error message",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
         " 5 |             push.3.4",
-        "   `----"
+        "   `----",
+        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 
     // With error message as constant
@@ -322,15 +315,14 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x assertion failed with error message: some error message",
-        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
+        "  x assertion failed with error message: some error message",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
         "   :             ^^^^^^^^^^^^^^^^^^^",
         " 6 |             push.3.4",
-        "   `----"
+        "   `----",
+        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 }
 
@@ -429,8 +421,7 @@ fn test_diagnostic_invalid_merkle_tree_node_index() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "advice provider error",
-        "provided node index 16 is out of bounds for a merkle tree node at depth 4",
+        "  x provided node index 16 is out of bounds for a merkle tree node at depth 4",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_get",
@@ -462,8 +453,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x when returning from a call, stack depth must be 16, but was 17",
+        "  x when returning from a call, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:7:21\]"#),
         " 6 |         begin",
         " 7 |             trace.2 call.foo",
@@ -492,8 +482,7 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x when returning from a call, stack depth must be 16, but was 17",
+        "  x when returning from a call, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:8:13\]"#),
         " 7 |             procref.foo mem_storew_le.100 dropw push.100",
         " 8 |             dyncall",
@@ -518,15 +507,14 @@ fn test_diagnostic_log_argument_zero() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x attempted to calculate integer logarithm with zero argument",
-        "        help: ilog2 requires a non-zero argument",
+        "  x attempted to calculate integer logarithm with zero argument",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
         "   :                     ^^^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "  help: ilog2 requires a non-zero argument"
     );
 }
 
@@ -697,7 +685,6 @@ fn test_diagnostic_merkle_store_lookup_failed() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "failed to lookup value in Merkle store",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_set",
@@ -780,8 +767,7 @@ fn test_diagnostic_not_binary_value_split_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x if statement expected a binary value on top of the stack, but got 2",
+        "  x if statement expected a binary value on top of the stack, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             if.true swap else dup end",
@@ -802,15 +788,14 @@ fn test_diagnostic_not_binary_value_loop_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x loop condition must be a binary value, but got 2",
-        "        help: this could happen either when first entering the loop, or any subsequent iteration",
+        "  x loop condition must be a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----"
+        "   `----",
+        "  help: this could happen either when first entering the loop, or any subsequent iteration"
     );
 }
 
@@ -826,8 +811,7 @@ fn test_diagnostic_not_binary_value_cswap_cswapw() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected a binary value, but got 2",
+        "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             cswap",
@@ -846,8 +830,7 @@ fn test_diagnostic_not_binary_value_cswap_cswapw() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected a binary value, but got 2",
+        "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             cswapw",
@@ -869,8 +852,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected a binary value, but got 2",
+        "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             and trace.2",
@@ -889,8 +871,7 @@ fn test_diagnostic_not_binary_value_binary_ops() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected a binary value, but got 2",
+        "  x operation expected a binary value, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             or trace.2",
@@ -916,8 +897,7 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected u32 values, but got values: [4294967296]",
+        "  x operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32and trace.2",
@@ -937,8 +917,7 @@ fn test_diagnostic_not_u32_value() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "operation expected u32 values, but got values: [4294967296]",
+        "  x operation expected u32 values, but got values: [4294967296]",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             u32overflowing_add3 trace.2",
@@ -1008,15 +987,14 @@ fn test_assert_messages() {
 
     assert_diagnostic_lines!(
         err,
-        "operation error",
-        "`->   x assertion failed with error message: Value is not zero",
-        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
+        "  x assertion failed with error message: Value is not zero",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1",
         " 5 |             assertz.err=NONZERO",
         "   :             ^^^^^^^^^^^^^^^^^^^",
         " 6 |         end",
-        "   `----"
+        "   `----",
+        "  help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met"
     );
 }
 
