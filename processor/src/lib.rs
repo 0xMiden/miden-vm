@@ -69,7 +69,9 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
 
 mod errors;
-pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
+pub use errors::{
+    ErrorContext, ErrorContextImpl, ExecutionError, OperationError, OperationResultExt,
+};
 
 pub mod utils;
 

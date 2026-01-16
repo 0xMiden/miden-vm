@@ -3,7 +3,7 @@
 
 use alloc::{string::String, sync::Arc, vec::Vec};
 
-use miden_air::trace::RowIndex;
+use miden_air::trace::{RowIndex, RowIndex as AirRowIndex};
 use miden_core::{
     EventId, EventName, Felt, Word,
     field::QuadFelt,
@@ -278,6 +278,18 @@ pub enum ExecutionError {
     },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
+    #[error("operation error at clock cycle {clk}")]
+    #[diagnostic()]
+    OperationError {
+        #[label]
+        label: SourceSpan,
+        #[source_code]
+        source_file: Option<Arc<SourceFile>>,
+        clk: AirRowIndex,
+        #[source]
+        #[diagnostic_source]
+        err: OperationError,
+    },
 }
 
 impl ExecutionError {
@@ -463,6 +475,53 @@ pub enum AceError {
     FailedWireBusRead,
     #[error("num of wires must be less than 2^30 but was {0}")]
     TooManyWires(u64),
+}
+
+// OPERATION ERROR
+// ================================================================================================
+
+/// Lightweight error type for operations that can fail.
+///
+/// This enum captures error conditions without expensive context information.
+/// When an `OperationError` needs to be converted to an `ExecutionError`, the
+/// context information is resolved lazily via `OperationResultExt::map_exec_err`.
+#[derive(Debug, Clone, thiserror::Error, Diagnostic)]
+pub enum OperationError {
+    #[error("operation expected a binary value, but got {value}")]
+    NotBinaryValue { value: Felt },
+    #[error("operation expected u32 value, but got {value}")]
+    NotU32Value { value: Felt },
+    #[error("division by zero")]
+    DivideByZero,
+}
+
+/// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.
+///
+/// This trait provides methods to wrap an `OperationError` with execution context
+/// (source location, clock cycle) at the point where the error needs to be propagated.
+pub trait OperationResultExt<T> {
+    /// Maps an `OperationError` to an `ExecutionError` with the provided context.
+    ///
+    /// The `err_ctx` parameter provides source location information, and `clk` is the
+    /// clock cycle at which the error occurred.
+    fn map_exec_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: AirRowIndex,
+    ) -> Result<T, ExecutionError>;
+}
+
+impl<T> OperationResultExt<T> for Result<T, OperationError> {
+    fn map_exec_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: AirRowIndex,
+    ) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            ExecutionError::OperationError { label, source_file, clk, err }
+        })
+    }
 }
 
 // ERROR CONTEXT
