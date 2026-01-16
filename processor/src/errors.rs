@@ -1,7 +1,7 @@
 // Allow unused assignments - required by miette::Diagnostic derive macro
 #![allow(unused_assignments)]
 
-use alloc::{string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_air::trace::{RowIndex, RowIndex as AirRowIndex};
 use miden_core::{
@@ -67,38 +67,9 @@ pub enum ExecutionError {
     ReservedEventNamespace { event: EventName },
     #[error("failed to execute the program for internal reason: {0}")]
     Internal(&'static str),
-    #[error(
-        "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
-    )]
-    MalformedMastForestInHost {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        root_digest: Word,
-    },
     #[error(transparent)]
     #[diagnostic(transparent)]
     MemoryError(MemoryError),
-    #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
-      value = to_hex(value.as_bytes()),
-      root = to_hex(root.as_bytes()),
-      err = match err_msg {
-        Some(msg) => format!("message: {msg}"),
-        None => format!("code: {err_code}"),
-      }
-    )]
-    MerklePathVerificationFailed {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        value: Word,
-        index: Felt,
-        root: Word,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-    },
     #[error("stack should have at most {MIN_STACK_DEPTH} elements at the end of program execution, but had {} elements", MIN_STACK_DEPTH + .0)]
     OutputStackOverflow(usize),
     #[error("failed to execute arithmetic circuit evaluation operation: {error}")]
@@ -109,19 +80,6 @@ pub enum ExecutionError {
         #[source_code]
         source_file: Option<Arc<SourceFile>>,
         error: AceError,
-    },
-    #[error(
-        "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth} at clock cycle {clk}"
-    )]
-    #[diagnostic()]
-    InvalidCryptoInput {
-        #[label]
-        label: SourceSpan,
-        #[source_code]
-        source_file: Option<Arc<SourceFile>>,
-        clk: RowIndex,
-        path_len: usize,
-        depth: Felt,
     },
     #[error("failed to serialize proof: {0}")]
     ProofSerializationError(String),
@@ -166,45 +124,9 @@ impl ExecutionError {
         }
     }
 
-    pub fn malformed_mast_forest_in_host(root_digest: Word, err_ctx: &impl ErrorContext) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::MalformedMastForestInHost { label, source_file, root_digest }
-    }
-
-    pub fn merkle_path_verification_failed(
-        value: Word,
-        index: Felt,
-        root: Word,
-        err_code: Felt,
-        err_msg: Option<Arc<str>>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::MerklePathVerificationFailed {
-            label,
-            source_file,
-            value,
-            index,
-            root,
-            err_code,
-            err_msg,
-        }
-    }
-
     pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
         let (label, source_file) = err_ctx.label_and_source_file();
         Self::AceChipError { label, source_file, error }
-    }
-
-    pub fn invalid_crypto_input(
-        clk: RowIndex,
-        path_len: usize,
-        depth: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::InvalidCryptoInput { label, source_file, clk, path_len, depth }
     }
 }
 
@@ -294,6 +216,38 @@ pub enum OperationError {
     InvalidStackDepthOnReturn { depth: usize },
     #[error("no MAST forest contains the procedure with root digest {root_digest}")]
     NoMastForestWithProcedure { root_digest: Word },
+    #[error(
+        "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
+    )]
+    MalformedMastForestInHost { root_digest: Word },
+    #[error("merkle path verification failed for value {value} at index {index} in the Merkle tree with root {root} (error {err})",
+      value = to_hex(inner.value.as_bytes()),
+      root = to_hex(inner.root.as_bytes()),
+      index = inner.index,
+      err = match &inner.err_msg {
+        Some(msg) => format!("message: {msg}"),
+        None => format!("code: {}", inner.err_code),
+      }
+    )]
+    MerklePathVerificationFailed {
+        inner: Box<MerklePathVerificationFailedInner>,
+    },
+    #[error(
+        "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
+    )]
+    InvalidMerklePathLength { path_len: usize, depth: Felt },
+}
+
+/// Inner data for `OperationError::MerklePathVerificationFailed`.
+///
+/// Boxed to reduce the size of `OperationError`.
+#[derive(Debug, Clone)]
+pub struct MerklePathVerificationFailedInner {
+    pub value: Word,
+    pub index: Felt,
+    pub root: Word,
+    pub err_code: Felt,
+    pub err_msg: Option<Arc<str>>,
 }
 
 /// Extension trait for converting `Result<T, OperationError>` to `Result<T, ExecutionError>`.

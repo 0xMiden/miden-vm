@@ -859,9 +859,11 @@ impl FastProcessor {
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malformed_mast_forest_in_host(node_digest, err_ctx))?;
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
+                .map_exec_err(err_ctx, clk)
+                .unwrap_err()
+        })?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
