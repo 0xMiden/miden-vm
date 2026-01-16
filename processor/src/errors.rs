@@ -389,6 +389,7 @@ pub trait OperationResultExt<T> {
 }
 
 impl<T> OperationResultExt<T> for Result<T, OperationError> {
+    #[inline(always)]
     fn map_exec_err(
         self,
         mast_forest: &MastForest,
@@ -396,13 +397,17 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         host: &impl BaseHost,
         in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-            ExecutionError::OperationError { label, source_file, err }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                Err(ExecutionError::OperationError { label, source_file, err })
+            },
+        }
     }
 
+    #[inline(always)]
     fn map_exec_err_with_op_idx(
         self,
         mast_forest: &MastForest,
@@ -411,11 +416,19 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
-            ExecutionError::OperationError { label, source_file, err }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) = get_label_and_source_file(
+                    Some(op_idx),
+                    mast_forest,
+                    node_id,
+                    host,
+                    in_debug_mode,
+                );
+                Err(ExecutionError::OperationError { label, source_file, err })
+            },
+        }
     }
 }
 
@@ -437,6 +450,7 @@ pub trait AdviceResultExt<T> {
 }
 
 impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
+    #[inline(always)]
     fn map_advice_err(
         self,
         mast_forest: &MastForest,
@@ -444,17 +458,24 @@ impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
         host: &impl BaseHost,
         in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            advice_error_with_context(err, mast_forest, node_id, host, in_debug_mode)
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                Err(advice_error_with_context(err, mast_forest, node_id, host, in_debug_mode))
+            },
+        }
     }
 
+    #[inline(always)]
     fn map_advice_err_no_ctx(self) -> Result<T, ExecutionError> {
-        self.map_err(|err| ExecutionError::AdviceError {
-            label: SourceSpan::UNKNOWN,
-            source_file: None,
-            err,
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => Err(ExecutionError::AdviceError {
+                label: SourceSpan::UNKNOWN,
+                source_file: None,
+                err,
+            }),
+        }
     }
 }
 
@@ -511,6 +532,7 @@ pub trait MemoryResultExt<T> {
 }
 
 impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
+    #[inline(always)]
     fn map_mem_err(
         self,
         mast_forest: &MastForest,
@@ -518,11 +540,14 @@ impl<T> MemoryResultExt<T> for Result<T, MemoryError> {
         host: &impl BaseHost,
         in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-            ExecutionError::MemoryError { label, source_file, err }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                Err(ExecutionError::MemoryError { label, source_file, err })
+            },
+        }
     }
 }
 
@@ -541,6 +566,7 @@ pub trait SystemEventResultExt<T> {
 impl<T> SystemEventResultExt<T>
     for Result<T, crate::operations::sys_ops::sys_event_handlers::SystemEventError>
 {
+    #[inline(always)]
     fn map_sys_event_err(
         self,
         mast_forest: &MastForest,
@@ -549,21 +575,24 @@ impl<T> SystemEventResultExt<T>
         in_debug_mode: bool,
     ) -> Result<T, ExecutionError> {
         use crate::operations::sys_ops::sys_event_handlers::SystemEventError;
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
-            match err {
-                SystemEventError::Advice(err) => {
-                    ExecutionError::AdviceError { label, source_file, err }
-                },
-                SystemEventError::Operation(err) => {
-                    ExecutionError::OperationError { label, source_file, err }
-                },
-                SystemEventError::Memory(err) => {
-                    ExecutionError::MemoryError { label, source_file, err }
-                },
-            }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(None, mast_forest, node_id, host, in_debug_mode);
+                Err(match err {
+                    SystemEventError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    SystemEventError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    SystemEventError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+        }
     }
 }
 
@@ -581,6 +610,7 @@ pub trait IoResultExt<T> {
 }
 
 impl<T> IoResultExt<T> for Result<T, IoError> {
+    #[inline(always)]
     fn map_io_err_with_op_idx(
         self,
         mast_forest: &MastForest,
@@ -589,16 +619,24 @@ impl<T> IoResultExt<T> for Result<T, IoError> {
         in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
-            match err {
-                IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
-                IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
-                // Execution errors are already fully formed, just unwrap
-                IoError::Execution(err) => *err,
-            }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) = get_label_and_source_file(
+                    Some(op_idx),
+                    mast_forest,
+                    node_id,
+                    host,
+                    in_debug_mode,
+                );
+                Err(match err {
+                    IoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
+                    IoError::Memory(err) => ExecutionError::MemoryError { label, source_file, err },
+                    // Execution errors are already fully formed, just unwrap
+                    IoError::Execution(err) => *err,
+                })
+            },
+        }
     }
 }
 
@@ -616,6 +654,7 @@ pub trait CryptoResultExt<T> {
 }
 
 impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
+    #[inline(always)]
     fn map_crypto_err_with_op_idx(
         self,
         mast_forest: &MastForest,
@@ -624,16 +663,26 @@ impl<T> CryptoResultExt<T> for Result<T, CryptoError> {
         in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
-            match err {
-                CryptoError::Advice(err) => ExecutionError::AdviceError { label, source_file, err },
-                CryptoError::Operation(err) => {
-                    ExecutionError::OperationError { label, source_file, err }
-                },
-            }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) = get_label_and_source_file(
+                    Some(op_idx),
+                    mast_forest,
+                    node_id,
+                    host,
+                    in_debug_mode,
+                );
+                Err(match err {
+                    CryptoError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    CryptoError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                })
+            },
+        }
     }
 }
 
@@ -651,6 +700,7 @@ pub trait AceEvalResultExt<T> {
 }
 
 impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
+    #[inline(always)]
     fn map_ace_eval_err_with_op_idx(
         self,
         mast_forest: &MastForest,
@@ -659,18 +709,26 @@ impl<T> AceEvalResultExt<T> for Result<T, AceEvalError> {
         in_debug_mode: bool,
         op_idx: usize,
     ) -> Result<T, ExecutionError> {
-        self.map_err(|err| {
-            let (label, source_file) =
-                get_label_and_source_file(Some(op_idx), mast_forest, node_id, host, in_debug_mode);
-            match err {
-                AceEvalError::Ace(error) => {
-                    ExecutionError::AceChipError { label, source_file, error }
-                },
-                AceEvalError::Memory(err) => {
-                    ExecutionError::MemoryError { label, source_file, err }
-                },
-            }
-        })
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) = get_label_and_source_file(
+                    Some(op_idx),
+                    mast_forest,
+                    node_id,
+                    host,
+                    in_debug_mode,
+                );
+                Err(match err {
+                    AceEvalError::Ace(error) => {
+                        ExecutionError::AceChipError { label, source_file, error }
+                    },
+                    AceEvalError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+        }
     }
 }
 

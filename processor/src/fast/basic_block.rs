@@ -228,6 +228,9 @@ impl FastProcessor {
             .linked_id()
             .expect("basic block node should be linked when executing operations");
 
+        // Cache debug mode check outside the loop - it doesn't change during batch execution
+        let in_debug_mode = self.in_debug_mode();
+
         // execute operations in the batch one by one
         for (op_idx_in_batch, op) in batch.ops().iter().enumerate().skip(start_op_idx) {
             let op_idx_in_block = batch_offset_in_block + op_idx_in_batch;
@@ -256,7 +259,6 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let in_debug_mode = self.in_debug_mode();
                 match op {
                     Operation::Emit => {
                         self.op_emit(host, current_forest, node_id, in_debug_mode).await?
