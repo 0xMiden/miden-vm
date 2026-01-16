@@ -3,7 +3,7 @@ use miden_core::{Felt, Operation, mast::MastForest};
 
 use crate::{
     BaseHost, ErrorContext, ExecutionError, OperationResultExt,
-    errors::{CryptoResultExt, IoResultExt},
+    errors::{AceEvalResultExt, CryptoResultExt, IoResultExt},
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -275,7 +275,7 @@ pub(super) fn execute_sync_op(
             user_op_helpers = Some(horner_ext_helpers);
         },
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(err_ctx, tracer)?;
+            processor.op_eval_circuit(tracer).map_ace_eval_err(err_ctx)?;
         },
         Operation::LogPrecompile => {
             let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);

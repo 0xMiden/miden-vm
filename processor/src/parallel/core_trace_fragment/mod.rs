@@ -17,11 +17,11 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ErrorContext, ExecutionError, ProcessState,
+    ContextId, ExecutionError, ProcessState,
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
-    errors::AceEvalResultExt,
+    errors::AceEvalError,
     fast::{
         NoopTracer, Tracer, eval_circuit_fast_,
         trace_state::{
@@ -690,11 +690,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         self.context.state.system.pc_transcript_state = state;
     }
 
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack().get(2);
         let num_read = self.stack().get(1);
         let ptr = self.stack().get(0);
@@ -707,7 +703,6 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
             num_read,
             num_eval,
             self,
-            err_ctx,
             tracer,
         )?;
 
@@ -957,13 +952,11 @@ fn eval_circuit_parallel_(
     num_vars: Felt,
     num_eval: Felt,
     processor: &mut CoreTraceFragmentFiller,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
+) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
     eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), tracer)
-        .map_ace_eval_err(err_ctx)
 }
 
 // BASIC BLOCK CONTEXT
