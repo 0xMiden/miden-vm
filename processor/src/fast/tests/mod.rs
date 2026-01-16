@@ -119,7 +119,10 @@ fn test_syscall_fail() {
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
         err,
-        ExecutionError::SyscallTargetNotInKernel { label: _, source_file: _, proc_root: _ }
+        ExecutionError::OperationError {
+            err: OperationError::SyscallTargetNotInKernel { .. },
+            ..
+        }
     );
 }
 

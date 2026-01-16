@@ -19,6 +19,7 @@ use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::{OperationError, OperationResultExt},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
@@ -843,16 +844,18 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
+        get_mast_forest_failed: impl Fn(Word) -> OperationError,
         err_ctx: &E,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
     where
         E: ErrorContext,
     {
+        let clk = self.clk;
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))
+            .map_exec_err(err_ctx, clk)?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.

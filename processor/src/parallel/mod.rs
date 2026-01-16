@@ -561,7 +561,7 @@ fn initialize_chiplets(
     for proc_hash in kernel_replay.into_iter() {
         chiplets
             .kernel_rom
-            .access_proc(proc_hash, &())
+            .access_proc(proc_hash)
             .expect("kernel proc access failed when populating chiplet");
     }
 

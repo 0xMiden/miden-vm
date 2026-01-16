@@ -12,6 +12,7 @@ use crate::{
     AsyncHost, ContextId, ErrorContext, ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
     err_ctx,
+    errors::{OperationError, OperationResultExt},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         step::{BreakReason, Stopper},
@@ -52,8 +53,13 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !kernel.contains_proc(callee_hash) {
+                let clk = self.clk;
                 return ControlFlow::Break(BreakReason::Err(
-                    ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx),
+                    Err::<(), _>(OperationError::SyscallTargetNotInKernel {
+                        proc_root: callee_hash,
+                    })
+                    .map_exec_err(&err_ctx, clk)
+                    .unwrap_err(),
                 ));
             }
             tracer.record_kernel_proc_access(callee_hash);
@@ -203,7 +209,7 @@ impl FastProcessor {
                     .load_mast_forest(
                         callee_hash,
                         host,
-                        ExecutionError::dynamic_node_not_found,
+                        |digest| OperationError::DynamicNodeNotFound { digest },
                         &err_ctx,
                     )
                     .await
@@ -318,8 +324,13 @@ impl FastProcessor {
     ) -> ControlFlow<BreakReason> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
+            let clk = self.clk;
             return ControlFlow::Break(BreakReason::Err(
-                ExecutionError::invalid_stack_depth_on_return(self.stack_size(), err_ctx),
+                Err::<(), _>(OperationError::InvalidStackDepthOnReturn {
+                    depth: self.stack_size(),
+                })
+                .map_exec_err(err_ctx, clk)
+                .unwrap_err(),
             ));
         }
 

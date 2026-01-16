@@ -168,7 +168,10 @@ fn local_fn_call() {
     let build_test = build_test!(source, &[1, 2]);
     expect_exec_error_matches!(
         build_test,
-        ExecutionError::InvalidStackDepthOnReturn { depth: 17, label: _, source_file: _ }
+        ExecutionError::OperationError {
+            err: OperationError::InvalidStackDepthOnReturn { depth: 17 },
+            ..
+        }
     );
 
     let inputs = (1_u64..18).collect::<Vec<_>>();
