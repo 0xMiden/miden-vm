@@ -200,7 +200,7 @@ proptest! {
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 
         // Execute the operation
-        let result = op_crypto_stream(&mut processor, &(), &mut tracer);
+        let result = op_crypto_stream(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
 

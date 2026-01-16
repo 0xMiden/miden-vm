@@ -541,7 +541,6 @@ pub(super) fn op_log_precompile<P: Processor>(
 #[inline(always)]
 pub(super) fn op_crypto_stream<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
@@ -556,7 +555,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     let dst_addr = processor.stack().get(DST_PTR_IDX);
 
     // Validate address ranges and check for overlap using half-open intervals.
-    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk, err_ctx)?;
+    validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk)?;
 
     // Load plaintext from source memory (2 words = 8 elements)
     let src_addr_word2 = src_addr + WORD_SIZE_FELT;

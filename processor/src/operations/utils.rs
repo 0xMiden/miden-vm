@@ -1,7 +1,7 @@
 use miden_air::trace::RowIndex;
 
 use super::{ExecutionError, Felt};
-use crate::{ContextId, ErrorContext, MemoryError, ONE, PrimeField64, ZERO};
+use crate::{ContextId, MemoryError, ONE, PrimeField64, ZERO};
 // Note: assert_binary now returns OperationError, imported via crate::OperationError in the
 // function
 
@@ -16,7 +16,6 @@ pub(crate) fn validate_dual_word_stream_addrs(
     dst_addr: Felt,
     ctx: ContextId,
     clk: RowIndex,
-    _err_ctx: &impl ErrorContext,
 ) -> Result<(), ExecutionError> {
     // Convert to u32 and check end-exclusive bounds
     let src_addr_u64 = src_addr.as_canonical_u64();
