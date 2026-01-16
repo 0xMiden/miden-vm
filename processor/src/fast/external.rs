@@ -6,7 +6,9 @@ use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 use crate::{
     AsyncHost, ExecutionError,
     continuation_stack::ContinuationStack,
+    errors::{OperationError, OperationResultExt},
     fast::{BreakReason, FastProcessor, Tracer},
+    processor::Processor,
 };
 
 impl FastProcessor {
@@ -67,7 +69,9 @@ impl FastProcessor {
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
         if mast_forest[root_id].is_external() {
-            return Err(ExecutionError::CircularExternalNode(external_node.digest()));
+            let clk = self.system().clk;
+            return Err(OperationError::CircularExternalNode(external_node.digest()))
+                .map_exec_err(&(), clk);
         }
 
         Ok((root_id, mast_forest))
