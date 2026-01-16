@@ -97,39 +97,6 @@ pub enum ExecutionError {
     },
 }
 
-impl ExecutionError {
-    pub fn advice_error(
-        err: AdviceError,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> ExecutionError {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        ExecutionError::AdviceError { label, source_file, err, clk }
-    }
-
-    pub fn event_error(
-        error: EventError,
-        event_id: EventId,
-        event_name: Option<EventName>,
-        err_ctx: &impl ErrorContext,
-    ) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-
-        Self::EventError {
-            label,
-            source_file,
-            event_id,
-            event_name,
-            error,
-        }
-    }
-
-    pub fn failed_arithmetic_evaluation(err_ctx: &impl ErrorContext, error: AceError) -> Self {
-        let (label, source_file) = err_ctx.label_and_source_file();
-        Self::AceChipError { label, source_file, error }
-    }
-}
-
 impl AsRef<dyn Diagnostic> for ExecutionError {
     fn as_ref(&self) -> &(dyn Diagnostic + 'static) {
         self
@@ -162,9 +129,35 @@ pub enum AceError {
 
 /// Lightweight error type for operations that can fail.
 ///
-/// This enum captures error conditions without expensive context information.
-/// When an `OperationError` needs to be converted to an `ExecutionError`, the
-/// context information is resolved lazily via `OperationResultExt::map_exec_err`.
+/// This enum captures error conditions without expensive context information (no
+/// source location, no file references). When an `OperationError` propagates up
+/// to become an `ExecutionError`, the context is resolved lazily via extension
+/// traits like `OperationResultExt::map_exec_err`.
+///
+/// # Adding new errors (for contributors)
+///
+/// **Use `OperationError` when:**
+/// - The error occurs during operation execution (e.g., assertion failures, type mismatches)
+/// - Context can be resolved at the call site via `err_ctx.label_and_source_file()`
+/// - The error needs both a human-readable message and optional diagnostic help
+///
+/// **Avoid duplicating error context.** If context comes from the call site via
+/// `ErrorContext`, do NOT add `label` or `source_file` fields to the variant.
+///
+/// **Pattern at call sites:**
+/// ```ignore
+/// // Return OperationError and let the caller wrap it:
+/// fn some_op() -> Result<(), OperationError> {
+///     Err(OperationError::DivideByZero)
+/// }
+///
+/// // Caller wraps with context lazily:
+/// some_op().map_exec_err(err_ctx, clk)?;
+/// ```
+///
+/// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the
+/// corresponding extension traits: `AdviceResultExt`, `EventResultExt`,
+/// `AceResultExt`.
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum OperationError {
     #[error("operation expected a binary value, but got {value}")]
@@ -275,6 +268,75 @@ impl<T> OperationResultExt<T> for Result<T, OperationError> {
         self.map_err(|err| {
             let (label, source_file) = err_ctx.label_and_source_file();
             ExecutionError::OperationError { label, source_file, clk, err }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, AdviceError>` to `Result<T, ExecutionError>`.
+pub trait AdviceResultExt<T> {
+    /// Maps an `AdviceError` to an `ExecutionError` with the provided context.
+    fn map_advice_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError>;
+}
+
+impl<T> AdviceResultExt<T> for Result<T, AdviceError> {
+    fn map_advice_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        clk: RowIndex,
+    ) -> Result<T, ExecutionError> {
+        self.map_err(|err| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            ExecutionError::AdviceError { label, source_file, clk, err }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, EventError>` to `Result<T, ExecutionError>`.
+pub trait EventResultExt<T> {
+    /// Maps an `EventError` to an `ExecutionError` with the provided context.
+    fn map_event_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        event_id: EventId,
+        event_name: Option<EventName>,
+    ) -> Result<T, ExecutionError>;
+}
+
+impl<T> EventResultExt<T> for Result<T, EventError> {
+    fn map_event_err(
+        self,
+        err_ctx: &impl ErrorContext,
+        event_id: EventId,
+        event_name: Option<EventName>,
+    ) -> Result<T, ExecutionError> {
+        self.map_err(|error| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            ExecutionError::EventError {
+                label,
+                source_file,
+                event_id,
+                event_name,
+                error,
+            }
+        })
+    }
+}
+
+/// Extension trait for converting `Result<T, AceError>` to `Result<T, ExecutionError>`.
+pub trait AceResultExt<T> {
+    /// Maps an `AceError` to an `ExecutionError` with the provided context.
+    fn map_ace_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError>;
+}
+
+impl<T> AceResultExt<T> for Result<T, AceError> {
+    fn map_ace_err(self, err_ctx: &impl ErrorContext) -> Result<T, ExecutionError> {
+        self.map_err(|error| {
+            let (label, source_file) = err_ctx.label_and_source_file();
+            ExecutionError::AceChipError { label, source_file, error }
         })
     }
 }

@@ -9,7 +9,7 @@ use miden_core::{
 
 use crate::{
     AdviceError, ExecutionError, PrimeField64, ProcessState,
-    errors::{ErrorContext, OperationError, OperationResultExt},
+    errors::{AdviceResultExt, ErrorContext, OperationError, OperationResultExt},
 };
 
 /// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
@@ -80,10 +80,8 @@ fn insert_mem_values_into_adv_map(
     }
 
     let key = process.get_stack_word(1);
-    process
-        .advice_provider_mut()
-        .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+    process.advice_provider_mut().insert_into_map(key, values)?;
+    Ok(())
 }
 
 /// Reads two words from the operand stack and inserts them into the advice map under the key
@@ -121,7 +119,7 @@ fn insert_hdword_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_advice_err(err_ctx, process.clk())
 }
 
 /// Reads four words from the operand stack and inserts them into the advice map under the key
@@ -161,7 +159,7 @@ fn insert_hqword_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_advice_err(err_ctx, process.clk())
 }
 
 /// Reads three words from the operand stack and inserts the rate portion into the advice map
@@ -214,7 +212,7 @@ fn insert_hperm_into_adv_map(
     process
         .advice_provider_mut()
         .insert_into_map(key, values)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))
+        .map_advice_err(err_ctx, process.clk())
 }
 
 /// Creates a new Merkle tree in the advice provider by combining Merkle trees with the
@@ -245,7 +243,7 @@ fn merge_merkle_nodes(
     process
         .advice_provider_mut()
         .merge_roots(lhs, rhs)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_advice_err(err_ctx, process.clk())?;
 
     Ok(())
 }
@@ -286,7 +284,7 @@ fn copy_merkle_node_to_adv_stack(
     let node = process
         .advice_provider()
         .get_tree_node(root, depth, index)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_advice_err(err_ctx, process.clk())?;
 
     // push_stack_word pushes in reverse order so that node[0] ends up on top of advice stack.
     // AdvPopW then pops the word maintaining structural order on the operand stack.
@@ -328,7 +326,7 @@ fn copy_map_value_to_adv_stack(
     process
         .advice_provider_mut()
         .push_from_map(key, include_len, pad_to)
-        .map_err(|err| ExecutionError::advice_error(err, process.clk(), err_ctx))?;
+        .map_advice_err(err_ctx, process.clk())?;
 
     Ok(())
 }
@@ -359,11 +357,11 @@ fn copy_map_value_length_to_adv_stack(
 
     let values_len = advice_provider
         .get_mapped_values(&key)
-        .ok_or(ExecutionError::advice_error(
-            AdviceError::MapKeyNotFound { key },
-            process_clk,
-            err_ctx,
-        ))?
+        .ok_or_else(|| {
+            Err::<(), _>(AdviceError::MapKeyNotFound { key })
+                .map_advice_err(err_ctx, process_clk)
+                .unwrap_err()
+        })?
         .len();
 
     // Note: we assume values_len fits within the field modulus. This is always true

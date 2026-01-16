@@ -20,7 +20,7 @@ use crate::{
         MAX_NUM_ACE_WIRES,
         instruction::{Op, decode_instruction},
     },
-    errors::{AceError, ErrorContext},
+    errors::{AceError, AceResultExt, ErrorContext},
 };
 
 /// Number of LogUp fractions in the wiring bus for rows in the `READ` section.
@@ -125,19 +125,19 @@ impl CircuitEvaluation {
     ) -> Result<(), ExecutionError> {
         // Decode instruction, ensuring it is valid
         let (id_l, id_r, op) = decode_instruction(instruction).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedDecodeInstruction)
+            Err::<(), _>(AceError::FailedDecodeInstruction)
+                .map_ace_err(err_ctx)
+                .unwrap_err()
         })?;
 
         // Read value of id_l from wire bus, increasing its multiplicity
-        let v_l = self.wire_bus.read_value(id_l).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
-        })?;
+        let v_l = self.wire_bus.read_value(id_l).ok_or(AceError::FailedWireBusRead)?;
         let id_l = Felt::from_u32(id_l);
         self.col_wire_left.push(id_l, v_l);
 
         // Read value of id_r from wire bus, increasing its multiplicity
         let v_r = self.wire_bus.read_value(id_r).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
+            Err::<(), _>(AceError::FailedWireBusRead).map_ace_err(err_ctx).unwrap_err()
         })?;
         let id_r = Felt::from_u32(id_r);
         self.col_wire_right.push(id_r, v_r);

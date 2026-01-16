@@ -14,7 +14,9 @@ use miden_core::{
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ErrorContext, ExecutionError, ONE,
-    errors::{MerklePathVerificationFailedInner, OperationError, OperationResultExt},
+    errors::{
+        AdviceResultExt, MerklePathVerificationFailedInner, OperationError, OperationResultExt,
+    },
     fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
     processor::{
@@ -103,7 +105,10 @@ pub(super) fn op_mpverify<P: Processor>(
     let path = processor
         .advice_provider()
         .get_merkle_path(root, depth, index)
+
         .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+
     tracer.record_hasher_build_merkle_root(node, path.as_ref(), index, root);
 
     // verify the path
@@ -179,7 +184,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     let path = processor
         .advice_provider()
         .update_merkle_node(claimed_old_root, depth, index, new_value)
-        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+        .map_advice_err(err_ctx, clk)?;
 
     if let Some(path) = &path
         && path.len() != depth.as_canonical_u64() as usize

@@ -3,6 +3,7 @@ use miden_air::Felt;
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ErrorContext, ExecutionError,
+    errors::AdviceResultExt,
     fast::Tracer,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
@@ -25,7 +26,7 @@ pub(super) fn op_advpop<P: Processor>(
     let value = processor
         .advice_provider()
         .pop_stack()
-        .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
+        .map_advice_err(err_ctx, processor.system().clk())?;
     tracer.record_advice_pop_stack(value);
 
     processor.stack().increment_size(tracer)?;
@@ -48,7 +49,7 @@ pub(super) fn op_advpopw<P: Processor>(
     let word = processor
         .advice_provider()
         .pop_stack_word()
-        .map_err(|err| ExecutionError::advice_error(err, processor.system().clk(), err_ctx))?;
+        .map_advice_err(err_ctx, processor.system().clk())?;
     tracer.record_advice_pop_stack_word(word);
 
     // Set word on stack (word[0] at top).
@@ -300,10 +301,7 @@ pub(super) fn op_pipe<P: Processor>(
     let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
     // pop two words from the advice stack
-    let words = processor
-        .advice_provider()
-        .pop_stack_dword()
-        .map_err(|err| ExecutionError::advice_error(err, clk, err_ctx))?;
+    let words = processor.advice_provider().pop_stack_dword().map_advice_err(err_ctx, clk)?;
     tracer.record_advice_pop_stack_dword(words);
 
     // write the words to memory

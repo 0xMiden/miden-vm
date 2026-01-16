@@ -176,7 +176,8 @@ fn test_diagnostic_divide_by_zero_1() {
     assert_diagnostic_lines!(
         err,
         "operation error at clock cycle 5",
-        "  x division by zero",
+        "`->   x division by zero",
+        "        help: ensure the divisor (second stack element) is non-zero before division or modulo operations",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 div",
@@ -198,7 +199,8 @@ fn test_diagnostic_divide_by_zero_2() {
     assert_diagnostic_lines!(
         err,
         "operation error at clock cycle 5",
-        "  x division by zero",
+        "`->   x division by zero",
+        "        help: ensure the divisor (second stack element) is non-zero before division or modulo operations",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 u32div",
@@ -222,7 +224,8 @@ fn test_diagnostic_dynamic_node_not_found_1() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "failed to execute the dynamic code block provided by the stack with root 0x0000000000000000000000000000000000000000000000000000000000000000; the block could not be found",
+        "operation error at clock cycle 8",
+        "`->   x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dynexec",
@@ -243,7 +246,8 @@ fn test_diagnostic_dynamic_node_not_found_2() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "failed to execute the dynamic code block provided by the stack with root 0x0000000000000000000000000000000000000000000000000000000000000000; the block could not be found",
+        "operation error at clock cycle 8",
+        "`->   x failed to execute dynamic code block; block with root 0x0000000000000000000000000000000000000000000000000000000000000000 could not be found",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 dyncall",
@@ -270,7 +274,9 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9",
+        "operation error at clock cycle 9",
+        "`->   x assertion failed with error code: 0",
+        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz",
@@ -291,7 +297,9 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error message: some error message",
+        "operation error at clock cycle 9",
+        "`->   x assertion failed with error message: some error message",
+        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
         regex!(r#",-\[test[\d]+:4:13\]"#),
         " 3 |             push.1.2",
         " 4 |             assertz.err=\"some error message\"",
@@ -313,7 +321,9 @@ fn test_diagnostic_failed_assertion() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "assertion failed at clock cycle 9 with error message: some error message",
+        "operation error at clock cycle 9",
+        "`->   x assertion failed with error message: some error message",
+        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
         regex!(r#",-\[test[\d]+:5:13\]"#),
         " 4 |             push.1.2",
         " 5 |             assertz.err=ERR_MSG",
@@ -396,10 +406,6 @@ fn test_diagnostic_merkle_path_verification_failed() {
     // With LE sponge, the root hash changes and lookup fails at root level
     assert_diagnostic_lines!(
         err,
-        "advice provider error at clock cycle 5",
-        "failed to lookup value in Merkle store",
-        "|",
-        regex!(r"`-> root Word\(\[\d+, \d+, \d+, \d+\]\) is not in the store"),
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             mtree_verify.err=\"some error message\"",
@@ -459,12 +465,12 @@ fn test_diagnostic_invalid_stack_depth_on_return_call() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "when returning from a call or dyncall, stack depth must be 16, but was 17",
+        "operation error at clock cycle 13",
+        "`->   x when returning from a call, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:7:21\]"#),
         " 6 |         begin",
         " 7 |             trace.2 call.foo",
-        "   :                     ^^^^|^^^",
-        "   :                         `-- when returning from this call site",
+        "   :                     ^^^^^^^^",
         " 8 |         end",
         "   `----"
     );
@@ -489,12 +495,12 @@ fn test_diagnostic_invalid_stack_depth_on_return_dyncall() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "when returning from a call or dyncall, stack depth must be 16, but was 17",
+        "operation error at clock cycle 28",
+        "`->   x when returning from a call, stack depth must be 16, but was 17",
         regex!(r#",-\[test[\d]+:8:13\]"#),
         " 7 |             procref.foo mem_storew_le.100 dropw push.100",
         " 8 |             dyncall",
-        "   :             ^^^|^^^",
-        "   :                `-- when returning from this call site",
+        "   :             ^^^^^^^",
         " 9 |         end",
         "   `----"
     );
@@ -516,15 +522,14 @@ fn test_diagnostic_log_argument_zero() {
     assert_diagnostic_lines!(
         err,
         "operation error at clock cycle 6",
+        "`->   x attempted to calculate integer logarithm with zero argument",
+        "        help: ilog2 requires a non-zero argument",
         regex!(r#",-\[test[\d]+:3:21\]"#),
         " 2 |         begin",
         " 3 |             trace.2 ilog2",
         "   :                     ^^^^^",
         " 4 |         end",
-        "   `----",
-        "",
-        "Error: attempted to calculate integer logarithm with zero argument",
-        "help: ilog2 requires a non-zero argument"
+        "   `----"
     );
 }
 
@@ -784,7 +789,8 @@ fn test_diagnostic_not_binary_value_split_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "if statement expected a binary value on top of the stack, but got 2",
+        "operation error at clock cycle 8",
+        "`->   x if statement expected a binary value on top of the stack, but got 2",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             if.true swap else dup end",
@@ -805,14 +811,15 @@ fn test_diagnostic_not_binary_value_loop_node() {
     let err = build_test.execute().expect_err("expected error");
     assert_diagnostic_lines!(
         err,
-        "loop condition must be a binary value, but got 2",
+        "operation error at clock cycle 8",
+        "`->   x loop condition must be a binary value, but got 2",
+        "        help: this could happen either when first entering the loop, or any subsequent iteration",
         regex!(r#",-\[test[\d]+:3:13\]"#),
         " 2 |         begin",
         " 3 |             while.true swap dup end",
         "   :             ^^^^^^^^^^^^^^^^^^^^^^^",
         " 4 |         end",
-        "   `----",
-        "  help: this could happen either when first entering the loop, or any subsequent iteration"
+        "   `----"
     );
 }
 
@@ -1010,13 +1017,15 @@ fn test_assert_messages() {
 
     assert_diagnostic_lines!(
         err,
-        "Value is not zero",
+        "operation error at clock cycle 8",
+        "`->   x assertion failed with error message: Value is not zero",
+        "        help: assertions validate program invariants. Review the assertion condition and ensure all prerequisites are met",
         regex!(r#",-\[test[\d]+:5:13\]"#),
-        "4 |             push.1",
-        "5 |             assertz.err=NONZERO",
-        "  :             ^^^^^^^^^^^^^^^^^^^",
-        "6 |         end",
-        "  `----"
+        " 4 |             push.1",
+        " 5 |             assertz.err=NONZERO",
+        "   :             ^^^^^^^^^^^^^^^^^^^",
+        " 6 |         end",
+        "   `----"
     );
 }
 

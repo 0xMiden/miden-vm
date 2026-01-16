@@ -19,7 +19,7 @@ use crate::{
     AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{OperationError, OperationResultExt},
+    errors::{AdviceResultExt, OperationError, OperationResultExt},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
@@ -232,7 +232,7 @@ impl FastProcessor {
     ) -> Result<ResumeContext, ExecutionError> {
         self.advice
             .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_advice_err(&(), self.clk)?;
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
@@ -416,7 +416,7 @@ impl FastProcessor {
         // Merge the program's advice map into the advice provider
         self.advice
             .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_advice_err(&(), self.clk)?;
 
         match self
             .execute_impl(
@@ -872,7 +872,7 @@ impl FastProcessor {
         // this call will be cheap.
         self.advice
             .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+            .map_advice_err(err_ctx, self.clk)?;
 
         Ok((root_id, mast_forest))
     }
@@ -1071,7 +1071,7 @@ impl FastProcessor {
         // Merge the program's advice map into the advice provider
         self.advice
             .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_advice_err(&(), self.clk)?;
 
         let execute_fut = async {
             match self

@@ -12,7 +12,7 @@ use miden_core::{
 use crate::{
     AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::AceError,
+    errors::{AceError, AceResultExt},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
@@ -408,26 +408,19 @@ pub fn eval_circuit_fast_(
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
+        return Err::<_, _>(AceError::TooManyWires(num_wires)).map_ace_err(err_ctx)?;
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
+        return Err::<_, _>(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars))
+            .map_ace_err(err_ctx)?;
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
+        return Err::<_, _>(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval))
+            .map_ace_err(err_ctx)?;
     }
 
     // Ensure instructions are word-aligned and non-empty
@@ -457,10 +450,7 @@ pub fn eval_circuit_fast_(
 
     // Ensure the circuit evaluated to zero.
     if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
+        return Err::<_, _>(AceError::CircuitNotEvaluateZero).map_ace_err(err_ctx)?;
     }
 
     Ok(evaluation_context)
