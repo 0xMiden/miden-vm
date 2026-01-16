@@ -86,8 +86,6 @@ impl FastProcessor {
             Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
-        self.execute_after_exit_decorators(node_id, current_forest, host)?;
-
-        ControlFlow::Continue(())
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 }
