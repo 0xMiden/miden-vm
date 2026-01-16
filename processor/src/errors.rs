@@ -231,22 +231,15 @@ pub enum CryptoError {
 /// helper functions (`advice_error_with_context`, `event_error_with_context`).
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum OperationError {
-    #[error("operation expected a binary value, but got {value}")]
-    NotBinaryValue { value: Felt },
-    #[error("if statement expected a binary value on top of the stack, but got {value}")]
-    NotBinaryValueIf { value: Felt },
-    #[error("loop condition must be a binary value, but got {value}")]
-    #[diagnostic(help(
-        "this could happen either when first entering the loop, or any subsequent iteration"
-    ))]
-    NotBinaryValueLoop { value: Felt },
-    #[error("operation expected u32 values, but got values: {values:?}")]
-    NotU32Values { values: Vec<Felt> },
+    #[error("external node with mast root {0} resolved to an external node")]
+    CircularExternalNode(Word),
     #[error("division by zero")]
     #[diagnostic(help(
         "ensure the divisor (second stack element) is non-zero before division or modulo operations"
     ))]
     DivideByZero,
+    #[error("failed to execute dynamic code block; block with root {digest} could not be found")]
+    DynamicNodeNotFound { digest: Word },
     #[error(
         "assertion failed with error {}",
         match err_msg {
@@ -261,25 +254,21 @@ pub enum OperationError {
         err_code: Felt,
         err_msg: Option<Arc<str>>,
     },
-    #[error("attempted to calculate integer logarithm with zero argument")]
-    #[diagnostic(help("ilog2 requires a non-zero argument"))]
-    LogArgumentZero,
-    #[error("external node with mast root {0} resolved to an external node")]
-    CircularExternalNode(Word),
+    #[error("FRI domain size was 0")]
+    InvalidFriDomainGenerator,
     #[error("FRI domain segment value cannot exceed 3, but was {0}")]
     InvalidFriDomainSegment(u64),
     #[error("degree-respecting projection is inconsistent: expected {0} but was {1}")]
     InvalidFriLayerFolding(QuadFelt, QuadFelt),
-    #[error("FRI domain size was 0")]
-    InvalidFriDomainGenerator,
-    #[error("failed to execute dynamic code block; block with root {digest} could not be found")]
-    DynamicNodeNotFound { digest: Word },
-    #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
-    SyscallTargetNotInKernel { proc_root: Word },
+    #[error(
+        "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
+    )]
+    InvalidMerklePathLength { path_len: usize, depth: Felt },
     #[error("when returning from a call, stack depth must be {MIN_STACK_DEPTH}, but was {depth}")]
     InvalidStackDepthOnReturn { depth: usize },
-    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
-    NoMastForestWithProcedure { root_digest: Word },
+    #[error("attempted to calculate integer logarithm with zero argument")]
+    #[diagnostic(help("ilog2 requires a non-zero argument"))]
+    LogArgumentZero,
     #[error(
         "MAST forest in host indexed by procedure root {root_digest} doesn't contain that root"
     )]
@@ -296,10 +285,21 @@ pub enum OperationError {
     MerklePathVerificationFailed {
         inner: Box<MerklePathVerificationFailedInner>,
     },
-    #[error(
-        "invalid crypto operation: Merkle path length {path_len} does not match expected depth {depth}"
-    )]
-    InvalidMerklePathLength { path_len: usize, depth: Felt },
+    #[error("no MAST forest contains the procedure with root digest {root_digest}")]
+    NoMastForestWithProcedure { root_digest: Word },
+    #[error("operation expected a binary value, but got {value}")]
+    NotBinaryValue { value: Felt },
+    #[error("if statement expected a binary value on top of the stack, but got {value}")]
+    NotBinaryValueIf { value: Felt },
+    #[error("loop condition must be a binary value, but got {value}")]
+    #[diagnostic(help(
+        "this could happen either when first entering the loop, or any subsequent iteration"
+    ))]
+    NotBinaryValueLoop { value: Felt },
+    #[error("operation expected u32 values, but got values: {values:?}")]
+    NotU32Values { values: Vec<Felt> },
+    #[error("syscall failed: procedure with root {proc_root} was not found in the kernel")]
+    SyscallTargetNotInKernel { proc_root: Word },
 }
 
 impl OperationError {
