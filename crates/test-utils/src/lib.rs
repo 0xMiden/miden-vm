@@ -554,7 +554,6 @@ impl Test {
                     let left_diagnostic =
                         format!("{}", PrintDiagnostic::new_without_color(left_err));
 
-                    // Note: This assumes that the tests are run WITHOUT the `no_err_ctx` feature
                     assert_eq!(
                         left_diagnostic, right_diagnostic,
                         "diagnostics do not match between {left_name} and {right_name}:\n{left_name}: {}\n{right_name}: {}",

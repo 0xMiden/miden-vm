@@ -16,8 +16,5 @@ OperationError {
         ),
     },
     source_file: None,
-    clk: RowIndex(
-        5,
-    ),
     err: DivideByZero,
 }

@@ -6,9 +6,8 @@ use miden_core::mast::{ExternalNode, MastForest, MastNodeExt, MastNodeId};
 use crate::{
     AsyncHost, ExecutionError,
     continuation_stack::ContinuationStack,
-    errors::{OperationError, OperationResultExt},
+    errors::OperationError,
     fast::{BreakReason, FastProcessor, Tracer},
-    processor::Processor,
 };
 
 impl FastProcessor {
@@ -26,11 +25,13 @@ impl FastProcessor {
         self.execute_before_enter_decorators(external_node_id, current_forest, host)?;
 
         let external_node = current_forest[external_node_id].unwrap_external();
-        let (resolved_node_id, new_mast_forest) =
-            match self.resolve_external_node(external_node, host).await {
-                Ok(result) => result,
-                Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
-            };
+        let (resolved_node_id, new_mast_forest) = match self
+            .resolve_external_node(external_node, external_node_id, current_forest, host)
+            .await
+        {
+            Ok(result) => result,
+            Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+        };
 
         tracer.record_mast_forest_resolution(resolved_node_id, &new_mast_forest);
 
@@ -52,26 +53,38 @@ impl FastProcessor {
 
     /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
     /// for asynchronous execution.
+    ///
+    /// Note: Since we're resolving an external node, we don't have meaningful error context
+    /// (no "current" forest/node). We pass the external node's parent forest and node_id for
+    /// error context, with debug mode disabled for this resolution step.
     async fn resolve_external_node(
         &mut self,
         external_node: &ExternalNode,
+        external_node_id: MastNodeId,
+        current_forest: &MastForest,
         host: &mut impl AsyncHost,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
+        let in_debug_mode = self.in_debug_mode();
         let (root_id, mast_forest) = self
             .load_mast_forest(
                 external_node.digest(),
                 host,
                 |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
-                &(),
+                current_forest,
+                external_node_id,
+                in_debug_mode,
             )
             .await?;
 
         // if the node that we got by looking up an external reference is also an External
         // node, we are about to enter into an infinite loop - so, return an error
         if mast_forest[root_id].is_external() {
-            let clk = self.system().clk;
-            return Err(OperationError::CircularExternalNode(external_node.digest()))
-                .map_exec_err(&(), clk);
+            return Err(OperationError::CircularExternalNode(external_node.digest()).with_context(
+                current_forest,
+                external_node_id,
+                host,
+                in_debug_mode,
+            ));
         }
 
         Ok((root_id, mast_forest))

@@ -16,9 +16,6 @@ OperationError {
         ),
     },
     source_file: None,
-    clk: RowIndex(
-        8,
-    ),
     err: DynamicNodeNotFound {
         digest: Word(
             [

@@ -108,6 +108,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     &initial_mast_forest,
+                    node_id,
                     batch_index,
                     op_idx_in_batch,
                     &mut basic_block_context,
@@ -133,6 +134,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     &initial_mast_forest,
+                    node_id,
                     batch_index,
                     0,
                     &mut basic_block_context,
@@ -265,6 +267,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     current_forest,
+                    node_id,
                     0,
                     0,
                     &mut basic_block_context,
@@ -435,6 +438,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         batch: &OpBatch,
         start_op_idx: Option<usize>,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         basic_block_context: &mut BasicBlockContext,
     ) -> ControlFlow<()> {
         let start_op_idx = start_op_idx.unwrap_or(0);
@@ -447,15 +451,21 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             {
                 // `execute_sync_op` does not support executing `Emit`, so we only call it for all
                 // other operations.
+                // Note: we pass `NoopHost` and `in_debug_mode: false` since errors should never
+                // occur here - the program already ran successfully in FastProcessor.
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
                     self.execute_sync_op(
                         op,
                         current_forest,
+                        node_id,
                         &mut NoopHost,
-                        &(),
+                        false,
                         &mut NoopTracer,
+                        // Note: op_idx is only used for error context, which should never
+                        // happen here since the program already ran successfully in FastProcessor.
+                        op_idx_in_batch,
                     )
                     // The assumption here is that the computation was done by the FastProcessor,
                     // and so all operations in the program are valid and can be executed

@@ -16,9 +16,6 @@ Err(
             ),
         },
         source_file: None,
-        clk: RowIndex(
-            1,
-        ),
         err: InvalidFriDomainGenerator,
     },
 )

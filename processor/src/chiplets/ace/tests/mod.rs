@@ -22,7 +22,6 @@ use crate::{
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },
-    errors::AceEvalResultExt,
     fast::{Memory, NoopTracer, eval_circuit_fast_},
 };
 
@@ -228,7 +227,6 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
     let ptr = Felt::ZERO;
     let clk = RowIndex::from(0);
     let mut mem = Memory::default();
-    let err_ctx = ();
     let mut tracer = NoopTracer;
 
     let circuit_mem = generate_memory(circuit, inputs);
@@ -248,7 +246,6 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         &mut mem,
         &mut tracer,
     )
-    .map_ace_eval_err(&err_ctx)
     .unwrap();
 }
 

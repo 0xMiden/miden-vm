@@ -27,17 +27,17 @@ doctest = false
 
 [[bench]]
 name = "build_trace"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
 name = "program_execution_for_trace"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
 name = "program_execution_fast"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
@@ -63,9 +63,6 @@ std = [
     "serde?/std",
     "serde_json?/std",
 ]
-# Removes proper error context from the error messages. Enable in production builds that need
-# maximal performance.
-no_err_ctx = ["miden-processor/no_err_ctx"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde", "std"]
 
