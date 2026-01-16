@@ -9,9 +9,9 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ContextId, ExecutionError,
+    AsyncHost, ContextId,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::OperationError,
+    errors::{MemoryResultExt, OperationError},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         step::{BreakReason, Stopper},
@@ -70,8 +70,12 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            if let Err(err) = self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE) {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryErrorNoCtx(err)));
+            if let Err(err) = self
+                .memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_mem_err(current_forest, current_node_id, host, self.in_debug_mode())
+            {
+                return ControlFlow::Break(BreakReason::Err(err));
             }
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -152,12 +156,15 @@ impl FastProcessor {
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk) {
+            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk).map_mem_err(
+                current_forest,
+                current_node_id,
+                host,
+                self.in_debug_mode(),
+            ) {
                 Ok(w) => w,
                 Err(err) => {
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryErrorNoCtx(
-                        err,
-                    )));
+                    return ControlFlow::Break(BreakReason::Err(err));
                 },
             };
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
@@ -181,8 +188,12 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            if let Err(err) = self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE) {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryErrorNoCtx(err)));
+            if let Err(err) = self
+                .memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_mem_err(current_forest, current_node_id, host, self.in_debug_mode())
+            {
+                return ControlFlow::Break(BreakReason::Err(err));
             }
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
