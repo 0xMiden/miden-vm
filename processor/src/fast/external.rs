@@ -54,9 +54,8 @@ impl FastProcessor {
     /// Analogous to [`Process::resolve_external_node`](crate::Process::resolve_external_node), but
     /// for asynchronous execution.
     ///
-    /// Note: Since we're resolving an external node, we don't have meaningful error context
-    /// (no "current" forest/node). We pass the external node's parent forest and node_id for
-    /// error context, with debug mode disabled for this resolution step.
+    /// Note: External node diagnostics are not fully implemented in FastProcessor (see #2476).
+    /// We pass the external node's parent forest and node_id for basic error context.
     async fn resolve_external_node(
         &mut self,
         external_node: &ExternalNode,
