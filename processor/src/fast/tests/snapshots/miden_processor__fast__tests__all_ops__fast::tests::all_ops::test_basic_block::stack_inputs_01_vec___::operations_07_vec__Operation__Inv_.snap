@@ -1,9 +1,10 @@
 ---
 source: processor/src/fast/tests/all_ops.rs
+assertion_line: 133
 expression: fast_stack_outputs
 ---
 Err(
-    DivideByZero {
+    OperationError {
         label: SourceSpan {
             source_id: SourceId(
                 4294967295,
@@ -19,5 +20,6 @@ Err(
         clk: RowIndex(
             1,
         ),
+        err: DivideByZero,
     },
 )
