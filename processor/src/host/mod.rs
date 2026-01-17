@@ -2,8 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
-    mast::MastForest, precompile::PrecompileRequest,
+    AdviceMap, DebugOptions, DebugVarInfo, EventId, EventName, Felt, Word,
+    crypto::merkle::InnerNodeInfo, mast::MastForest, precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
@@ -84,6 +84,21 @@ pub trait BaseHost {
     fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
+    }
+
+    /// Handles a debug variable decorator from the VM.
+    ///
+    /// This callback is invoked when the processor encounters a `DebugVar` decorator,
+    /// which provides information about source-level variables and their locations
+    /// during execution. This is useful for debuggers to track variable values.
+    ///
+    /// The default implementation does nothing, as most hosts don't need variable tracking.
+    fn on_debug_var(
+        &mut self,
+        _process: &ProcessState,
+        _var_info: &DebugVarInfo,
+    ) -> Result<(), ExecutionError> {
+        Ok(())
     }
 
     /// Handles the failure of the assertion instruction.
