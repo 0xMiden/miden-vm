@@ -100,7 +100,7 @@ impl DecoratorInfo {
                         let value = data_reader.read_u64()?;
                         DebugVarLocation::Const(crate::Felt::new(value))
                     },
-                    3 => DebugVarLocation::Local(data_reader.read_u16()?),
+                    3 => DebugVarLocation::Local(data_reader.read_u16()? as i16),
                     4 => {
                         let len = data_reader.read_u16()? as usize;
                         let bytes = data_reader.read_vec(len)?;
@@ -334,9 +334,9 @@ impl DecoratorDataBuilder {
                         // Serialize Felt as u64
                         self.decorator_data.extend(felt.as_canonical_u64().to_le_bytes());
                     },
-                    DebugVarLocation::Local(idx) => {
+                    DebugVarLocation::Local(offset) => {
                         self.decorator_data.push(3); // tag
-                        self.decorator_data.extend(idx.to_le_bytes());
+                        self.decorator_data.extend(offset.to_le_bytes());
                     },
                     DebugVarLocation::Expression(bytes) => {
                         self.decorator_data.push(4); // tag
