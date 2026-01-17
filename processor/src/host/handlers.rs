@@ -8,7 +8,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::{
     events::{EventId, EventName, SystemEvent},
-    operations::DebugOptions,
+    operations::{DebugOptions, DebugVarInfo},
 };
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
@@ -87,6 +87,12 @@ pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
 /// Trace handlers can define their own [`Error`] type which can be seamlessly converted
 /// into this type since it is a [`Box`].
 pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
+
+/// A generic [`Error`] wrapper for debug variable handler errors.
+///
+/// Debug variable handlers can define their own [`Error`] type which can be seamlessly converted
+/// into this type since it is a [`Box`].
+pub type DebugVarError = Box<dyn Error + Send + Sync + 'static>;
 
 // EVENT HANDLER REGISTRY
 // ================================================================================================
@@ -216,6 +222,18 @@ pub trait DebugHandler: Sync {
             process.clock(),
             process.ctx()
         );
+        Ok(())
+    }
+
+    /// This function is invoked when the `DebugVar` decorator is executed.
+    ///
+    /// This provides debuggers with information about source-level variables and
+    /// where their values can be found during execution.
+    fn on_debug_var(
+        &mut self,
+        _process: &ProcessorState,
+        _var_info: &DebugVarInfo,
+    ) -> Result<(), DebugVarError> {
         Ok(())
     }
 }

@@ -7,7 +7,7 @@ use miden_core::{
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
+    operations::{DebugOptions, DebugVarInfo},
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -21,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{DebugHandler, EventError};
+use handlers::{DebugHandler, DebugVarError, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -115,6 +115,21 @@ pub trait Host {
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
+    }
+
+    /// Handles a debug variable decorator from the VM.
+    ///
+    /// This callback is invoked when the processor encounters a `DebugVar` decorator,
+    /// which provides information about source-level variables and their locations
+    /// during execution. This is useful for debuggers to track variable values.
+    ///
+    /// The default implementation does nothing, as most hosts don't need variable tracking.
+    fn on_debug_var(
+        &mut self,
+        _process: &ProcessorState,
+        _var_info: &DebugVarInfo,
+    ) -> Result<(), DebugVarError> {
+        Ok(())
     }
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.

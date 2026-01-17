@@ -49,7 +49,7 @@ pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
-    handlers::{DebugError, DebugHandler, TraceError},
+    handlers::{DebugError, DebugHandler, DebugVarError, TraceError},
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
