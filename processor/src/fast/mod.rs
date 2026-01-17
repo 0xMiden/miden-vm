@@ -795,9 +795,11 @@ impl FastProcessor {
             Decorator::DebugVar(debug_var) => {
                 // DebugVar decorators provide source variable information for debuggers.
                 // Only notify the host when debug mode is enabled.
-                if self.in_debug_mode {
+                if self.in_debug_mode() {
                     let process = &self.state();
-                    host.on_debug_var(process, debug_var)?;
+                    if let Err(err) = host.on_debug_var(process, debug_var) {
+                        return ControlFlow::Break(BreakReason::Err(err));
+                    }
                 }
             },
         };

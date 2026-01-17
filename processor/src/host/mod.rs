@@ -7,7 +7,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{AssertError, DebugError, EventError, ProcessState, TraceError};
+use crate::{AssertError, DebugError, EventError, ExecutionError, ProcessState, TraceError};
 
 pub(super) mod advice;
 

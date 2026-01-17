@@ -140,8 +140,12 @@ pub enum DebugVarLocation {
     Memory(u32),
     /// Variable is a constant field element
     Const(Felt),
-    /// Variable is in a local slot at the given index
-    Local(u16),
+    /// Variable is in local memory at a signed offset from FMP.
+    ///
+    /// The actual memory address is computed as: `FMP + offset`
+    /// where offset is typically negative (locals are below FMP).
+    /// For example, with 3 locals: local[0] has offset -3, local[2] has offset -1.
+    Local(i16),
     /// Complex location described by expression bytes.
     /// This is used for variables that require computation to locate,
     /// such as struct fields or array elements.
@@ -154,7 +158,7 @@ impl fmt::Display for DebugVarLocation {
             Self::Stack(pos) => write!(f, "stack[{}]", pos),
             Self::Memory(addr) => write!(f, "mem[{}]", addr),
             Self::Const(val) => write!(f, "const({})", val.as_canonical_u64()),
-            Self::Local(idx) => write!(f, "local[{}]", idx),
+            Self::Local(offset) => write!(f, "FMP{:+}", offset),
             Self::Expression(bytes) => {
                 write!(f, "expr(")?;
                 for (i, byte) in bytes.iter().enumerate() {
@@ -206,7 +210,7 @@ mod tests {
         assert_eq!(DebugVarLocation::Stack(0).to_string(), "stack[0]");
         assert_eq!(DebugVarLocation::Memory(256).to_string(), "mem[256]");
         assert_eq!(DebugVarLocation::Const(Felt::new(42)).to_string(), "const(42)");
-        assert_eq!(DebugVarLocation::Local(3).to_string(), "local[3]");
+        assert_eq!(DebugVarLocation::Local(-3).to_string(), "FMP-3");
         assert_eq!(
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]).to_string(),
             "expr(10 20 30)"
