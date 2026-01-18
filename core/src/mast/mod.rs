@@ -1,3 +1,21 @@
+//! MAST forest: a collection of procedures represented as Merkle trees.
+//!
+//! # Deserializing from untrusted sources
+//!
+//! When loading a `MastForest` from bytes you don't fully trust (network, user upload, etc.),
+//! use [`UntrustedMastForest`] instead of calling `MastForest::read_from_bytes` directly:
+//!
+//! ```ignore
+//! use miden_core::mast::UntrustedMastForest;
+//!
+//! let forest = UntrustedMastForest::read_from_bytes(&bytes)?
+//!     .validate()?;
+//! ```
+//!
+//! This recomputes all node hashes and checks structural invariants before returning a usable
+//! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
+//! hashes and should only be used for data from trusted sources (e.g. compiled locally).
+
 use alloc::{
     boxed::Box,
     collections::{BTreeMap, BTreeSet},
