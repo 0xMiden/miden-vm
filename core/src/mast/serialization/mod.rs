@@ -54,6 +54,9 @@ pub(crate) mod string_table;
 pub(crate) use string_table::StringTable;
 
 #[cfg(test)]
+mod seed_gen;
+
+#[cfg(test)]
 mod tests;
 
 // TYPE ALIASES
@@ -182,6 +185,13 @@ impl Deserializable for MastForest {
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
@@ -296,6 +306,25 @@ where
         remaining -= 1;
         Some(MastNodeInfo::read_from(source))
     })
+}
+
+// UNTRUSTED DESERIALIZATION
+// ================================================================================================
+
+impl Deserializable for super::UntrustedMastForest {
+    /// Deserializes an [`super::UntrustedMastForest`] from bytes.
+    ///
+    /// This performs the same deserialization as [`MastForest::read_from`], but wraps
+    /// the result in [`super::UntrustedMastForest`] to indicate that validation has not yet
+    /// been performed.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let forest = MastForest::read_from(source)?;
+        Ok(super::UntrustedMastForest(forest))
+    }
 }
 
 // STRIPPED SERIALIZATION
