@@ -4,40 +4,62 @@ use miden_utils_testing::{
     Felt, PrimeField64, build_expected_hash, build_expected_perm, build_op_test, build_test,
     crypto::{MerkleTree, NodeIndex, init_merkle_leaf, init_merkle_store},
     proptest::prelude::*,
-    rand::rand_vector,
 };
 
 // TESTS
 // ================================================================================================
 
-#[test]
-fn hash() {
-    let asm_op = "hash";
+proptest! {
+    #[test]
+    fn hash_proptest(
+        v0 in any::<u64>(),
+        v1 in any::<u64>(),
+        v2 in any::<u64>(),
+        v3 in any::<u64>(),
+    ) {
+        let asm_op = "hash";
 
-    // --- test hashing 4 random values -----------------------------------------------------------
-    let random_values = rand_vector::<u64>(4);
-    let expected = build_expected_hash(&random_values);
+        // --- test hashing 4 random values -----------------------------------------------------------
+        let random_values = [v0, v1, v2, v3];
+        let expected = build_expected_hash(&random_values);
 
-    let test = build_op_test!(asm_op, &random_values);
-    let last_state = test.get_last_stack_state();
+        let test = build_op_test!(asm_op, &random_values);
+        let last_state = test.get_last_stack_state();
 
-    assert_eq!(expected, &last_state[..4]);
+        prop_assert_eq!(expected, &last_state[..4]);
+    }
+}
+
+proptest! {
+    #[test]
+    fn hperm_proptest(
+        v0 in any::<u64>(),
+        v1 in any::<u64>(),
+        v2 in any::<u64>(),
+        v3 in any::<u64>(),
+        v4 in any::<u64>(),
+        v5 in any::<u64>(),
+        v6 in any::<u64>(),
+        v7 in any::<u64>(),
+    ) {
+        let asm_op = "hperm";
+
+        // --- test hashing 8 random values -----------------------------------------------------------
+        let mut values = vec![v0, v1, v2, v3, v4, v5, v6, v7];
+        let capacity: Vec<u64> = vec![0, 0, 0, 0];
+        values.extend_from_slice(&capacity);
+        let expected = build_expected_perm(&values);
+
+        let test = build_op_test!(asm_op, &values);
+        let last_state = test.get_last_stack_state();
+
+        prop_assert_eq!(expected, &last_state[0..12]);
+    }
 }
 
 #[test]
 fn hperm() {
     let asm_op = "hperm";
-
-    // --- test hashing 8 random values -----------------------------------------------------------
-    let mut values = rand_vector::<u64>(8);
-    let capacity: Vec<u64> = vec![0, 0, 0, 0];
-    values.extend_from_slice(&capacity);
-    let expected = build_expected_perm(&values);
-
-    let test = build_op_test!(asm_op, &values);
-    let last_state = test.get_last_stack_state();
-
-    assert_eq!(expected, &last_state[0..12]);
 
     // --- test hashing # of values that's not a multiple of the rate: [ONE, ONE] -----------------
     #[rustfmt::skip]
@@ -80,15 +102,6 @@ fn hmerge() {
 
     assert_eq!(expected, &last_state[..4]);
 
-    // --- test hashing 8 random values -----------------------------------------------------------
-    let values = rand_vector::<u64>(8);
-    let expected = build_expected_hash(&values);
-
-    let test = build_op_test!(asm_op, &values);
-    let last_state = test.get_last_stack_state();
-
-    assert_eq!(expected, &last_state[..4]);
-
     // --- test that the rest of the stack isn't affected -----------------------------------------
     let stack_inputs: Vec<u64> = vec![1, 2, 3, 4];
     let expected_stack_slice = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
@@ -101,6 +114,31 @@ fn hmerge() {
     let last_state = test.get_last_stack_state();
 
     assert_eq!(expected_stack_slice, &last_state[4..8]);
+}
+
+proptest! {
+    #[test]
+    fn hmerge_proptest(
+        v0 in any::<u64>(),
+        v1 in any::<u64>(),
+        v2 in any::<u64>(),
+        v3 in any::<u64>(),
+        v4 in any::<u64>(),
+        v5 in any::<u64>(),
+        v6 in any::<u64>(),
+        v7 in any::<u64>(),
+    ) {
+        let asm_op = "hmerge";
+
+        // --- test hashing 8 random values -----------------------------------------------------------
+        let values = [v0, v1, v2, v3, v4, v5, v6, v7];
+        let expected = build_expected_hash(&values);
+
+        let test = build_op_test!(asm_op, &values);
+        let last_state = test.get_last_stack_state();
+
+        prop_assert_eq!(expected, &last_state[..4]);
+    }
 }
 
 #[test]
