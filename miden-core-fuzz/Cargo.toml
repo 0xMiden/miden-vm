@@ -5,6 +5,9 @@ authors = ["Miden contributors"]
 publish = false
 edition = "2024"
 
+[workspace]
+# This is a standalone workspace for the fuzz crate, independent of the main miden-vm workspace
+
 [package.metadata]
 cargo-fuzz = true
 

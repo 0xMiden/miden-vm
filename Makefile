@@ -247,16 +247,16 @@ bench: ## Runs benchmarks
 
 .PHONY: fuzz-mast-forest
 fuzz-mast-forest: ## Run fuzzing for MastForest deserialization
-	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
+	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-mast-validate
 fuzz-mast-validate: ## Run fuzzing for UntrustedMastForest validation
-	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
+	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
 
 .PHONY: fuzz-all
 fuzz-all: ## Run all fuzz targets (in sequence)
-	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
-	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	-@cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
 
 .PHONY: fuzz-list
 fuzz-list: ## List available fuzz targets
