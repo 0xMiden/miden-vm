@@ -43,6 +43,7 @@ thiserror.workspace = true
 miden-assembly = { path = ".", default-features = false, features = ["testing"] }
 miden-mast-package = { workspace = true, features = ["arbitrary"] }
 # core lib and processor are imported using paths to avoid specifying dependency versions
+miden-core = { path = "../../core", default-features = false, features = ["testing"] }
 miden-core-lib = { path = "../lib/core", default-features = false }
 miden-processor = { path = "../../processor", features = ["testing"] }
 insta = { workspace = true }

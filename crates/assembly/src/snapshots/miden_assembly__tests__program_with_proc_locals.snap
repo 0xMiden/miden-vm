@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 2038
+assertion_line: 2230
 expression: program
 ---
 begin
@@ -26,18 +26,27 @@ begin
         drop
         asmOp(loc_store.0, 6)
         push(18446744069414584317)
+        asmOp(loc_store.0, 6)
         push(4294967294)
+        asmOp(loc_store.0, 6)
         mload
+        asmOp(loc_store.0, 6)
         add
+        asmOp(loc_store.0, 6)
         mstore
+        asmOp(loc_store.0, 6)
         drop
         asmOp(add, 1)
         add
         asmOp(loc_load.0, 5)
         push(18446744069414584317)
+        asmOp(loc_load.0, 5)
         push(4294967294)
+        asmOp(loc_load.0, 5)
         mload
+        asmOp(loc_load.0, 5)
         add
+        asmOp(loc_load.0, 5)
         mload
         asmOp(mul, 1)
         mul

@@ -602,18 +602,58 @@ impl MastForest {
             // If a target operation index is provided, return the assembly op associated with that
             // operation.
             Some(target_op_idx) => {
-                for (op_idx, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
-                    {
-                        // when an instruction compiles down to multiple operations, only the first
-                        // operation is associated with the assembly op. We need to check if the
-                        // target operation index falls within the range of operations associated
-                        // with the assembly op.
-                        if target_op_idx >= op_idx
-                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
-                        {
-                            return Some(assembly_op);
+                // With the 1-1 mapping, every operation covered by an AsmOp is explicitly linked
+                // to that AsmOp. We need to find the minimum op_idx for each unique AsmOp decorator
+                // to determine the start of its range, then check if target_op_idx falls within
+                // that range.
+                let mut asmop_ranges: BTreeMap<DecoratorId, (usize, usize)> = BTreeMap::new();
+
+                // For Block nodes with target_op_idx, we should only consider operation-indexed
+                // decorators (not before_enter/after_exit) for operation-specific lookups
+                match node {
+                    MastNode::Block(_) => {
+                        // For Block nodes, use only operation-indexed decorators
+                        let op_iter = self
+                            .decorator_links_for_node(node_id)
+                            .expect("Block node must have some valid set of decorator links");
+
+                        for (op_idx, decorator_id) in op_iter {
+                            if let Some(Decorator::AsmOp(assembly_op)) =
+                                self.decorator_by_id(decorator_id)
+                            {
+                                let num_cycles = assembly_op.num_cycles() as usize;
+                                asmop_ranges
+                                    .entry(decorator_id)
+                                    .and_modify(|(min_idx, cycles)| {
+                                        *min_idx = (*min_idx).min(op_idx);
+                                        *cycles = num_cycles; // num_cycles should be the same for same decorator_id
+                                    })
+                                    .or_insert((op_idx, num_cycles));
+                            }
                         }
+                    },
+                    _ => {
+                        // For non-Block nodes, before_enter is at index 0, after_exit is at index 1
+                        // These are not operation ranges, so we check exact matches
+                        for (op_idx, decorator_id) in decorator_links {
+                            if op_idx == target_op_idx
+                                && let Some(Decorator::AsmOp(assembly_op)) =
+                                    self.decorator_by_id(decorator_id)
+                            {
+                                return Some(assembly_op);
+                            }
+                        }
+                    },
+                }
+
+                // Second pass: check if target_op_idx falls within any AsmOp's range
+                for (decorator_id, (min_op_idx, num_cycles)) in asmop_ranges {
+                    if target_op_idx >= min_op_idx
+                        && target_op_idx < min_op_idx + num_cycles
+                        && let Some(Decorator::AsmOp(assembly_op)) =
+                            self.decorator_by_id(decorator_id)
+                    {
+                        return Some(assembly_op);
                     }
                 }
             },
@@ -713,7 +753,7 @@ impl MastForest {
 // TEST HELPERS
 // ================================================================================================
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 impl MastForest {
     /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
     ///

@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 1574
 expression: program
 ---
 begin
@@ -12,6 +13,7 @@ begin
                 drop
                 asmOp(push.1, 2)
                 pad
+                asmOp(push.1, 2)
                 incr
                 noop
             end

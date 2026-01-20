@@ -17,6 +17,7 @@ begin
         push(2)
         asmOp(u32wrapping_add3, 2)
         u32add3
+        asmOp(u32wrapping_add3, 2)
         drop
         noop
         noop
