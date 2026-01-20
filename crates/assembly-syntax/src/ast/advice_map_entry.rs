@@ -9,7 +9,7 @@ use crate::{
     parser::WordValue,
 };
 
-// Advice Map data that the host populates before the VM starts.
+// Advice Map data that the host populates before the VM starts. 
 // ============================================================
 
 #[derive(Clone, Debug, PartialEq, Eq)]
