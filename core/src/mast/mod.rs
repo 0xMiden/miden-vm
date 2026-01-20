@@ -606,8 +606,7 @@ impl MastForest {
                 // to that AsmOp. We need to find the minimum op_idx for each unique AsmOp decorator
                 // to determine the start of its range, then check if target_op_idx falls within
                 // that range.
-                let mut asmop_ranges: std::collections::HashMap<DecoratorId, (usize, usize)> =
-                    std::collections::HashMap::new();
+                let mut asmop_ranges: BTreeMap<DecoratorId, (usize, usize)> = BTreeMap::new();
 
                 // For Block nodes with target_op_idx, we should only consider operation-indexed
                 // decorators (not before_enter/after_exit) for operation-specific lookups
