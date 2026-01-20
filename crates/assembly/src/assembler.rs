@@ -972,6 +972,8 @@ impl Assembler {
                         None,
                         block_builder.mast_forest_builder_mut(),
                     )?;
+                    
+                    let iteration_count = (*count).expect_value();
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {
                         // Attach the decorators before the first instance of the repeated node
@@ -985,11 +987,11 @@ impl Assembler {
                             .ensure_node(first_repeat_builder)?;
 
                         body_node_ids.push(first_repeat_node_id);
-                        for _ in 0..(*count - 1) {
+                        for _ in 0..(iteration_count - 1) {
                             body_node_ids.push(repeat_node_id);
                         }
                     } else {
-                        for _ in 0..*count {
+                        for _ in 0..iteration_count {
                             body_node_ids.push(repeat_node_id);
                         }
                     }

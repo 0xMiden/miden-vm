@@ -2,7 +2,7 @@ use core::fmt;
 
 use miden_debug_types::{SourceSpan, Span, Spanned};
 
-use super::{Block, Instruction};
+use super::{Block, Instruction, Immediate};
 
 /// Represents the Miden Assembly instruction set syntax
 ///
@@ -25,11 +25,10 @@ pub enum Op {
     While { span: SourceSpan, body: Block } = 1,
     /// Represents a counter-controlled loop.
     ///
-    /// NOTE: The iteration count must be known at compile-time, so this is _not_ used for general
-    /// `for`-style loops where the iteration count is dynamic.
+    /// NOTE: The iteration count may be either a literal value or constant name (e.g. `add.1` or `add.CONST`)
     Repeat {
         span: SourceSpan,
-        count: u32,
+        count: Immediate<u32>,
         body: Block,
     } = 2,
     /// A primitive operation, e.g. `add`
