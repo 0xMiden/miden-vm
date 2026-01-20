@@ -1,6 +1,5 @@
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec, collections::BTreeSet};
 use core::fmt;
-use std::collections::BTreeSet;
 
 use miden_core::utils::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
