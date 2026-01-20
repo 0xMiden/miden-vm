@@ -6,6 +6,7 @@
 
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
+- Established 1-1 mapping between operations and AsmOp decorators, linking every operation to its corresponding assembly instruction in multi-operation sequences ([#2455](https://github.com/0xMiden/miden-vm/pull/2455)).
 
 #### Fixes
 
@@ -38,11 +39,10 @@
 - Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
 - Add API to serialize the `MastForest` without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
 - Removed `ErrorContext` trait and `err_ctx!` macro; error context is now computed lazily by passing raw parameters to error extension traits ([#2544](https://github.com/0xMiden/miden-vm/pull/2544)).
-
 - Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
 - [BREAKING] Remove `NodeExecutionState` in favor of `Continuation` ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
-
 - Made `StackInputs` and `StackOutputs` implement `Copy` trait ([#2581](https://github.com/0xMiden/miden-vm/pull/2581)).
+
 ## 0.20.2 (TBD)
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
 
