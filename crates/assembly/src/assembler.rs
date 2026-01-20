@@ -972,7 +972,7 @@ impl Assembler {
                         None,
                         block_builder.mast_forest_builder_mut(),
                     )?;
-                    
+
                     let iteration_count = (*count).expect_value();
 
                     if let Some(decorator_ids) = block_builder.drain_decorators() {

@@ -5,7 +5,7 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
+use core::{marker::PhantomData, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
