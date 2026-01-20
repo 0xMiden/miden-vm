@@ -25,7 +25,9 @@ pub enum Op {
     While { span: SourceSpan, body: Block } = 1,
     /// Represents a counter-controlled loop.
     ///
-    /// NOTE: The iteration count may be either a literal value or constant name (e.g. `add.1` or `add.CONST`)
+    /// NOTE: The iteration count must be known at compile-time, so this is _not_ used for general
+    /// `for`-style loops where the iteration count is dynamic.
+    /// Also, it may be either a literal value or constant name (e.g. `add.1` or `add.CONST`)
     Repeat {
         span: SourceSpan,
         count: Immediate<u32>,
