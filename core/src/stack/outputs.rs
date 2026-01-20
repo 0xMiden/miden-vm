@@ -19,7 +19,7 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError};
 /// `stack` is expected to be ordered as if the elements were popped off the stack one by one.
 /// Thus, the value at the top of the stack is expected to be in the first position, and the order
 /// of the rest of the output elements will also match the order on the stack.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StackOutputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }

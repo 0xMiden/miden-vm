@@ -356,7 +356,7 @@ fn falcon_prove_verify() {
 
     let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_256);
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);

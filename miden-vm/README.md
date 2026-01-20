@@ -71,7 +71,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute_sync(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
+let trace = execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution

@@ -78,7 +78,7 @@ pub async fn prove(
         trace.trace_len_summary().main_trace_len()
     );
 
-    let stack_outputs = trace.stack_outputs().clone();
+    let stack_outputs = *trace.stack_outputs();
     let precompile_requests = trace.precompile_requests().to_vec();
     let hash_fn = options.hash_fn();
 
