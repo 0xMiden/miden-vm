@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 2773
+assertion_line: 2996
 expression: program
 ---
 begin
@@ -11,14 +11,19 @@ begin
         drop
         asmOp(push.[2,2,2,2], 4)
         push(2)
+        asmOp(push.[2,2,2,2], 4)
         push(2)
+        asmOp(push.[2,2,2,2], 4)
         push(2)
+        asmOp(push.[2,2,2,2], 4)
         push(2)
         noop
         noop
         asmOp(adv.push_mapval, 3)
         push(17843484659000820118)
+        asmOp(adv.push_mapval, 3)
         emit
+        asmOp(adv.push_mapval, 3)
         drop
         asmOp(assert, 1)
         assert(0)

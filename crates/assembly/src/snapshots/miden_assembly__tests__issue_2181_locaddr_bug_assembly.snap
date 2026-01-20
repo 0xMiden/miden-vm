@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 4495
 expression: program
 ---
 begin
@@ -18,21 +19,30 @@ begin
         asmOp(locaddr.0, 4)
         push(18446744069414584317)
         noop
+        asmOp(locaddr.0, 4)
         push(4294967294)
+        asmOp(locaddr.0, 4)
         mload
+        asmOp(locaddr.0, 4)
         add
         debug(stack.4)
         asmOp(locaddr.0, 4)
         push(18446744069414584317)
+        asmOp(locaddr.0, 4)
         push(4294967294)
+        asmOp(locaddr.0, 4)
         mload
+        asmOp(locaddr.0, 4)
         add
         debug(stack.4)
         asmOp(locaddr.0, 4)
         push(18446744069414584317)
         noop
+        asmOp(locaddr.0, 4)
         push(4294967294)
+        asmOp(locaddr.0, 4)
         mload
+        asmOp(locaddr.0, 4)
         add
         debug(stack.4)
         debug(stack.4)
@@ -41,8 +51,11 @@ begin
         debug(stack.4)
         asmOp(dropw, 4)
         drop
+        asmOp(dropw, 4)
         drop
+        asmOp(dropw, 4)
         drop
+        asmOp(dropw, 4)
         drop
         noop
         push(18446744069414584317)

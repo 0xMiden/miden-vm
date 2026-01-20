@@ -1,5 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
+assertion_line: 2981
 expression: program
 ---
 begin
@@ -10,8 +11,11 @@ begin
         drop
         asmOp(push.[2,3,4,5], 4)
         push(5)
+        asmOp(push.[2,3,4,5], 4)
         push(4)
+        asmOp(push.[2,3,4,5], 4)
         push(3)
+        asmOp(push.[2,3,4,5], 4)
         push(2)
         noop
         noop

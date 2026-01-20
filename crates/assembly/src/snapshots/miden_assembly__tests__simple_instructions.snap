@@ -13,6 +13,7 @@ begin
         pad
         asmOp(assertz, 2)
         eqz
+        asmOp(assertz, 2)
         assert(0)
         noop
     end

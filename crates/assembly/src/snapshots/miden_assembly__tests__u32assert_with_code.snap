@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 1761
+assertion_line: 1953
 expression: program
 ---
 begin
@@ -11,15 +11,21 @@ begin
         drop
         asmOp(u32assert, 3)
         pad
+        asmOp(u32assert, 3)
         u32assert2(0)
+        asmOp(u32assert, 3)
         drop
         asmOp(u32assert.err="Oh no", 3)
         pad
+        asmOp(u32assert.err="Oh no", 3)
         u32assert2(15491226248792286710)
+        asmOp(u32assert.err="Oh no", 3)
         drop
         asmOp(u32assert.err="Oh no", 3)
         pad
+        asmOp(u32assert.err="Oh no", 3)
         u32assert2(15491226248792286710)
+        asmOp(u32assert.err="Oh no", 3)
         drop
     end
 end

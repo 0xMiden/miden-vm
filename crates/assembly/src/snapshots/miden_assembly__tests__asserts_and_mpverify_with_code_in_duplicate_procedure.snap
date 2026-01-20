@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 1883
+assertion_line: 2075
 expression: program
 ---
 begin
@@ -11,27 +11,39 @@ begin
         drop
         asmOp(u32assert.err="1", 3)
         pad
+        asmOp(u32assert.err="1", 3)
         u32assert2(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         drop
         asmOp(u32assert.err="2", 3)
         pad
+        asmOp(u32assert.err="2", 3)
         u32assert2(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         drop
         asmOp(u32assert.err="1", 3)
         pad
+        asmOp(u32assert.err="1", 3)
         u32assert2(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         drop
         asmOp(u32assert.err="2", 3)
         pad
+        asmOp(u32assert.err="2", 3)
         u32assert2(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         drop
         asmOp(u32assert.err="2", 3)
         pad
+        asmOp(u32assert.err="2", 3)
         u32assert2(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         drop
         asmOp(u32assert.err="1", 3)
         pad
+        asmOp(u32assert.err="1", 3)
         u32assert2(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         drop
         asmOp(assert.err="1", 1)
         assert(13948122101519563734)
@@ -49,23 +61,31 @@ begin
         assert(13948122101519563734)
         asmOp(u32assert.err="1", 3)
         pad
+        asmOp(u32assert.err="1", 3)
         u32assert2(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         drop
         asmOp(assert.err="2", 1)
         assert(17575088163785490049)
         asmOp(u32assert.err="2", 3)
         pad
+        asmOp(u32assert.err="2", 3)
         u32assert2(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         drop
         asmOp(u32assert.err="1", 3)
         pad
+        asmOp(u32assert.err="1", 3)
         u32assert2(13948122101519563734)
+        asmOp(u32assert.err="1", 3)
         drop
         asmOp(assert.err="1", 1)
         assert(13948122101519563734)
         asmOp(u32assert.err="2", 3)
         pad
+        asmOp(u32assert.err="2", 3)
         u32assert2(17575088163785490049)
+        asmOp(u32assert.err="2", 3)
         drop
         asmOp(assert.err="2", 1)
         assert(17575088163785490049)

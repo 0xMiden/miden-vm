@@ -11,6 +11,7 @@ begin
         drop
         asmOp(push.1, 2)
         pad
+        asmOp(push.1, 2)
         incr
         asmOp(push.2, 1)
         push(2)

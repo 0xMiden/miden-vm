@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 1737
+assertion_line: 1929
 expression: program
 ---
 begin
@@ -11,39 +11,69 @@ begin
         drop
         asmOp(assert_eqw, 11)
         movup4
+        asmOp(assert_eqw, 11)
         eq
+        asmOp(assert_eqw, 11)
         assert(0)
+        asmOp(assert_eqw, 11)
         movup3
+        asmOp(assert_eqw, 11)
         eq
+        asmOp(assert_eqw, 11)
         assert(0)
+        asmOp(assert_eqw, 11)
         movup2
+        asmOp(assert_eqw, 11)
         eq
+        asmOp(assert_eqw, 11)
         assert(0)
+        asmOp(assert_eqw, 11)
         eq
+        asmOp(assert_eqw, 11)
         assert(0)
         asmOp(assert_eqw.err="Oh no", 11)
         movup4
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         movup3
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         movup2
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
         asmOp(assert_eqw.err="Oh no", 11)
         movup4
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         movup3
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         movup2
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
+        asmOp(assert_eqw.err="Oh no", 11)
         eq
+        asmOp(assert_eqw.err="Oh no", 11)
         assert(15491226248792286710)
         noop
     end

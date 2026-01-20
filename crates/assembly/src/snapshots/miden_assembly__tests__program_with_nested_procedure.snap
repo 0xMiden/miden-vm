@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 2015
+assertion_line: 2207
 expression: program
 ---
 begin
@@ -36,6 +36,7 @@ begin
         add
         asmOp(sub, 2)
         neg
+        asmOp(sub, 2)
         add
         noop
         noop

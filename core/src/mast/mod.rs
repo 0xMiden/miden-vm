@@ -637,12 +637,11 @@ impl MastForest {
                         // For non-Block nodes, before_enter is at index 0, after_exit is at index 1
                         // These are not operation ranges, so we check exact matches
                         for (op_idx, decorator_id) in decorator_links {
-                            if op_idx == target_op_idx {
-                                if let Some(Decorator::AsmOp(assembly_op)) =
+                            if op_idx == target_op_idx
+                                && let Some(Decorator::AsmOp(assembly_op)) =
                                     self.decorator_by_id(decorator_id)
-                                {
-                                    return Some(assembly_op);
-                                }
+                            {
+                                return Some(assembly_op);
                             }
                         }
                     },
