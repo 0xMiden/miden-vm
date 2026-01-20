@@ -1,6 +1,8 @@
 use miden_air::trace::RowIndex;
 use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing};
-use miden_processor::{ContextId, DefaultHost, ExecutionError, Program, fast::FastProcessor};
+use miden_processor::{
+    ContextId, DefaultHost, ExecutionError, OperationError, Program, fast::FastProcessor,
+};
 use miden_utils_testing::{
     AdviceStackBuilder, Felt, ONE, ZERO, build_expected_hash, build_expected_perm,
     felt_slice_to_ints,
@@ -42,7 +44,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1000), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1000), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 1000"
@@ -50,7 +52,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1004), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1004), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 1004"
@@ -58,7 +60,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1008), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1008), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 1008"
@@ -66,7 +68,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1012), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1012), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 1012"
@@ -74,7 +76,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(1016), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(1016), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 1016"
@@ -83,7 +85,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(2000), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(2000), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 2000"
@@ -91,7 +93,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(2004), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(2004), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 2004"
@@ -99,7 +101,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(2008), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(2008), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 2008"
@@ -107,7 +109,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(2012), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(2012), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 2012"
@@ -115,7 +117,7 @@ fn test_memcopy_words() {
     assert_eq!(
         exec_output
             .memory
-            .read_word(ContextId::root(), Felt::from_u32(2016), dummy_clk, &())
+            .read_word(ContextId::root(), Felt::from_u32(2016), dummy_clk)
             .unwrap(),
         Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 2016"
@@ -157,7 +159,7 @@ fn test_memcopy_elements() {
         assert_eq!(
             exec_output
                 .memory
-                .read_element(ContextId::root(), Felt::from_u32(addr), &())
+                .read_element(ContextId::root(), Felt::from_u32(addr))
                 .unwrap(),
             Felt::from_u32(addr - 2000),
             "Address {}",
@@ -364,7 +366,13 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    assert_matches!(
+        execution_result,
+        Err(ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { .. },
+            ..
+        })
+    );
 }
 
 #[test]
@@ -388,5 +396,11 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    assert_matches!(
+        execution_result,
+        Err(ExecutionError::OperationError {
+            err: OperationError::FailedAssertion { .. },
+            ..
+        })
+    );
 }

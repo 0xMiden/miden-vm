@@ -36,7 +36,7 @@ ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,testing,internal
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
-FAST_TEST_FEATURES       := concurrent,testing,no_err_ctx
+FAST_TEST_FEATURES       := concurrent,testing
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
@@ -91,7 +91,7 @@ serve-docs: ## Serves the docs
 # -- core knobs (overridable from CLI or by caller targets) --------------------
 # Advanced usage (most users should use pattern rules like 'make test-air'):
 #   make core-test CRATE=miden-air FEATURES=testing
-#   make core-test CARGO_PROFILE=test-dev FEATURES="testing,no_err_ctx"
+#   make core-test CARGO_PROFILE=test-dev FEATURES=testing
 #   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
 
 NEXTEST_PROFILE ?= default
@@ -234,9 +234,9 @@ run-examples: exec ## Runs all masm examples to verify they execute correctly
 # --- benchmarking --------------------------------------------------------------------------------
 
 .PHONY: check-bench
-check-bench: ## Builds all benchmarks (incl. those needing no_err_ctx)
-	cargo check --benches --features internal,no_err_ctx
+check-bench: ## Builds all benchmarks
+	cargo check --benches --features internal
 
 .PHONY: bench
 bench: ## Runs benchmarks
-	cargo bench --profile optimized --features internal,no_err_ctx
+	cargo bench --profile optimized --features internal

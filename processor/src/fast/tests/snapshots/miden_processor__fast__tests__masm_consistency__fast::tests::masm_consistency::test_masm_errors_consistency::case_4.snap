@@ -1,8 +1,9 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
+assertion_line: 352
 expression: fast_err
 ---
-DynamicNodeNotFound {
+OperationError {
     label: SourceSpan {
         source_id: SourceId(
             4294967295,
@@ -15,12 +16,14 @@ DynamicNodeNotFound {
         ),
     },
     source_file: None,
-    digest: Word(
-        [
-            0,
-            0,
-            0,
-            0,
-        ],
-    ),
+    err: DynamicNodeNotFound {
+        digest: Word(
+            [
+                0,
+                0,
+                0,
+                0,
+            ],
+        ),
+    },
 }

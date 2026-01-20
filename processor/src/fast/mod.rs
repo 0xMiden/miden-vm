@@ -16,9 +16,10 @@ use miden_core::{
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ExecutionError, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
@@ -231,7 +232,7 @@ impl FastProcessor {
     ) -> Result<ResumeContext, ExecutionError> {
         self.advice
             .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_exec_err_no_ctx()?;
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
@@ -413,9 +414,7 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice
-            .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         match self
             .execute_impl(
@@ -773,11 +772,10 @@ impl FastProcessor {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
-                    let clk = self.clk;
                     let process = &mut self.state();
                     if let Err(err) = host.on_debug(process, options) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { clk, err },
+                            ExecutionError::DebugHandlerError { err },
                         ));
                     }
                 }
@@ -787,11 +785,10 @@ impl FastProcessor {
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
-                    let clk = self.clk;
                     let process = &mut self.state();
                     if let Err(err) = host.on_trace(process, *id) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { clk, trace_id: *id, err },
+                            ExecutionError::TraceHandlerError { trace_id: *id, err },
                         ));
                     }
                 }
@@ -839,35 +836,38 @@ impl FastProcessor {
         }
     }
 
-    async fn load_mast_forest<E>(
+    async fn load_mast_forest(
         &mut self,
         node_digest: Word,
         host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
-        err_ctx: &E,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
-    where
-        E: ErrorContext,
-    {
+        get_mast_forest_failed: impl Fn(Word) -> OperationError,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))
+            .map_exec_err(current_forest, node_id, host)?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malformed_mast_forest_in_host(node_digest, err_ctx))?;
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
+                .map_exec_err(current_forest, node_id, host)
+                .unwrap_err()
+        })?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice
-            .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
+            current_forest,
+            node_id,
+            host,
+        )?;
 
         Ok((root_id, mast_forest))
     }
@@ -1064,9 +1064,7 @@ impl FastProcessor {
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice
-            .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         let execute_fut = async {
             match self

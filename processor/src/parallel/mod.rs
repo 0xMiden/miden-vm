@@ -461,13 +461,13 @@ fn initialize_chiplets(
             BitwiseOp::U32And => {
                 let _ = chiplets
                     .bitwise
-                    .u32and(a, b, &())
+                    .u32and(a, b)
                     .expect("bitwise AND operation failed when populating chiplet");
             },
             BitwiseOp::U32Xor => {
                 let _ = chiplets
                     .bitwise
-                    .u32xor(a, b, &())
+                    .u32xor(a, b)
                     .expect("bitwise XOR operation failed when populating chiplet");
             },
         }
@@ -510,25 +510,25 @@ fn initialize_chiplets(
                 MemoryAccess::ReadElement(addr, ctx, clk) => {
                     let _ = chiplets
                         .memory
-                        .read(ctx, addr, clk, &())
+                        .read(ctx, addr, clk)
                         .expect("memory read element failed when populating chiplet");
                 },
                 MemoryAccess::WriteElement(addr, element, ctx, clk) => {
                     chiplets
                         .memory
-                        .write(ctx, addr, clk, element, &())
+                        .write(ctx, addr, clk, element)
                         .expect("memory write element failed when populating chiplet");
                 },
                 MemoryAccess::ReadWord(addr, ctx, clk) => {
                     chiplets
                         .memory
-                        .read_word(ctx, addr, clk, &())
+                        .read_word(ctx, addr, clk)
                         .expect("memory read word failed when populating chiplet");
                 },
                 MemoryAccess::WriteWord(addr, word, ctx, clk) => {
                     chiplets
                         .memory
-                        .write_word(ctx, addr, clk, word, &())
+                        .write_word(ctx, addr, clk, word)
                         .expect("memory write word failed when populating chiplet");
                 },
             });
@@ -561,7 +561,7 @@ fn initialize_chiplets(
     for proc_hash in kernel_replay.into_iter() {
         chiplets
             .kernel_rom
-            .access_proc(proc_hash, &())
+            .access_proc(proc_hash)
             .expect("kernel proc access failed when populating chiplet");
     }
 

@@ -670,7 +670,7 @@ fn debug_mmr_peaks_vs_vm_memory() {
             let addr = mmr_ptr + (word_idx as u32) * 4 + limb;
             let v = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::new(addr as u64), &())
+                .read_element(ContextId::root(), Felt::new(addr as u64))
                 .unwrap()
                 .as_canonical_u64();
             vm_mem.push(v);

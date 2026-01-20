@@ -17,10 +17,11 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ErrorContext, ExecutionError, ProcessState,
+    ContextId, ExecutionError, ProcessState,
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
+    errors::AceEvalError,
     fast::{
         NoopTracer, Tracer, eval_circuit_fast_,
         trace_state::{
@@ -107,6 +108,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     &initial_mast_forest,
+                    node_id,
                     batch_index,
                     op_idx_in_batch,
                     &mut basic_block_context,
@@ -132,6 +134,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     &initial_mast_forest,
+                    node_id,
                     batch_index,
                     0,
                     &mut basic_block_context,
@@ -264,6 +267,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     current_forest,
+                    node_id,
                     0,
                     0,
                     &mut basic_block_context,
@@ -434,6 +438,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         batch: &OpBatch,
         start_op_idx: Option<usize>,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         basic_block_context: &mut BasicBlockContext,
     ) -> ControlFlow<()> {
         let start_op_idx = start_op_idx.unwrap_or(0);
@@ -446,15 +451,20 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             {
                 // `execute_sync_op` does not support executing `Emit`, so we only call it for all
                 // other operations.
+                // Note: we pass `NoopHost` since errors should never occur here - the program
+                // already ran successfully in FastProcessor.
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
                     self.execute_sync_op(
                         op,
                         current_forest,
+                        node_id,
                         &mut NoopHost,
-                        &(),
                         &mut NoopTracer,
+                        // Note: op_idx is only used for error context, which should never
+                        // happen here since the program already ran successfully in FastProcessor.
+                        op_idx_in_batch,
                     )
                     // The assumption here is that the computation was done by the FastProcessor,
                     // and so all operations in the program are valid and can be executed
@@ -689,11 +699,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         self.context.state.system.pc_transcript_state = state;
     }
 
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack().get(2);
         let num_read = self.stack().get(1);
         let ptr = self.stack().get(0);
@@ -706,7 +712,6 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
             num_read,
             num_eval,
             self,
-            err_ctx,
             tracer,
         )?;
 
@@ -956,12 +961,11 @@ fn eval_circuit_parallel_(
     num_vars: Felt,
     num_eval: Felt,
     processor: &mut CoreTraceFragmentFiller,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
+) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), err_ctx, tracer)
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), tracer)
 }
 
 // BASIC BLOCK CONTEXT

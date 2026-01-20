@@ -1,7 +1,8 @@
 use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    BaseHost, ExecutionError,
+    errors::OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
@@ -19,15 +20,16 @@ pub(super) fn op_assert<P: Processor>(
     err_code: Felt,
     host: &mut impl BaseHost,
     program: &MastForest,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     if processor.stack().get(0) != ONE {
         let process = &mut processor.state();
-        let clk = process.clk();
-        let err = host.on_assert_failed(process, err_code);
+        // Notify host of assertion failure for side effects only (logging, debugging, telemetry).
+        // The return value is intentionally ignored because the host callback is for observation,
+        // not for modifying the error. The error message comes from the program's error table.
+        let _ = host.on_assert_failed(process, err_code);
         let err_msg = program.resolve_error_message(err_code);
-        return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
+        return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
     processor.stack().decrement_size(tracer);
     Ok(())

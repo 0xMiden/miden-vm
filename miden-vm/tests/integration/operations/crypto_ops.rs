@@ -344,7 +344,10 @@ fn crypto_stream_rejects_in_place() {
     let err = test.execute().expect_err("crypto_stream should reject in-place encryption");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::IllegalMemoryAccess { .. },
+            ..
+        }
     ));
 }
 
@@ -377,7 +380,10 @@ fn crypto_stream_rejects_partial_overlap() {
         .expect_err("crypto_stream should reject partial overlap (dst within src)");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::IllegalMemoryAccess { .. },
+            ..
+        }
     ));
 
     // Test case 2: src starts within dst range (src=1004, dst=1000)
@@ -401,7 +407,10 @@ fn crypto_stream_rejects_partial_overlap() {
         .expect_err("crypto_stream should reject partial overlap (src within dst)");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::IllegalMemoryAccess { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::IllegalMemoryAccess { .. },
+            ..
+        }
     ));
 }
 
@@ -424,7 +433,10 @@ fn crypto_stream_rejects_src_range_overflow() {
     let err = test.execute().expect_err("crypto_stream should reject when src+8 overflows");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::AddressOutOfBounds { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::AddressOutOfBounds { .. },
+            ..
+        }
     ));
 }
 
@@ -447,7 +459,10 @@ fn crypto_stream_rejects_dst_range_overflow() {
     let err = test.execute().expect_err("crypto_stream should reject when dst+8 overflows");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::AddressOutOfBounds { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::AddressOutOfBounds { .. },
+            ..
+        }
     ));
 }
 
@@ -468,7 +483,10 @@ fn crypto_stream_rejects_unaligned_src() {
     let err = test.execute().expect_err("crypto_stream should reject unaligned src");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::UnalignedWordAccess { .. },
+            ..
+        }
     ));
 }
 
@@ -489,7 +507,10 @@ fn crypto_stream_rejects_unaligned_dst() {
     let err = test.execute().expect_err("crypto_stream should reject unaligned dst");
     assert!(matches!(
         err,
-        ExecutionError::MemoryError(MemoryError::UnalignedWordAccess { .. })
+        ExecutionError::MemoryError {
+            err: MemoryError::UnalignedWordAccess { .. },
+            ..
+        }
     ));
 }
 

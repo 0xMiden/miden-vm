@@ -8,9 +8,9 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ErrorContext, ExecutionError,
+    AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
+    errors::{MapExecErr, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
     operations::sys_ops::sys_event_handlers::handle_system_event,
     processor::Processor,
@@ -256,15 +256,18 @@ impl FastProcessor {
             // whereas all the other operations are synchronous (resulting in a significant
             // performance improvement).
             {
-                let err_ctx =
-                    err_ctx!(current_forest, node_id, host, self.in_debug_mode(), op_idx_in_block);
                 match op {
-                    Operation::Emit => self.op_emit(host, &err_ctx).await?,
+                    Operation::Emit => self.op_emit(host, current_forest, node_id).await?,
                     _ => {
                         // if the operation is not an Emit, we execute it normally
-                        if let Err(err) =
-                            self.execute_sync_op(op, current_forest, host, &err_ctx, tracer)
-                        {
+                        if let Err(err) = self.execute_sync_op(
+                            op,
+                            current_forest,
+                            node_id,
+                            host,
+                            tracer,
+                            op_idx_in_block,
+                        ) {
                             return ControlFlow::Break(BreakReason::Err(err));
                         }
                     },
@@ -342,30 +345,42 @@ impl FastProcessor {
     async fn op_emit(
         &mut self,
         host: &mut impl AsyncHost,
-        err_ctx: &impl ErrorContext,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
     ) -> ControlFlow<BreakReason> {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event, err_ctx) {
+            if let Err(err) = handle_system_event(&mut process, system_event).map_exec_err(
+                current_forest,
+                node_id,
+                host,
+            ) {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
         } else {
-            let clk = process.clk();
             let mutations = match host.on_event(&process).await {
                 Ok(m) => m,
                 Err(err) => {
                     let event_name = host.resolve_event(event_id).cloned();
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::event_error(
-                        err, event_id, event_name, err_ctx,
+                    return ControlFlow::Break(BreakReason::Err(event_error_with_context(
+                        err,
+                        current_forest,
+                        node_id,
+                        host,
+                        event_id,
+                        event_name,
                     )));
                 },
             };
             if let Err(err) = self.advice.apply_mutations(mutations) {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::advice_error(
-                    err, clk, err_ctx,
+                return ControlFlow::Break(BreakReason::Err(advice_error_with_context(
+                    err,
+                    current_forest,
+                    node_id,
+                    host,
                 )));
             }
         }

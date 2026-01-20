@@ -221,11 +221,13 @@ impl ExecutionOptions {
     }
 
     /// Returns a flag indicating whether the VM should execute `trace` instructions.
+    #[inline]
     pub fn enable_tracing(&self) -> bool {
         self.enable_tracing
     }
 
     /// Returns a flag indicating whether the VM should execute a program in debug mode.
+    #[inline]
     pub fn enable_debugging(&self) -> bool {
         self.enable_debugging
     }

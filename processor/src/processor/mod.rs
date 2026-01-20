@@ -1,12 +1,17 @@
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
-    Felt, Operation, Word, crypto::merkle::MerklePath, field::QuadFelt, mast::MastForest,
+    Felt, Operation, Word,
+    crypto::merkle::MerklePath,
+    field::QuadFelt,
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
-    fast::Tracer, processor::operations::execute_sync_op,
+    AdviceError, BaseHost, ContextId, ExecutionError, MemoryError, ProcessState,
+    errors::{AceEvalError, OperationError},
+    fast::Tracer,
+    processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -77,11 +82,7 @@ pub trait Processor: Sized {
     ///
     /// # Note
     /// All processors need to support this operation.
-    fn op_eval_circuit(
-        &mut self,
-        _err_ctx: &impl ErrorContext,
-        _tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the provided synchronous operation.
     ///
@@ -95,11 +96,12 @@ pub trait Processor: Sized {
         &mut self,
         op: &Operation,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         host: &mut impl BaseHost,
-        err_ctx: &impl ErrorContext,
         tracer: &mut impl Tracer,
+        op_idx: usize,
     ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, current_forest, host, err_ctx, tracer)
+        execute_sync_op(self, op, current_forest, node_id, host, tracer, op_idx)
     }
 }
 
@@ -265,21 +267,11 @@ pub trait AdviceProviderInterface {
 /// Trait representing the memory subsystem of the processor.
 pub trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
-    fn read_element(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError>;
+    fn read_element(&mut self, ctx: ContextId, addr: Felt) -> Result<Felt, MemoryError>;
 
     /// Reads a word from memory starting at the provided address in the provided context.
-    fn read_word(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Word, MemoryError>;
+    fn read_word(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex)
+    -> Result<Word, MemoryError>;
 
     /// Writes an element to memory at the provided address in the provided context.
     fn write_element(
@@ -287,7 +279,6 @@ pub trait MemoryInterface {
         ctx: ContextId,
         addr: Felt,
         element: Felt,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 
     /// Writes a word to memory starting at the provided address in the provided context.
@@ -297,7 +288,6 @@ pub trait MemoryInterface {
         addr: Felt,
         clk: RowIndex,
         word: Word,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 }
 
@@ -331,8 +321,8 @@ pub trait HasherInterface {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError>;
 
     /// Verifies that the `claimed_old_root` is indeed the root of a Merkle tree containing
     /// `old_value` at the specified `index`, and computes a new Merkle root after updating the node
@@ -354,8 +344,8 @@ pub trait HasherInterface {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError>;
 }
 
 /// Trait for computing helper registers for operations.

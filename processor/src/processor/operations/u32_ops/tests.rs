@@ -59,7 +59,7 @@ proptest! {
         ]);
         let mut tracer = NoopTracer;
 
-        let _ = op_u32assert2(&mut processor, ZERO, &(), &mut tracer).unwrap();
+        let _ = op_u32assert2(&mut processor, ZERO, &mut tracer).unwrap();
         let expected = build_expected(&[a as u64, b as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
@@ -71,7 +71,7 @@ fn test_op_u32assert2_both_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(123u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(123u32), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -81,7 +81,7 @@ fn test_op_u32assert2_second_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(1000u64), Felt::new(4294967297u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(456u32), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(456u32), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -91,7 +91,7 @@ fn test_op_u32assert2_first_invalid() {
     let mut processor = FastProcessor::new(&[Felt::new(4294967296u64), Felt::new(2000u64)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32assert2(&mut processor, Felt::from_u32(789), &(), &mut tracer);
+    let result = op_u32assert2(&mut processor, Felt::from_u32(789), &mut tracer);
     assert!(result.is_err());
 }
 
@@ -112,7 +112,7 @@ proptest! {
 
         let (result, over) = a.overflowing_add(b);
 
-        let _ = op_u32add(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32add(&mut processor, &mut tracer).unwrap();
         // Output: [sum, carry, ...] - sum on top
         let expected = build_expected(&[result as u64, over as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
@@ -133,7 +133,7 @@ proptest! {
         let hi = result >> 32;
         let lo = (result as u32) as u64;
 
-        let _ = op_u32add3(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32add3(&mut processor, &mut tracer).unwrap();
         // Output: [sum, carry, ...] - sum (lo) on top
         let expected = build_expected(&[lo, hi, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
@@ -152,7 +152,7 @@ proptest! {
 
         let (result, under) = b.overflowing_sub(a);
 
-        let _ = op_u32sub(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32sub(&mut processor, &mut tracer).unwrap();
         let expected = build_expected(&[under as u64, result as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
@@ -172,7 +172,7 @@ proptest! {
         let hi = result >> 32;
         let lo = (result as u32) as u64;
 
-        let _ = op_u32mul(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32mul(&mut processor, &mut tracer).unwrap();
         // Output: [lo, hi, ...] - lo on top
         let expected = build_expected(&[lo, hi, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
@@ -193,7 +193,7 @@ proptest! {
         let hi = result >> 32;
         let lo = (result as u32) as u64;
 
-        let _ = op_u32madd(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32madd(&mut processor, &mut tracer).unwrap();
         // Output: [lo, hi, ...] - lo on top
         let expected = build_expected(&[lo, hi, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
@@ -214,7 +214,7 @@ proptest! {
         let q = b / a;
         let r = b % a;
 
-        let _ = op_u32div(&mut processor, &(), &mut tracer).unwrap();
+        let _ = op_u32div(&mut processor, &mut tracer).unwrap();
         // Output: [remainder, quotient, ...] - remainder on top
         let expected = build_expected(&[r as u64, q as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
@@ -227,7 +227,7 @@ fn test_op_u32div_by_zero() {
     let mut processor = FastProcessor::new(&[Felt::new(0), Felt::new(10)]);
     let mut tracer = NoopTracer;
 
-    let result = op_u32div(&mut processor, &(), &mut tracer);
+    let result = op_u32div(&mut processor, &mut tracer);
     assert!(result.is_err());
 }
 
@@ -246,7 +246,7 @@ proptest! {
         ]);
         let mut tracer = NoopTracer;
 
-        op_u32and(&mut processor, &(), &mut tracer).unwrap();
+        op_u32and(&mut processor, &mut tracer).unwrap();
         let expected = build_expected(&[(a & b) as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
@@ -262,7 +262,7 @@ proptest! {
         ]);
         let mut tracer = NoopTracer;
 
-        op_u32xor(&mut processor, &(), &mut tracer).unwrap();
+        op_u32xor(&mut processor, &mut tracer).unwrap();
         let expected = build_expected(&[(a ^ b) as u64, c as u64, d as u64]);
         prop_assert_eq!(expected, processor.stack_top());
     }
@@ -273,28 +273,28 @@ proptest! {
 fn test_op_u32add3_min_stack() {
     let mut processor = FastProcessor::new(&[]);
     let mut tracer = NoopTracer;
-    assert!(op_u32add3(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_u32add3(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_u32madd_min_stack() {
     let mut processor = FastProcessor::new(&[]);
     let mut tracer = NoopTracer;
-    assert!(op_u32madd(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_u32madd(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_u32and_min_stack() {
     let mut processor = FastProcessor::new(&[]);
     let mut tracer = NoopTracer;
-    assert!(op_u32and(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_u32and(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_u32xor_min_stack() {
     let mut processor = FastProcessor::new(&[]);
     let mut tracer = NoopTracer;
-    assert!(op_u32xor(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_u32xor(&mut processor, &mut tracer).is_ok());
 }
 
 // HELPER FUNCTIONS

@@ -7,9 +7,9 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ExecutionError,
+    AsyncHost,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
+    errors::OperationError,
     fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
 };
 
@@ -69,9 +69,11 @@ impl FastProcessor {
                 stopper,
             )
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
-            ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
-                condition, &err_ctx,
+            let err = OperationError::NotBinaryValueLoop { value: condition };
+            ControlFlow::Break(BreakReason::Err(err.with_context(
+                current_forest,
+                current_node_id,
+                host,
             )))
         }
     }
@@ -126,9 +128,11 @@ impl FastProcessor {
 
             self.execute_after_exit_decorators(current_node_id, current_forest, host)
         } else {
-            let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
-            ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_loop(
-                condition, &err_ctx,
+            let err = OperationError::NotBinaryValueLoop { value: condition };
+            ControlFlow::Break(BreakReason::Err(err.with_context(
+                current_forest,
+                current_node_id,
+                host,
             )))
         }
     }

@@ -19,7 +19,7 @@ use super::{
     EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
-use crate::{MemoryAddress, PrimeField64, errors::ErrorContext, system::ContextId};
+use crate::{MemoryAddress, PrimeField64, system::ContextId};
 
 mod errors;
 pub use errors::MemoryError;
@@ -134,7 +134,7 @@ impl Memory {
         match self.trace.get(&ctx) {
             Some(segment) => segment
                 .get_word(addr)
-                .map_err(|_| MemoryError::UnalignedWordAccessNoClk { addr, ctx }),
+                .map_err(|_| MemoryError::UnalignedWordAccess { addr, ctx }),
             None => Ok(None),
         }
     }
@@ -164,17 +164,11 @@ impl Memory {
     /// # Errors
     /// - Returns an error if the address is equal or greater than 2^32.
     /// - Returns an error if the same address is accessed more than once in the same clock cycle.
-    pub fn read(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError> {
+    pub fn read(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
             .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().read(ctx, addr, Felt::from(clk))
     }
@@ -193,14 +187,13 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         clk: RowIndex,
-        err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
             .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;
@@ -218,12 +211,11 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Felt,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().write(ctx, addr, Felt::from(clk), value)
     }
@@ -240,14 +232,13 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Word,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
             .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_canonical_u64(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;

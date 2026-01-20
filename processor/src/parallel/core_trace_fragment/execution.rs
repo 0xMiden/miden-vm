@@ -23,6 +23,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         basic_block_node: &BasicBlockNode,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         start_batch_index: usize,
         op_idx_in_batch: usize,
         basic_block_context: &mut BasicBlockContext,
@@ -41,6 +42,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 current_batch,
                 Some(op_idx_in_batch),
                 current_forest,
+                node_id,
                 basic_block_context,
             )?;
         }
@@ -49,7 +51,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         for op_batch in op_batches.iter().skip(start_batch_index + 1) {
             self.add_respan_trace_row(op_batch, basic_block_context)?;
 
-            self.execute_op_batch(op_batch, None, current_forest, basic_block_context)?;
+            self.execute_op_batch(op_batch, None, current_forest, node_id, basic_block_context)?;
         }
 
         // Add END trace row to complete the basic block

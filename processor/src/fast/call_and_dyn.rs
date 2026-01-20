@@ -9,9 +9,9 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ContextId, ErrorContext, ExecutionError,
+    AsyncHost, ContextId,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
+    errors::{MapExecErr, OperationError},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
         step::{BreakReason, Stopper},
@@ -43,8 +43,6 @@ impl FastProcessor {
         // Execute decorators that should be executed before entering the node
         self.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-        let err_ctx = err_ctx!(current_forest, current_node_id, host, self.in_debug_mode());
-
         let callee_hash = current_forest[call_node.callee()].digest();
 
         self.save_context_and_truncate_stack(tracer);
@@ -52,9 +50,12 @@ impl FastProcessor {
         if call_node.is_syscall() {
             // check if the callee is in the kernel
             if !kernel.contains_proc(callee_hash) {
-                return ControlFlow::Break(BreakReason::Err(
-                    ExecutionError::syscall_target_not_in_kernel(callee_hash, &err_ctx),
-                ));
+                let err = OperationError::SyscallTargetNotInKernel { proc_root: callee_hash };
+                return ControlFlow::Break(BreakReason::Err(err.with_context(
+                    current_forest,
+                    current_node_id,
+                    host,
+                )));
             }
             tracer.record_kernel_proc_access(callee_hash);
 
@@ -68,9 +69,12 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            if let Err(err) = self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE, &err_ctx)
+            if let Err(err) = self
+                .memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_exec_err(current_forest, current_node_id, host)
             {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryError(err)));
+                return ControlFlow::Break(BreakReason::Err(err));
             }
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         }
@@ -102,17 +106,16 @@ impl FastProcessor {
             current_forest,
         );
 
-        // When the `no_err_ctx` feature is enabled, the err_ctx! macro expands to `()`
-        // and doesn't use its parameters. In this case, _call_node would be unused,
-        // so we prefix it with underscore to indicate this intentional unused state
-        // and suppress warnings in feature combinations that include `no_err_ctx`.
-        let _call_node = current_forest[node_id].unwrap_call();
-        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // when returning from a function call or a syscall, restore the
-        // context of the
-        // system registers and the operand stack to what it was prior
+        // context of the system registers and the operand stack to what it was prior
         // to the call.
-        self.restore_context(tracer, &err_ctx)?;
+        if let Err(e) = self.restore_context(tracer) {
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                host,
+            )));
+        }
 
         // Corresponds to the row inserted for the END operation added to the trace.
         self.increment_clk_with_continuation(tracer, stopper, || {
@@ -147,16 +150,18 @@ impl FastProcessor {
         // added to the trace.
         let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
-        let err_ctx = err_ctx!(&current_forest, current_node_id, host, self.in_debug_mode());
-
         // Retrieve callee hash from memory, using stack top as the memory
         // address.
         let callee_hash = {
             let mem_addr = self.stack_get(0);
-            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk, &err_ctx) {
+            let word = match self.memory.read_word(self.ctx, mem_addr, self.clk).map_exec_err(
+                current_forest,
+                current_node_id,
+                host,
+            ) {
                 Ok(w) => w,
                 Err(err) => {
-                    return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryError(err)));
+                    return ControlFlow::Break(BreakReason::Err(err));
                 },
             };
             tracer.record_memory_read_word(word, mem_addr, self.ctx, self.clk);
@@ -180,9 +185,12 @@ impl FastProcessor {
             self.caller_hash = callee_hash;
 
             // Initialize the frame pointer in memory for the new context.
-            if let Err(err) = self.memory.write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE, &err_ctx)
+            if let Err(err) = self
+                .memory
+                .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
+                .map_exec_err(current_forest, current_node_id, host)
             {
-                return ControlFlow::Break(BreakReason::Err(ExecutionError::MemoryError(err)));
+                return ControlFlow::Break(BreakReason::Err(err));
             }
             tracer.record_memory_write_element(FMP_INIT_VALUE, FMP_ADDR, new_ctx, self.clk);
         };
@@ -203,8 +211,9 @@ impl FastProcessor {
                     .load_mast_forest(
                         callee_hash,
                         host,
-                        ExecutionError::dynamic_node_not_found,
-                        &err_ctx,
+                        |digest| OperationError::DynamicNodeNotFound { digest },
+                        current_forest,
+                        current_node_id,
                     )
                     .await
                 {
@@ -248,10 +257,15 @@ impl FastProcessor {
         );
 
         let dyn_node = current_forest[node_id].unwrap_dyn();
-        let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
         // For dyncall, restore the context.
-        if dyn_node.is_dyncall() {
-            self.restore_context(tracer, &err_ctx)?;
+        if dyn_node.is_dyncall()
+            && let Err(e) = self.restore_context(tracer)
+        {
+            return ControlFlow::Break(BreakReason::Err(e.with_context(
+                current_forest,
+                node_id,
+                host,
+            )));
         }
 
         // Corresponds to the row inserted for the END operation added to
@@ -311,16 +325,10 @@ impl FastProcessor {
     /// # Errors
     /// - Returns an error if the overflow stack is larger than the space available in the stack
     ///   buffer.
-    fn restore_context(
-        &mut self,
-        tracer: &mut impl Tracer,
-        err_ctx: &impl ErrorContext,
-    ) -> ControlFlow<BreakReason> {
+    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
-            return ControlFlow::Break(BreakReason::Err(
-                ExecutionError::invalid_stack_depth_on_return(self.stack_size(), err_ctx),
-            ));
+            return Err(OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() });
         }
 
         let ctx_info = self
@@ -337,7 +345,7 @@ impl FastProcessor {
 
         tracer.restore_context();
 
-        ControlFlow::Continue(())
+        Ok(())
     }
 
     /// Restores the overflow stack from a previous context.

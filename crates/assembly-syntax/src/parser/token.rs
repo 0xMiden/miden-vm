@@ -259,6 +259,14 @@ impl IntValue {
         }
     }
 
+    /// Returns the value as a `u64`.
+    ///
+    /// This is an alias for [`as_int`](Self::as_int) that matches the `Felt` API,
+    /// allowing the generated grammar code to use a consistent method name.
+    pub fn as_canonical_u64(&self) -> u64 {
+        self.as_int()
+    }
+
     pub fn checked_add(&self, rhs: Self) -> Option<Self> {
         self.as_int().checked_add(rhs.as_int()).map(super::lexer::shrink_u64_hex)
     }

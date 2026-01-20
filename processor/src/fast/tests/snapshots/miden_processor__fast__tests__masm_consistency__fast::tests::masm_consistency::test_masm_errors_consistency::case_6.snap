@@ -1,8 +1,9 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
+assertion_line: 352
 expression: fast_err
 ---
-NotU32Values {
+OperationError {
     label: SourceSpan {
         source_id: SourceId(
             4294967295,
@@ -15,7 +16,9 @@ NotU32Values {
         ),
     },
     source_file: None,
-    values: [
-        4294967296,
-    ],
+    err: NotU32Values {
+        values: [
+            4294967296,
+        ],
+    },
 }

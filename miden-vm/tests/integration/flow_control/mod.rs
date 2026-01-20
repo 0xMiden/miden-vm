@@ -3,7 +3,7 @@ use alloc::sync::Arc;
 use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_debug_types::{SourceLanguage, SourceManager};
-use miden_processor::ExecutionError;
+use miden_processor::{ExecutionError, OperationError};
 use miden_prover::Word;
 use miden_utils_testing::{
     PrimeField64, StackInputs, Test, build_test, expect_exec_error_matches, push_inputs,
@@ -72,7 +72,10 @@ fn faulty_condition_from_loop() {
     let test = build_test!(source, &[10]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueLoop { label: _, source_file: _, value: _ }
+        ExecutionError::OperationError {
+            err: OperationError::NotBinaryValueLoop { value: _ },
+            ..
+        }
     );
 }
 
@@ -165,7 +168,10 @@ fn local_fn_call() {
     let build_test = build_test!(source, &[1, 2]);
     expect_exec_error_matches!(
         build_test,
-        ExecutionError::InvalidStackDepthOnReturn { depth: 17, label: _, source_file: _ }
+        ExecutionError::OperationError {
+            err: OperationError::InvalidStackDepthOnReturn { depth: 17 },
+            ..
+        }
     );
 
     let inputs = (1_u64..18).collect::<Vec<_>>();

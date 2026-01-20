@@ -3,7 +3,7 @@ source: processor/src/fast/tests/all_ops.rs
 expression: fast_stack_outputs
 ---
 Err(
-    NotBinaryValueOp {
+    OperationError {
         label: SourceSpan {
             source_id: SourceId(
                 4294967295,
@@ -16,6 +16,8 @@ Err(
             ),
         },
         source_file: None,
-        value: 2,
+        err: NotBinaryValue {
+            value: 2,
+        },
     },
 )
