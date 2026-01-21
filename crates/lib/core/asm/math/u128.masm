@@ -129,14 +129,16 @@ end
 #!                 a_ll    a_ml    a_mh    a_hh
 #!               x b_ll    b_ml    b_mh    b_hh
 #! -------------------------------------------
-#!  (position)     0       1       2       3       4 (overflow)
+#!  (position)     0       1       2       3       4       5       6
 #!
 #! Partial products contributing to each position:
 #!   c_ll (pos 0): a_ll*b_ll
 #!   c_ml (pos 1): a_ml*b_ll + a_ll*b_ml + carries from pos 0
 #!   c_mh (pos 2): a_mh*b_ll + a_ml*b_ml + a_ll*b_mh + carries from pos 1
 #!   c_hh (pos 3): a_hh*b_ll + a_mh*b_ml + a_ml*b_mh + a_ll*b_hh + carries from pos 2
-#!   overflow: anything that goes into pos 4+
+#!   overflow (pos 4+): a_hh*b_ml + a_mh*b_mh + a_ml*b_hh + carries from pos 3
+#!                    + a_hh*b_mh + a_mh*b_hh (pos 5)
+#!                    + a_hh*b_hh (pos 6)
 
 pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
@@ -216,15 +218,65 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     dup.12 dup.6                # [a_ll, b_hh, p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
     u32overflowing_madd         # [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-    # Sum the carries for overflow flag (including o2_carry)
     # Stack: [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    # 17 elements, o2_carry at position 5
-    swap                        # [o3d, c_hh, o3c, o3b, o3a, o2_carry, ...]
+    # Position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
+    # 17 elements
+
+    # === Column 4+ (overflow): compute products that go directly to overflow ===
+    # Products for position 4: a_hh*b_ml, a_mh*b_mh, a_ml*b_hh
+    # Products for position 5: a_hh*b_mh, a_mh*b_hh
+    # Products for position 6: a_hh*b_hh
+    # We only need to detect if overflow is non-zero.
+    # Note: the `or` instruction requires binary operands, so we convert each term to boolean.
+
+    # Stack: [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
+
+    # Start with carries from column 3: (o3a + o3b + o3c + o3d + o2_carry) != 0
+    swap                        # [o3d, c_hh, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
     movup.2 add                 # [o3d+o3c, c_hh, o3b, o3a, o2_carry, ...] 16 elements
     movup.2 add                 # [sum1, c_hh, o3a, o2_carry, ...] 15 elements
     movup.2 add                 # [sum2, c_hh, o2_carry, a_ll, ...] 14 elements
-    movup.2 add                 # [overflow_raw, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    push.0 neq                  # [overflow, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 add                 # [carry_sum, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    neq.0                       # [overflow_acc, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [overflow_acc (bool), c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:        0          1     2     3     4     5     6     7     8     9    10    11    12
+    # 13 elements
+
+    # Now compute the direct overflow products, converting each to boolean before OR
+    # Stack: [overflow_acc, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:    0          1     2     3     4     5     6     7     8     9    10    11    12
+
+    # a_hh * b_ml (position 4): a_hh at pos 5, b_ml at pos 7
+    dup.7 dup.6                 # [a_hh, b_ml, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0                   # [p_nonzero, overflow_acc, c_hh, ...] (lo+hi != 0 iff either is nonzero)
+    or                          # [overflow_acc, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+
+    # a_mh * b_mh (position 4): a_mh at pos 4, b_mh at pos 8
+    dup.8 dup.5                 # [a_mh, b_mh, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0 or                # [overflow_acc, c_hh, ...]
+
+    # a_ml * b_hh (position 4): a_ml at pos 3, b_hh at pos 9
+    dup.9 dup.4                 # [a_ml, b_hh, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0 or                # [overflow_acc, c_hh, ...]
+
+    # a_hh * b_mh (position 5): a_hh at pos 5, b_mh at pos 8
+    dup.8 dup.6                 # [a_hh, b_mh, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0 or                # [overflow_acc, c_hh, ...]
+
+    # a_mh * b_hh (position 5): a_mh at pos 4, b_hh at pos 9
+    dup.9 dup.5                 # [a_mh, b_hh, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0 or                # [overflow_acc, c_hh, ...]
+
+    # a_hh * b_hh (position 6): a_hh at pos 5, b_hh at pos 9
+    dup.9 dup.6                 # [a_hh, b_hh, overflow_acc, c_hh, ...]
+    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    add neq.0 or                # [overflow, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # Clean up: remove a and b limbs, keep only overflow, c_hh, c_ll, c_ml, c_mh
     movup.2 drop                # [overflow, c_hh, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
