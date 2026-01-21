@@ -169,6 +169,55 @@ fn u32overflowing_add3() {
 }
 
 #[test]
+fn u32wrapping_add3() {
+    let asm_op = "u32wrapping_add3";
+
+    // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
+    // wrapping_add3 should return (a + b + c) mod 2^32
+    let test = build_op_test!(asm_op, &[2, 1, 0]);
+    test.expect_stack(&[3]);
+
+    // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
+    let test = build_op_test!(asm_op, &[3, 2, 1]);
+    test.expect_stack(&[6]);
+
+    // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
+    let a = u32::MAX;
+    let b = 1_u64;
+    // sum mod 2^32 = 0
+    let test = build_op_test!(asm_op, &[b, a as u64, 0]);
+    test.expect_stack(&[0]);
+
+    // --- (a + b + c) > 2^32 ---------------------------------------------------------------------
+    let a = 1_u64;
+    let b = u32::MAX;
+    // sum mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[b as u64, a, 1]);
+    test.expect_stack(&[1]);
+
+    // --- random u32 values with c = 0 -----------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let c = 0_u32;
+    let d = a.wrapping_add(b).wrapping_add(c);
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+    test.expect_stack(&[d as u64]);
+
+    // --- random u32 values with c = 1 -----------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let c = 1_u32;
+    let d = a.wrapping_add(b).wrapping_add(c);
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+    test.expect_stack(&[d as u64]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    let f = rand_value::<u64>();
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
+    test.expect_stack(&[d as u64, f]);
+}
+
+#[test]
 fn u32wrapping_sub() {
     let asm_op = "u32wrapping_sub";
 
@@ -404,6 +453,43 @@ fn u32widening_madd() {
 }
 
 #[test]
+fn u32wrapping_madd() {
+    let asm_op = "u32wrapping_madd";
+
+    // --- no overflow ----------------------------------------------------------------------------
+    // wrapping_madd should return (a * b + c) mod 2^32
+    let test = build_op_test!(asm_op, &[0, 0, 1]);
+    test.expect_stack(&[1]);
+
+    let test = build_op_test!(asm_op, &[2, 1, 3]);
+    test.expect_stack(&[5]);
+
+    // --- overflow once --------------------------------------------------------------------------
+    // (2^31 * 2 + 1) mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[2, U32_BOUND / 2, 1]);
+    test.expect_stack(&[1]);
+
+    // --- multiple overflows ---------------------------------------------------------------------
+    // (2^31 * 4 + 1) mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[4, U32_BOUND / 2, 1]);
+    test.expect_stack(&[1]);
+
+    // --- random u32 values ----------------------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let c = rand_value::<u32>();
+    let madd = a as u64 * b as u64 + c as u64;
+    let lo = madd % U32_BOUND;
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+    test.expect_stack(&[lo]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    let f = rand_value::<u64>();
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
+    test.expect_stack(&[lo, f]);
+}
+
+#[test]
 fn u32div() {
     // --- simple cases ---------------------------------------------------------------------------
     let test = build_op_test!("u32div", &[1, 0]);
@@ -559,15 +645,19 @@ proptest! {
     }
 
     #[test]
-    fn u32overflowing_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
-        let asm_op = "u32overflowing_add3";
+    fn u32unchecked_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let wrapping_asm_op = "u32wrapping_add3";
+        let overflowing_asm_op = "u32overflowing_add3";
 
         // Output is [sum, carry] with sum on top
         let sum: u64 = u64::from(a) + u64::from(b) + u64::from(c);
         let lo = (sum as u32) as u64;
         let hi = sum >> 32;
 
-        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, c as u64]);
+        test.prop_expect_stack(&[lo])?;
+
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, c as u64]);
         test.prop_expect_stack(&[lo, hi])?;
     }
 
@@ -663,5 +753,17 @@ proptest! {
 
         let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
         test.prop_expect_stack(&[lo, hi])?;
+    }
+
+    #[test]
+    fn u32wrapping_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let asm_op = "u32wrapping_madd";
+
+        // wrapping_madd returns (a * b + c) mod 2^32
+        let madd = a as u64 * b as u64 + c as u64;
+        let lo = madd % U32_BOUND;
+
+        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+        test.prop_expect_stack(&[lo])?;
     }
 }

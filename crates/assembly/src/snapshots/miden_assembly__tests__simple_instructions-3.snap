@@ -1,6 +1,6 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 79
+assertion_line: 81
 expression: program
 ---
 begin
@@ -15,10 +15,10 @@ begin
         push(50)
         asmOp(push.2, 1)
         push(2)
-        asmOp(u32wrapping_add3, 2)
+        asmOp(u32wrapping_add3, 3)
         u32add3
+        swap
         drop
-        noop
         noop
     end
 end
