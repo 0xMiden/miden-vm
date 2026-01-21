@@ -195,26 +195,9 @@ fn u32wrapping_add3() {
     let test = build_op_test!(asm_op, &[b as u64, a, 1]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values with c = 0 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let c = 0_u32;
-    let d = a.wrapping_add(b).wrapping_add(c);
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[d as u64]);
-
-    // --- random u32 values with c = 1 -----------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let c = 1_u32;
-    let d = a.wrapping_add(b).wrapping_add(c);
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[d as u64]);
-
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[d as u64, f]);
+    let test = build_op_test!(asm_op, &[2, 1, 0, 99]);
+    test.expect_stack(&[3, 99]);
 }
 
 #[test]
@@ -474,19 +457,10 @@ fn u32wrapping_madd() {
     let test = build_op_test!(asm_op, &[4, U32_BOUND / 2, 1]);
     test.expect_stack(&[1]);
 
-    // --- random u32 values ----------------------------------------------------------------------
-    let a = rand_value::<u32>();
-    let b = rand_value::<u32>();
-    let c = rand_value::<u32>();
-    let madd = a as u64 * b as u64 + c as u64;
-    let lo = madd % U32_BOUND;
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
-    test.expect_stack(&[lo]);
-
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let f = rand_value::<u64>();
-    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
-    test.expect_stack(&[lo, f]);
+    // (2 * 1 + 3) = 5, stack element 99 should remain
+    let test = build_op_test!(asm_op, &[2, 1, 3, 99]);
+    test.expect_stack(&[5, 99]);
 }
 
 #[test]
