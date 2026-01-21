@@ -66,9 +66,7 @@ fn edge_case_add_max_values() {
     let (c, ov) = a.overflowing_add(b);
     let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
     test_u128_op("overflowing_add", a, b, &[ov as u64, c_ll, c_ml, c_mh, c_hh]);
-
-    let c = a.wrapping_add(b);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+    // wrapping_add returns the same c value, reuse the split
     test_u128_op("wrapping_add", a, b, &[c_ll, c_ml, c_mh, c_hh]);
 }
 
