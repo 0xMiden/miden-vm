@@ -173,19 +173,14 @@ fn edge_case_mul_powers_of_two() {
     let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
     test_u128_op("overflowing_mul", a, b, &[0, c_ll, c_ml, c_mh, c_hh]);
 
-    // NOTE: 2^64 * 2^64 = 2^128 would overflow, but there's a known bug in the implementation
-    // where products like a_mh * b_mh that contribute directly to overflow position are not
-    // computed. This test is commented out until the bug is fixed.
-    // See: The schoolbook multiplication only computes products up to position 3, but
-    // a_mh * b_mh (where mh is the 64-96 bit limb) contributes to position 4 (overflow).
-    //
-    // let a = 1u128 << 64;
-    // let b = 1u128 << 64;
-    // let (c, ov) = a.overflowing_mul(b);
-    // assert!(ov);
-    // assert_eq!(c, 0); // 2^128 mod 2^128 = 0
-    // let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    // test_u128_op("overflowing_mul", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
+    // 2^64 * 2^64 = 2^128 overflows
+    let a = 1u128 << 64;
+    let b = 1u128 << 64;
+    let (c, ov) = a.overflowing_mul(b);
+    assert!(ov);
+    assert_eq!(c, 0); // 2^128 mod 2^128 = 0
+    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+    test_u128_op("overflowing_mul", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
 }
 
 #[test]
