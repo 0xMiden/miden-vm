@@ -144,8 +144,8 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
     # Position:  0     1     2     3     4     5     6     7
     #
-    # u32overflowing_mul: [b, a] -> [lo, hi] computes a*b
-    # u32overflowing_madd: [c, b, a] -> [lo, hi] computes a*b+c
+    # u32widening_mul: [b, a] -> [lo, hi] computes a*b
+    # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
     # Move a limbs to front for easier access
     movup.7 movup.7 movup.7 movup.7
@@ -155,7 +155,7 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # === Column 0: c_ll ===
     # a_ll * b_ll
     dup.4 dup.1                 # [a_ll, b_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
-    u32overflowing_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    u32widening_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
     movdn.9                     # [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     # Stack: [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     # Position: 0   1     2     3     4     5     6     7     8     9
@@ -163,11 +163,11 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # === Column 1: c_ml ===
     # a_ml * b_ll + o0: [c, b, a] for madd where c=o0, b=b_ll, a=a_ml
     dup.5 dup.3                 # [a_ml, b_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
-    u32overflowing_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32widening_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
 
     # a_ll * b_ml + p1: [c, b, a] where c=p1, b=b_ml, a=a_ll
     dup.7 dup.3                 # [a_ll, b_ml, p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
-    u32overflowing_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32widening_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     movdn.11                    # [o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
     # Sum o1a + o1b, tracking carry for column 2
     u32overflowing_add          # [o1_sum, o1_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
@@ -178,15 +178,15 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # === Column 2: c_mh ===
     # a_mh * b_ll + o1_sum: [c, b, a] where c=o1_sum, b=b_ll, a=a_mh
     dup.5 dup.4                 # [a_mh, b_ll, o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
     # a_ml * b_ml + p2a
     dup.7 dup.4                 # [a_ml, b_ml, p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
     # a_ll * b_mh + p2b
     dup.9 dup.4                 # [a_ll, b_mh, p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
     movdn.13                    # [o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
     # Stack has 15 elements: o1_carry at position 14, c_mh at position 13
     # Sum o2a + o2b + o2c + o1_carry for carry into column 3
@@ -204,19 +204,19 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
     # a_hh * b_ll + o2_sum: [c, b, a] where c=o2_sum, b=b_ll, a=a_hh
     dup.6 dup.6                 # [a_hh, b_ll, o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    u32overflowing_madd         # [p3a, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32widening_madd         # [p3a, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # a_mh * b_ml + p3a
     dup.8 dup.6                 # [a_mh, b_ml, p3a, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    u32overflowing_madd         # [p3b, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32widening_madd         # [p3b, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # a_ml * b_mh + p3b
     dup.10 dup.6                # [a_ml, b_mh, p3b, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    u32overflowing_madd         # [p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32widening_madd         # [p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # a_ll * b_hh + p3c
     dup.12 dup.6                # [a_ll, b_hh, p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
-    u32overflowing_madd         # [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32widening_madd         # [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # Stack: [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
     # Position: 0     1    2    3    4      5       6     7     8     9    10    11    12    13    14    15    16
@@ -249,33 +249,33 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
 
     # a_hh * b_ml (position 4): a_hh at pos 5, b_ml at pos 7
     dup.7 dup.6                 # [a_hh, b_ml, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0                   # [p_nonzero, overflow_acc, c_hh, ...] (lo+hi != 0 iff either is nonzero)
     or                          # [overflow_acc, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # a_mh * b_mh (position 4): a_mh at pos 4, b_mh at pos 8
     dup.8 dup.5                 # [a_mh, b_mh, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0 or                # [overflow_acc, c_hh, ...]
 
     # a_ml * b_hh (position 4): a_ml at pos 3, b_hh at pos 9
     dup.9 dup.4                 # [a_ml, b_hh, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0 or                # [overflow_acc, c_hh, ...]
 
     # a_hh * b_mh (position 5): a_hh at pos 5, b_mh at pos 8
     dup.8 dup.6                 # [a_hh, b_mh, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0 or                # [overflow_acc, c_hh, ...]
 
     # a_mh * b_hh (position 5): a_mh at pos 4, b_hh at pos 9
     dup.9 dup.5                 # [a_mh, b_hh, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0 or                # [overflow_acc, c_hh, ...]
 
     # a_hh * b_hh (position 6): a_hh at pos 5, b_hh at pos 9
     dup.9 dup.6                 # [a_hh, b_hh, overflow_acc, c_hh, ...]
-    u32overflowing_mul          # [lo, hi, overflow_acc, c_hh, ...]
+    u32widening_mul          # [lo, hi, overflow_acc, c_hh, ...]
     add neq.0 or                # [overflow, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
     # Clean up: remove a and b limbs, keep only overflow, c_hh, c_ll, c_ml, c_mh
@@ -304,8 +304,8 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
     # Position:  0     1     2     3     4     5     6     7
     #
-    # u32overflowing_mul: [b, a] -> [lo, hi] computes a*b
-    # u32overflowing_madd: [c, b, a] -> [lo, hi] computes a*b+c
+    # u32widening_mul: [b, a] -> [lo, hi] computes a*b
+    # u32widening_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
     # Move a limbs to front for easier access
     movup.7 movup.7 movup.7 movup.7
@@ -315,7 +315,7 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     # === Column 0: c_ll ===
     # a_ll * b_ll
     dup.4 dup.1                 # [a_ll, b_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
-    u32overflowing_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    u32widening_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
     movdn.9                     # [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     # Stack: [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     # Position: 0   1     2     3     4     5     6     7     8     9
@@ -323,11 +323,11 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     # === Column 1: c_ml ===
     # a_ml * b_ll + o0: [c, b, a] for madd where c=o0, b=b_ll, a=a_ml
     dup.5 dup.3                 # [a_ml, b_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
-    u32overflowing_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32widening_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
 
     # a_ll * b_ml + p1: [c, b, a] where c=p1, b=b_ml, a=a_ll
     dup.7 dup.3                 # [a_ll, b_ml, p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
-    u32overflowing_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32widening_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
     movdn.11                    # [o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
     # Sum o1a + o1b, tracking carry for column 2
     u32overflowing_add          # [o1_sum, o1_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
@@ -338,15 +338,15 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     # === Column 2: c_mh ===
     # a_mh * b_ll + o1_sum: [c, b, a] where c=o1_sum, b=b_ll, a=a_mh
     dup.5 dup.4                 # [a_mh, b_ll, o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
     # a_ml * b_ml + p2a
     dup.7 dup.4                 # [a_ml, b_ml, p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
     # a_ll * b_mh + p2b
     dup.9 dup.4                 # [a_ll, b_mh, p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
-    u32overflowing_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32widening_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
     movdn.13                    # [o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
     # Stack has 15 elements: o1_carry at position 14, c_mh at position 13
     # Sum o2a + o2b + o2c + o1_carry for carry into column 3
