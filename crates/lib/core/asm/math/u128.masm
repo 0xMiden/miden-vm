@@ -2,27 +2,45 @@
 #! Performs addition of two unsigned 128 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [overflowing_flag, chh, cmh, cml, cll, ...], where c = (a + b) % 2^128
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [overflow, c_ll, c_ml, c_mh, c_hh, ...], where c = (a + b) % 2^128
 pub proc overflowing_add(b: u128, a: u128) -> (i1, u128)
-                        # [bhh bmh bml bll ahh amh aml all ...]
-    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
-    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
-    u32overflowing_add  # [oll rll bhh bmh bml ahh amh aml ...]
-    movup.7             # [aml oll rll bhh bmh bml ahh amh ...]
-    movup.5             # [bml aml oll rll bhh bmh ahh amh ...]
-    u32overflowing_add3 # [oml rml rll bhh bmh ahh amh ...]
-    movup.6             # [amh oml rml rll bhh bmh ahh ...]
-    movup.5             # [bmh amh oml rml rll bhh ahh ...]
-    u32overflowing_add3 # [omh rmh rml rll bhh ahh ...]
-    movup.5             # [ahh omh rmh rml rll bhh ...]
-    movup.5             # [bhh ahh omh rmh rml rll ...]
-    u32overflowing_add3 # [o rhh rmh rml rll ...]
+    # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
+    # Output: [overflow, c_ll, c_ml, c_mh, c_hh, ...]
+    #
+    # Following u64 pattern: keep sums at bottom, carries at top
+
+    # Step 1: a_ll + b_ll
+    movup.4                     # [a_ll, b_ll, b_ml, b_mh, b_hh, a_ml, a_mh, a_hh]
+    u32overflowing_add          # [c_ll, carry1, b_ml, b_mh, b_hh, a_ml, a_mh, a_hh]
+    movdn.7                     # [carry1, b_ml, b_mh, b_hh, a_ml, a_mh, a_hh, c_ll]
+
+    # Step 2: carry1 + a_ml + b_ml
+    movup.4                     # [a_ml, carry1, b_ml, b_mh, b_hh, a_mh, a_hh, c_ll]
+    movup.2                     # [b_ml, a_ml, carry1, b_mh, b_hh, a_mh, a_hh, c_ll]
+    u32overflowing_add3         # [c_ml, carry2, b_mh, b_hh, a_mh, a_hh, c_ll]
+    movdn.6                     # [carry2, b_mh, b_hh, a_mh, a_hh, c_ll, c_ml]
+
+    # Step 3: carry2 + a_mh + b_mh
+    movup.3                     # [a_mh, carry2, b_mh, b_hh, a_hh, c_ll, c_ml]
+    movup.2                     # [b_mh, a_mh, carry2, b_hh, a_hh, c_ll, c_ml]
+    u32overflowing_add3         # [c_mh, carry3, b_hh, a_hh, c_ll, c_ml]
+    movdn.5                     # [carry3, b_hh, a_hh, c_ll, c_ml, c_mh]
+
+    # Step 4: carry3 + a_hh + b_hh
+    movup.2                     # [a_hh, carry3, b_hh, c_ll, c_ml, c_mh]
+    movup.2                     # [b_hh, a_hh, carry3, c_ll, c_ml, c_mh]
+    u32overflowing_add3         # [c_hh, overflow, c_ll, c_ml, c_mh]
+
+    # Current: [c_hh, overflow, c_ll, c_ml, c_mh]
+    # Target:  [overflow, c_ll, c_ml, c_mh, c_hh]
+    # Move c_hh from position 0 to position 4
+    movdn.4         # [overflow, c_ll, c_ml, c_mh, c_hh]
 end
 
 #! Performs addition of two unsigned 128 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a + b) % 2^128
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [c_ll, c_ml, c_mh, c_hh, ...], where c = (a + b) % 2^128
 pub proc wrapping_add(b: u128, a: u128) -> u128
     exec.overflowing_add
     drop
@@ -31,233 +49,314 @@ end
 #! Performs subtraction of two unsigned 128 bit integers preserving the underflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [underflowing_flag, chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [underflow, c_ll, c_ml, c_mh, c_hh, ...], where c = (a - b) % 2^128
 pub proc overflowing_sub(b: u128, a: u128) -> (i1, u128)
-                        # [bhh bmh bml bll ahh amh aml all ...]
-    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
-    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
-    u32overflowing_sub  # [ull rll bhh bmh bml ahh amh aml ...]
-    movup.7             # [aml ull rll bhh bmh bml ahh amh ...]
-    movup.5             # [bml aml ull rll bhh bmh ahh amh ...]
-    u32overflowing_sub  # [uml rml ull rll bhh bmh ahh amh ...]
-    swap.1              # [rml uml ull rll bhh bmh ahh amh ...]
-    movup.2             # [ull rml uml rll bhh bmh ahh amh ...]
-    u32overflowing_sub  # [uml' rml uml rll bhh bmh ahh amh ...]
-    movup.2             # [uml uml' rml rll bhh bmh ahh amh ...]
-    or                  # [uml rml rll bhh bmh ahh amh ...]
-    movup.6             # [amh uml rml rll bhh bmh ahh ...]
-    movup.5             # [bmh amh uml rml rll bhh ahh ...]
-    u32overflowing_sub  # [umh rmh uml rml rll bhh ahh ...]
-    swap.1              # [rmh umh uml rml rll bhh ahh ...]
-    movup.2             # [uml rmh umh rml rll bhh ahh ...]
-    u32overflowing_sub  # [umh' rmh umh rml rll bhh ahh ...]
-    movup.2             # [umh umh' rmh rml rll bhh ahh ...]
-    or                  # [umh rmh rml rll bhh ahh ...]
-    movup.5             # [ahh umh rmh rml rll bhh ...]
-    movup.5             # [bhh ahh umh rmh rml rll ...]
-    u32overflowing_sub  # [uhh rhh umh rmh rml rll ...]
-    swap.1              # [rhh uhh umh rmh rml rll ...]
-    movup.2             # [umh rhh uhh rmh rml rll ...]
-    u32overflowing_sub  # [uhh' rhh uhh rmh rml rll ...]
-    movup.2             # [uhh uhh' rhh rmh rml rll ...]
-    or                  # [uhh rhh rmh rml rll ...]
+    # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
+    # Following u64 pattern: move a limbs to front, then subtract limb by limb
+    # u32overflowing_sub computes: second - top = [borrow, result]
+
+    # Move a to front: [b...] [a...] -> [a...] [b...]
+    movup.7 movup.7 movup.7 movup.7
+                                # [a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+
+    # Step 1: a_ll - b_ll
+    movup.4                     # [b_ll, a_ll, a_ml, a_mh, a_hh, b_ml, b_mh, b_hh]
+    u32overflowing_sub          # [borrow1, c_ll, a_ml, a_mh, a_hh, b_ml, b_mh, b_hh]
+    movdn.7                     # [c_ll, a_ml, a_mh, a_hh, b_ml, b_mh, b_hh, borrow1]
+
+    # Step 2: a_ml - b_ml - borrow1
+    movup.4                     # [b_ml, c_ll, a_ml, a_mh, a_hh, b_mh, b_hh, borrow1]
+    movup.2                     # [a_ml, b_ml, c_ll, a_mh, a_hh, b_mh, b_hh, borrow1]
+    swap                        # [b_ml, a_ml, c_ll, a_mh, a_hh, b_mh, b_hh, borrow1]
+    u32overflowing_sub          # [borrow2a, diff_ml, c_ll, a_mh, a_hh, b_mh, b_hh, borrow1]
+    movup.7                     # [borrow1, borrow2a, diff_ml, c_ll, a_mh, a_hh, b_mh, b_hh]
+    movup.2                     # [diff_ml, borrow1, borrow2a, c_ll, a_mh, a_hh, b_mh, b_hh]
+    swap                        # [borrow1, diff_ml, borrow2a, c_ll, a_mh, a_hh, b_mh, b_hh]
+    u32overflowing_sub          # [borrow2b, c_ml, borrow2a, c_ll, a_mh, a_hh, b_mh, b_hh]
+    movup.2                     # [borrow2a, borrow2b, c_ml, c_ll, a_mh, a_hh, b_mh, b_hh]
+    or                          # [borrow2, c_ml, c_ll, a_mh, a_hh, b_mh, b_hh]
+    movdn.6                     # [c_ml, c_ll, a_mh, a_hh, b_mh, b_hh, borrow2]
+
+    # Step 3: a_mh - b_mh - borrow2
+    movup.4                     # [b_mh, c_ml, c_ll, a_mh, a_hh, b_hh, borrow2]
+    movup.3                     # [a_mh, b_mh, c_ml, c_ll, a_hh, b_hh, borrow2]
+    swap                        # [b_mh, a_mh, c_ml, c_ll, a_hh, b_hh, borrow2]
+    u32overflowing_sub          # [borrow3a, diff_mh, c_ml, c_ll, a_hh, b_hh, borrow2]
+    movup.6                     # [borrow2, borrow3a, diff_mh, c_ml, c_ll, a_hh, b_hh]
+    movup.2                     # [diff_mh, borrow2, borrow3a, c_ml, c_ll, a_hh, b_hh]
+    swap                        # [borrow2, diff_mh, borrow3a, c_ml, c_ll, a_hh, b_hh]
+    u32overflowing_sub          # [borrow3b, c_mh, borrow3a, c_ml, c_ll, a_hh, b_hh]
+    movup.2                     # [borrow3a, borrow3b, c_mh, c_ml, c_ll, a_hh, b_hh]
+    or                          # [borrow3, c_mh, c_ml, c_ll, a_hh, b_hh]
+    movdn.5                     # [c_mh, c_ml, c_ll, a_hh, b_hh, borrow3]
+
+    # Step 4: a_hh - b_hh - borrow3
+    movup.4                     # [b_hh, c_mh, c_ml, c_ll, a_hh, borrow3]
+    movup.4                     # [a_hh, b_hh, c_mh, c_ml, c_ll, borrow3]
+    swap                        # [b_hh, a_hh, c_mh, c_ml, c_ll, borrow3]
+    u32overflowing_sub          # [borrow4a, diff_hh, c_mh, c_ml, c_ll, borrow3]
+    movup.5                     # [borrow3, borrow4a, diff_hh, c_mh, c_ml, c_ll]
+    movup.2                     # [diff_hh, borrow3, borrow4a, c_mh, c_ml, c_ll]
+    swap                        # [borrow3, diff_hh, borrow4a, c_mh, c_ml, c_ll]
+    u32overflowing_sub          # [borrow4b, c_hh, borrow4a, c_mh, c_ml, c_ll]
+    movup.2                     # [borrow4a, borrow4b, c_hh, c_mh, c_ml, c_ll]
+    or                          # [underflow, c_hh, c_mh, c_ml, c_ll]
+
+    # Rearrange: [underflow, c_hh, c_mh, c_ml, c_ll] -> [underflow, c_ll, c_ml, c_mh, c_hh]
+    movdn.4                     # [c_hh, c_mh, c_ml, c_ll, underflow]
+    movdn.3                     # [c_mh, c_ml, c_ll, c_hh, underflow]
+    movdn.2                     # [c_ml, c_ll, c_mh, c_hh, underflow]
+    swap                        # [c_ll, c_ml, c_mh, c_hh, underflow]
+    movup.4                     # [underflow, c_ll, c_ml, c_mh, c_hh]
 end
 
 #! Performs subtraction of two unsigned 128 bit integers discarding the underflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a - b) % 2^128
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [c_ll, c_ml, c_mh, c_hh, ...], where c = (a - b) % 2^128
 pub proc wrapping_sub(b: u128, a: u128) -> u128
-                        # [bhh bmh bml bll ahh amh aml all ...]
-    movup.7             # [all bhh bmh bml bll ahh amh aml ...]
-    movup.4             # [bll all bhh bmh bml ahh amh aml ...]
-    u32overflowing_sub  # [ull rll bhh bmh bml ahh amh aml ...]
-    movup.7             # [aml ull rll bhh bmh bml ahh amh ...]
-    movup.5             # [bml aml ull rll bhh bmh ahh amh ...]
-    u32overflowing_sub  # [uml rml ull rll bhh bmh ahh amh ...]
-    swap.1              # [rml uml ull rll bhh bmh ahh amh ...]
-    movup.2             # [ull rml uml rll bhh bmh ahh amh ...]
-    u32overflowing_sub  # [uml' rml uml rll bhh bmh ahh amh ...]
-    movup.2             # [uml uml' rml rll bhh bmh ahh amh ...]
-    or                  # [uml rml rll bhh bmh ahh amh ...]
-    movup.6             # [amh uml rml rll bhh bmh ahh ...]
-    movup.5             # [bmh amh uml rml rll bhh ahh ...]
-    u32overflowing_sub  # [umh rmh uml rml rll bhh ahh ...]
-    swap.1              # [rmh umh uml rml rll bhh ahh ...]
-    movup.2             # [uml rmh umh rml rll bhh ahh ...]
-    u32overflowing_sub  # [umh' rmh umh rml rll bhh ahh ...]
-    movup.2             # [umh umh' rmh rml rll bhh ahh ...]
-    or                  # [umh rmh rml rll bhh ahh ...]
-    movup.5             # [ahh umh rmh rml rll bhh ...]
-    movup.5             # [bhh ahh umh rmh rml rll ...]
-    u32wrapping_sub     # [rhh umh rmh rml rll ...]
-    swap.1              # [umh rhh rmh rml rll ...]
-    u32wrapping_sub     # [rhh rmh rml rll ...]
+    exec.overflowing_sub
+    drop
 end
 
 #! Performs multiplication of two unsigned 128 bit integers preserving the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [overflowing_flag, chh, cmh, cml, cll, ...], where c = (a * b) % 2^128
-
-#                 ahh     amh     aml     all
-#               x bhh     bmh     bml     bll
-# -------------------------------------------
-#                                  o0 allxbll
-#                          o1 amlxbll       0
-#                  o2 amhxbll       0       0
-#          f1 ahhxbll       0       0       0     bll x4 uses, ahh x1 uses
-#                          o4 allxbml       0
-#                  o5 amlxbml       0       0
-#          f2 amhxbml       0       0       0     amh x2 uses, bml x3 uses
-#                  o7 allxbmh       0       0
-#          f3 amlxbmh       0       0       0     aml x3 uses, bmh x2 uses
-#          f4 allxbhh       0       0       0     all x4 uses, bhh x1 uses
-# -------------------------------------------
-#           f      rhh    rmh     rml     rll
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [overflow, c_ll, c_ml, c_mh, c_hh, ...], where c = (a * b) % 2^128
+#!
+#! Schoolbook multiplication (LE layout with low limbs on top):
+#!
+#!                 a_ll    a_ml    a_mh    a_hh
+#!               x b_ll    b_ml    b_mh    b_hh
+#! -------------------------------------------
+#!  (position)     0       1       2       3       4 (overflow)
+#!
+#! Partial products contributing to each position:
+#!   c_ll (pos 0): a_ll*b_ll
+#!   c_ml (pos 1): a_ml*b_ll + a_ll*b_ml + carries from pos 0
+#!   c_mh (pos 2): a_mh*b_ll + a_ml*b_ml + a_ll*b_mh + carries from pos 1
+#!   c_hh (pos 3): a_hh*b_ll + a_mh*b_ml + a_ml*b_mh + a_ll*b_hh + carries from pos 2
+#!   overflow: anything that goes into pos 4+
 
 pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
-                         # [bhh bmh bml bll ahh amh aml all ... ]
-     # all x bll
-     dup.7 dup.4
-     u32overflowing_mul  # [o0 rll bhh bmh bml bll ahh amh aml all ...]
+    # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
+    # Position:  0     1     2     3     4     5     6     7
+    #
+    # u32overflowing_mul: [b, a] -> [lo, hi] computes a*b
+    # u32overflowing_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
-     # aml x bll + o0 -> rml0
-     dup.8 dup.6
-     u32overflowing_madd # [o1 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+    # Move a limbs to front for easier access
+    movup.7 movup.7 movup.7 movup.7
+    # Now: [a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, ...]
+    # Position: 0     1     2     3     4     5     6     7
 
-     # amh x bll + o1 -> rmh0
-     dup.8 dup.7
-     u32overflowing_madd # [o2 rmh0 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+    # === Column 0: c_ll ===
+    # a_ll * b_ll
+    dup.4 dup.1                 # [a_ll, b_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    u32overflowing_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    movdn.9                     # [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    # Stack: [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    # Position: 0   1     2     3     4     5     6     7     8     9
 
-     # ahh x bll + o2 -> rhh0, f1
-     movup.8 movup.8
-     u32overflowing_madd
-     push.0 neq          # [f1 rhh0 rmh0 rml0 rll bhh bmh bml amh aml all ...]
+    # === Column 1: c_ml ===
+    # a_ml * b_ll + o0: [c, b, a] for madd where c=o0, b=b_ll, a=a_ml
+    dup.5 dup.3                 # [a_ml, b_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32overflowing_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
 
-     # all x bml + rml0 -> rml
-     movup.3
-     dup.10 dup.8
-     u32overflowing_madd # [o4 rml f1 rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+    # a_ll * b_ml + p1: [c, b, a] where c=p1, b=b_ml, a=a_ll
+    dup.7 dup.3                 # [a_ll, b_ml, p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32overflowing_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    movdn.11                    # [o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
+    # Sum o1a + o1b, tracking carry for column 2
+    u32overflowing_add          # [o1_sum, o1_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
+    swap movdn.11               # [o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    # Stack: [o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    # Position:   0      1     2     3     4     5     6     7     8     9    10        11
 
-     # aml x bml + o4 -> rmh1
-     dup.10 dup.9
-     u32overflowing_madd # [o5 rmh1 rml f1 rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+    # === Column 2: c_mh ===
+    # a_mh * b_ll + o1_sum: [c, b, a] where c=o1_sum, b=b_ll, a=a_mh
+    dup.5 dup.4                 # [a_mh, b_ll, o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
-     # amh x bml + o5 -> rhh1, f2
-     movup.10 movup.10
-     u32overflowing_madd
-     push.0 neq          # [f2 rhh1 rmh1 rml f1 rhh0 rmh0 rll bhh bmh aml all ...]
+    # a_ml * b_ml + p2a
+    dup.7 dup.4                 # [a_ml, b_ml, p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
-     # all x bmh + rmh0 -> rmh3
-     movup.6
-     dup.11 dup.10
-     u32overflowing_madd # [o7 rmh3 f2 rhh1 rmh1 rml f1 rhh0 rll bhh bmh aml all ...]
+    # a_ll * b_mh + p2b
+    dup.9 dup.4                 # [a_ll, b_mh, p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    movdn.13                    # [o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
+    # Stack has 15 elements: o1_carry at position 14, c_mh at position 13
+    # Sum o2a + o2b + o2c + o1_carry for carry into column 3
+    u32overflowing_add3         # [o2_partial, o2_carry1, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
+    # Stack has 14 elements: o1_carry at position 13, c_mh at position 12
+    movup.13                    # [o1_carry, o2_partial, o2_carry1, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh] (14 elements)
+    u32overflowing_add          # [o2_sum, o2_carry2, o2_carry1, a_ll, ...] (13 elements)
+    swap movup.2 add            # [o2_total_carry, o2_sum, a_ll, ...] (12 elements)
+    swap                        # [o2_sum, o2_total_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
 
-     # aml x bmh + o7 -> rhh2, f3
-     movup.11 movup.11
-     u32overflowing_madd
-     push.0 neq          # [f3 rhh2 rmh3 f2 rhh1 rmh1 rml f1 rhh0 rll bhh all ...]
+    # === Column 3: c_hh ===
+    # Stack: [o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # a_hh * b_ll + o2_sum: [c, b, a] where c=o2_sum, b=b_ll, a=a_hh
+    dup.6 dup.6                 # [a_hh, b_ll, o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32overflowing_madd         # [p3a, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-     # rmh1 + rmh3 -> rmh
-     movup.5 movup.3
-     u32overflowing_add
-     push.0 neq          # [o9 rmh f3 rhh2 f2 rhh1 rml f1 rhh0 rll bhh all ...]
+    # a_mh * b_ml + p3a
+    dup.8 dup.6                 # [a_mh, b_ml, p3a, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32overflowing_madd         # [p3b, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-     # all x bhh + o9 -> rhh3, f4
-     movup.11 movup.11
-     u32overflowing_madd
-     push.0 neq          # [f4 rhh3 rmh f3 rhh2 f2 rhh1 rml f1 rhh0 rll ...]
+    # a_ml * b_mh + p3b
+    dup.10 dup.6                # [a_ml, b_mh, p3b, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32overflowing_madd         # [p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-     # rhh0 + rhh1 + rhh2 -> rhh4, f5
-     movup.9 movup.7 movup.6
-     u32overflowing_add3 # [f5 rhh4 f4 rhh3 rmh f3 f2 rml f1 rll ...]
+    # a_ll * b_hh + p3c
+    dup.12 dup.6                # [a_ll, b_hh, p3c, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32overflowing_madd         # [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-     # rhh4 + rhh3 -> rhh, f6
-     movup.3 movup.2
-     u32overflowing_add  # [f6 rhh f5 f4 rmh f3 f2 rml f1 rll ...]
+    # Sum the carries for overflow flag (including o2_carry)
+    # Stack: [c_hh, o3d, o3c, o3b, o3a, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # 17 elements, o2_carry at position 5
+    swap                        # [o3d, c_hh, o3c, o3b, o3a, o2_carry, ...]
+    movup.2 add                 # [o3d+o3c, c_hh, o3b, o3a, o2_carry, ...] 16 elements
+    movup.2 add                 # [sum1, c_hh, o3a, o2_carry, ...] 15 elements
+    movup.2 add                 # [sum2, c_hh, o2_carry, a_ll, ...] 14 elements
+    movup.2 add                 # [overflow_raw, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    push.0 neq                  # [overflow, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-     # all the overflows
-     movup.2 add
-     movup.2 add
-     movup.3 add
-     movup.3 add
-     movup.4 add
-     push.0 neq          # [f rhh rmh rml rll ...]
+    # Clean up: remove a and b limbs, keep only overflow, c_hh, c_ll, c_ml, c_mh
+    movup.2 drop                # [overflow, c_hh, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, b_mh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, b_hh, c_ll, c_ml, c_mh]
+    movup.2 drop                # [overflow, c_hh, c_ll, c_ml, c_mh]
+
+    # Rearrange: [overflow, c_hh, c_ll, c_ml, c_mh] -> [overflow, c_ll, c_ml, c_mh, c_hh]
+    swap                        # [c_hh, overflow, c_ll, c_ml, c_mh]
+    movdn.4                     # [overflow, c_ll, c_ml, c_mh, c_hh]
 end
 
 #! Performs multiplication of two unsigned 128 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
-#! [bhh, bmh, bml, bll, ahh, amh, aml, all, ...] -> [chh, cmh, cml, cll, ...], where c = (a * b) % 2^128
-
-#                 ahh     amh     aml     all
-#               x bhh     bmh     bml     bll
-# -------------------------------------------
-#                                  o0 allxbll
-#                          o1 amlxbll       0
-#                  o2 amhxbll       0       0
-#             ahhxbll       0       0       0     bll x4 uses, ahh x1 uses
-#                          o3 allxbml       0
-#                  o4 amlxbml       0       0
-#             amhxbml       0       0       0     amh x2 uses, bml x3 uses
-#                  o5 allxbmh       0       0
-#             amlxbmh       0       0       0     aml x3 uses, bmh x2 uses
-#             allxbhh       0       0       0     all x4 uses, bhh x1 uses
-# -------------------------------------------
-#                  rhh    rmh     rml     rll
-
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [c_ll, c_ml, c_mh, c_hh, ...], where c = (a * b) % 2^128
+#!
+#! Uses schoolbook multiplication with u32wrapping_madd for products contributing to c_hh
+#! since overflow there doesn't affect the result.
 pub proc wrapping_mul(b: u128, a: u128) -> u128
-                         # [bhh bmh bml bll ahh amh aml all ... ]
-    # all x bll -> rll
-    dup.7 dup.4
-    u32overflowing_mul   # [o0 rll bhh bmh bml bll ahh amh aml all ...]
+    # Input: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
+    # Position:  0     1     2     3     4     5     6     7
+    #
+    # u32overflowing_mul: [b, a] -> [lo, hi] computes a*b
+    # u32overflowing_madd: [c, b, a] -> [lo, hi] computes a*b+c
 
-    # aml x bml + o0 -> rml0
-    dup.8 dup.6
-    u32overflowing_madd  # [o1 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+    # Move a limbs to front for easier access
+    movup.7 movup.7 movup.7 movup.7
+    # Now: [a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, ...]
+    # Position: 0     1     2     3     4     5     6     7
 
-    # amh x bll + o1 -> rmh0
-    dup.8 dup.7
-    u32overflowing_madd  # [o2 rmh0 rml0 rll bhh bmh bml bll ahh amh aml all ...]
+    # === Column 0: c_ll ===
+    # a_ll * b_ll
+    dup.4 dup.1                 # [a_ll, b_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    u32overflowing_mul          # [c_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    movdn.9                     # [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    # Stack: [o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    # Position: 0   1     2     3     4     5     6     7     8     9
 
-    # ahh x bll + o2 -> rhh0
-    movup.8 movup.8
-    u32wrapping_madd     # [rhh0 rmh0 rml0 rll bhh bmh bml amh aml all ...]
+    # === Column 1: c_ml ===
+    # a_ml * b_ll + o0: [c, b, a] for madd where c=o0, b=b_ll, a=a_ml
+    dup.5 dup.3                 # [a_ml, b_ll, o0, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32overflowing_madd         # [p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
 
-    # all x bml + rml0 -> rml
-    movup.2 dup.9 dup.7
-    u32overflowing_madd  # [o3 rml rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+    # a_ll * b_ml + p1: [c, b, a] where c=p1, b=b_ml, a=a_ll
+    dup.7 dup.3                 # [a_ll, b_ml, p1, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    u32overflowing_madd         # [c_ml, o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll]
+    movdn.11                    # [o1b, o1a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
+    # Sum o1a + o1b, tracking carry for column 2
+    u32overflowing_add          # [o1_sum, o1_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml]
+    swap movdn.11               # [o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    # Stack: [o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    # Position:   0      1     2     3     4     5     6     7     8     9    10        11
 
-    # aml x bml + o3 -> rmh1
-    dup.9 dup.8
-    u32overflowing_madd  # [o4 rmh1 rml rhh0 rmh0 rll bhh bmh bml amh aml all ...]
+    # === Column 2: c_mh ===
+    # a_mh * b_ll + o1_sum: [c, b, a] where c=o1_sum, b=b_ll, a=a_mh
+    dup.5 dup.4                 # [a_mh, b_ll, o1_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
-    # amh x bml + o4 -> rhh1
-    movup.9 movup.9
-    u32wrapping_madd     # [rhh1 rmh1 rml rhh0 rmh0 rll bhh bmh aml all ...]
+    # a_ml * b_ml + p2a
+    dup.7 dup.4                 # [a_ml, b_ml, p2a, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
 
-    # all x bmh + rmh1 -> rmh2
-    swap.1 dup.9 dup.8
-    u32overflowing_madd  # [o5 rmh2 rhh1 rml rhh0 rmh0 rll bhh bmh aml all ...]
+    # a_ll * b_mh + p2b
+    dup.9 dup.4                 # [a_ll, b_mh, p2b, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    u32overflowing_madd         # [c_mh, o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, o1_carry]
+    movdn.13                    # [o2c, o2b, o2a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
+    # Stack has 15 elements: o1_carry at position 14, c_mh at position 13
+    # Sum o2a + o2b + o2c + o1_carry for carry into column 3
+    u32overflowing_add3         # [o2_partial, o2_carry1, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh, o1_carry]
+    # Stack has 14 elements: o1_carry at position 13, c_mh at position 12
+    movup.13                    # [o1_carry, o2_partial, o2_carry1, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32overflowing_add          # [o2_sum, o2_carry2, o2_carry1, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Combine carries: o2_carry1 + o2_carry2 (will be at most 2, fits in u32)
+    swap movup.2 add            # [o2_total_carry, o2_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    swap                        # [o2_sum, o2_total_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
 
-    # aml x bmh + o5 -> rhh2
-    movup.9 movup.9
-    u32wrapping_madd     # [rhh2 rmh2 rhh1 rml rhh0 rmh0 rll bhh all ...]
+    # === Column 3: c_hh (overflow discarded) ===
+    # Stack: [o2_sum, o2_carry, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:   0        1      2     3     4     5     6     7     8     9    10    11    12
+    # 13 elements
+    # For wrapping_mul, o2_carry represents overflow beyond 128 bits - discard it now
+    swap drop                   # [o2_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [o2_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:   0      1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements
 
-    # all x bhh + rhh2 -> rhh3
-    movup.8 movup.8
-    u32wrapping_madd     # [rhh3 rmh2 rhh1 rml rhh0 rmh0 rll ...]
+    # a_hh * b_ll + o2_sum
+    dup.5 dup.5                 # dup.5 gets b_ll, then dup.5 gets a_hh
+                                # [a_hh, b_ll, o2_sum, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32wrapping_madd            # [p3a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [p3a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position:  0    1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements
 
-    # rmh0 + rmh2 -> rmh
-    swap.1 movup.5
-    u32overflowing_add   # [o6 rmh rhh3 rhh1 rml rhh0 rll ...]
+    # a_mh * b_ml + p3a
+    dup.6 dup.4                 # dup.6 gets b_ml, then dup.4 gets a_mh
+                                # [a_mh, b_ml, p3a, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32wrapping_madd            # [p3b, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-    # rhh0 + rhh3 + o6 -> rhh4
-    movup.5 movup.3
-    u32wrapping_add3     # [rhh4 rmh rhh1 rml rll ...]
+    # a_ml * b_mh + p3b
+    dup.7 dup.3                 # dup.7 gets b_mh, then dup.3 gets a_ml
+                                # [a_ml, b_mh, p3b, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32wrapping_madd            # [p3c, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
 
-    # rhh4 + rhh1 -> rhh
-    movup.2
-    u32wrapping_add      # [rhh rmh rml rll ...]
+    # a_ll * b_hh + p3c
+    dup.8 dup.2                 # dup.8 gets b_hh, then dup.2 gets a_ll
+                                # [a_ll, b_hh, p3c, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    u32wrapping_madd            # [c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Stack: [c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ll, c_ml, c_mh]
+    # Position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements; extract c_ll, c_ml, c_mh from positions 9, 10, 11
+    movup.9                     # [c_ll, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_ml, c_mh]
+    movup.10                    # [c_ml, c_ll, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh, c_mh]
+    movup.11                    # [c_mh, c_ml, c_ll, c_hh, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    movup.3                     # [c_hh, c_mh, c_ml, c_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    # Stack: [c_hh, c_mh, c_ml, c_ll, a_ll, a_ml, a_mh, a_hh, b_ll, b_ml, b_mh, b_hh]
+    # Position: 0     1     2     3     4     5     6     7     8     9    10    11
+    # 12 elements; need to drop 8 elements (a and b limbs)
+    swapw                       # [a_ll, a_ml, a_mh, a_hh, c_hh, c_mh, c_ml, c_ll, b_ll, b_ml, b_mh, b_hh]
+    dropw                       # [c_hh, c_mh, c_ml, c_ll, b_ll, b_ml, b_mh, b_hh]
+    swapw                       # [b_ll, b_ml, b_mh, b_hh, c_hh, c_mh, c_ml, c_ll]
+    dropw                       # [c_hh, c_mh, c_ml, c_ll]
+
+    # Rearrange from [c_hh, c_mh, c_ml, c_ll] to [c_ll, c_ml, c_mh, c_hh]
+    movdn.3                     # [c_mh, c_ml, c_ll, c_hh]
+    movdn.2                     # [c_ml, c_ll, c_mh, c_hh]
+    swap                        # [c_ll, c_ml, c_mh, c_hh]
 end
