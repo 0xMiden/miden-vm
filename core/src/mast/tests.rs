@@ -901,9 +901,12 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
     assert!(result4.is_some());
     assert_eq!(result4.unwrap(), &assembly_op);
 
-    // Should not find it at index 5 (no asm_op registered there)
+    // With sparse storage and backward search, index 5 (out of bounds) will find index 4's
+    // AssemblyOp. This is expected behavior: backward search returns the most recent AssemblyOp
+    // for any index.
     let result5 = forest.get_assembly_op(node_id, Some(5));
-    assert!(result5.is_none());
+    assert!(result5.is_some());
+    assert_eq!(result5.unwrap(), &assembly_op);
 }
 
 #[test]
