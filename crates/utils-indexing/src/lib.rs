@@ -1,15 +1,17 @@
 //! Type-safe u32-indexed vector utilities for Miden
 //!
 //! This module provides utilities for working with u32-indexed vectors in a type-safe manner,
-//! including the `IndexVec` type and related functionality.
+//! including the [`IndexVec`] type and the [`CsrMatrix`] compressed sparse row storage.
 #![no_std]
 
 extern crate alloc;
 
+mod csr;
 #[doc = include_str!("../README.md")]
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
+pub use csr::{CsrMatrix, CsrValidationError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
