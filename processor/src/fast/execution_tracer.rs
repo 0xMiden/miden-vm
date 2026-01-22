@@ -1,6 +1,9 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH};
+use miden_air::trace::{
+    RowIndex,
+    chiplets::hasher::{HASH_CYCLE_LEN, STATE_WIDTH},
+};
 use miden_core::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
@@ -654,7 +657,7 @@ impl Tracer for ExecutionTracer {
 
 /// The number of hasher rows per permutation operation. This is used to compute the address for
 /// the next operation in the hasher chiplet.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = 8;
+const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = HASH_CYCLE_LEN as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.

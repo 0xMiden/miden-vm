@@ -2,7 +2,7 @@
 //!
 //! This module defines the structure of the hasher chiplet's execution trace, including:
 //! - Trace selectors that determine which hash operation is being performed
-//! - State layout for the RPO permutation (12 field elements: 4 capacity + 8 rate)
+//! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
 //! - Column ranges and indices for accessing trace data
 //!
 //! The hasher chiplet supports several operations:
@@ -13,7 +13,7 @@
 
 use core::ops::Range;
 
-pub use miden_core::{Word, crypto::hash::Rpo256 as Hasher};
+pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 
@@ -76,14 +76,14 @@ pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
 /// Number of needed to complete a single permutation.
 ///
-/// This value is set to 7 to target 128-bit security level with 40% security margin.
-pub const NUM_ROUNDS: usize = Hasher::NUM_ROUNDS;
+/// For Poseidon2, we model a permutation as 31 step transitions, resulting in a 32-row cycle.
+pub const NUM_ROUNDS: usize = 31;
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized. This is equal to 8.
+/// The number of rows in the execution trace required to compute a permutation of Poseidon2.
+/// This is equal to 32.
 pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
 
 /// Number of columns in Hasher execution trace. There is one additional column for the node index.

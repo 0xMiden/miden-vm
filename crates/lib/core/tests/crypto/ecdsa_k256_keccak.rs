@@ -15,7 +15,7 @@ use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
+use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::poseidon2::Poseidon2};
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 use rand::{SeedableRng, rngs::StdRng};
 
@@ -159,18 +159,18 @@ impl EventHandler for EcdsaSignatureHandler {
     fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
         // Position 0 has the event ID, so pk_commitment starts at position 1
-        let provided_pk_rpo = process.get_stack_word(1);
+        let provided_pk_commitment = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
             let pk = secret_key.public_key();
             let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
-            Rpo256::hash_elements(&pk_felts)
+            Poseidon2::hash_elements(&pk_felts)
         };
         assert_eq!(
-            provided_pk_rpo, pk_commitment,
+            provided_pk_commitment, pk_commitment,
             "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_rpo
+            pk_commitment, provided_pk_commitment
         );
 
         // Message starts at position 5 (after event_id + pk_commitment)
@@ -191,7 +191,7 @@ fn test_ecdsa_verify_bis_wrapper() {
 
     let pk_commitment = {
         let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
-        Rpo256::hash_elements(&pk_felts)
+        Poseidon2::hash_elements(&pk_felts)
     };
 
     let source = format!(

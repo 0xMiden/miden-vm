@@ -173,7 +173,7 @@ fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
                 // selectors
                 assert_eq!(LINEAR_HASH, [trace[1][row], trace[2][row], trace[3][row]]);
             },
-            7 => {
+            r if r == HASH_CYCLE_LEN - 1 => {
                 // in the last row, the expected start of the trace should hold the final selectors
                 assert_eq!(RETURN_STATE, [trace[1][row], trace[2][row], trace[3][row]]);
             },

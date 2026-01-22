@@ -22,7 +22,7 @@ use miden_core::{
 use miden_crypto::{
     ZERO,
     dsa::eddsa_25519_sha512::{PublicKey, Signature},
-    hash::rpo::Rpo256,
+    hash::poseidon2::Poseidon2,
 };
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 
@@ -136,18 +136,18 @@ impl EddsaRequest {
 
         let pk_comm = {
             let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
-            Rpo256::hash_elements(&felts)
+            Poseidon2::hash_elements(&felts)
         };
         let k_digest_comm = {
             let felts = bytes_to_packed_u32_elements(&self.k_digest);
-            Rpo256::hash_elements(&felts)
+            Poseidon2::hash_elements(&felts)
         };
         let sig_comm = {
             let felts = bytes_to_packed_u32_elements(&self.sig.to_bytes());
-            Rpo256::hash_elements(&felts)
+            Poseidon2::hash_elements(&felts)
         };
 
-        let commitment = Rpo256::merge(&[Rpo256::merge(&[pk_comm, k_digest_comm]), sig_comm]);
+        let commitment = Poseidon2::merge(&[Poseidon2::merge(&[pk_comm, k_digest_comm]), sig_comm]);
 
         PrecompileCommitment::new(tag, commitment)
     }

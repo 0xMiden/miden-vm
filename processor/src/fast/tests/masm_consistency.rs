@@ -352,15 +352,15 @@ fn test_masm_errors_consistency(
     insta::assert_debug_snapshot!(testname, fast_err);
 }
 
-/// Tests that `log_precompile` correctly computes the RPO permutation and updates the stack.
+/// Tests that `log_precompile` correctly computes the Poseidon2 permutation and updates the stack.
 ///
 /// This test verifies:
-/// 1. The RPO permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
+/// 1. The Poseidon2 permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
 /// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
 /// 3. The capacity is properly initialized to [0,0,0,0] for the first call
 #[test]
 fn test_log_precompile_correctness() {
-    use miden_core::crypto::hash::Rpo256;
+    use miden_core::crypto::hash::Poseidon2;
 
     // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
     // The stack represents [COMM, TAG] where COMM=[1,2,3,4] and TAG=[5,6,7,8]
@@ -369,15 +369,15 @@ fn test_log_precompile_correctness() {
     let tag: Word = [5, 6, 7, 8].map(Felt::new).into();
     let cap_prev = Word::empty();
 
-    // Compute expected output using RPO permutation
+    // Compute expected output using Poseidon2 permutation
     // Input state: [COMM, TAG, CAP_PREV], with CAP_PREV = [0,0,0,0]
     let mut hasher_state = [ZERO; 12];
     hasher_state[0..4].copy_from_slice(comm_calldata.as_slice());
     hasher_state[4..8].copy_from_slice(tag.as_slice());
     hasher_state[8..12].copy_from_slice(cap_prev.as_slice());
 
-    // Apply RPO permutation
-    Rpo256::apply_permutation(&mut hasher_state);
+    // Apply Poseidon2 permutation
+    Poseidon2::apply_permutation(&mut hasher_state);
 
     // The implementation writes output to stack as:
     // stack[0..4] = R0 elements, stack[4..8] = R1 elements, stack[8..12] = CAP_NEXT elements

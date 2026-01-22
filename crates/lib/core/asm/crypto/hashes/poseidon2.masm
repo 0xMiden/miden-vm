@@ -1,4 +1,4 @@
-# ===== RPO PROCEDURES ==========================================================================
+# ===== POSEIDON2 PROCEDURES ====================================================================
 
 #! Prepares the top of the stack with the hasher initial state.
 #!
@@ -55,7 +55,7 @@ pub proc copy_digest
     dupw
 end
 
-#! Hashes the memory `start_addr` to `end_addr` given an RPO state specified by 3 words.
+#! Hashes the memory `start_addr` to `end_addr` given a Poseidon2 state specified by 3 words.
 #!
 #! This requires that `end_addr = start_addr + 8n` where n = {0, 1, 2 ...}, otherwise the procedure
 #! will enter an infinite loop.
@@ -215,7 +215,7 @@ pub proc prepare_hasher_state
     cdrop
     # => [capacity, ptr, end_pairs_addr, num_elements%8]
 
-    # prepare hasher state for RPO permutation
+    # prepare hasher state for Poseidon2 permutation
     push.0.0.0 movup.3 padw padw
     # => [R0, R1, C, ptr, end_pairs_addr, num_elements%8]
 end
@@ -438,35 +438,35 @@ pub proc pad_and_hash_elements
     # => [HASH]
 end
 
-#! Computes RPO hash of a single word (256-bit input).
+#! Computes Poseidon2 hash of a single word (256-bit input).
 #!
 #! Inputs:  [A]
 #! Outputs: [B]
 #!
 #! Where:
 #! - A is the word to be hashed.
-#! - B is the resulting hash, computed as `RPO256(A)`.
+#! - B is the resulting hash, computed as `Poseidon2(A)`.
 #!
 #! Cycles: 20
 pub proc hash
     hash
 end
 
-#! Merges two words (256-bit digests) via RPO hash.
+#! Merges two words (256-bit digests) via Poseidon2 hash.
 #!
 #! Inputs:  [B, A]
 #! Outputs: [C]
 #!
 #! Where:
 #! - A and B are the words to be merged.
-#! - C is the resulting hash, computed as `RPO256(A || B)`.
+#! - C is the resulting hash, computed as `Poseidon2(A || B)`.
 #!
 #! Cycles: 16
 pub proc merge
     hmerge
 end
 
-#! Performs RPO permutation on the hasher state.
+#! Performs Poseidon2 permutation on the hasher state.
 #!
 #! Inputs:  [R0, R1, C]
 #! Outputs: [R0', R1', C']

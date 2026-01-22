@@ -355,7 +355,7 @@ pub trait OperationHelperRegisters {
     fn op_eq_registers(a: Felt, b: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32split operation.
-    fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32split_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the Eqz operation.
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS];
@@ -375,7 +375,7 @@ pub trait OperationHelperRegisters {
     fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add3 operation.
-    fn op_u32add3_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32sub operation.
     fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS];

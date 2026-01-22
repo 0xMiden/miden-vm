@@ -38,18 +38,18 @@ impl DynNode {
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(18153562947144664406),
-        Felt::new(4931170883977271433),
-        Felt::new(18183136473628023536),
-        Felt::new(6489282016600636545),
+        Felt::new(14319792288905293245),
+        Felt::new(11465345153771181037),
+        Felt::new(16104169334207009019),
+        Felt::new(2750797734633655770),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(16931814232667048363),
-        Felt::new(5757421171745063062),
-        Felt::new(12557766285964467316),
-        Felt::new(826610245118922423),
+        Felt::new(13210061556570014836),
+        Felt::new(16003296542960478536),
+        Felt::new(6732564319544917702),
+        Felt::new(16687523027086140644),
     ]);
 }
 
@@ -532,7 +532,7 @@ impl Default for DynNodeBuilderParams {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::rpo::Rpo256;
+    use miden_crypto::hash::poseidon2::Poseidon2;
 
     use super::*;
 
@@ -545,14 +545,17 @@ mod tests {
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+            Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         let dyncall_node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
+            Poseidon2::merge_in_domain(
+                &[Word::default(), Word::default()],
+                DynNode::DYNCALL_DOMAIN
+            )
         );
     }
 }

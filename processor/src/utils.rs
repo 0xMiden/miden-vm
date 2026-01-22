@@ -8,8 +8,8 @@ use rayon::prelude::*;
 
 use crate::PrimeField64;
 
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized, represented as a field element.
+/// The number of rows in the execution trace required to compute a permutation of Poseidon2,
+/// represented as a field element.
 pub(crate) const HASH_CYCLE_LEN_FELT: Felt =
     Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 

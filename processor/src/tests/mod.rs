@@ -747,7 +747,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0xc85d62dad9e9a4195dcd2d75f1deb32116ee4d6ed3d8cc3948c6e7cf1142c7f4",
+        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
         regex!(r#",-\[::\$exec:5:13\]"#),
         " 4 |         begin",
         " 5 |             call.bar::dummy_proc",
@@ -805,7 +805,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0xc85d62dad9e9a4195dcd2d75f1deb32116ee4d6ed3d8cc3948c6e7cf1142c7f4",
+        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             while.true",
@@ -866,7 +866,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "no MAST forest contains the procedure with root digest 0xc85d62dad9e9a4195dcd2d75f1deb32116ee4d6ed3d8cc3948c6e7cf1142c7f4",
+        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
         regex!(r#",-\[::\$exec:6:13\]"#),
         "  5 |                 push.1",
         "  6 | ,->             if.true",
@@ -1090,7 +1090,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
-        "syscall failed: procedure with root 0x90b881ddd998a6d2212b04620e312285df8fadec251aebb3f3096da501ca8f78 was not found in the kernel",
+        "syscall failed: procedure with root 0x3b7651d5f57f0d3eb4eb69c7491cf16ca9f2f0010e32ed41cffadf9c8e18e61b was not found in the kernel",
         regex!(r#",-\[::\$exec:3:13\]"#),
         " 2 |         begin",
         " 3 |             syscall.dummy_proc",

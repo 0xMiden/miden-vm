@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
-    crypto::hash::Rpo256,
+    crypto::hash::Poseidon2,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
     sys_events::SystemEvent,
 };
@@ -117,7 +117,7 @@ fn insert_hdword_into_adv_map(
     let b = process.get_stack_word(5);
 
     // Hash as [A, B] to match `hmerge` behavior directly.
-    let key = Rpo256::merge_in_domain(&[a, b], domain);
+    let key = Poseidon2::merge_in_domain(&[a, b], domain);
 
     // Store values as [A, B] matching the hash order.
     // Retrieval with `padw adv_loadw padw adv_loadw swapw` produces [A, B] on operand stack.
@@ -151,7 +151,7 @@ fn insert_hqword_into_adv_map(process: &mut ProcessorState) -> Result<(), System
     let d = process.get_stack_word(13);
 
     // Hash in natural stack order [A, B, C, D].
-    let key = Rpo256::hash_elements(&[*a, *b, *c, *d].concat());
+    let key = Poseidon2::hash_elements(&[*a, *b, *c, *d].concat());
 
     // Store values in [A, B, C, D] order.
     let mut values = Vec::with_capacity(4 * WORD_SIZE);
@@ -165,7 +165,7 @@ fn insert_hqword_into_adv_map(process: &mut ProcessorState) -> Result<(), System
 }
 
 /// Reads three words from the operand stack and inserts the rate portion into the advice map
-/// under the key defined by applying an RPO permutation to all three words.
+/// under the key defined by applying a Poseidon2 permutation to all three words.
 ///
 /// ```text
 /// Inputs:
@@ -198,12 +198,12 @@ fn insert_hperm_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemE
     ];
 
     // Extract the rate portion (first 8 elements) as values to store.
-    let values = state[Rpo256::RATE_RANGE].to_vec();
+    let values = state[Poseidon2::RATE_RANGE].to_vec();
 
     // Apply permutation and extract digest as the key.
-    Rpo256::apply_permutation(&mut state);
+    Poseidon2::apply_permutation(&mut state);
     let key = Word::new(
-        state[Rpo256::DIGEST_RANGE]
+        state[Poseidon2::DIGEST_RANGE]
             .try_into()
             .expect("failed to extract digest from state"),
     );

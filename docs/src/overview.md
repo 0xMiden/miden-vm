@@ -15,7 +15,7 @@ These components are:
 
 - **Stack** which is a push-down stack where each item is a field element. Most assembly instructions operate with values located on the stack. The stack can grow up to $2^{32}$ items deep, however, only the top 16 items are directly accessible.
 - **Memory** which is a linear random-access read-write memory. The memory is element-addressable, meaning, a single element is located at each address. However, there are instructions to read and write elements to/from memory both individually or in batches of four, since the latter is quite common. Memory addresses can be in the range $[0, 2^{32})$.
-- **Chiplets** which are specialized circuits for accelerating certain types of computations. These include Rescue Prime Optimized (RPO) hash function, 32-bit binary operations, and 16-bit range checks.
+- **Chiplets** which are specialized circuits for accelerating certain types of computations. These include Poseidon2 hash function, 32-bit binary operations, and 16-bit range checks.
 - **Host** which is a way for the prover to communicate with the VM during runtime. This includes responding to the VM's requests for non-deterministic inputs and handling messages sent by the VM (e.g., for debugging purposes). The requests for non-deterministic inputs are handled by the host's _advice provider_.
 
 Miden VM comes with a default implementation of the host interface (with an in-memory advice provider). However, the users are able to provide their own implementations which can connect the VM to arbitrary data sources (e.g., a database or RPC calls) and define custom logic for handling events emitted by the VM.

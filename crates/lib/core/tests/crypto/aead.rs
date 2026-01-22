@@ -1,5 +1,5 @@
 use miden_air::Felt;
-use miden_crypto::aead::aead_rpo::{Nonce, SecretKey};
+use miden_crypto::aead::aead_poseidon2::{Nonce, SecretKey};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 

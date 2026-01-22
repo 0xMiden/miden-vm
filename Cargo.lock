@@ -987,9 +987,9 @@ dependencies = [
 
 [[package]]
 name = "insta"
-version = "1.46.0"
+version = "1.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b66886d14d18d420ab5052cbff544fc5d34d0b2cdd35eb5976aaa10a4a472e5"
+checksum = "248b42847813a1550dafd15296fd9748c651d0c32194559dbc05d804d54b21e8"
 dependencies = [
  "console",
  "once_cell",
@@ -1312,9 +1312,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06a55991cd502d1f9e844b379e3188cbf00b03f0a2ea0c5a1d6072e5ad8a572a"
+version = "0.22.0"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-change-poseidon2#c22aa02294b866c7fbff73070af5edf0880afe15"
 dependencies = [
  "blake3",
  "cc",
@@ -1352,9 +1351,8 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a16c0062cd1004963e722559eb4850281fe779df1a85b38a264f603ad983bcdd"
+version = "0.22.0"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-change-poseidon2#c22aa02294b866c7fbff73070af5edf0880afe15"
 dependencies = [
  "quote",
  "syn 2.0.114",
@@ -1479,9 +1477,8 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20a8e15adcc44de7f7260a0f324663dc993f805b4c2ab1a8769eb477df46eca5"
+version = "0.22.0"
+source = "git+https://github.com/0xMiden/crypto.git?branch=al-change-poseidon2#c22aa02294b866c7fbff73070af5edf0880afe15"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -3263,9 +3260,9 @@ checksum = "ccf3ec651a847eb01de73ccad15eb7d99f80485de043efb2f370cd654f4ea44b"
 
 [[package]]
 name = "wasip2"
-version = "1.0.1+wasi-0.2.4"
+version = "1.0.2+wasi-0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0562428422c63773dad2c345a1882263bbf4d65cf3f42e90921f787ef5ad58e7"
+checksum = "9517f9239f02c069db75e65f174b3da828fe5f5b945c4dd26bd25d89c03ebcf5"
 dependencies = [
  "wit-bindgen",
 ]
@@ -3538,9 +3535,9 @@ dependencies = [
 
 [[package]]
 name = "wit-bindgen"
-version = "0.46.0"
+version = "0.51.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+checksum = "d7249219f66ced02969388cf2bb044a09756a083d0fab1e566056b04d9fbcaa5"
 
 [[package]]
 name = "x25519-dalek"

@@ -2,15 +2,15 @@
 //!
 //! This module provides an event handler for decrypting AEAD ciphertext using non-deterministic
 //! advice. When the VM emits an AEAD_DECRYPT_EVENT, this handler reads the ciphertext from memory,
-//! performs decryption using the AEAD-RPO scheme, and pushes the plaintext onto the advice stack
-//! for the MASM decrypt procedure to load.
+//! performs decryption using the AEAD-Poseidon2 scheme, and pushes the plaintext onto the advice
+//! stack for the MASM decrypt procedure to load.
 
 use alloc::{vec, vec::Vec};
 
 use miden_core::{EventName, field::PrimeField64};
 use miden_crypto::aead::{
     DataType, EncryptionError,
-    aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
+    aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
 use miden_processor::{AdviceMutation, EventError, ProcessorState};
 
@@ -23,12 +23,12 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 ///
 /// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It reads the full
 /// ciphertext (including padding block) and tag from memory, performs decryption and
-/// tag verification using AEAD-RPO, then pushes the plaintext onto the advice stack.
+/// tag verification using AEAD-Poseidon2, then pushes the plaintext onto the advice stack.
 ///
 /// Process:
 /// 1. Reads full ciphertext from memory at src_ptr ((num_blocks + 1) * 8 elements)
 /// 2. Reads authentication tag from memory at src_ptr + (num_blocks + 1) * 8
-/// 3. Constructs EncryptedData and decrypts using AEAD-RPO
+/// 3. Constructs EncryptedData and decrypts using AEAD-Poseidon2
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
 /// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
 ///

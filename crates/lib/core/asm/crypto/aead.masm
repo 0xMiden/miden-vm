@@ -1,8 +1,8 @@
-#! AEAD (Authenticated Encryption with Associated Data) implementation using RPO hash.
+#! AEAD (Authenticated Encryption with Associated Data) implementation using Poseidon2 hash.
 #!
 #! This implementation uses the `crypto_stream` instruction for optimal performance.
 #! The scheme follows the MonkeySpongeWrap construction:
-#! 1. Initialize RPO sponge state with key and nonce
+#! 1. Initialize Poseidon2 sponge state with key and nonce
 #! 2. Absorb associated data padding (currently [1,0,0,0,0,0,0,0])
 #! 3. Process plaintext blocks using `crypto_stream` + `hperm`
 #! 4. Generate authentication tag from final sponge state
@@ -10,7 +10,7 @@
 #! Note: Associated data (AD) is currently NOT supported. Only empty AD is handled,
 #! which is represented by the padding block [1,0,0,0,0,0,0,0].
 
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 
 # Constants
 # ================================================================================================
@@ -22,7 +22,7 @@ const AEAD_DECRYPT_EVENT=event("miden::core::crypto::aead::decrypt")
 
 #! Initializes the AEAD state with a key and nonce.
 #!
-#! This procedure sets up the initial RPO state for AEAD operations. The key and nonce
+#! This procedure sets up the initial Poseidon2 state for AEAD operations. The key and nonce
 #! are absorbed into the capacity and rate portions of the sponge.
 #!
 #! Input: [key(4), nonce(4), ...]
@@ -209,8 +209,8 @@ pub proc encrypt
     hperm
     # => [rate_final(8), capacity_final(4), src_ptr_final, dst_ptr_final, ...]
 
-    # Extract the authentication tag (first word of rate) using rpo256::squeeze_digest
-    exec.rpo256::squeeze_digest
+    # Extract the authentication tag (first word of rate) using poseidon2::squeeze_digest
+    exec.poseidon2::squeeze_digest
     # => [tag(4), src_ptr_final, dst_ptr_final, ...]
 
     # Clean up stack - remove the two pointers

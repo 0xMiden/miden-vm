@@ -5,7 +5,7 @@ use miden_core::{Felt, FieldElement, QuadFelt, ToElements, WORD_SIZE, Word};
 use miden_processor::crypto::RpoRandomCoin;
 use miden_utils_testing::{
     MIN_STACK_DEPTH, VerifierError,
-    crypto::{MerkleStore, RandomCoin, Rpo256},
+    crypto::{MerkleStore, Poseidon2, RandomCoin},
 };
 use winter_air::{
     Air,
@@ -71,7 +71,7 @@ pub fn generate_advice_inputs(
 
     // create AIR instance for the computation specified in the proof
     let air = ProcessorAir::new(proof.trace_info().to_owned(), pub_inputs, proof.options().clone());
-    let seed_digest = Rpo256::hash_elements(&public_coin_seed);
+    let seed_digest = Poseidon2::hash_elements(&public_coin_seed);
     let mut public_coin: RpoRandomCoin = RpoRandomCoin::new(seed_digest);
     let mut channel = VerifierChannel::new(&air, proof)?;
 
@@ -136,7 +136,7 @@ pub fn generate_advice_inputs(
     advice_stack.extend_from_slice(&to_int_vec(&ood_evals));
 
     // reseed with the digest of the OOD evaluations
-    let ood_digest = Rpo256::hash_elements(&ood_evals);
+    let ood_digest = Poseidon2::hash_elements(&ood_evals);
     public_coin.reseed(ood_digest);
 
     // 5 ----- FRI  -------------------------------------------------------------------------------

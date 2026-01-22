@@ -15,7 +15,7 @@ const M: u64 = 12289;
 
 /// Event name for the falcon_div operation.
 pub const FALCON_DIV_EVENT_NAME: EventName =
-    EventName::new("miden::core::crypto::dsa::falcon512rpo::falcon_div");
+    EventName::new("miden::core::crypto::dsa::falcon512poseidon2::falcon_div");
 
 /// FALCON_DIV system event handler.
 ///

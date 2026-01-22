@@ -206,14 +206,14 @@ fn test_pipe_words_to_memory() {
     let one_word = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::rpo256
+        use miden::core::crypto::hashes::poseidon2
 
         begin
             push.{mem_addr} # target address
             push.1  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.rpo256::squeeze_digest
+            exec.poseidon2::squeeze_digest
 
             # truncate stack
             swapdw dropw dropw
@@ -233,14 +233,14 @@ fn test_pipe_words_to_memory() {
     let three_words = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::rpo256
+        use miden::core::crypto::hashes::poseidon2
 
         begin
             push.{mem_addr} # target address
             push.3  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.rpo256::squeeze_digest
+            exec.poseidon2::squeeze_digest
 
             # truncate stack
             swapdw dropw dropw

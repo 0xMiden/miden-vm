@@ -5,9 +5,9 @@ sidebar_position: 2
 
 # Hash chiplet
 
-Miden VM "offloads" all hash-related computations to a separate _hash processor_. This chiplet supports executing the [Rescue Prime Optimized](https://eprint.iacr.org/2022/1577) hash function (or rather a [specific instantiation](https://docs.rs/miden-crypto/latest/miden_crypto/hash/rpo/struct.Rpo256.html) of it) in the following settings:
+Miden VM "offloads" all hash-related computations to a separate _hash processor_. This chiplet supports executing the [Poseidon2](https://eprint.iacr.org/2023/323) hash function in the following settings:
 
-- A single permutation of Rescue Prime Optimized.
+- A single permutation of Poseidon2.
 - A simple 2-to-1 hash.
 - A linear hash of $n$ field elements.
 - Merkle path verification.
@@ -17,27 +17,27 @@ The chiplet can be thought of as having a small instruction set of $11$ instruct
 
 | Instruction | Description | Cycles | Context | Notes |
 | ----------- | ----------- | ------ | ------- | ----- |
-| `HR` | Executes a single round of the VM's native hash function | $0$-$6$, $8$-$14$, $16$-$22$... (not $7$, $15$, $23$...) | Any | |
-| `BP` | Initiates computation of a single permutation, a 2-to-1 hash, or a linear hash of many elements | Multiples of $8$ ($0$, $8$, $16$...) | Start of computation | Concurrent with `HR` |
-| `MP` | Initiates Merkle path verification computation | Multiples of $8$ | Start of computation | Concurrent with `HR` |
-| `MV` | Initiates Merkle path verification for the "old" node value | Multiples of $8$ | Merkle root update | Concurrent with `HR` |
-| `MU` | Initiates Merkle path verification for the "new" node value | Multiples of $8$ | Merkle root update | Concurrent with `HR` |
-| `HOUT` | Returns the "output" portion of the hasher state (indices $[4,8)$) | $8n-1$ ($7$, $15$, $23$...) | End of computation | |
-| `SOUT` | Returns entire hasher state | $8n-1$ ($7$, $15$, $23$...) | End of computation | Only after `BP` |
-| `ABP` | Absorbs a new set of elements into the hasher state | $8n-1$ ($7$, $15$, $23$...) | Linear hash (multi-block) | Only after `BP` |
-| `MPA` | Absorbs the next Merkle path node into the hasher state | $8n-1$ ($7$, $15$, $23$...) | Merkle path verification | Only after `MP` |
-| `MVA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "old" node value | $8n-1$ ($7$, $15$, $23$...) | Merkle root update | Only after `MV` |
-| `MUA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "new" node value | $8n-1$ ($7$, $15$, $23$...) | Merkle root update | Only after `MU` |
+| `HR` | Executes a single round of the VM's native hash function | $0$-$30$, $32$-$62$, $64$-$94$... (not $31$, $63$, $95$...) | Any | |
+| `BP` | Initiates computation of a single permutation, a 2-to-1 hash, or a linear hash of many elements | Multiples of $32$ ($0$, $32$, $64$...) | Start of computation | Concurrent with `HR` |
+| `MP` | Initiates Merkle path verification computation | Multiples of $32$ | Start of computation | Concurrent with `HR` |
+| `MV` | Initiates Merkle path verification for the "old" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
+| `MU` | Initiates Merkle path verification for the "new" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
+| `HOUT` | Returns the "output" portion of the hasher state (indices $[4,8)$) | $32n-1$ ($31$, $63$, $95$...) | End of computation | |
+| `SOUT` | Returns entire hasher state | $32n-1$ ($31$, $63$, $95$...) | End of computation | Only after `BP` |
+| `ABP` | Absorbs a new set of elements into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Linear hash (multi-block) | Only after `BP` |
+| `MPA` | Absorbs the next Merkle path node into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Merkle path verification | Only after `MP` |
+| `MVA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "old" node value | $32n-1$ ($31$, $63$, $95$...) | Merkle root update | Only after `MV` |
+| `MUA` | Absorbs the next Merkle path node into the hasher state during Merkle path verification for the "new" node value | $32n-1$ ($31$, $63$, $95$...) | Merkle root update | Only after `MU` |
 
 ## Chiplet trace
 
-Execution trace table of the chiplet consists of $16$ trace columns and $3$ periodic columns. The structure of the table is such that a single permutation of the hash function can be computed using $8$ table rows. The layout of the table is illustrated below.
+Execution trace table of the chiplet consists of $16$ trace columns and $3$ periodic columns. The structure of the table is such that a single permutation of the hash function can be computed using $32$ table rows. The layout of the table is illustrated below.
 
 ![hash_execution_trace](../../img/design/chiplets/hasher/hash_execution_trace.png)
 
 The meaning of the columns is as follows:
 
-- Three periodic columns $k_0$, $k_1$, and $k_2$ are used to help select the instruction executed at a given row. All of these columns contain patterns which repeat every $8$ rows. For $k_0$ the pattern is $7$ zeros followed by $1$ one, helping us identify the last row in the cycle. For $k_1$ the pattern is $6$ zeros, $1$ one, and $1$ zero, which can be used to identify the second-to-last row in a cycle. For $k_2$ the pattern is $1$ one followed by $7$ zeros, which can identify the first row in the cycle.
+- Three periodic columns $k_0$, $k_1$, and $k_2$ are used to help select the instruction executed at a given row. All of these columns contain patterns which repeat every $32$ rows. For $k_0$ the pattern is $31$ zeros followed by $1$ one, helping us identify the last row in the cycle. For $k_1$ the pattern is $30$ zeros, $1$ one, and $1$ zero, which can be used to identify the second-to-last row in a cycle. For $k_2$ the pattern is $1$ one followed by $31$ zeros, which can identify the first row in the cycle.
 - Three selector columns $s_0$, $s_1$, and $s_2$. These columns can contain only binary values (ones or zeros), and they are also used to help select the instruction to execute at a given row.
 - Twelve hasher state columns $h_0, ..., h_{11}$. These columns are used to hold the hasher state for each round of the hash function permutation. The state is laid out as follows:
   - The first four columns ($h_0, ..., h_3$) are reserved for capacity elements of the state. When the state is initialized for hash computations, $h_0$ should be set to $0$ if the number of elements to be hashed is a multiple of the rate width ($8$). Otherwise, $h_0$ should be set to $1$. $h_1$ should be set to the domain value if a domain has been provided (as in the case of [control block hashing](../programs.md#program-hash-computation)). All other capacity elements should be set to $0$'s.
@@ -55,17 +55,17 @@ As mentioned above, chiplet instructions are encoded using a combination of peri
 
 | Flag       | Value                                                 | Notes                                                                                             |
 | ---------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| $f_{rpr}$  | $1 - k_0$                                             | Set to $1$ on the first $7$ steps of every $8$-step cycle.                                        |
-| $f_{bp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are multiples of $8$.                |
-| $f_{mp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are multiples of $8$.                |
-| $f_{mv}$   | $k_2 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are multiples of $8$.                |
-| $f_{mu}$   | $k_2 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are multiples of $8$.                |
-| $f_{hout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot (1 - s_2)$ | Set to $1$ when selector flags are $(0, 0, 0)$ on rows which are $1$ less than a multiple of $8$. |
-| $f_{sout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot s_2$       | Set to $1$ when selector flags are $(0, 0, 1)$ on rows which are $1$ less than a multiple of $8$. |
-| $f_{abp}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are $1$ less than a multiple of $8$. |
-| $f_{mpa}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are $1$ less than a multiple of $8$. |
-| $f_{mva}$  | $k_0 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are $1$ less than a multiple of $8$. |
-| $f_{mua}$  | $k_0 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are $1$ less than a multiple of $8$. |
+| $f_{rpr}$  | $1 - k_0$                                             | Set to $1$ on the first $31$ steps of every $32$-step cycle.                                        |
+| $f_{bp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are multiples of $32$.                |
+| $f_{mp}$   | $k_2 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are multiples of $32$.                |
+| $f_{mv}$   | $k_2 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are multiples of $32$.                |
+| $f_{mu}$   | $k_2 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are multiples of $32$.                |
+| $f_{hout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot (1 - s_2)$ | Set to $1$ when selector flags are $(0, 0, 0)$ on rows which are $1$ less than a multiple of $32$. |
+| $f_{sout}$ | $k_0 \cdot (1 - s_0) \cdot (1 - s_1) \cdot s_2$       | Set to $1$ when selector flags are $(0, 0, 1)$ on rows which are $1$ less than a multiple of $32$. |
+| $f_{abp}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot (1 - s_2)$       | Set to $1$ when selector flags are $(1, 0, 0)$ on rows which are $1$ less than a multiple of $32$. |
+| $f_{mpa}$  | $k_0 \cdot s_0 \cdot (1 - s_1) \cdot s_2$             | Set to $1$ when selector flags are $(1, 0, 1)$ on rows which are $1$ less than a multiple of $32$. |
+| $f_{mva}$  | $k_0 \cdot s_0 \cdot s_1 \cdot (1 - s_2)$             | Set to $1$ when selector flags are $(1, 1, 0)$ on rows which are $1$ less than a multiple of $32$. |
+| $f_{mua}$  | $k_0 \cdot s_0 \cdot s_1 \cdot s_2$                   | Set to $1$ when selector flags are $(1, 1, 1)$ on rows which are $1$ less than a multiple of $32$. |
 
 A few additional notes about flag values:
 
@@ -85,18 +85,20 @@ The above rules ensure that we must finish one computation before starting anoth
 
 ### Single permutation
 
-Computing a single permutation of Rescue Prime Optimized hash function involves the following steps:
+Computing a single permutation of Poseidon2 hash function involves the following steps:
 
 1. Initialize hasher state with $12$ field elements.
-2. Apply Rescue Prime Optimized permutation.
+2. Apply Poseidon2 permutation.
 3. Return the entire hasher state as output.
 
 The chiplet accomplishes the above by executing the following instructions:
 
 ```
-[BP, HR]                 // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR        // execute 6 more hash rounds
-SOUT                     // return the entire state as output
+[BP, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+SOUT                                        // return the entire state as output
 ```
 
 Execution trace for this computation would look as illustrated below.
@@ -110,15 +112,17 @@ In the above $\{a_0, ..., a_{11}\}$ is the input state of the hasher, and $\{b_0
 Computing a 2-to-1 hash involves the following steps:
 
 1. Initialize hasher state with $8$ field elements, setting the second capacity element to $domain$ if the domain is provided (as in the case of [control block hashing](../programs.md#program-hash-computation)) or else $0$, and the remaining capacity elements to $0$.
-2. Apply Rescue Prime Optimized permutation.
+2. Apply Poseidon2 permutation.
 3. Return elements $[4, 8)$ of the hasher state as output.
 
 The chiplet accomplishes the above by executing the following instructions:
 
 ```
-[BP, HR]                 // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR        // execute 6 more hash rounds
-HOUT                     // return elements 4, 5, 6, 7 of the state as output
+[BP, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
 ```
 
 Execution trace for this computation would look as illustrated below.
@@ -136,7 +140,7 @@ $$
 Computing a linear hash of $n$ elements consists of the following steps:
 
 1. Initialize hasher state with the first $8$ elements, setting the first capacity register to $0$ if $n$ is a multiple of the rate width ($8$) or else $1$, and the remaining capacity elements to $0$.
-2. Apply Rescue Prime Optimized permutation.
+2. Apply Poseidon2 permutation.
 3. Absorb the next set of elements into the state (up to $8$ elements), while keeping capacity elements unchanged.
 4. Repeat steps 2 and 3 until all $n$ elements have been absorbed.
 5. Return elements $[4, 8)$ of the hasher state as output.
@@ -144,18 +148,22 @@ Computing a linear hash of $n$ elements consists of the following steps:
 The chiplet accomplishes the above by executing the following instructions (for hashing $16$ elements):
 
 ```
-[BP, HR]                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR           // execute 6 more hash rounds
-ABP                         // absorb the next set of elements into the state
-HR HR HR HR HR HR HR        // execute 7 hash rounds
-HOUT                        // return elements 4, 5, 6, 7 of the state as output
+[BP, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+ABP                                         // absorb the next set of elements into the state
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
+HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
 ```
 
 Execution trace for this computation would look as illustrated below.
 
 ![hash_linear_hash_n](../../img/design/chiplets/hasher/hash_linear_hash_n.png)
 
-In the above, the value absorbed into hasher state between rows $7$ and $8$ is the delta between values $t_i$ and $s_i$. Thus, if we define $b_i = t_i - s_i$ for $i \in [0, 8)$, the above computes the following:
+In the above, the value absorbed into hasher state between rows $31$ and $32$ is the delta between values $t_i$ and $s_i$. Thus, if we define $b_i = t_i - s_i$ for $i \in [0, 8)$, the above computes the following:
 
 $$
 \{r_0, r_1, r_2, r_3\} \leftarrow hash(a_0, ..., a_7, b_0, ..., b_7)
@@ -167,7 +175,7 @@ Verifying a Merkle path involves the following steps:
 
 1. Initialize hasher state with the leaf and the first node of the path, setting all capacity elements to $0$s.
    a. Also, initialize the index register to the leaf's index value.
-2. Apply Rescue Prime Optimized permutation.
+2. Apply Poseidon2 permutation.
    a. Make sure the index value doesn't change during this step.
 3. Copy the result of the hash to the next row, and absorb the next node of the Merkle path into the hasher state.
    a. Remove a single bit from the index, and use it to determine how to place the copied result and absorbed node in the state.
@@ -178,11 +186,15 @@ Verifying a Merkle path involves the following steps:
 The chiplet accomplishes the above by executing the following instructions (for Merkle tree of depth $3$):
 
 ```
-[MP, HR]                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR           // execute 6 more hash rounds
-MPA                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR        // execute 7 hash rounds
-HOUT                        // return elements 4, 5, 6, 7 of the state as output
+[MP, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+MPA                                         // copy result & absorb the next node into the state
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
+HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
 ```
 
 Suppose we have a Merkle tree as illustrated below. This Merkle tree has $4$ leaves, each of which consists of $4$ field elements. For example, leaf $a$ consists of elements $a_0, a_1, a_2, a_3$, leaf be consists of elements $b_0, b_1, b_2, b_3$ etc.
@@ -218,18 +230,26 @@ The chiplet accomplishes the above by executing the following instructions:
 
 ```
 // verify the old merkle path
-[MV, HR]                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR           // execute 6 more hash rounds
-MVA                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR        // execute 7 hash rounds
-HOUT                        // return elements 4, 5, 6, 7 of the state as output
+[MV, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+MVA                                         // copy result & absorb the next node into the state
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
+HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
 
 // verify the new merkle path
-[MU, HR]                    // init state and execute a hash round (concurrently)
-HR HR HR HR HR HR           // execute 6 more hash rounds
-MUA                         // copy result & absorb the next node into the state
-HR HR HR HR HR HR HR        // execute 7 hash rounds
-HOUT                        // return elements 4, 5, 6, 7 of the state as output
+[MU, HR]                                    // init state and execute a hash round (concurrently)
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+MUA                                         // copy result & absorb the next node into the state
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR               // execute 10 more hash rounds
+HR HR HR HR HR HR HR HR HR HR HR            // execute 11 more hash rounds
+HOUT                                        // return elements 0, 1, 2, 3 of the state as output (the digest)
 ```
 
 The semantics of `MV` and `MU` instructions are similar to the semantics of `MP` instruction from the previous example (and `MVA` and `MUA` are similar to `MPA`) with one important difference: `MV*` instructions add the absorbed node (together with its index in the tree) to permutation column $p_1$, while `MU*` instructions remove the absorbed node (together with its index in the tree) from $p_1$. Thus, if the same nodes were used during both Merkle path verification, the state of $p_1$ should not change. This mechanism is used to ensure that the same internal nodes were used in both computations.
@@ -255,7 +275,7 @@ $$
 (s_2' - s_2) \cdot (1 - f_{out}') \cdot (1 - f_{out}) = 0  \text{ | degree} = 7
 $$
 
-Next, we need to enforce that if any of $f_{abp}, f_{mpa}, f_{mva}, f_{mua}$ flags is set to $1$, the next value of $s_0$ is $0$. In all other cases, $s_0$ should be unconstrained. These flags will only be set for rows that are 1 less than a multiple of 8 (the last row of each cycle). This can be done with the following constraint:
+Next, we need to enforce that if any of $f_{abp}, f_{mpa}, f_{mva}, f_{mua}$ flags is set to $1$, the next value of $s_0$ is $0$. In all other cases, $s_0$ should be unconstrained. These flags will only be set for rows that are 1 less than a multiple of 32 (the last row of each cycle). This can be done with the following constraint:
 
 $$
 s_0' \cdot (f_{abp} + f_{mpa} + f_{mva} + f_{mua})= 0  \text{ | degree} = 5
@@ -267,7 +287,7 @@ $$
 k_0 \cdot (1 - s_0) \cdot s_1 = 0 \text{ | degree} = 3
 $$
 
-The above constraints enforce that on every step which is one less than a multiple of $8$, if $s_0 = 0$, then $s_1$ must also be set to $0$. Basically, if we set $s_0=0$, then we must make sure that either $f_{hout}=1$ or $f_{sout}=1$.
+The above constraints enforce that on every step which is one less than a multiple of $32$, if $s_0 = 0$, then $s_1$ must also be set to $0$. Basically, if we set $s_0=0$, then we must make sure that either $f_{hout}=1$ or $f_{sout}=1$.
 
 ### Node index constraints
 
@@ -316,8 +336,8 @@ To satisfy these constraints for computations not related to Merkle paths (i.e.,
 
 Hasher state columns $h_0, ..., h_{11}$ should behave as follows:
 
-- For the first $7$ row of every $8$-row cycle (i.e., when $k_0=0$), we need to apply [Rescue Prime Optimized](https://eprint.iacr.org/2022/1577) round constraints to the hasher state. For brevity, we omit these constraints from this note.
-- On the $8$th row of every $8$-row cycle, we apply the constraints based on which transition flag is set as described in the table below.
+- For the first $31$ rows of every $32$-row cycle (i.e., when $k_0=0$), we need to apply [Poseidon2](https://eprint.iacr.org/2023/323) round constraints to the hasher state. For brevity, we omit these constraints from this note.
+- On the $32$nd row of every $32$-row cycle, we apply the constraints based on which transition flag is set as described in the table below.
 
 Specifically, when absorbing the next set of elements into the state during linear hash computation (i.e., $f_{abp} = 1$), the first $4$ elements (the capacity portion) are carried over to the next row. For $j \in [0, 4)$ this can be described as follows:
 
@@ -335,7 +355,7 @@ Note, that when a computation is completed (i.e., $f_{out}=1$), the next hasher 
 
 ### Multiset check constraints
 
-In this sections we describe constraints which enforce updates for [multiset check columns](../lookups/multiset.md) $b_{chip}$ and $p_1$. These columns can be updated only on rows which are multiples of $8$ or $1$ less than a multiple of $8$. On all other rows the values in the columns remain the same.
+In this sections we describe constraints which enforce updates for [multiset check columns](../lookups/multiset.md) $b_{chip}$ and $p_1$. These columns can be updated only on rows which are multiples of $32$ or $1$ less than a multiple of $32$. On all other rows the values in the columns remain the same.
 
 To simplify description of the constraints, we define the following variables. Below, we denote random values sent by the verifier after the prover commits to the main execution trace as $\alpha_0$, $\alpha_1$, $\alpha_2$ etc.
 

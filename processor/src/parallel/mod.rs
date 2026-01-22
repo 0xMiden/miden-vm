@@ -110,7 +110,7 @@ pub fn build_trace(
         },
     );
 
-    // Padding to make the number of columns a multiple of 8 i.e., the RPO permutation rate
+    // Padding to make the number of columns a multiple of 8 i.e., the Poseidon2 permutation rate
     let padding_columns = vec![vec![ZERO; main_trace_len]; PADDED_TRACE_WIDTH - TRACE_WIDTH];
 
     // Chain all trace columns together

@@ -620,7 +620,7 @@ pub fn prop_randw<T: Arbitrary>() -> impl Strategy<Value = Vec<T>> {
 pub fn build_expected_perm(values: &[u64]) -> [Felt; STATE_WIDTH] {
     assert!(values.len() >= STATE_WIDTH, "expected at least 12 values for hperm test");
 
-    // Reconstruct the internal RPO state from the initial stack:
+    // Reconstruct the internal Poseidon2 state from the initial stack:
     // stack[0..12] = [v0, ..., v11]
     // => state[0..12] = stack[0..12] in [RATE0,RATE1,CAPACITY] layout.
     let mut state = [ZERO; STATE_WIDTH];

@@ -13,7 +13,7 @@ These helpers expose constants, memory layout pointers, and routines shared acro
 | Module | Description |
 | --- | --- |
 | `miden::core::stark::constants` | Defines memory layout constants and general constants used by the verifier. |
-| `miden::core::stark::random_coin` | Contains procedures for sampling and updating the RPO-based random coin used throughout the verifier. |
+| `miden::core::stark::random_coin` | Contains procedures for sampling and updating the Poseidon2-based random coin used throughout the verifier. |
 | `miden::core::stark::deep_queries` | Implements helper procedures for constructing DEEP queries. |
 | `miden::core::stark::ood_frames` | Exposes helpers for processing out-of-domain evaluation frames. |
 | `miden::core::stark::public_inputs` | Procedures for loading and hashing public inputs. |

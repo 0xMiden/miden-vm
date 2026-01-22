@@ -163,17 +163,9 @@ pub fn b_chip_span_with_respan() {
     assert_eq!(expected, b_chip[1]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 2..8 {
+    for row in 2..10 {
         assert_eq!(expected, b_chip[row]);
     }
-
-    // At the end of the first hash cycle at cycle 7, the absorption of the next operation batch is
-    // provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, 7.into());
-    assert_eq!(expected, b_chip[8]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    assert_eq!(expected, b_chip[9]);
 
     // At cycle 9, after the first operation batch, the decoder initiates a respan and requests the
     // absorption of the next operation batch.
@@ -182,36 +174,57 @@ pub fn b_chip_span_with_respan() {
     // get the state with the next absorbed batch.
     fill_state_from_decoder(&trace, &mut state, 9.into());
 
-    let request_respan =
-        build_expected(&alphas, LINEAR_HASH_LABEL, prev_state, state, Felt::new(8), ZERO);
+    let request_respan = build_expected(
+        &alphas,
+        LINEAR_HASH_LABEL,
+        prev_state,
+        state,
+        Felt::new(HASH_CYCLE_LEN as u64),
+        ZERO,
+    );
     expected *= request_respan.inverse();
     assert_eq!(expected, b_chip[10]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 11..16 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At cycle 15 at the end of the second hash cycle, the result of the span hash is provided by
-    // the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 15.into());
-    assert_eq!(expected, b_chip[16]);
-
-    // Nothing changes when there is no communication with the hash chiplet.
-    for row in 17..22 {
+    for row in 11..22 {
         assert_eq!(expected, b_chip[row]);
     }
 
     // At cycle 21, after the second operation batch, the decoder ends the SPAN block and requests
     // its hash.
     apply_permutation(&mut state);
-    let request_result =
-        build_expected(&alphas, RETURN_HASH_LABEL, state, [ZERO; STATE_WIDTH], Felt::new(16), ZERO);
+    let request_result = build_expected(
+        &alphas,
+        RETURN_HASH_LABEL,
+        state,
+        [ZERO; STATE_WIDTH],
+        Felt::new((2 * HASH_CYCLE_LEN) as u64),
+        ZERO,
+    );
     expected *= request_result.inverse();
     assert_eq!(expected, b_chip[22]);
 
+    // Nothing changes when there is no communication with the hash chiplet.
+    for row in 23..HASH_CYCLE_LEN {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // At the end of the first hash cycle, the absorption of the next operation batch is provided
+    // by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
+
+    // Nothing changes when there is no communication with the hash chiplet.
+    for row in (HASH_CYCLE_LEN + 1)..(2 * HASH_CYCLE_LEN) {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // At the end of the second hash cycle, the result of the span hash is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
+
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 22..trace.length() {
+    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -273,7 +286,7 @@ pub fn b_chip_merge() {
         LINEAR_HASH_LABEL,
         f_branch_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(9),
+        Felt::new((HASH_CYCLE_LEN + 1) as u64),
         ZERO,
     );
     expected *= f_branch_init.inverse();
@@ -289,7 +302,7 @@ pub fn b_chip_merge() {
         RETURN_HASH_LABEL,
         f_branch_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(16),
+        Felt::new((2 * HASH_CYCLE_LEN) as u64),
         ZERO,
     );
     expected *= f_branch_result.inverse();
@@ -302,37 +315,38 @@ pub fn b_chip_merge() {
         RETURN_HASH_LABEL,
         split_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(8),
+        Felt::new(HASH_CYCLE_LEN as u64),
         ZERO,
     );
     expected *= split_result.inverse();
     assert_eq!(expected, b_chip[5]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 6..8 {
+    for row in 6..HASH_CYCLE_LEN {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 7 the result of the merge is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 7.into());
-    assert_eq!(expected, b_chip[8]);
+    // At the end of the merge hash cycle, the result of the merge is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
-    // at cycle 8 the initialization of the hash of the span block for the false branch is provided
-    // by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 8.into());
-    assert_eq!(expected, b_chip[9]);
+    // At the start of the next hash cycle, the initialization of the hash of the span block for the
+    // false branch is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, HASH_CYCLE_LEN.into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 9..16 {
+    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 15 the result of the span block for the false branch is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 15.into());
-    assert_eq!(expected, b_chip[16]);
+    // At the end of the false branch hash cycle, the result of the span block for the false branch
+    // is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 16..trace.length() {
+    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -390,7 +404,7 @@ pub fn b_chip_permutation() {
         LINEAR_HASH_LABEL,
         hperm_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(9),
+        Felt::new((HASH_CYCLE_LEN + 1) as u64),
         ZERO,
     );
     // request the hperm initialization.
@@ -401,7 +415,7 @@ pub fn b_chip_permutation() {
         RETURN_STATE_LABEL,
         hperm_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(16),
+        Felt::new((2 * HASH_CYCLE_LEN) as u64),
         ZERO,
     );
     // request the hperm result.
@@ -415,42 +429,43 @@ pub fn b_chip_permutation() {
         RETURN_HASH_LABEL,
         span_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(8),
+        Felt::new(HASH_CYCLE_LEN as u64),
         ZERO,
     );
     expected *= span_result.inverse();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 4..8 {
+    for row in 4..HASH_CYCLE_LEN {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 7 the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 7.into());
-    assert_eq!(expected, b_chip[8]);
+    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
-    // at cycle 8 the initialization of the hperm hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 8.into());
-    assert_eq!(expected, b_chip[9]);
+    // At the start of the next hash cycle, the initialization of the hperm hash is provided by the
+    // hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, HASH_CYCLE_LEN.into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 10..16 {
+    for row in (HASH_CYCLE_LEN + 2)..(2 * HASH_CYCLE_LEN) {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 15 the result of the hperm hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 15.into());
-    assert_eq!(expected, b_chip[16]);
+    // At the end of the hperm hash cycle, the result of the hperm hash is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 16..trace.length() {
+    for row in (2 * HASH_CYCLE_LEN)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a log_precompile
-/// operation requested by the stack. The operation absorbs TAG and COMM into an RPO
+/// operation requested by the stack. The operation absorbs TAG and COMM into a Poseidon2
 /// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
 #[test]
 #[expect(clippy::needless_range_loop)]
@@ -630,7 +645,7 @@ fn b_chip_mpverify() {
         MP_VERIFY_LABEL,
         mp_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(9),
+        Felt::new((HASH_CYCLE_LEN + 1) as u64),
         Felt::new(index as u64),
     );
     // request the initialization of the Merkle path verification
@@ -658,27 +673,28 @@ fn b_chip_mpverify() {
         RETURN_HASH_LABEL,
         span_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(8),
+        Felt::new(HASH_CYCLE_LEN as u64),
         ZERO,
     );
     expected *= span_result.inverse();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 3..8 {
+    for row in 4..HASH_CYCLE_LEN {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 7 the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 7.into());
-    assert_eq!(expected, b_chip[8]);
+    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
-    // at cycle 8 the initialization of the merkle path is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 8.into());
-    assert_eq!(expected, b_chip[9]);
+    // At the start of the next hash cycle, the initialization of the merkle path is provided by
+    // the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, HASH_CYCLE_LEN.into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 10..(mp_verify_complete) {
+    for row in (HASH_CYCLE_LEN + 2)..(mp_verify_complete) {
         assert_eq!(expected, b_chip[row]);
     }
 
@@ -751,7 +767,7 @@ fn b_chip_mrupdate() {
         MR_UPDATE_OLD_LABEL,
         mp_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(9),
+        Felt::new((HASH_CYCLE_LEN + 1) as u64),
         Felt::new(index as u64),
     );
     // request the initialization of the (first) Merkle path verification
@@ -818,27 +834,28 @@ fn b_chip_mrupdate() {
         RETURN_HASH_LABEL,
         span_state,
         [ZERO; STATE_WIDTH],
-        Felt::new(8),
+        Felt::new(HASH_CYCLE_LEN as u64),
         ZERO,
     );
     expected *= span_result.inverse();
     assert_eq!(expected, b_chip[3]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 3..8 {
+    for row in 4..HASH_CYCLE_LEN {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // at cycle 7 the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 7.into());
-    assert_eq!(expected, b_chip[8]);
+    // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
-    // at cycle 8 the initialization of the first merkle path is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, 8.into());
-    assert_eq!(expected, b_chip[9]);
+    // At the start of the next hash cycle, the initialization of the first merkle path is provided
+    // by the hasher.
+    expected *= build_expected_from_trace(&trace, &alphas, HASH_CYCLE_LEN.into());
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN + 1]);
 
     // Nothing changes when there is no communication with the hash chiplet.
-    for row in 10..(mp_old_verify_complete) {
+    for row in (HASH_CYCLE_LEN + 2)..(mp_old_verify_complete) {
         assert_eq!(expected, b_chip[row]);
     }
 
@@ -934,7 +951,7 @@ fn build_expected_from_trace(trace: &ExecutionTrace, alphas: &[Felt], row: RowIn
     let mut next_state = [ZERO; STATE_WIDTH];
     for (i, col_idx) in HASHER_STATE_COL_RANGE.enumerate() {
         state[i] = trace.main_trace.get_column(col_idx)[row];
-        if cycle_row == 7 && label == LINEAR_HASH_LABEL {
+        if cycle_row == HASH_CYCLE_LEN - 1 && label == LINEAR_HASH_LABEL {
             next_state[i] = trace.main_trace.get_column(col_idx)[row + 1];
         }
     }
