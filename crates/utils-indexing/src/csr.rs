@@ -324,24 +324,32 @@ where
     D: Deserializable,
 {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // Read data
+        // Read data using read_many_iter for BudgetedReader integration
         let data_len = source.read_usize()?;
-        let mut data = Vec::with_capacity(data_len);
-        for _ in 0..data_len {
-            data.push(D::read_from(source)?);
-        }
+        let data: Vec<D> = source.read_many_iter(data_len)?.collect::<Result<_, _>>()?;
 
-        // Read indptr
+        // Read indptr using read_many_iter for BudgetedReader integration
         let indptr_len = source.read_usize()?;
-        let mut indptr_vec = Vec::with_capacity(indptr_len);
-        for _ in 0..indptr_len {
-            indptr_vec.push(source.read_usize()?);
-        }
+        let indptr_vec: Vec<usize> =
+            source.read_many_iter(indptr_len)?.collect::<Result<_, _>>()?;
         let indptr = IndexVec::try_from(indptr_vec).map_err(|_| {
             DeserializationError::InvalidValue("indptr too large for IndexVec".into())
         })?;
 
         Ok(Self { data, indptr })
+    }
+
+    /// Returns the minimum serialized size for a CsrMatrix.
+    ///
+    /// A CsrMatrix serializes as:
+    /// - data_len (vint, minimum 1 byte)
+    /// - data elements (minimum 0 if empty)
+    /// - indptr_len (vint, minimum 1 byte)
+    /// - indptr elements (minimum 0 if empty)
+    ///
+    /// Total minimum: 2 bytes (two vint length prefixes for empty matrix)
+    fn min_serialized_size() -> usize {
+        2
     }
 }
 

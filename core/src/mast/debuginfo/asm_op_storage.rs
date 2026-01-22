@@ -59,7 +59,7 @@ pub enum AsmOpIndexError {
 pub struct OpToAsmOpId {
     /// CSR storage: each row (node) contains `(op_idx, asm_op_id)` pairs.
     /// Only operations with an AssemblyOp are stored (sparse representation).
-    inner: CsrMatrix<MastNodeId, (u16, AsmOpId)>,
+    inner: CsrMatrix<MastNodeId, (usize, AsmOpId)>,
 }
 
 impl Default for OpToAsmOpId {
@@ -152,10 +152,7 @@ impl OpToAsmOpId {
             return Err(AsmOpIndexError::OpIndexOutOfBounds(*max_idx, num_operations));
         }
 
-        // Convert to storage format: (u16, AsmOpId)
-        let data = asm_ops.into_iter().map(|(op_idx, id)| (op_idx as u16, id));
-
-        self.inner.push_row(data).map_err(|_| AsmOpIndexError::InternalStructure)?;
+        self.inner.push_row(asm_ops).map_err(|_| AsmOpIndexError::InternalStructure)?;
 
         Ok(())
     }
@@ -181,7 +178,7 @@ impl OpToAsmOpId {
 
         // Binary search for the largest op_idx <= target
         // We're looking for the entry whose op_idx is closest to (but not greater than) op_idx
-        match entries.binary_search_by_key(&(op_idx as u16), |(idx, _)| *idx) {
+        match entries.binary_search_by_key(&op_idx, |(idx, _)| *idx) {
             Ok(i) => {
                 // Exact match
                 Some(entries[i].1)
@@ -243,7 +240,7 @@ impl OpToAsmOpId {
         let num_new_nodes = max_new_id + 1;
 
         // Collect the data for each new node ID
-        let mut new_node_data: BTreeMap<usize, Vec<(u16, AsmOpId)>> = BTreeMap::new();
+        let mut new_node_data: BTreeMap<usize, Vec<(usize, AsmOpId)>> = BTreeMap::new();
 
         for (old_id, new_id) in remapping {
             let new_idx = u32::from(*new_id) as usize;
@@ -283,7 +280,7 @@ impl OpToAsmOpId {
     ) -> Result<Self, crate::utils::DeserializationError> {
         use crate::utils::{Deserializable, DeserializationError};
 
-        let inner: CsrMatrix<MastNodeId, (u16, AsmOpId)> = Deserializable::read_from(source)?;
+        let inner: CsrMatrix<MastNodeId, (usize, AsmOpId)> = Deserializable::read_from(source)?;
 
         let result = Self { inner };
 
