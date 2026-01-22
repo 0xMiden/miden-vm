@@ -1249,3 +1249,13 @@ fn digest_from_seed(seed: [u8; 32]) -> Word {
     });
     digest.into()
 }
+
+#[test]
+fn test_asm_op_id_basic() {
+    use crate::Idx;
+    use crate::mast::AsmOpId;
+
+    let id = AsmOpId::new(42);
+    assert_eq!(id.to_usize(), 42);
+    assert_eq!(u32::from(id), 42);
+}

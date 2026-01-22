@@ -1156,6 +1156,58 @@ impl Deserializable for DecoratorId {
     }
 }
 
+// ASM OP ID
+// ================================================================================================
+
+/// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
+///
+/// Unlike decorators (which are executed at runtime), AssemblyOps are metadata
+/// used only for error context and debugging tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct AsmOpId(u32);
+
+impl AsmOpId {
+    /// Creates a new [`AsmOpId`] with the provided inner value.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<u32> for AsmOpId {
+    fn from(value: u32) -> Self {
+        AsmOpId::new(value)
+    }
+}
+
+impl Idx for AsmOpId {}
+
+impl From<AsmOpId> for u32 {
+    fn from(id: AsmOpId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for AsmOpId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AsmOpId({})", self.0)
+    }
+}
+
+impl Serializable for AsmOpId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+}
+
+impl Deserializable for AsmOpId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
