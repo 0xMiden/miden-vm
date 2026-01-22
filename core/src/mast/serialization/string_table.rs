@@ -25,8 +25,6 @@ pub struct StringTable {
     /// string data corresponds to the same index in `strings`. All future requests for a
     /// ref-counted string we've allocated an `Arc` for, will clone the `Arc` rather than
     /// allocate a fresh string.
-    // TODO: This field will be used again when AssemblyOp serialization is added in Task 7.
-    #[allow(dead_code)]
     refc_strings: Vec<RefCell<Option<Arc<str>>>>,
 }
 
@@ -38,8 +36,6 @@ impl StringTable {
         Self { table, data, refc_strings }
     }
 
-    // TODO: This method will be used again when AssemblyOp serialization is added in Task 7.
-    #[allow(dead_code)]
     pub fn read_arc_str(&self, str_idx: StringIndex) -> Result<Arc<str>, DeserializationError> {
         if let Some(cached) = self.refc_strings.get(str_idx).and_then(|cell| cell.borrow().clone())
         {
@@ -51,8 +47,6 @@ impl StringTable {
         Ok(string)
     }
 
-    // TODO: This method will be used again when AssemblyOp serialization is added in Task 7.
-    #[allow(dead_code)]
     pub fn read_string(&self, str_idx: StringIndex) -> Result<String, DeserializationError> {
         let str_offset = self.table.get(str_idx).copied().ok_or_else(|| {
             DeserializationError::InvalidValue(format!("invalid index in strings table: {str_idx}"))
@@ -87,15 +81,11 @@ impl Deserializable for StringTable {
 #[derive(Debug, Default)]
 pub struct StringTableBuilder {
     table: Vec<StringDataOffset>,
-    // TODO: This field will be used again when AssemblyOp serialization is added in Task 7.
-    #[allow(dead_code)]
     str_to_index: BTreeMap<Blake3Digest<32>, StringIndex>,
     strings_data: Vec<u8>,
 }
 
 impl StringTableBuilder {
-    // TODO: This method will be used again when AssemblyOp serialization is added in Task 7.
-    #[allow(dead_code)]
     pub fn add_string(&mut self, string: &str) -> StringIndex {
         let digest = Blake3_256::hash(string.as_bytes());
         if let Some(str_idx) = self.str_to_index.get(&digest) {

@@ -1,6 +1,5 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 1548
 expression: program
 ---
 begin
@@ -14,7 +13,6 @@ begin
             trace(0)
             trace(1)
         end
-        asmOp(call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef, 1)
         call.0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
     end
     trace(2)

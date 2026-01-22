@@ -1,6 +1,5 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 71
 expression: program
 ---
 begin
@@ -9,9 +8,7 @@ begin
         push(4294967294)
         mstore
         drop
-        asmOp(push.0, 1)
         pad
-        asmOp(assertz, 2)
         eqz
         assert(0)
         noop

@@ -188,6 +188,9 @@ impl MastForest {
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
 
+        // Remap the asm_op_storage to use the new node IDs
+        self.debug_info.remap_asm_op_storage(&id_remappings);
+
         // Invalidate the cached commitment since we modified the forest structure
         self.commitment_cache.take();
 
@@ -782,6 +785,19 @@ impl MastForest {
             "attempted to insert procedure name for digest that is not a procedure root"
         );
         self.debug_info.insert_procedure_name(digest, name);
+    }
+
+    /// Returns a reference to the debug info for this forest.
+    pub fn debug_info(&self) -> &DebugInfo {
+        &self.debug_info
+    }
+
+    /// Returns a mutable reference to the debug info.
+    ///
+    /// This is intended for use by the assembler to register AssemblyOps and other debug
+    /// information during compilation.
+    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
+        &mut self.debug_info
     }
 }
 
