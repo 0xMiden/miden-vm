@@ -127,38 +127,12 @@ impl MastForestBuilder {
         // The CSR structure requires nodes to be added sequentially.
         // We must also merge mappings for duplicate node_ids (can happen when control flow nodes
         // like Call are deduplicated but still have asm_ops registered).
-        self.pending_asm_op_mappings.sort_by_key(|(node_id, _)| *node_id);
-
-        // Deduplicate mappings with the same node_id (keep first registration only).
-        // This can happen when control flow nodes like Call are deduplicated - the same node_id
-        // may have asm_ops registered multiple times, but we only want the first one.
-        let mut seen_node_ids: BTreeSet<MastNodeId> = BTreeSet::new();
-        let mut deduped_mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)> = Vec::new();
-        for (node_id, asm_op_mappings) in self.pending_asm_op_mappings {
-            if seen_node_ids.insert(node_id) {
-                // First time seeing this node_id, keep it
-                deduped_mappings.push((node_id, asm_op_mappings));
-            }
-            // Otherwise skip - the node already has asm_ops registered
-        }
+        let deduped_mappings =
+            deduplicate_asm_op_mappings(core::mem::take(&mut self.pending_asm_op_mappings));
 
         for (node_id, asm_op_mappings) in deduped_mappings {
-            // AssemblyOp indices are stored as raw (unpadded) indices during assembly.
-            // During execution, the processor uses padded indices (because OpBatches include
-            // padding NOOPs). We need to adjust the indices to match what the processor will use.
-            let (num_operations, adjusted_mappings) = match &self.mast_forest[node_id] {
-                MastNode::Block(block) => (
-                    block.num_operations() as usize,
-                    BasicBlockNode::adjust_asm_op_indices(asm_op_mappings, block.op_batches()),
-                ),
-                // Non-block nodes (control flow like Dyn, Call, Split, Loop) don't have
-                // operations in the traditional sense. Compute num_ops from max index.
-                _ => {
-                    let num_ops =
-                        asm_op_mappings.iter().map(|(idx, _)| *idx + 1).max().unwrap_or(0);
-                    (num_ops, asm_op_mappings)
-                },
-            };
+            let (num_operations, adjusted_mappings) =
+                compute_operations_and_adjust_mappings(&self.mast_forest[node_id], asm_op_mappings);
 
             // Errors here are programming errors since we control the ordering.
             // Use expect to surface any issues during development.
@@ -173,6 +147,42 @@ impl MastForestBuilder {
 
         (self.mast_forest, id_remappings)
     }
+}
+
+/// Computes the number of operations for a node and adjusts AssemblyOp indices if needed.
+///
+/// For basic block nodes, adjusts indices to account for padding NOOPs in OpBatches.
+/// For control flow nodes, computes the operation count from the maximum index.
+fn compute_operations_and_adjust_mappings(
+    node: &MastNode,
+    asm_op_mappings: Vec<(usize, AsmOpId)>,
+) -> (usize, Vec<(usize, AsmOpId)>) {
+    match node {
+        MastNode::Block(block) => (
+            block.num_operations() as usize,
+            BasicBlockNode::adjust_asm_op_indices(asm_op_mappings, block.op_batches()),
+        ),
+        _ => {
+            let num_ops = asm_op_mappings.iter().map(|(idx, _)| idx + 1).max().unwrap_or(0);
+            (num_ops, asm_op_mappings)
+        },
+    }
+}
+
+/// Deduplicates AssemblyOp mappings by node_id, keeping only the first registration.
+///
+/// Mappings are sorted by node_id, then deduplicated. This is necessary because control flow
+/// nodes like Call can be deduplicated, resulting in multiple registrations for the same node_id.
+fn deduplicate_asm_op_mappings(
+    mut mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)>,
+) -> Vec<(MastNodeId, Vec<(usize, AsmOpId)>)> {
+    mappings.sort_by_key(|(node_id, _)| *node_id);
+
+    let mut seen_node_ids = BTreeSet::new();
+    mappings
+        .into_iter()
+        .filter(|(node_id, _)| seen_node_ids.insert(*node_id))
+        .collect()
 }
 
 /// Takes the set of MAST node ids (all basic blocks) that were merged as part of the assembly
@@ -382,12 +392,10 @@ impl MastForestBuilder {
             let basic_block_node = self.mast_forest[basic_block_id].get_basic_block().unwrap();
 
             // check if the block should be merged with other blocks
-            let do_merge = should_merge(
+            if should_merge(
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
-            );
-
-            if do_merge {
+            ) {
                 // Collect decorators and operations from the block (while still borrowing)
                 // We need owned copies so we can drop the borrow before mutating self
                 let block_decorators: Vec<_> =
@@ -456,18 +464,18 @@ impl MastForestBuilder {
         ops_offset: usize,
         merged_asm_ops: &mut Vec<(usize, AsmOpId)>,
     ) {
-        // Find and remove the asm_ops for source_block_id from pending mappings
-        let mut i = 0;
-        while i < self.pending_asm_op_mappings.len() {
-            if self.pending_asm_op_mappings[i].0 == source_block_id {
-                let (_, asm_ops) = self.pending_asm_op_mappings.remove(i);
-                // Add to merged list with adjusted indices
-                for (op_idx, asm_op_id) in asm_ops {
-                    merged_asm_ops.push((op_idx + ops_offset, asm_op_id));
-                }
-            } else {
-                i += 1;
-            }
+        // Partition pending mappings into those matching source_block_id and the rest
+        let (matched, rest): (Vec<_>, Vec<_>) = core::mem::take(&mut self.pending_asm_op_mappings)
+            .into_iter()
+            .partition(|(node_id, _)| *node_id == source_block_id);
+
+        self.pending_asm_op_mappings = rest;
+
+        // Add matched asm_ops to merged list with adjusted indices
+        for (_, asm_ops) in matched {
+            merged_asm_ops.extend(
+                asm_ops.into_iter().map(|(op_idx, asm_op_id)| (op_idx + ops_offset, asm_op_id)),
+            );
         }
     }
 

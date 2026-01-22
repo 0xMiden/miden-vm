@@ -194,13 +194,12 @@ impl BasicBlockBuilder<'_> {
             pending.should_break,
         );
 
-        if cycle_count == 0 {
-            // Return for node-level attachment (exec/call/syscall)
-            Some(asm_op)
-        } else {
-            // Store for basic block registration
-            self.asm_ops.push((pending.op_start, asm_op));
-            None
+        match cycle_count {
+            0 => Some(asm_op),
+            _ => {
+                self.asm_ops.push((pending.op_start, asm_op));
+                None
+            },
         }
     }
 }

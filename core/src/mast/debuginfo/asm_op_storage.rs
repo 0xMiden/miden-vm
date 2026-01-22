@@ -179,14 +179,9 @@ impl OpToAsmOpId {
         // Binary search for the largest op_idx <= target
         // We're looking for the entry whose op_idx is closest to (but not greater than) op_idx
         match entries.binary_search_by_key(&op_idx, |(idx, _)| *idx) {
-            Ok(i) => {
-                // Exact match
-                Some(entries[i].1)
-            },
-            Err(i) => {
-                // i is the insertion point, so the previous entry (if any) has op_idx < target
-                if i > 0 { Some(entries[i - 1].1) } else { None }
-            },
+            Ok(i) => Some(entries[i].1),
+            Err(i) if i > 0 => Some(entries[i - 1].1),
+            Err(_) => None,
         }
     }
 
@@ -297,22 +292,18 @@ impl OpToAsmOpId {
 
 /// Format a CsrValidationError into a human-readable string.
 fn format_validation_error(error: CsrValidationError, asm_op_count: usize) -> String {
+    use alloc::format;
     match error {
-        CsrValidationError::IndptrStartNotZero(val) => {
-            alloc::format!("indptr must start at 0, got {val}")
-        },
+        CsrValidationError::IndptrStartNotZero(val) => format!("indptr must start at 0, got {val}"),
         CsrValidationError::IndptrNotMonotonic { index, prev, curr } => {
-            alloc::format!("indptr not monotonic at index {index}: {prev} > {curr}")
+            format!("indptr not monotonic at index {index}: {prev} > {curr}")
         },
         CsrValidationError::IndptrDataMismatch { indptr_end, data_len } => {
-            alloc::format!("indptr ends at {indptr_end}, but data.len() is {data_len}")
+            format!("indptr ends at {indptr_end}, but data.len() is {data_len}")
         },
-        CsrValidationError::InvalidData { row, position } => {
-            alloc::format!(
-                "Invalid AsmOpId at row {row}, position {position}: \
-                 exceeds asm_op count {asm_op_count}"
-            )
-        },
+        CsrValidationError::InvalidData { row, position } => format!(
+            "Invalid AsmOpId at row {row}, position {position}: exceeds asm_op count {asm_op_count}"
+        ),
     }
 }
 
