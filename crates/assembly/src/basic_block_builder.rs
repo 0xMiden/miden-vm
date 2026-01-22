@@ -1,6 +1,15 @@
-use alloc::{borrow::Borrow, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    borrow::Borrow,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
-use miden_assembly_syntax::{ast::Instruction, debuginfo::Span, diagnostics::Report};
+use miden_assembly_syntax::{
+    ast::Instruction,
+    debuginfo::{Location, Span},
+    diagnostics::Report,
+};
 use miden_core::{
     AssemblyOp, Decorator, DecoratorList, Felt, Operation,
     mast::{DecoratorId, MastNodeId},
@@ -8,6 +17,28 @@ use miden_core::{
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
+
+// PENDING ASM OP
+// ================================================================================================
+
+/// Information about an instruction being tracked, pending cycle count computation.
+///
+/// When an instruction is encountered during assembly, we don't yet know how many VM cycles
+/// it will consume. This struct holds the instruction's metadata until the cycle count can
+/// be computed (when the next instruction begins or the block ends).
+#[derive(Debug)]
+struct PendingAsmOp {
+    /// Operation index where this instruction started (before any ops were added for it).
+    op_start: usize,
+    /// Source location in the original source file, if available.
+    location: Option<Location>,
+    /// The fully-qualified procedure path (e.g., "std::math::u64::add").
+    context_name: String,
+    /// The string representation of the instruction (e.g., "add", "push.1").
+    op: String,
+    /// Whether this instruction is a breakpoint.
+    should_break: bool,
+}
 
 // BASIC BLOCK BUILDER
 // ================================================================================================
@@ -26,7 +57,10 @@ pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
     decorators: DecoratorList,
     epilogue: Vec<Operation>,
-    last_asmop_pos: usize,
+    /// Pending assembly operation info, waiting for cycle count to be computed.
+    pending_asm_op: Option<PendingAsmOp>,
+    /// Finalized AssemblyOps with their operation indices (op_idx, AssemblyOp).
+    asm_ops: Vec<(usize, AssemblyOp)>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -46,14 +80,16 @@ impl<'a> BasicBlockBuilder<'a> {
                 ops: wrapper.prologue,
                 decorators: Vec::new(),
                 epilogue: wrapper.epilogue,
-                last_asmop_pos: 0,
+                pending_asm_op: None,
+                asm_ops: Vec::new(),
                 mast_forest_builder,
             },
             None => Self {
                 ops: Default::default(),
                 decorators: Default::default(),
                 epilogue: Default::default(),
-                last_asmop_pos: 0,
+                pending_asm_op: None,
+                asm_ops: Vec::new(),
                 mast_forest_builder,
             },
         }
@@ -113,54 +149,57 @@ impl BasicBlockBuilder<'_> {
         Ok(())
     }
 
-    /// Adds an AsmOp decorator to the list of basic block decorators.
+    /// Tracks an instruction for AssemblyOp metadata collection.
     ///
-    /// This indicates that the provided instruction should be tracked and the cycle count for
-    /// this instruction will be computed when the call to set_instruction_cycle_count() is made.
+    /// This stores the instruction's metadata in a pending state. The cycle count will be
+    /// computed when [`Self::set_instruction_cycle_count`] is called (typically after all
+    /// operations for the instruction have been added).
     pub fn track_instruction(
         &mut self,
         instruction: &Span<Instruction>,
         proc_ctx: &ProcedureContext,
     ) -> Result<(), Report> {
         let span = instruction.span();
-        let location = proc_ctx.source_manager().location(span).ok();
-        let context_name = proc_ctx.path().to_string();
-        let num_cycles = 0;
-        let op = instruction.to_string();
-        let should_break = instruction.should_break();
-        let op = AssemblyOp::new(location, context_name, num_cycles, op, should_break);
-        self.push_decorator(Decorator::AsmOp(op))?;
-        self.last_asmop_pos = self.decorators.len() - 1;
+        self.pending_asm_op = Some(PendingAsmOp {
+            op_start: self.ops.len(),
+            location: proc_ctx.source_manager().location(span).ok(),
+            context_name: proc_ctx.path().to_string(),
+            op: instruction.to_string(),
+            should_break: instruction.should_break(),
+        });
 
         Ok(())
     }
 
-    /// Computes the number of cycles elapsed since the last invocation of track_instruction() and
-    /// updates the related AsmOp decorator to include this cycle count.
+    /// Finalizes the pending AssemblyOp with the computed cycle count.
     ///
-    /// If the cycle count is 0, the original decorator is removed from the list and returned. This
-    /// can happen for instructions which do not contribute any operations to the span block - e.g.,
-    /// exec, call, and syscall.
-    pub fn set_instruction_cycle_count(&mut self) -> Option<DecoratorId> {
-        // get the last asmop decorator and the cycle at which it was added
-        let (op_start, assembly_op_id) =
-            self.decorators.get_mut(self.last_asmop_pos).expect("no asmop decorator");
+    /// Computes the number of cycles elapsed since the last invocation of
+    /// [`Self::track_instruction`] and creates an [`AssemblyOp`] with that cycle count.
+    ///
+    /// If the cycle count is 0 (instruction did not contribute any operations to the basic block,
+    /// e.g., exec, call, syscall), returns the [`AssemblyOp`] so it can be attached to a node-level
+    /// decorator. Otherwise, stores the [`AssemblyOp`] in the internal `asm_ops` list for later
+    /// registration with the node's debug info.
+    pub fn set_instruction_cycle_count(&mut self) -> Option<AssemblyOp> {
+        let pending = self.pending_asm_op.take().expect("no pending asm op to finalize");
 
-        let assembly_op = match &mut self.mast_forest_builder[*assembly_op_id] {
-            Decorator::AsmOp(assembly_op) => assembly_op,
-            _ => panic!("internal error: last asmop decorator is not an AsmOp"),
-        };
+        // Compute the cycle count for the instruction
+        let cycle_count = self.ops.len() - pending.op_start;
 
-        // compute the cycle count for the instruction
-        let cycle_count = self.ops.len() - *op_start;
+        let asm_op = AssemblyOp::new(
+            pending.location,
+            pending.context_name,
+            cycle_count as u8,
+            pending.op,
+            pending.should_break,
+        );
 
-        // if the cycle count is 0, remove the decorator; otherwise update its cycle count
         if cycle_count == 0 {
-            let (_, decorator_id) = self.decorators.remove(self.last_asmop_pos);
-            Some(decorator_id)
+            // Return for node-level attachment (exec/call/syscall)
+            Some(asm_op)
         } else {
-            assembly_op.set_num_cycles(cycle_count as u8);
-
+            // Store for basic block registration
+            self.asm_ops.push((pending.op_start, asm_op));
             None
         }
     }
@@ -181,9 +220,11 @@ impl BasicBlockBuilder<'_> {
         if !self.ops.is_empty() {
             let ops = self.ops.drain(..).collect();
             let decorators = self.decorators.drain(..).collect();
+            let asm_ops = core::mem::take(&mut self.asm_ops);
 
             let basic_block_node_id =
-                self.mast_forest_builder.ensure_block(ops, decorators, vec![], vec![])?;
+                self.mast_forest_builder
+                    .ensure_block(ops, decorators, asm_ops, vec![], vec![])?;
 
             Ok(Some(basic_block_node_id))
         } else {

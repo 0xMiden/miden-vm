@@ -160,7 +160,8 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators, asm_ops, error codes, or procedure names.
+    /// Returns true if this [DebugInfo] has no decorators, asm_ops, error codes, or procedure
+    /// names.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty()
             && self.asm_ops.is_empty()
@@ -168,7 +169,8 @@ impl DebugInfo {
             && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators, asm_ops, error codes, and procedure names.
+    /// Strips all debug information, removing decorators, asm_ops, error codes, and procedure
+    /// names.
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn clear(&mut self) {
@@ -317,12 +319,28 @@ impl DebugInfo {
     }
 
     /// Registers operation-indexed AssemblyOps for a node.
+    ///
+    /// The `num_operations` parameter must be the total number of operations in the node.
+    /// This is needed to allocate enough space for all operations, even those without
+    /// AssemblyOps, so that lookups at any valid operation index will work correctly.
     pub fn register_asm_ops(
         &mut self,
         node_id: MastNodeId,
+        num_operations: usize,
         asm_ops: Vec<(usize, AsmOpId)>,
     ) -> Result<(), AsmOpIndexError> {
-        self.asm_op_storage.add_asm_op_for_node(node_id, asm_ops)
+        self.asm_op_storage.add_asm_op_for_node(node_id, num_operations, asm_ops)
+    }
+
+    /// Remaps the asm_op_storage to use new node IDs after nodes have been removed/reordered.
+    ///
+    /// This should be called after nodes are removed from the MastForest to ensure
+    /// the asm_op storage still references valid node IDs.
+    pub(super) fn remap_asm_op_storage(
+        &mut self,
+        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
+    ) {
+        self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
     // ERROR CODE METHODS
@@ -436,7 +454,9 @@ impl DebugInfo {
 
 impl Serializable for DebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        use crate::mast::serialization::decorator::DecoratorDataBuilder;
+        use crate::mast::serialization::{
+            asm_op::AsmOpDataBuilder, decorator::DecoratorDataBuilder,
+        };
 
         // 1. Serialize decorators (data, string table, infos)
         let mut decorator_data_builder = DecoratorDataBuilder::new();
@@ -468,11 +488,16 @@ impl Serializable for DebugInfo {
             self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
         procedure_names.write_into(target);
 
-        // 6. Serialize AssemblyOps count and storage
-        // Note: Full AssemblyOp serialization is implemented in Task 7.
-        // For now, we serialize the count only; AssemblyOps will be reconstructed
-        // from decorators during deserialization for backward compatibility.
-        (self.asm_ops.len() as u32).write_into(target);
+        // 6. Serialize AssemblyOps (data, string table, infos)
+        let mut asm_op_data_builder = AsmOpDataBuilder::new();
+        for asm_op in self.asm_ops.iter() {
+            asm_op_data_builder.add_asm_op(asm_op);
+        }
+        let (asm_op_data, asm_op_infos, asm_op_string_table) = asm_op_data_builder.finalize();
+
+        asm_op_data.write_into(target);
+        asm_op_string_table.write_into(target);
+        asm_op_infos.write_into(target);
 
         // 7. Serialize OpToAsmOpId CSR (dense representation)
         self.asm_op_storage.write_into(target);
@@ -481,7 +506,7 @@ impl Serializable for DebugInfo {
 
 impl Deserializable for DebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use crate::mast::serialization::decorator::DecoratorInfo;
+        use crate::mast::serialization::{asm_op::AsmOpInfo, decorator::DecoratorInfo};
 
         // 1. Read decorator data and string table
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
@@ -523,16 +548,27 @@ impl Deserializable for DebugInfo {
             .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
             .collect();
 
-        // 7. Read AssemblyOps count
-        // Note: Full AssemblyOp serialization is implemented in Task 7.
-        // For now, we read the count only and create empty storage.
-        let asm_op_count: u32 = Deserializable::read_from(source)?;
-        let asm_ops: IndexVec<AsmOpId, AssemblyOp> = IndexVec::new();
+        // 7. Read AssemblyOps (data, string table, infos)
+        let asm_op_data: Vec<u8> = Deserializable::read_from(source)?;
+        let asm_op_string_table: crate::mast::serialization::StringTable =
+            Deserializable::read_from(source)?;
+        let asm_op_infos: Vec<AsmOpInfo> = Deserializable::read_from(source)?;
 
-        // 8. Read OpToAsmOpId CSR (dense representation)
-        let asm_op_storage = OpToAsmOpId::read_from(source, asm_op_count as usize)?;
+        // 8. Reconstruct AssemblyOps
+        let mut asm_ops = IndexVec::new();
+        for asm_op_info in asm_op_infos {
+            let asm_op = asm_op_info.try_into_asm_op(&asm_op_string_table, &asm_op_data)?;
+            asm_ops.push(asm_op).map_err(|_| {
+                DeserializationError::InvalidValue(
+                    "Failed to add AssemblyOp to IndexVec".to_string(),
+                )
+            })?;
+        }
 
-        // 9. Construct and validate DebugInfo
+        // 9. Read OpToAsmOpId CSR (dense representation)
+        let asm_op_storage = OpToAsmOpId::read_from(source, asm_ops.len())?;
+
+        // 10. Construct and validate DebugInfo
         let debug_info = DebugInfo {
             decorators,
             op_decorator_storage,

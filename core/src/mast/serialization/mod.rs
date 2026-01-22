@@ -42,6 +42,7 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
