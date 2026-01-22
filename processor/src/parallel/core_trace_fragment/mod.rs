@@ -81,7 +81,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
     /// Fills the fragment and returns the final stack rows, system rows, and number of rows built.
     pub fn fill_fragment(mut self) -> ([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize) {
-        // Execute fragment generation and always finalize at the end
+        // We extract final state from `self`, so the ControlFlow result doesn't matter.
         let _ = self.fill_fragment_impl();
 
         let num_rows_built = self.num_rows_built();

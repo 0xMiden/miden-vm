@@ -65,7 +65,7 @@ impl OverflowStack {
 
     /// Pushes a value onto the overflow stack.
     pub fn push(&mut self, entry: OverflowStackEntry) {
-        let _ = self.overflow.push(entry);
+        let _ = self.overflow.push(entry); // discard returned index
     }
 
     /// Pops a value from the overflow stack, if any.
@@ -98,7 +98,7 @@ impl OverflowTable {
     /// table at every clock cycle. This is used for debugging purposes.
     pub fn new() -> Self {
         let mut overflow = IndexVec::new();
-        let _ = overflow.push(OverflowStack::new());
+        let _ = overflow.push(OverflowStack::new()); // discard returned index
 
         Self { overflow }
     }
@@ -178,7 +178,7 @@ impl OverflowTable {
     /// Note: It is possible to return to context 0 with a syscall; in this case, each instantiation
     /// of context 0 will get a separate overflow table.
     pub fn start_context(&mut self) {
-        let _ = self.overflow.push(OverflowStack::new());
+        let _ = self.overflow.push(OverflowStack::new()); // discard returned index
     }
 
     /// Restores the specified context.

@@ -423,6 +423,8 @@ fn initialize_range_checker(
     range_checker
 }
 
+/// Replays recorded operations to populate chiplet traces. Results were already used during
+/// execution; this pass only needs the trace-recording side effects.
 fn initialize_chiplets(
     kernel: Kernel,
     core_trace_contexts: &[CoreTraceFragmentContext],

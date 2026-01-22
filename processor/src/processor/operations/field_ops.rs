@@ -71,8 +71,8 @@ pub(super) fn op_and<P: Processor>(
     pop2_applyfn_push_op(
         processor,
         |a, b| {
-            let _ = assert_binary(b)?;
-            let _ = assert_binary(a)?;
+            assert_binary(b)?;
+            assert_binary(a)?;
 
             if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -94,8 +94,8 @@ pub(super) fn op_or<P: Processor>(
     pop2_applyfn_push_op(
         processor,
         |a, b| {
-            let _ = assert_binary(b)?;
-            let _ = assert_binary(a)?;
+            assert_binary(b)?;
+            assert_binary(a)?;
 
             if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
