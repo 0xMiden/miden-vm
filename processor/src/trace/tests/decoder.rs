@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS,
+    chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
@@ -24,7 +25,6 @@ use super::{
 use crate::{
     ContextId,
     decoder::{BlockHashTableRow, build_op_group},
-    utils::HASH_CYCLE_LEN_FELT,
 };
 
 // BLOCK STACK TABLE TESTS

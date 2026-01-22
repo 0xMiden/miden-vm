@@ -85,6 +85,7 @@ pub const NUM_SELECTORS: usize = 3;
 /// The number of rows in the execution trace required to compute a permutation of Poseidon2.
 /// This is equal to 32.
 pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
+pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
 
 /// Number of columns in Hasher execution trace. There is one additional column for the node index.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 1;

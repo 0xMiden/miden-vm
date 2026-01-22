@@ -5,8 +5,8 @@ use miden_air::trace::{
     chiplets::{
         hasher,
         hasher::{
-            HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
-            MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
+            HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, LINEAR_HASH_LABEL, MP_VERIFY_LABEL,
+            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
     },
     log_precompile::{
@@ -265,7 +265,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
 ) -> E {
     // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
-    let hash_cycle_len = Felt::from_u16(HASH_CYCLE_LEN as u16);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
 
     let node_value = main_trace.stack_word(0, row);
     let node_depth = main_trace.stack_element(4, row);
@@ -316,7 +316,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 ) -> E {
     // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
-    let hash_cycle_len = Felt::from_u16(HASH_CYCLE_LEN as u16);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
     let two_hash_cycles_len = hash_cycle_len + hash_cycle_len;
 
     let old_node_value = main_trace.stack_word(0, row);

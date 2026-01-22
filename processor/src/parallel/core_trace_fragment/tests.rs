@@ -2,6 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     CTX_COL_IDX,
+    chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
@@ -32,9 +33,6 @@ const TWO: Felt = Felt::new(2);
 const EIGHT: Felt = Felt::new(8);
 const NINE: Felt = Felt::new(9);
 const FOURTEEN: Felt = Felt::new(14);
-
-const HASH_CYCLE_LEN_FELT: Felt =
-    Felt::new(miden_air::trace::chiplets::hasher::HASH_CYCLE_LEN as u64);
 
 const INIT_ADDR: Felt = ONE;
 const EMIT_EVENT: EventName = EventName::new("test::emit::event");

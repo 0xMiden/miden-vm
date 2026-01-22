@@ -2,7 +2,7 @@ use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::{
     RowIndex,
-    chiplets::hasher::{HASH_CYCLE_LEN, STATE_WIDTH},
+    chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH},
 };
 use miden_core::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
@@ -33,7 +33,7 @@ use crate::{
     },
     stack::OverflowTable,
     system::ContextId,
-    utils::{HASH_CYCLE_LEN_FELT, split_u32_into_u16},
+    utils::split_u32_into_u16,
 };
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
