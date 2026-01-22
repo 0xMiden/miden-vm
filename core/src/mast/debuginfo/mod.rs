@@ -51,15 +51,13 @@ use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
+use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
-    LexicographicWord, Word,
+    AssemblyOp, LexicographicWord, Word,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 mod asm_op_storage;
-// TODO: Remove this allow when Task 3 integrates OpToAsmOpId into DebugInfo
-#[allow(unused_imports)]
 pub use asm_op_storage::{AsmOpIndexError, OpToAsmOpId};
 
 mod decorator_storage;
@@ -77,7 +75,7 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
-    /// All decorators in the MAST forest.
+    /// All decorators in the MAST forest (Debug and Trace only, no AsmOp).
     decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Efficient access to decorators per operation per node.
@@ -85,6 +83,12 @@ pub struct DebugInfo {
 
     /// Efficient storage for node-level decorators (before_enter and after_exit).
     node_decorator_storage: NodeToDecoratorIds,
+
+    /// All AssemblyOps in the MAST forest.
+    asm_ops: IndexVec<AsmOpId, AssemblyOp>,
+
+    /// Efficient access to AssemblyOps per operation per node.
+    asm_op_storage: OpToAsmOpId,
 
     /// Maps error codes to error messages.
     error_codes: BTreeMap<u64, Arc<str>>,
@@ -104,6 +108,8 @@ impl DebugInfo {
             decorators: IndexVec::new(),
             op_decorator_storage: OpToDecoratorIds::new(),
             node_decorator_storage: NodeToDecoratorIds::new(),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -124,6 +130,8 @@ impl DebugInfo {
                 decorator_ids_capacity,
             ),
             node_decorator_storage: NodeToDecoratorIds::with_capacity(nodes_capacity, 0, 0),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -142,6 +150,8 @@ impl DebugInfo {
             decorators: IndexVec::new(),
             op_decorator_storage,
             node_decorator_storage: NodeToDecoratorIds::new(),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -150,17 +160,22 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators, error codes, or procedure names.
+    /// Returns true if this [DebugInfo] has no decorators, asm_ops, error codes, or procedure names.
     pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty() && self.error_codes.is_empty() && self.procedure_names.is_empty()
+        self.decorators.is_empty()
+            && self.asm_ops.is_empty()
+            && self.error_codes.is_empty()
+            && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators, error codes, and procedure names.
+    /// Strips all debug information, removing decorators, asm_ops, error codes, and procedure names.
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn clear(&mut self) {
         self.clear_mappings();
         self.decorators = IndexVec::new();
+        self.asm_ops = IndexVec::new();
+        self.asm_op_storage = OpToAsmOpId::new();
         self.error_codes.clear();
         self.procedure_names.clear();
     }
@@ -263,6 +278,53 @@ impl DebugInfo {
         self.node_decorator_storage.clear();
     }
 
+    // ASSEMBLY OP ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the number of AssemblyOps.
+    pub fn num_asm_ops(&self) -> usize {
+        self.asm_ops.len()
+    }
+
+    /// Returns all AssemblyOps as a slice.
+    pub fn asm_ops(&self) -> &[AssemblyOp] {
+        self.asm_ops.as_slice()
+    }
+
+    /// Returns the AssemblyOp with the given ID, if it exists.
+    pub fn asm_op(&self, asm_op_id: AsmOpId) -> Option<&AssemblyOp> {
+        self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns the AssemblyOp for a specific operation within a node, if any.
+    pub fn asm_op_for_operation(&self, node_id: MastNodeId, op_idx: usize) -> Option<&AssemblyOp> {
+        let asm_op_id = self.asm_op_storage.asm_op_id_for_operation(node_id, op_idx)?;
+        self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns the first AssemblyOp for a node, if any.
+    pub fn first_asm_op_for_node(&self, node_id: MastNodeId) -> Option<&AssemblyOp> {
+        let asm_op_id = self.asm_op_storage.first_asm_op_for_node(node_id)?;
+        self.asm_ops.get(asm_op_id)
+    }
+
+    // ASSEMBLY OP MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Adds an AssemblyOp and returns its ID.
+    pub fn add_asm_op(&mut self, asm_op: AssemblyOp) -> Result<AsmOpId, MastForestError> {
+        self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDecorators)
+    }
+
+    /// Registers operation-indexed AssemblyOps for a node.
+    pub fn register_asm_ops(
+        &mut self,
+        node_id: MastNodeId,
+        asm_ops: Vec<(usize, AsmOpId)>,
+    ) -> Result<(), AsmOpIndexError> {
+        self.asm_op_storage.add_asm_op_for_node(node_id, asm_ops)
+    }
+
     // ERROR CODE METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -343,15 +405,21 @@ impl DebugInfo {
     /// This validates:
     /// - All CSR structures in op_decorator_storage
     /// - All CSR structures in node_decorator_storage
+    /// - All CSR structures in asm_op_storage
     /// - All decorator IDs reference valid decorators
+    /// - All AsmOpIds reference valid AssemblyOps
     pub(super) fn validate(&self) -> Result<(), String> {
         let decorator_count = self.decorators.len();
+        let asm_op_count = self.asm_ops.len();
 
         // Validate OpToDecoratorIds CSR
         self.op_decorator_storage.validate_csr(decorator_count)?;
 
         // Validate NodeToDecoratorIds CSR
         self.node_decorator_storage.validate_csr(decorator_count)?;
+
+        // Validate OpToAsmOpId CSR
+        self.asm_op_storage.validate_csr(asm_op_count)?;
 
         Ok(())
     }
@@ -399,6 +467,15 @@ impl Serializable for DebugInfo {
         let procedure_names: BTreeMap<Word, String> =
             self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
         procedure_names.write_into(target);
+
+        // 6. Serialize AssemblyOps count and storage
+        // Note: Full AssemblyOp serialization is implemented in Task 7.
+        // For now, we serialize the count only; AssemblyOps will be reconstructed
+        // from decorators during deserialization for backward compatibility.
+        (self.asm_ops.len() as u32).write_into(target);
+
+        // 7. Serialize OpToAsmOpId CSR (dense representation)
+        self.asm_op_storage.write_into(target);
     }
 }
 
@@ -446,11 +523,22 @@ impl Deserializable for DebugInfo {
             .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
             .collect();
 
-        // 7. Construct and validate DebugInfo
+        // 7. Read AssemblyOps count
+        // Note: Full AssemblyOp serialization is implemented in Task 7.
+        // For now, we read the count only and create empty storage.
+        let asm_op_count: u32 = Deserializable::read_from(source)?;
+        let asm_ops: IndexVec<AsmOpId, AssemblyOp> = IndexVec::new();
+
+        // 8. Read OpToAsmOpId CSR (dense representation)
+        let asm_op_storage = OpToAsmOpId::read_from(source, asm_op_count as usize)?;
+
+        // 9. Construct and validate DebugInfo
         let debug_info = DebugInfo {
             decorators,
             op_decorator_storage,
             node_decorator_storage,
+            asm_ops,
+            asm_op_storage,
             error_codes,
             procedure_names,
         };

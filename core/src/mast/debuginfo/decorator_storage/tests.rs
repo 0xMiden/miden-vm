@@ -770,6 +770,8 @@ fn test_sparse_debuginfo_round_trip() {
         decorators,
         op_decorator_storage: op_storage,
         node_decorator_storage: node_storage,
+        asm_ops: crate::mast::debuginfo::IndexVec::new(),
+        asm_op_storage: crate::mast::OpToAsmOpId::new(),
         error_codes,
         procedure_names: BTreeMap::new(),
     };
