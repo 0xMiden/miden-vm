@@ -633,7 +633,6 @@ impl Arbitrary for Decorator {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         prop_oneof![
-            any_with::<AssemblyOp>(()).prop_map(Decorator::AsmOp),
             any_with::<DebugOptions>(()).prop_map(Decorator::Debug),
             any::<u32>().prop_map(Decorator::Trace),
         ]
