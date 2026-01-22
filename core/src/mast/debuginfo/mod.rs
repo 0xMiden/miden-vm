@@ -57,6 +57,11 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+mod asm_op_storage;
+// TODO: Remove this allow when Task 3 integrates OpToAsmOpId into DebugInfo
+#[allow(unused_imports)]
+pub use asm_op_storage::{AsmOpIndexError, OpToAsmOpId};
+
 mod decorator_storage;
 pub use decorator_storage::{
     DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, OpToDecoratorIds,
