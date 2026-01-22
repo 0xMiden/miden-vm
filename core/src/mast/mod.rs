@@ -66,8 +66,8 @@ use crate::{
 
 mod debuginfo;
 pub use debuginfo::{
-    DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds,
-    OpToDecoratorIds,
+    AsmOpIndexError, DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError,
+    NodeToDecoratorIds, OpToAsmOpId, OpToDecoratorIds,
 };
 
 mod serialization;

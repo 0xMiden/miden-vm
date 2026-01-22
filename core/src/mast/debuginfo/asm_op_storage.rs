@@ -32,8 +32,6 @@ use serde::{Deserialize, Serialize};
 use crate::mast::{AsmOpId, MastNodeId};
 
 /// Error type for AsmOp index mapping operations.
-// TODO: Remove this allow when Task 3 integrates OpToAsmOpId into DebugInfo
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum AsmOpIndexError {
     /// Node index is invalid (either out of sequence or already added).
@@ -54,8 +52,6 @@ pub enum AsmOpIndexError {
 ///
 /// This structure provides efficient lookup of AssemblyOps by node and operation index,
 /// which is needed for error context reporting and debugging tools.
-// TODO: Remove this allow when Task 3 integrates OpToAsmOpId into DebugInfo
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OpToAsmOpId {
@@ -65,8 +61,6 @@ pub struct OpToAsmOpId {
     node_indptr: IndexVec<MastNodeId, usize>,
 }
 
-// TODO: Remove this allow when Task 3 integrates OpToAsmOpId into DebugInfo
-#[allow(dead_code)]
 impl OpToAsmOpId {
     /// Creates a new empty [`OpToAsmOpId`].
     pub fn new() -> Self {

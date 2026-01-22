@@ -1259,3 +1259,43 @@ fn test_asm_op_id_basic() {
     assert_eq!(id.to_usize(), 42);
     assert_eq!(u32::from(id), 42);
 }
+
+#[test]
+fn test_debug_info_asm_op_storage() {
+    use crate::mast::{DebugInfo, MastNodeId};
+    use alloc::string::ToString;
+
+    let mut debug_info = DebugInfo::new();
+
+    // Add an AssemblyOp
+    let asm_op = AssemblyOp::new(None, "test".to_string(), 5, "add".to_string(), false);
+    let asm_op_id = debug_info.add_asm_op(asm_op).unwrap();
+
+    // Register it for node 0, op 2
+    let node_id = MastNodeId::new_unchecked(0);
+    debug_info.register_asm_ops(node_id, vec![(2, asm_op_id)]).unwrap();
+
+    // Query it back
+    let retrieved = debug_info.asm_op_for_operation(node_id, 2);
+    assert!(retrieved.is_some());
+    assert_eq!(retrieved.unwrap().op(), "add");
+
+    // Query non-existent
+    assert!(debug_info.asm_op_for_operation(node_id, 0).is_none());
+
+    // Test first_asm_op_for_node
+    let first = debug_info.first_asm_op_for_node(node_id);
+    assert!(first.is_some());
+    assert_eq!(first.unwrap().op(), "add");
+
+    // Test accessors
+    assert_eq!(debug_info.num_asm_ops(), 1);
+    assert_eq!(debug_info.asm_ops().len(), 1);
+    assert!(debug_info.asm_op(asm_op_id).is_some());
+    assert_eq!(debug_info.asm_op(asm_op_id).unwrap().op(), "add");
+
+    // Test non-existent node
+    let non_existent_node = MastNodeId::new_unchecked(999);
+    assert!(debug_info.asm_op_for_operation(non_existent_node, 0).is_none());
+    assert!(debug_info.first_asm_op_for_node(non_existent_node).is_none());
+}
