@@ -6,7 +6,7 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId, EventName, sys_events::SystemEvent};
+use miden_core::{DebugOptions, DebugVarInfo, EventId, EventName, sys_events::SystemEvent};
 
 use crate::{AdviceMutation, ExecutionError, ProcessState};
 
@@ -219,6 +219,18 @@ pub trait DebugHandler: Sync {
             process.clk(),
             process.ctx()
         );
+        Ok(())
+    }
+
+    /// This function is invoked when the `DebugVar` decorator is executed.
+    ///
+    /// This provides debuggers with information about source-level variables and
+    /// where their values can be found during execution.
+    fn on_debug_var(
+        &mut self,
+        _process: &ProcessState,
+        _var_info: &DebugVarInfo,
+    ) -> Result<(), ExecutionError> {
         Ok(())
     }
 }
