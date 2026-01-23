@@ -70,6 +70,7 @@
 - [BREAKING] Updated processor module structure ([#2651](https://github.com/0xMiden/miden-vm/pull/2651)).
 
 ## 0.20.6 (2026-02-04)
+- Consolidated testing hosts by merging `TestHost` into `TestConsistencyHost` (kept `TestHost` as an alias) and reusing the unified host in tests ([#2601](https://github.com/0xMiden/miden-vm/issues/2601)).
 
 - Fixed issue with link-time symbol resolution that prevented referencing an imported item as locally-defined, e.g. an import like `use some::module::CONST` used via something like `emit.CONST` would fail to resolve correctly. [#2637](https://github.com/0xMiden/miden-vm/pull/2637)
 
