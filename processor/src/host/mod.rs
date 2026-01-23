@@ -7,7 +7,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{AssertError, DebugError, EventError, ProcessState, TraceError};
+use crate::{DebugError, EventError, ProcessState, TraceError};
 
 pub(super) mod advice;
 
@@ -110,15 +110,6 @@ pub trait Host {
     fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
-    }
-
-    /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(
-        &mut self,
-        _process: &ProcessState,
-        _err_code: Felt,
-    ) -> Option<AssertError> {
-        None
     }
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.

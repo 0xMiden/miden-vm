@@ -85,12 +85,6 @@ pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
 /// into this type since it is a [`Box`].
 pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
 
-/// A generic [`Error`] wrapper for assertion handler errors.
-///
-/// Assertion handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type AssertError = Box<dyn Error + Send + Sync + 'static>;
-
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 

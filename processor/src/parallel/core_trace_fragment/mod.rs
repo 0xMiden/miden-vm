@@ -17,7 +17,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ExecutionError, ProcessState,
+    ContextId, ExecutionError,
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
@@ -625,10 +625,6 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
 
     fn system(&mut self) -> &mut Self::System {
         self
-    }
-
-    fn state(&mut self) -> ProcessState<'_> {
-        ProcessState::Noop(())
     }
 
     fn advice_provider(&mut self) -> &mut Self::AdviceProvider {

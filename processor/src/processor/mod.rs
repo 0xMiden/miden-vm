@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ExecutionError, Host, MemoryError, ProcessState,
+    AdviceError, ContextId, ExecutionError, Host, MemoryError,
     errors::{AceEvalError, OperationError},
     fast::Tracer,
     processor::operations::execute_sync_op,
@@ -34,9 +34,6 @@ pub trait Processor: Sized {
 
     /// Returns a mutable reference to the internal system.
     fn system(&mut self) -> &mut Self::System;
-
-    /// Returns a [ProcessState] referring to the current process state.
-    fn state(&mut self) -> ProcessState<'_>;
 
     /// Returns a mutable reference to the internal advice provider.
     fn advice_provider(&mut self) -> &mut Self::AdviceProvider;

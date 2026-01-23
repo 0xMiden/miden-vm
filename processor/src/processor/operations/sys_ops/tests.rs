@@ -4,7 +4,6 @@ use miden_core::{Felt, ONE, ZERO, mast::MastForest, stack::MIN_STACK_DEPTH};
 
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
-    DefaultHost,
     fast::{FastProcessor, NoopTracer, step::NeverStopper},
     processor::{Processor, StackInterface, operations::stack_ops::op_push},
 };
@@ -14,14 +13,13 @@ use crate::{
 
 #[test]
 fn test_op_assert() {
-    let mut host = DefaultHost::default();
     let program = MastForest::default();
     let mut tracer = NoopTracer;
 
     // Calling assert with a minimum stack should be ok, as long as the top value is ONE.
     let mut processor = FastProcessor::new(&[ONE]);
 
-    assert!(op_assert(&mut processor, ZERO, &mut host, &program, &mut tracer).is_ok());
+    assert!(op_assert(&mut processor, ZERO, &program, &mut tracer).is_ok());
 }
 
 #[test]

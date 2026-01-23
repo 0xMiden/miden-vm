@@ -10,7 +10,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceProvider, ContextId, ExecutionError, ProcessState,
+    AdviceProvider, ContextId, ExecutionError,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
@@ -31,11 +31,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn stack(&mut self) -> &mut Self::Stack {
         self
-    }
-
-    #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
-        self.state()
     }
 
     #[inline(always)]

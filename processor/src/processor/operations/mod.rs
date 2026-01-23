@@ -50,7 +50,7 @@ pub(super) fn execute_sync_op(
             // do nothing
         },
         Operation::Assert(err_code) => {
-            sys_ops::op_assert(processor, *err_code, host, current_forest, tracer)
+            sys_ops::op_assert(processor, *err_code, current_forest, tracer)
                 .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
         },
         Operation::SDepth => sys_ops::op_sdepth(processor, tracer)?,
