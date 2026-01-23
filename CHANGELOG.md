@@ -50,6 +50,7 @@
 - [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
 - [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
 - Consolidated testing hosts by merging `TestHost` into `TestConsistencyHost` (kept `TestHost` as an alias) and reusing the unified host in tests ([#2601](https://github.com/0xMiden/miden-vm/issues/2601)).
+- Consolidated testing hosts by merging `TestHost` into `TestConsistencyHost` (kept `TestHost` as an alias) and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
 
 ## 0.20.2 (TBD)
 
