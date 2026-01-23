@@ -6,6 +6,8 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+use core::borrow::Borrow;
+
 use alloc::vec::Vec;
 
 use miden_core::{
@@ -140,7 +142,7 @@ where
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>
 {
-    inner: A,
+    inner: Option<A>,
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
     phantom: core::marker::PhantomData<EF>,
@@ -152,7 +154,7 @@ where
     EF: ExtensionField<Felt>
 {
     /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new(a: A) -> Self {
+    pub fn new(a: Option<A>) -> Self {
         Self { 
             inner: a,
             aux_builder: None,
@@ -168,7 +170,7 @@ where
     B: AuxTraceBuilder<EF>,
 {
     /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(a: A, builder: B) -> Self {
+    pub fn with_aux_builder(a: Option<A>, builder: B) -> Self {
         Self { 
             inner: a,
             aux_builder: Some(builder),
@@ -179,6 +181,8 @@ where
 
 use p3_matrix::dense::RowMajorMatrix;
 
+use crate::trace::AUX_TRACE_WIDTH;
+
 impl<A, EF, B> MidenAir<Felt, EF> for ProcessorAir<A, EF, B>
 where
     A: MidenAir<Felt, EF>,
@@ -186,31 +190,31 @@ where
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
-        self.inner.width()
+        self.inner.as_ref().map(|inner| inner.width()).unwrap_or(TRACE_WIDTH)
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.inner.preprocessed_trace()
+        self.inner.as_ref().map(|inner| inner.preprocessed_trace()).unwrap_or(None)
     }
 
     fn num_public_values(&self) -> usize {
-        self.inner.num_public_values()
+        self.inner.as_ref().map(|inner| inner.num_public_values()).unwrap_or(0) // todo
     }
 
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
-        self.inner.periodic_table()
+        self.inner.as_ref().map(|inner| inner.periodic_table()).unwrap_or_default()
     }
 
     fn num_randomness(&self) -> usize {
-        self.inner.num_randomness()
+        self.inner.as_ref().map(|inner| inner.num_randomness()).unwrap_or(trace::AUX_TRACE_RAND_ELEMENTS) // todo
     }
 
     fn aux_width(&self) -> usize {
-        self.inner.aux_width()
+        self.inner.as_ref().map(|inner| inner.aux_width()).unwrap_or(AUX_TRACE_WIDTH) // todo
     }
 
     fn bus_types(&self) -> &[BusType] {
-        self.inner.bus_types()
+        self.inner.as_ref().map(|inner| inner.bus_types()).unwrap_or(&[]) // todo
     }
 
     fn build_aux_trace(
@@ -226,7 +230,47 @@ where
     }
     
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        // First, apply the inner AIR's constraints
-        self.inner.eval(builder);
+        if let Some(inner) = &self.inner {
+            inner.eval(builder);
+        } else {
+            use p3_matrix::Matrix;
+
+            use crate::constraints;
+
+            let main = builder.main();
+
+            // Access the two rows: current (local) and next
+            let local = main.row_slice(0).expect("Matrix should have at least 1 row");
+            let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
+
+            // Use structured column access via MainTraceCols
+            let local: &MainTraceRow<AB::Var> = (*local).borrow();
+            let next: &MainTraceRow<AB::Var> = (*next).borrow();
+
+            let periodic_values: [_; NUM_PERIODIC_VALUES] =
+                builder.periodic_evals().try_into().expect("Wrong number of periodic values");
+
+            // SYSTEM CONSTRAINTS
+            constraints::enforce_clock_constraint(builder, local, next);
+
+            // STACK CONSTRAINTS
+            //constraints::stack::enforce_stack_boundary_constraints(builder, local);
+            //constraints::stack::enforce_stack_transition_constraint(builder, local, next);
+            //constraints::stack::enforce_stack_bus_constraint(builder, local);
+
+            // RANGE CHECKER CONSTRAINTS
+            constraints::range::enforce_range_boundary_constraints(builder, local);
+            constraints::range::enforce_range_transition_constraint(builder, local, next);
+            constraints::range::enforce_range_bus_constraint(builder, local);
+
+            // CHIPLETS CONSTRAINTS
+            constraints::chiplets::enforce_chiplets_transition_constraint(
+                builder,
+                local,
+                next,
+                &periodic_values,
+            );
+            constraints::chiplets::enforce_chiplets_bus_constraint(builder, local);
+        }
     }
 }
