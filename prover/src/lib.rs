@@ -20,6 +20,7 @@ mod proving_options;
 
 pub use miden_air::{DeserializationError, ProcessorAir, config};
 pub use miden_core::{ExecutionProof, HashFunction};
+
 pub use miden_crypto::{
     stark,
     stark::{Commitments, OpenedValues, Proof},
@@ -90,7 +91,8 @@ pub async fn prove(
     let public_values = trace.to_public_values();
 
     // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    let inner = miden_air::unedited_constraints::miden_vm_plonky3::MidenVM {};
+    let air = miden_air::ProcessorAir::with_aux_builder(inner, trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {

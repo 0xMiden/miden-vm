@@ -100,3 +100,4 @@ pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 rand_chacha = { version = "0.9" }
 walkdir = { version = "2.5" }
+miden-air = { workspace = true }

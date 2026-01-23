@@ -26,6 +26,7 @@ std = ["miden-air/std", "miden-core/std", "thiserror/std"]
 miden-air.workspace = true
 miden-core.workspace = true
 miden-crypto.workspace = true
+p3-miden-air.workspace = true
 
 # External dependencies
 tracing.workspace = true
