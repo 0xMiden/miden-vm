@@ -93,6 +93,7 @@ pub async fn prove(
     // Create AIR with aux trace builders
     let inner = miden_air::unedited_constraints::miden_vm_plonky3::MidenVM {};
     let air = miden_air::ProcessorAir::with_aux_builder(Some(inner), trace.aux_trace_builders().clone());
+    //let air = miden_air::ProcessorAir::with_aux_builder(None::<miden_air::unedited_constraints::miden_vm_plonky3::MidenVM>, trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {
