@@ -1,13 +1,16 @@
 use alloc::{string::ToString, vec::Vec};
 
-use miden_core::{
+#[cfg(feature = "serde")]
+use serde::{Deserialize, Serialize};
+
+use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
+    errors::InvalidHashFunctionError,
     precompile::PrecompileRequest,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
-use serde::{Deserialize, Serialize};
 
 // EXECUTION PROOF
 // ================================================================================================
@@ -16,7 +19,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
 /// proof. However, the proof does not contain public inputs needed to verify the proof.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
     pub proof: Vec<u8>,
     pub hash_fn: HashFunction,
@@ -97,7 +101,8 @@ impl ExecutionProof {
 // ================================================================================================
 
 /// A hash function used during STARK proof generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
 pub enum HashFunction {
     /// BLAKE3 hash function with 256-bit output.
@@ -143,7 +148,7 @@ impl TryFrom<u8> for HashFunction {
 }
 
 impl TryFrom<&str> for HashFunction {
-    type Error = super::ExecutionOptionsError;
+    type Error = InvalidHashFunctionError;
 
     fn try_from(hash_fn_str: &str) -> Result<Self, Self::Error> {
         match hash_fn_str {
@@ -152,9 +157,7 @@ impl TryFrom<&str> for HashFunction {
             "rpx" => Ok(Self::Rpx256),
             "poseidon2" => Ok(Self::Poseidon2),
             "keccak" => Ok(Self::Keccak),
-            _ => Err(super::ExecutionOptionsError::InvalidHashFunction {
-                hash_function: hash_fn_str.to_string(),
-            }),
+            _ => Err(InvalidHashFunctionError { hash_function: hash_fn_str.to_string() }),
         }
     }
 }

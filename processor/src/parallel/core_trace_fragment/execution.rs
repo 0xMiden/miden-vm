@@ -1,8 +1,7 @@
 use core::ops::ControlFlow;
 
-use miden_air::Felt;
 use miden_core::{
-    ONE,
+    ONE, ZERO,
     mast::{BasicBlockNode, CallNode, DynNode, MastForest, MastNodeExt, MastNodeId},
 };
 
@@ -23,6 +22,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         basic_block_node: &BasicBlockNode,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         start_batch_index: usize,
         op_idx_in_batch: usize,
         basic_block_context: &mut BasicBlockContext,
@@ -41,6 +41,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 current_batch,
                 Some(op_idx_in_batch),
                 current_forest,
+                node_id,
                 basic_block_context,
             )?;
         }
@@ -49,7 +50,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         for op_batch in op_batches.iter().skip(start_batch_index + 1) {
             self.add_respan_trace_row(op_batch, basic_block_context)?;
 
-            self.execute_op_batch(op_batch, None, current_forest, basic_block_context)?;
+            self.execute_op_batch(op_batch, None, current_forest, node_id, basic_block_context)?;
         }
 
         // Add END trace row to complete the basic block
@@ -66,18 +67,19 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         node_id: MastNodeId,
         mast_forest: &MastForest,
-        condition: Option<Felt>,
+        was_entered: bool,
     ) -> ControlFlow<()> {
         let loop_node =
             mast_forest.get_node_by_id(node_id).expect("node should exist").unwrap_loop();
 
-        // If no condition is provided, read it from the stack
-        let mut condition = if let Some(cond) = condition {
-            cond
-        } else {
+        // If the loop was never entered, we know the condition is ZERO. Otherwise, read it from the
+        // stack.
+        let mut condition = if was_entered {
             let cond = self.get(0);
             self.decrement_size(&mut NoopTracer);
             cond
+        } else {
+            ZERO
         };
 
         while condition == ONE {

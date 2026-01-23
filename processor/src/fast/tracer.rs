@@ -9,28 +9,41 @@ use miden_core::{
 
 use crate::{
     chiplets::CircuitEvaluation,
-    continuation_stack::ContinuationStack,
-    fast::{FastProcessor, trace_state::NodeExecutionState},
+    continuation_stack::{Continuation, ContinuationStack},
+    fast::FastProcessor,
     system::ContextId,
 };
 
 /// A trait for tracing the execution of a [FastProcessor].
 pub trait Tracer {
-    /// Signals the start of a new clock cycle.
+    /// Signals the start of a new clock cycle, guaranteed to be called before executing the
+    /// operation at the given clock cycle. For example, it is safe to access the processor's stack
+    /// and memory state as they are before executing the operation at this clock cycle.
     ///
-    /// This is guaranteed to be called before executing the operation at the given clock cycle.
+    /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
+    /// `continuation_stack` represents whatever comes after execution `continuation`.
+    ///
+    /// The following continuations do not occur at the start of a clock cycle, and hence will never
+    /// be passed to this method:
+    /// - Continuation::FinishExternal: because external nodes are resolved before starting a clock
+    ///   cycle,
+    /// - Continuation::EnterForest: because entering a new forest does not consume a clock cycle,
+    /// - Continuation::AfterExitDecorators and Continuation::AfterExitDecoratorsBasicBlock: because
+    ///   after-exit decorators are executed at the end of an `END` operation; never at the start of
+    ///   a clock cycle
+    ///
+    ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
-        execution_state: NodeExecutionState,
+        continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     );
 
-    /// Records and replays the resolutions of [crate::host::AsyncHost::get_mast_forest] or
-    /// [crate::host::SyncHost::get_mast_forest].
+    /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].
     ///
     /// Note that when execution encounters a [miden_core::mast::ExternalNode], the external node
     /// gets resolved to the MAST node it refers to in the new MAST forest, without consuming the
@@ -173,7 +186,7 @@ impl Tracer for NoopTracer {
     fn start_clock_cycle(
         &mut self,
         _processor: &FastProcessor,
-        _execution_state: NodeExecutionState,
+        _continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
     ) {

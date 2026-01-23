@@ -19,6 +19,11 @@ use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::Fast
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
+/// A sentinel value mainly used to catch when a ZERO is dropped from the stack but shouldn't have
+/// been. That is, if the stack is only ZEROs, we can't tell if a ZERO was dropped or not. Using a
+/// sentinel value makes it obvious when an unexpected ZERO is dropped.
+const SENTINEL_VALUE: Felt = Felt::new(9999);
+
 /// Returns the procedure hash that DYN and DYNCALL will call.
 /// The digest is computed dynamically from the target basic block (single SWAP operation).
 fn dyn_target_proc_hash() -> &'static [Felt] {
@@ -98,7 +103,7 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 //  9:   END
 // 10: END
 // 11: HALT
-#[case(split_program(), 5, &[ZERO])]
+#[case(split_program(), 5, &[ZERO, SENTINEL_VALUE])]
 // Case 5: Tests the trace fragment generation for when a fragment starts in the finish phase of a
 // Join node. Same execution as case 3, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
@@ -106,21 +111,21 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // Case 6: Tests the trace fragment generation for when a fragment starts in the finish phase of a
 // Join node. Same execution as case 4, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
-#[case(split_program(), 9, &[ZERO])]
+#[case(split_program(), 9, &[ZERO, SENTINEL_VALUE])]
 // Case 7: LOOP start
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP END
 //  7: END
 //  8: HALT
-#[case(loop_program(), 5, &[ZERO])]
+#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
 // Case 8: LOOP END, when loop was not entered
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP END
 //  7: END
 //  8: HALT
-#[case(loop_program(), 6, &[ZERO])]
+#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
 // Case 9: LOOP END, when loop was entered
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
@@ -129,7 +134,7 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // 10:   END
 // 11: END
 // 12: HALT
-#[case(loop_program(), 10, &[ONE])]
+#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
 // Case 10: LOOP REPEAT
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
@@ -140,7 +145,7 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // 15:   END
 // 16: END
 // 17: HALT
-#[case(loop_program(), 10, &[ONE, ONE])]
+#[case(loop_program(), 10, &[ONE, ONE, ZERO, SENTINEL_VALUE])]
 // Case 11: CALL START
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END

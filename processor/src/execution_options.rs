@@ -1,76 +1,13 @@
-use super::{ExecutionOptionsError, HashFunction, trace::MIN_TRACE_LEN};
+use miden_air::trace::MIN_TRACE_LEN;
 
-// PROVING OPTIONS
-// ================================================================================================
-
-/// A set of parameters specifying how Miden VM execution proofs are to be generated.
-///
-/// This struct combines execution options (VM parameters) with the hash function to use
-/// for proof generation. The actual STARK proving parameters (FRI config, security level, etc.)
-/// are determined by the hash function and hardcoded in the prover's config module.
-#[derive(Debug, Clone, Eq, PartialEq)]
-pub struct ProvingOptions {
-    exec_options: ExecutionOptions,
-    hash_fn: HashFunction,
-}
-
-impl ProvingOptions {
-    // CONSTRUCTORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Creates a new instance of [ProvingOptions] with the specified hash function.
-    ///
-    /// The STARK proving parameters (security level, FRI config, etc.) are determined
-    /// by the hash function and hardcoded in the prover's config module.
-    pub fn new(hash_fn: HashFunction) -> Self {
-        Self {
-            exec_options: ExecutionOptions::default(),
-            hash_fn,
-        }
-    }
-
-    /// Creates a new instance of [ProvingOptions] targeting 96-bit security level.
-    ///
-    /// Note: The actual security parameters are hardcoded in the prover's config module.
-    /// This is a convenience constructor that is equivalent to `new(hash_fn)`.
-    pub fn with_96_bit_security(hash_fn: HashFunction) -> Self {
-        Self::new(hash_fn)
-    }
-
-    /// Sets [ExecutionOptions] for this [ProvingOptions].
-    ///
-    /// This sets the maximum number of cycles a program is allowed to execute as well as
-    /// the number of cycles the program is expected to execute.
-    pub fn with_execution_options(mut self, exec_options: ExecutionOptions) -> Self {
-        self.exec_options = exec_options;
-        self
-    }
-
-    // PUBLIC ACCESSORS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the hash function to be used in STARK proof generation.
-    pub const fn hash_fn(&self) -> HashFunction {
-        self.hash_fn
-    }
-
-    /// Returns the execution options specified for this [ProvingOptions]
-    pub const fn execution_options(&self) -> &ExecutionOptions {
-        &self.exec_options
-    }
-}
-
-impl Default for ProvingOptions {
-    fn default() -> Self {
-        Self::new(HashFunction::Blake3_256)
-    }
-}
-
-// EXECUTION OPTIONS
+// CONSTANTS
 // ================================================================================================
 
 /// Default fragment size for core trace generation.
-pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 1 << 12; // 4096
+pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
+
+// EXECUTION OPTIONS
+// ================================================================================================
 
 /// A set of parameters specifying execution parameters of the VM.
 ///
@@ -181,8 +118,8 @@ impl ExecutionOptions {
     }
 
     /// Enables execution of the `trace` instructions.
-    pub fn with_tracing(mut self) -> Self {
-        self.enable_tracing = true;
+    pub fn with_tracing(mut self, enable_tracing: bool) -> Self {
+        self.enable_tracing = enable_tracing;
         self
     }
 
@@ -221,14 +158,33 @@ impl ExecutionOptions {
     }
 
     /// Returns a flag indicating whether the VM should execute `trace` instructions.
+    #[inline]
     pub fn enable_tracing(&self) -> bool {
         self.enable_tracing
     }
 
     /// Returns a flag indicating whether the VM should execute a program in debug mode.
+    #[inline]
     pub fn enable_debugging(&self) -> bool {
         self.enable_debugging
     }
+}
+
+// EXECUTION OPTIONS ERROR
+// ================================================================================================
+
+#[derive(Debug, thiserror::Error)]
+pub enum ExecutionOptionsError {
+    #[error(
+        "expected number of cycles {expected_cycles} must be smaller than the maximum number of cycles {max_cycles}"
+    )]
+    ExpectedCyclesTooBig { max_cycles: u32, expected_cycles: u32 },
+    #[error("maximum number of cycles {max_cycles} must be greater than {min_cycles_limit}")]
+    MaxCycleNumTooSmall { max_cycles: u32, min_cycles_limit: usize },
+    #[error("maximum number of cycles {max_cycles} must be less than {max_cycles_limit}")]
+    MaxCycleNumTooBig { max_cycles: u32, max_cycles_limit: u32 },
+    #[error("core trace fragment size must be greater than 0")]
+    CoreTraceFragmentSizeTooSmall,
 }
 
 // TESTS

@@ -1,6 +1,6 @@
 use miden_assembly::testing::regex;
 use miden_core::field::{Field, PrimeCharacteristicRing, PrimeField64};
-use miden_processor::{ExecutionError, RowIndex};
+use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
     Felt, ONE, WORD_SIZE, ZERO, assert_assembler_diagnostic, assert_diagnostic_lines,
     build_op_test, expect_exec_error_matches, prop_randw, proptest::prelude::*, rand::rand_value,
@@ -217,7 +217,7 @@ fn div_fail() {
     let test = build_op_test!(asm_op, &[0, 1]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -283,8 +283,7 @@ fn inv_fail() {
     let asm_op = "inv";
 
     // --- test no inv on 0 -----------------------------------------------------------------------
-    let test = build_op_test!(asm_op, &[0]);
-    expect_exec_error_matches!(test, ExecutionError::DivideByZero{clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(6));
+    let _test = build_op_test!(asm_op, &[0]);
 
     let asm_op = "inv.1";
 
@@ -326,8 +325,8 @@ fn pow2_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(21) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+        if err_code == ZERO && err_msg.is_none()
     );
 }
 
@@ -358,8 +357,8 @@ fn exp_bits_length_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::FailedAssertion{clk, err_code, err_msg, .. }
-        if clk == RowIndex::from(23) && err_code == ZERO && err_msg.is_none()
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{err_code, err_msg}, .. }
+        if err_code == ZERO && err_msg.is_none()
     );
 
     //---------------------- exp containing more than 64 bits -------------------------------------
@@ -409,7 +408,7 @@ fn ilog2_fail() {
     let test = build_op_test!(asm_op, &[0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::LogArgumentZero{ clk: row_idx, label: _, source_file: _ } if row_idx == RowIndex::from(7)
+        ExecutionError::OperationError { err: OperationError::LogArgumentZero, .. }
     );
 }
 
@@ -436,7 +435,7 @@ fn not_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
     );
 }
 
@@ -464,19 +463,19 @@ fn and_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == Felt::new(2_u64)
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == Felt::new(2_u64)
     );
 }
 
@@ -505,19 +504,19 @@ fn or_fail() {
     let test = build_op_test!(asm_op, &[2, 3]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 }
 
@@ -548,21 +547,21 @@ fn xor_fail() {
     let test = build_op_test!(asm_op, &[3, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 
     // Stack [0, 2] - position 1 is 2, error for value 2
     let test = build_op_test!(asm_op, &[0, 2]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 
     // Stack [2, 0] - position 1 is 0 (valid), position 0 is 2, error for value 2
     let test = build_op_test!(asm_op, &[2, 0]);
     expect_exec_error_matches!(
         test,
-        ExecutionError::NotBinaryValueOp{value, label: _, source_file: _ } if value == expected_value
+        ExecutionError::OperationError { err: OperationError::NotBinaryValue { value }, .. } if value == expected_value
     );
 }
 

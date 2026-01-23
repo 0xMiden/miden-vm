@@ -15,7 +15,7 @@ use miden_core::{
 
 use crate::{
     chiplets::CircuitEvaluation,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
         FastProcessor,
@@ -23,8 +23,8 @@ use crate::{
             AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
             CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
             HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, MemoryWritesReplay, NodeExecutionState, NodeFlags,
-            RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+            MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay,
+            StackOverflowReplay, StackState, SystemState,
         },
         tracer::Tracer,
     },
@@ -38,7 +38,6 @@ use crate::{
 struct StateSnapshot {
     state: CoreTraceState,
     continuation_stack: ContinuationStack,
-    execution_state: NodeExecutionState,
     initial_mast_forest: Arc<MastForest>,
 }
 
@@ -176,8 +175,8 @@ impl ExecutionTracer {
         &mut self,
         system_state: SystemState,
         stack_top: [Felt; MIN_STACK_DEPTH],
-        continuation_stack: ContinuationStack,
-        execution_state: NodeExecutionState,
+        mut continuation_stack: ContinuationStack,
+        continuation: Continuation,
         current_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
@@ -204,6 +203,9 @@ impl ExecutionTracer {
                 StackState::new(stack_top, stack_depth, last_overflow_addr)
             };
 
+            // Push new continuation corresponding to the current execution state
+            continuation_stack.push_continuation(continuation);
+
             Some(StateSnapshot {
                 state: CoreTraceState {
                     system: system_state,
@@ -211,7 +213,6 @@ impl ExecutionTracer {
                     stack,
                 },
                 continuation_stack,
-                execution_state,
                 initial_mast_forest: current_forest,
             })
         };
@@ -411,7 +412,6 @@ impl ExecutionTracer {
                     block_stack: block_stack_replay,
                 },
                 continuation: snapshot.continuation_stack,
-                initial_execution_state: snapshot.execution_state,
                 initial_mast_forest: snapshot.initial_mast_forest,
             };
 
@@ -426,7 +426,7 @@ impl Tracer for ExecutionTracer {
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
-        execution_state: NodeExecutionState,
+        continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
@@ -439,24 +439,24 @@ impl Tracer for ExecutionTracer {
                     .try_into()
                     .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
                 continuation_stack.clone(),
-                execution_state.clone(),
+                continuation.clone(),
                 current_forest.clone(),
             );
         }
 
         // Update block stack
-        match &execution_state {
-            NodeExecutionState::BasicBlock { .. } => {
+        match continuation {
+            Continuation::ResumeBasicBlock { .. } => {
                 // do nothing, since operations in a basic block don't update the block stack
             },
-            NodeExecutionState::Start(mast_node_id) => match &current_forest[*mast_node_id] {
+            Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
                 MastNode::Join(_)
                 | MastNode::Split(_)
                 | MastNode::Loop(_)
                 | MastNode::Dyn(_)
                 | MastNode::Call(_) => {
                     self.record_control_node_start(
-                        &current_forest[*mast_node_id],
+                        &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
@@ -476,13 +476,21 @@ impl Tracer for ExecutionTracer {
                     "start_clock_cycle is guaranteed not to be called on external nodes"
                 ),
             },
-            NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
+            Continuation::Respan { node_id: _, batch_index: _ } => {
                 self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
-            NodeExecutionState::LoopRepeat(_) => {
-                // do nothing, REPEAT doesn't affect the block stack
+            Continuation::FinishLoop { node_id: _, was_entered }
+                if was_entered && processor.stack_get(0) == ONE =>
+            {
+                // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
             },
-            NodeExecutionState::End(_) => {
+            Continuation::FinishJoin(_)
+            | Continuation::FinishSplit(_)
+            | Continuation::FinishCall(_)
+            | Continuation::FinishDyn(_)
+            | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
+            | Continuation::FinishBasicBlock(_) => {
+                // This is an END operation; pop the block stack and record the node end
                 let block_info = self.block_stack.pop();
                 self.record_node_end(&block_info);
 
@@ -492,6 +500,14 @@ impl Tracer for ExecutionTracer {
                         parent_fn_hash: ctx_info.parent_fn_hash,
                     });
                 }
+            },
+            Continuation::FinishExternal(_)
+            | Continuation::EnterForest(_)
+            | Continuation::AfterExitDecorators(_)
+            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+                panic!(
+                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                )
             },
         }
     }

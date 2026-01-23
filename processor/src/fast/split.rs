@@ -7,10 +7,10 @@ use miden_core::{
 };
 
 use crate::{
-    AsyncHost, ExecutionError,
+    Host,
     continuation_stack::{Continuation, ContinuationStack},
-    err_ctx,
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper, trace_state::NodeExecutionState},
+    errors::OperationError,
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
 };
 
 impl FastProcessor {
@@ -22,13 +22,13 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
         stopper: &impl Stopper,
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(node_id),
+            Continuation::StartNode(node_id),
             continuation_stack,
             current_forest,
         );
@@ -48,9 +48,11 @@ impl FastProcessor {
         } else if condition == ZERO {
             continuation_stack.push_start_node(split_node.on_false());
         } else {
-            let err_ctx = err_ctx!(current_forest, node_id, host, self.in_debug_mode());
-            return ControlFlow::Break(BreakReason::Err(ExecutionError::not_binary_value_if(
-                condition, &err_ctx,
+            let err = OperationError::NotBinaryValueIf { value: condition };
+            return ControlFlow::Break(BreakReason::Err(err.with_context(
+                current_forest,
+                node_id,
+                host,
             )));
         };
 
@@ -66,13 +68,13 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
         stopper: &impl Stopper,
     ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::End(node_id),
+            Continuation::FinishSplit(node_id),
             continuation_stack,
             current_forest,
         );
@@ -83,8 +85,6 @@ impl FastProcessor {
             Some(Continuation::AfterExitDecorators(node_id))
         })?;
 
-        self.execute_after_exit_decorators(node_id, current_forest, host)?;
-
-        ControlFlow::Continue(())
+        self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 }

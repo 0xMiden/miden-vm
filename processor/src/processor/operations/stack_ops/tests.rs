@@ -380,21 +380,21 @@ fn test_op_cswap() {
     let mut tracer = NoopTracer;
 
     // no swap (top of the stack is 0)
-    op_cswap(&mut processor, &(), &mut tracer).unwrap();
+    op_cswap(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[1, 2, 3, 4]);
     assert_eq!(expected, processor.stack_top());
 
     // swap (top of the stack is 1)
-    op_cswap(&mut processor, &(), &mut tracer).unwrap();
+    op_cswap(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[3, 2, 4]);
     assert_eq!(expected, processor.stack_top());
 
     // error: top of the stack is not binary
-    assert!(op_cswap(&mut processor, &(), &mut tracer).is_err());
+    assert!(op_cswap(&mut processor, &mut tracer).is_err());
 
     // executing conditional swap with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(&[]);
-    assert!(op_cswap(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_cswap(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
@@ -417,21 +417,21 @@ fn test_op_cswapw() {
     let mut tracer = NoopTracer;
 
     // no swap (top of the stack is 0)
-    op_cswapw(&mut processor, &(), &mut tracer).unwrap();
+    op_cswapw(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     assert_eq!(expected, processor.stack_top());
 
     // swap (top of the stack is 1)
-    op_cswapw(&mut processor, &(), &mut tracer).unwrap();
+    op_cswapw(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[6, 7, 8, 9, 2, 3, 4, 5, 10, 11]);
     assert_eq!(expected, processor.stack_top());
 
     // error: top of the stack is not binary
-    assert!(op_cswapw(&mut processor, &(), &mut tracer).is_err());
+    assert!(op_cswapw(&mut processor, &mut tracer).is_err());
 
     // executing conditional swap with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(&[]);
-    assert!(op_cswapw(&mut processor, &(), &mut tracer).is_ok());
+    assert!(op_cswapw(&mut processor, &mut tracer).is_ok());
 }
 
 // HELPER FUNCTIONS

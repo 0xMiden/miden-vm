@@ -1,14 +1,11 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
-use miden_debug_types::{
-    DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
-};
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventHandler,
-    EventHandlerRegistry, ExecutionError, MastForestStore, MemMastForestStore, ProcessState,
-    SyncHost, TraceError,
+    AdviceMutation, DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
+    Host, MastForestStore, MemMastForestStore, ProcessState, TraceError,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
@@ -119,7 +116,7 @@ where
     }
 }
 
-impl<D, S> BaseHost for DefaultHost<D, S>
+impl<D, S> Host for DefaultHost<D, S>
 where
     D: DebugHandler,
     S: SourceManager,
@@ -131,6 +128,34 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
+    }
+
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = self.store.get(node_digest);
+        async move { result }
+    }
+
+    fn on_event(
+        &mut self,
+        process: &ProcessState<'_>,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        let event_id = EventId::from_felt(process.get_stack_item(0));
+        let result = match self.event_handlers.handle_event(event_id, process) {
+            Ok(Some(mutations)) => {
+                // the event was handled by the registered event handlers; just return
+                Ok(mutations)
+            },
+            Ok(None) => {
+                // EventError is a `Box<dyn Error>` so we can define the error anonymously.
+                #[derive(Debug, thiserror::Error)]
+                #[error("no event handler registered")]
+                struct UnhandledEvent;
+
+                Err(UnhandledEvent.into())
+            },
+            Err(e) => Err(e),
+        };
+        async move { result }
     }
 
     fn on_debug(
@@ -150,57 +175,13 @@ where
     }
 }
 
-impl<D, S> SyncHost for DefaultHost<D, S>
-where
-    D: DebugHandler,
-    S: SourceManager,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = EventId::from_felt(process.get_stack_item(0));
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
-            // the event was handled by the registered event handlers; just return
-            return Ok(mutations);
-        }
-
-        // EventError is a `Box<dyn Error>` so we can define the error anonymously.
-        #[derive(Debug, thiserror::Error)]
-        #[error("no event handler registered")]
-        struct UnhandledEvent;
-
-        Err(UnhandledEvent.into())
-    }
-}
-
-impl<D, S> AsyncHost for DefaultHost<D, S>
-where
-    D: DebugHandler,
-    S: SourceManagerSync,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
-        async move { result }
-    }
-
-    fn on_event(
-        &mut self,
-        process: &ProcessState<'_>,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process);
-        async move { result }
-    }
-}
-
 // NOOPHOST
 // ================================================================================================
 
 /// A Host which does nothing.
 pub struct NoopHost;
 
-impl BaseHost for NoopHost {
+impl Host for NoopHost {
     #[inline(always)]
     fn get_label_and_source_file(
         &self,
@@ -208,21 +189,7 @@ impl BaseHost for NoopHost {
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
     }
-}
 
-impl SyncHost for NoopHost {
-    #[inline(always)]
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-        None
-    }
-
-    #[inline(always)]
-    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
-    }
-}
-
-impl AsyncHost for NoopHost {
     #[inline(always)]
     fn get_mast_forest(
         &self,

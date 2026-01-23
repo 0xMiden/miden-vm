@@ -51,6 +51,10 @@ assertion failed: `(left matches right)`
 
 pub mod chiplets;
 pub mod errors;
+pub use errors::InvalidHashFunctionError;
+
+mod proof;
+pub use proof::{ExecutionProof, HashFunction};
 
 mod program;
 pub use program::{Program, ProgramInfo};

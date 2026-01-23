@@ -3,9 +3,9 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_prover::{AdviceInputs, HashFunction, ProvingOptions, StackInputs, prove_sync};
+use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
 use miden_verifier::verify;
-use miden_vm::DefaultHost;
+use miden_vm::{DefaultHost, HashFunction};
 
 #[test]
 fn test_blake3_256_prove_verify() {
@@ -29,7 +29,7 @@ fn test_blake3_256_prove_verify() {
 
     println!("Proving with Blake3_256...");
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -67,7 +67,7 @@ fn test_keccak_prove_verify() {
     // Prove the program
     println!("Proving with Keccak...");
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -107,7 +107,7 @@ fn test_rpo_prove_verify() {
     // Prove the program
     println!("Proving with RPO...");
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -143,7 +143,7 @@ fn test_poseidon2_prove_verify() {
 
     println!("Proving with Poseidon2...");
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -179,7 +179,7 @@ fn test_rpx_prove_verify() {
 
     println!("Proving with RPX...");
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs.clone(), advice_inputs, &mut host, options)
+        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("Proving failed");
 
     println!("Proof generated successfully!");
@@ -200,13 +200,11 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::Felt;
+    use miden_core::{ExecutionProof, Felt, HashFunction};
     use miden_processor::{
         AdviceInputs, ExecutionOptions, StackInputs, fast::FastProcessor, parallel::build_trace,
     };
-    use miden_prover::{
-        ExecutionProof, HashFunction, ProcessorAir, config, execution_trace_to_row_major, stark,
-    };
+    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major, stark};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -236,7 +234,7 @@ mod fast_parallel {
         let mut host =
             DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-        let stack_inputs_vec: Vec<Felt> = stack_inputs.clone().into_iter().collect();
+        let stack_inputs_vec: Vec<Felt> = stack_inputs.into_iter().collect();
 
         let options = ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
@@ -247,7 +245,7 @@ mod fast_parallel {
             .execute_for_trace_sync(&program, &mut host)
             .expect("Fast processor execution failed");
 
-        let fast_stack_outputs = execution_output.stack.clone();
+        let fast_stack_outputs = execution_output.stack;
 
         // Build trace using parallel trace generation
         let trace =

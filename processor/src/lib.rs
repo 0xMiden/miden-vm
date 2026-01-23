@@ -9,8 +9,13 @@ extern crate std;
 use alloc::vec::Vec;
 use core::fmt::{Display, LowerHex};
 
+pub use miden_air::trace::RowIndex;
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, trace::RowIndex};
+
+mod execution_options;
+pub use execution_options::{
+    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ExecutionOptionsError,
+};
 pub use miden_core::{
     AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
     StackOutputs, WORD_SIZE, Word, ZERO,
@@ -50,8 +55,7 @@ use range::RangeChecker;
 mod host;
 
 pub use host::{
-    AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
-    SyncHost,
+    AdviceMutation, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     advice::{AdviceError, AdviceInputs, AdviceProvider, AdviceStackBuilder},
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
@@ -69,11 +73,13 @@ use trace::TraceFragment;
 pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
 
 mod errors;
-pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
+pub use errors::{
+    ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
+};
 
 pub mod utils;
 
-#[cfg(all(test, not(feature = "no_err_ctx")))]
+#[cfg(test)]
 mod tests;
 
 mod debug;
@@ -172,7 +178,7 @@ pub async fn execute(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl AsyncHost,
+    host: &mut impl Host,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     let stack_inputs: Vec<Felt> = stack_inputs.into_iter().collect();
@@ -205,7 +211,7 @@ pub fn execute_sync(
     program: &Program,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
-    host: &mut impl AsyncHost,
+    host: &mut impl Host,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
     match tokio::runtime::Handle::try_current() {
@@ -330,9 +336,7 @@ impl<'a> ProcessState<'a> {
     #[inline(always)]
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
         match self {
-            ProcessState::Fast(state) => {
-                state.processor.memory.read_word_impl(ctx, addr, None, &())
-            },
+            ProcessState::Fast(state) => state.processor.memory.read_word_impl(ctx, addr),
             ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
         }
     }
@@ -348,10 +352,10 @@ impl<'a> ProcessState<'a> {
         let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
 
         if start_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(start_addr, &()));
+            return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
         }
         if end_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(end_addr, &()));
+            return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
         }
 
         if start_addr > end_addr {

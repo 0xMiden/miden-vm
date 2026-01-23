@@ -28,8 +28,8 @@ pub use miden_core::{
 };
 use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, AdviceStackBuilder, BaseHost, ContextId, ExecutionError,
-    ExecutionTrace, ProcessState,
+    AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
+    ProcessState,
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, EventHandler, Program,
@@ -277,7 +277,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
+        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
         let processor = if self.in_debug_mode {
             FastProcessor::new_debug(&stack_inputs, self.advice_inputs.clone())
         } else {
@@ -291,7 +291,7 @@ impl Test {
         {
             let mem_state = execution_output
                 .memory
-                .read_element(ContextId::root(), Felt::from_u32(addr as u32), &())
+                .read_element(ContextId::root(), Felt::from_u32(addr as u32))
                 .unwrap();
             assert_eq!(
                 *mem_value,
@@ -386,12 +386,12 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_stack_result = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
+            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_processor = FastProcessor::new_with_options(
                 &stack_inputs,
                 advice_inputs,
-                miden_air::ExecutionOptions::default()
+                miden_processor::ExecutionOptions::default()
                     .with_debugging(self.in_debug_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
@@ -424,7 +424,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().collect::<Vec<Felt>>(),
+            &self.stack_inputs.into_iter().collect::<Vec<Felt>>(),
             self.advice_inputs.clone(),
         );
 
@@ -445,7 +445,7 @@ impl Test {
             .with_debug_handler(debug_handler);
 
         let processor = FastProcessor::new_debug(
-            &self.stack_inputs.clone().into_iter().collect::<Vec<Felt>>(),
+            &self.stack_inputs.into_iter().collect::<Vec<Felt>>(),
             self.advice_inputs.clone(),
         );
 
@@ -473,7 +473,7 @@ impl Test {
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
         let (mut stack_outputs, proof) = miden_prover::prove_sync(
             &program,
-            stack_inputs.clone(),
+            stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
             ProvingOptions::default(),
@@ -554,7 +554,6 @@ impl Test {
                     let left_diagnostic =
                         format!("{}", PrintDiagnostic::new_without_color(left_err));
 
-                    // Note: This assumes that the tests are run WITHOUT the `no_err_ctx` feature
                     assert_eq!(
                         left_diagnostic, right_diagnostic,
                         "diagnostics do not match between {left_name} and {right_name}:\n{left_name}: {}\n{right_name}: {}",
@@ -580,7 +579,7 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.clone().into_iter().collect();
+            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
             let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_process = if self.in_debug_mode {
                 FastProcessor::new_debug(&stack_inputs, advice_inputs)
@@ -591,7 +590,7 @@ impl Test {
         };
 
         compare_results(
-            fast_result.as_ref().map(|(output, _)| output.stack.clone()),
+            fast_result.as_ref().map(|(output, _)| output.stack),
             &fast_result_by_step,
             "fast processor",
             "fast processor by step",

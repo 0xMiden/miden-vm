@@ -3,10 +3,8 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionOptionsError};
-use miden_vm::{
-    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, HashFunction, ProvingOptions, internal::InputFile,
-};
+use miden_processor::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, DefaultHost, ExecutionOptions};
+use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
 use super::{
     data::{Libraries, OutputFile, ProofFile},
@@ -71,16 +69,18 @@ pub struct ProveCmd {
 }
 
 impl ProveCmd {
-    pub fn get_proof_options(&self) -> Result<ProvingOptions, ExecutionOptionsError> {
+    pub fn get_proof_options(&self) -> Result<ProvingOptions, Report> {
         let exec_options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
             DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             self.trace,
             !self.release,
-        )?;
+        )
+        .map_err(|err| Report::msg(format!("{err}")))?;
 
-        let hash_fn = HashFunction::try_from(self.hasher.as_str())?;
+        let hash_fn = HashFunction::try_from(self.hasher.as_str())
+            .map_err(|err| Report::msg(format!("{err}")))?;
         Ok(match self.security.as_str() {
             "96bits" => ProvingOptions::with_96_bit_security(hash_fn),
             other => panic!(
@@ -141,8 +141,7 @@ impl ProveCmd {
         let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
         let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
 
-        let proving_options =
-            self.get_proof_options().map_err(|err| Report::msg(format!("{err}")))?;
+        let proving_options = self.get_proof_options()?;
 
         // execute program and generate proof
         let (stack_outputs, proof) = miden_prover::prove_sync(

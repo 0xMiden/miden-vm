@@ -1,8 +1,9 @@
 ---
 source: processor/src/fast/tests/masm_consistency.rs
+assertion_line: 352
 expression: fast_err
 ---
-NotBinaryValueLoop {
+OperationError {
     label: SourceSpan {
         source_id: SourceId(
             4294967295,
@@ -15,5 +16,7 @@ NotBinaryValueLoop {
         ),
     },
     source_file: None,
-    value: 100,
+    err: NotBinaryValueLoop {
+        value: 100,
+    },
 }

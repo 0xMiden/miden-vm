@@ -6,8 +6,8 @@ use miden_debug_types::{
 };
 
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventError, FutureMaybeSend,
-    MastForest, MastForestStore, MemMastForestStore, ProcessState, SyncHost, TraceError, Word,
+    AdviceMutation, DebugError, DebugHandler, EventError, FutureMaybeSend, Host, MastForest,
+    MastForestStore, MemMastForestStore, ProcessState, TraceError, Word,
 };
 
 /// A snapshot of the process state for consistency checking between processors.
@@ -136,9 +136,9 @@ impl Default for TestConsistencyHost {
     }
 }
 
-impl<S> BaseHost for TestConsistencyHost<S>
+impl<S> Host for TestConsistencyHost<S>
 where
-    S: SourceManager,
+    S: SourceManagerSync,
 {
     fn get_label_and_source_file(
         &self,
@@ -147,6 +147,18 @@ where
         let maybe_file = self.source_manager.get_by_uri(location.uri());
         let span = self.source_manager.location_to_span(location.clone()).unwrap_or_default();
         (span, maybe_file)
+    }
+
+    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+        let result = self.store.get(node_digest);
+        async move { result }
+    }
+
+    fn on_event(
+        &mut self,
+        _process: &ProcessState,
+    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+        async move { Ok(Vec::new()) } // For testing, return empty mutations
     }
 
     fn on_debug(
@@ -166,35 +178,5 @@ where
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())
-    }
-}
-
-impl<S> SyncHost for TestConsistencyHost<S>
-where
-    S: SourceManager,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new()) // For testing, return empty mutations
-    }
-}
-
-impl<S> AsyncHost for TestConsistencyHost<S>
-where
-    S: SourceManagerSync,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
-        async move { result }
-    }
-
-    fn on_event(
-        &mut self,
-        _process: &ProcessState,
-    ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        async move { Ok(Vec::new()) } // For testing, return empty mutations
     }
 }

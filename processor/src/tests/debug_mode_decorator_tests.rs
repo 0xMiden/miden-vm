@@ -7,8 +7,8 @@ use miden_core::{
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::{
-    AdviceInputs, AdviceMutation, AsyncHost, BaseHost, DebugError, EventError, FutureMaybeSend,
-    ProcessState, Program, SyncHost, TraceError, Word, fast::FastProcessor,
+    AdviceInputs, AdviceMutation, DebugError, EventError, FutureMaybeSend, Host, ProcessState,
+    Program, TraceError, Word, fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
 };
 
@@ -56,12 +56,26 @@ fn test_decorators_only_execute_in_debug_mode() {
         decorator_executed: bool,
     }
 
-    impl BaseHost for TestHost {
+    impl Host for TestHost {
         fn get_label_and_source_file(
             &self,
             _location: &Location,
         ) -> (SourceSpan, Option<Arc<SourceFile>>) {
             (SourceSpan::default(), None)
+        }
+
+        fn get_mast_forest(
+            &self,
+            _node_digest: &Word,
+        ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
+            async { None }
+        }
+
+        fn on_event(
+            &mut self,
+            _process: &ProcessState<'_>,
+        ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
+            async { Ok(Vec::new()) }
         }
 
         fn on_debug(
@@ -81,33 +95,6 @@ fn test_decorators_only_execute_in_debug_mode() {
                 self.decorator_executed = true;
             }
             Ok(())
-        }
-    }
-
-    impl SyncHost for TestHost {
-        fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-            None
-        }
-
-        fn on_event(&mut self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-            Ok(Vec::new())
-        }
-    }
-
-    impl AsyncHost for TestHost {
-        fn get_mast_forest(
-            &self,
-            node_digest: &Word,
-        ) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-            async { <Self as SyncHost>::get_mast_forest(self, node_digest) }
-        }
-
-        fn on_event(
-            &mut self,
-            process: &ProcessState<'_>,
-        ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-            let result = <Self as SyncHost>::on_event(self, process);
-            async { result }
         }
     }
 

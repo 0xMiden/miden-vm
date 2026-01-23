@@ -1,16 +1,13 @@
 use alloc::vec::Vec;
 
-use miden_air::{
-    ExecutionOptions,
-    trace::{
-        CHIPLETS_RANGE, CHIPLETS_WIDTH,
-        chiplets::{
-            NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
-            bitwise::{BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH as BITWISE_TRACE_WIDTH},
-            hasher::{HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE},
-            kernel_rom::TRACE_WIDTH as KERNEL_ROM_TRACE_WIDTH,
-            memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
-        },
+use miden_air::trace::{
+    CHIPLETS_RANGE, CHIPLETS_WIDTH,
+    chiplets::{
+        NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
+        bitwise::{BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH as BITWISE_TRACE_WIDTH},
+        hasher::{HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE},
+        kernel_rom::TRACE_WIDTH as KERNEL_ROM_TRACE_WIDTH,
+        memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
 use miden_core::{
@@ -19,7 +16,7 @@ use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
 };
 
-use crate::{AdviceInputs, DefaultHost, Kernel, Operation, fast::FastProcessor};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Kernel, Operation, fast::FastProcessor};
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 

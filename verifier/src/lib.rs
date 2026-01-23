@@ -7,14 +7,14 @@ extern crate std;
 
 use alloc::vec::Vec;
 
-use miden_air::{HashFunction, ProcessorAir, PublicInputs, config};
+use miden_air::{ProcessorAir, PublicInputs, config};
 use miden_crypto::stark;
 
 // RE-EXPORTS
 // ================================================================================================
 mod exports {
     pub use miden_core::{
-        Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
+        ExecutionProof, HashFunction, Kernel, ProgramInfo, StackInputs, StackOutputs, Word,
         precompile::{
             PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
             PrecompileVerifierRegistry,
@@ -23,7 +23,6 @@ mod exports {
     pub mod math {
         pub use miden_core::Felt;
     }
-    pub use miden_air::ExecutionProof;
 }
 pub use exports::*;
 

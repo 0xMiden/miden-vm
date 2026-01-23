@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, RowIndex};
+use miden_processor::{ExecutionError, OperationError};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
@@ -169,6 +169,38 @@ fn u32overflowing_add3() {
 }
 
 #[test]
+fn u32wrapping_add3() {
+    let asm_op = "u32wrapping_add3";
+
+    // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
+    // wrapping_add3 should return (a + b + c) mod 2^32
+    let test = build_op_test!(asm_op, &[2, 1, 0]);
+    test.expect_stack(&[3]);
+
+    // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
+    let test = build_op_test!(asm_op, &[3, 2, 1]);
+    test.expect_stack(&[6]);
+
+    // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
+    let a = u32::MAX;
+    let b = 1_u64;
+    // sum mod 2^32 = 0
+    let test = build_op_test!(asm_op, &[b, a as u64, 0]);
+    test.expect_stack(&[0]);
+
+    // --- (a + b + c) > 2^32 ---------------------------------------------------------------------
+    let a = 1_u64;
+    let b = u32::MAX;
+    // sum mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[b as u64, a, 1]);
+    test.expect_stack(&[1]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    let test = build_op_test!(asm_op, &[2, 1, 0, 99]);
+    test.expect_stack(&[3, 99]);
+}
+
+#[test]
 fn u32wrapping_sub() {
     let asm_op = "u32wrapping_sub";
 
@@ -330,8 +362,8 @@ fn u32wrapping_mul_b() {
 }
 
 #[test]
-fn u32overflowing_mul() {
-    let asm_op = "u32overflowing_mul";
+fn u32widening_mul() {
+    let asm_op = "u32widening_mul";
 
     // --- no overflow ----------------------------------------------------------------------------
     // c = a * b and d should be unset, since there was no arithmetic overflow.
@@ -365,8 +397,8 @@ fn u32overflowing_mul() {
 }
 
 #[test]
-fn u32overflowing_madd() {
-    let asm_op = "u32overflowing_madd";
+fn u32widening_madd() {
+    let asm_op = "u32widening_madd";
 
     // --- no overflow ----------------------------------------------------------------------------
     // d = a * b + c and e should be unset, since there was no arithmetic overflow.
@@ -401,6 +433,34 @@ fn u32overflowing_madd() {
     let f = rand_value::<u64>();
     let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
     test.expect_stack(&[lo, hi, f]);
+}
+
+#[test]
+fn u32wrapping_madd() {
+    let asm_op = "u32wrapping_madd";
+
+    // --- no overflow ----------------------------------------------------------------------------
+    // wrapping_madd should return (a * b + c) mod 2^32
+    let test = build_op_test!(asm_op, &[0, 0, 1]);
+    test.expect_stack(&[1]);
+
+    let test = build_op_test!(asm_op, &[2, 1, 3]);
+    test.expect_stack(&[5]);
+
+    // --- overflow once --------------------------------------------------------------------------
+    // (2^31 * 2 + 1) mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[2, U32_BOUND / 2, 1]);
+    test.expect_stack(&[1]);
+
+    // --- multiple overflows ---------------------------------------------------------------------
+    // (2^31 * 4 + 1) mod 2^32 = 1
+    let test = build_op_test!(asm_op, &[4, U32_BOUND / 2, 1]);
+    test.expect_stack(&[1]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    // (2 * 1 + 3) = 5, stack element 99 should remain
+    let test = build_op_test!(asm_op, &[2, 1, 3, 99]);
+    test.expect_stack(&[5, 99]);
 }
 
 #[test]
@@ -444,7 +504,7 @@ fn u32div_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -486,7 +546,7 @@ fn u32mod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -535,7 +595,7 @@ fn u32divmod_fail() {
 
     expect_exec_error_matches!(
         test,
-        ExecutionError::DivideByZero{ clk:value, label: _, source_file: _ } if value == RowIndex::from(6)
+        ExecutionError::OperationError { err: OperationError::DivideByZero, .. }
     );
 }
 
@@ -559,15 +619,19 @@ proptest! {
     }
 
     #[test]
-    fn u32overflowing_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
-        let asm_op = "u32overflowing_add3";
+    fn u32unchecked_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let wrapping_asm_op = "u32wrapping_add3";
+        let overflowing_asm_op = "u32overflowing_add3";
 
         // Output is [sum, carry] with sum on top
         let sum: u64 = u64::from(a) + u64::from(b) + u64::from(c);
         let lo = (sum as u32) as u64;
         let hi = sum >> 32;
 
-        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+        let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64, c as u64]);
+        test.prop_expect_stack(&[lo])?;
+
+        let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, c as u64]);
         test.prop_expect_stack(&[lo, hi])?;
     }
 
@@ -590,7 +654,7 @@ proptest! {
     #[test]
     fn u32unchecked_mul_proptest(a in any::<u32>(), b in any::<u32>()) {
         let wrapping_asm_op = "u32wrapping_mul";
-        let overflowing_asm_op = "u32overflowing_mul";
+        let overflowing_asm_op = "u32widening_mul";
 
         // Output is [lo, hi] in LE order with lo on top
         let result = a as u64 * b as u64;
@@ -653,8 +717,8 @@ proptest! {
     }
 
     #[test]
-    fn u32overflowing_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
-        let asm_op = "u32overflowing_madd";
+    fn u32widening_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let asm_op = "u32widening_madd";
 
         // Output is [lo, hi] in LE order with lo on top
         let madd = a as u64 * b as u64 + c as u64;
@@ -663,5 +727,17 @@ proptest! {
 
         let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
         test.prop_expect_stack(&[lo, hi])?;
+    }
+
+    #[test]
+    fn u32wrapping_madd_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
+        let asm_op = "u32wrapping_madd";
+
+        // wrapping_madd returns (a * b + c) mod 2^32
+        let madd = a as u64 * b as u64 + c as u64;
+        let lo = madd % U32_BOUND;
+
+        let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+        test.prop_expect_stack(&[lo])?;
     }
 }

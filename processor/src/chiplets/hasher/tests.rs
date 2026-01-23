@@ -84,6 +84,9 @@ fn hasher_permute() {
 
 // MERKLE TREE TESTS
 // ================================================================================================
+//
+// These tests verify trace generation, not computed results. The Merkle roots are validated
+// through `check_merkle_path`.
 
 #[test]
 fn hasher_build_merkle_root() {

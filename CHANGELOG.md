@@ -5,12 +5,15 @@
 #### Enhancements
 
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
+- Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
 
 #### Fixes
 
-- `FastProcessor` now correctly returns an error if the maximum number of cycles was exceeded during execution ([#2537](https://github.com/0xMiden/miden-vm/pull/2537))
-- `FastProcessor` now correctly only executes `trace` decorators when tracing is enabled (with `ExecutionOptions`) ([#2539](https://github.com/0xMiden/miden-vm/pull/2539))
-- Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484))
+- `FastProcessor` now correctly returns an error if the maximum number of cycles was exceeded during execution ([#2537](https://github.com/0xMiden/miden-vm/pull/2537)).
+- `FastProcessor` now correctly only executes `trace` decorators when tracing is enabled (with `ExecutionOptions`) ([#2539](https://github.com/0xMiden/miden-vm/pull/2539)).
+- Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484)).
+- Added missing `as_canonical_u64()` method to `IntValue` in `miden-assembly-syntax`, fixing compilation errors in the generated grammar code ([#2589](https://github.com/0xMiden/miden-vm/pull/2589)).
+- Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 
 #### Changes
 
@@ -33,6 +36,8 @@
 - Add `MastForest::write_stripped()` to serialize without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
 - [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
 - Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
+- Add API to serialize the `MastForest` without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
+- Removed `ErrorContext` trait and `err_ctx!` macro; error context is now computed lazily by passing raw parameters to error extension traits ([#2544](https://github.com/0xMiden/miden-vm/pull/2544)).
 - Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
 - [BREAKING] Remove `NodeExecutionState` in favor of `Continuation` ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Made `StackInputs` and `StackOutputs` implement `Copy` trait ([#2581](https://github.com/0xMiden/miden-vm/pull/2581)).
@@ -40,6 +45,7 @@
 - Documented `push.[a,b,c,d]` word literal syntax ([#2556](https://github.com/0xMiden/miden-vm/issues/2556)).
 
 ## 0.20.2 (TBD)
+
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
 
 ## 0.20.1 (2025-12-14)

@@ -111,8 +111,8 @@ pub fn u32sub(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Opt
 /// VM cycles per mode:
 /// - u32wrapping_mul: 2 cycles
 /// - u32wrapping_mul.b: 3 cycles
-/// - u32overflowing_mul: 1 cycles
-/// - u32overflowing_mul.b: 2 cycles
+/// - u32widening_mul: 1 cycles
+/// - u32widening_mul.b: 2 cycles
 pub fn u32mul(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Option<u32>) {
     handle_arithmetic_operation(span_builder, U32mul, op_mode, imm);
 }

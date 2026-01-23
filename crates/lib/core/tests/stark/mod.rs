@@ -88,7 +88,7 @@ pub fn generate_recursive_verifier_data(
         ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
 
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 

@@ -1,15 +1,12 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::{
-    ExecutionOptions,
-    trace::{
-        CTX_COL_IDX,
-        decoder::{
-            ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX,
-            NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
-            OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS, OP_BATCH_FLAGS_RANGE,
-            OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET, OP_INDEX_COL_IDX,
-        },
+use miden_air::trace::{
+    CTX_COL_IDX,
+    decoder::{
+        ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX, NUM_HASHER_COLUMNS,
+        NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS, OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS,
+        OP_BATCH_8_GROUPS, OP_BATCH_FLAGS_RANGE, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_OFFSET,
+        OP_INDEX_COL_IDX,
     },
 };
 use miden_core::{
@@ -23,8 +20,8 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionTrace, NoopEventHandler, PrimeField64, fast::FastProcessor,
-    parallel::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, NoopEventHandler, PrimeField64,
+    fast::FastProcessor, parallel::build_trace,
 };
 
 // CONSTANTS

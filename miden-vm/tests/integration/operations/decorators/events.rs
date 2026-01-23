@@ -67,7 +67,7 @@ fn test_trace_handling() {
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
-        ExecutionOptions::default().with_tracing(),
+        ExecutionOptions::default().with_tracing(true),
     )
     .unwrap();
     let expected = vec![1, 2];

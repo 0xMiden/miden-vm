@@ -213,7 +213,7 @@ proc mulstep
     # Output: [new_k, result, ...]
 
     movdn.2                    # [c, b, k, a, ...]
-    u32overflowing_madd        # [lo, hi, a, ...]  (computes c*b+k)
+    u32widening_madd        # [lo, hi, a, ...]  (computes c*b+k)
     movup.2                    # [a, lo, hi, ...]
     u32overflowing_add         # [result, carry, hi, ...]  (computes a+lo)
     swap                       # [carry, result, hi, ...]

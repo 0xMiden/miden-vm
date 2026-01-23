@@ -5,7 +5,7 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{ExecutionOptions, Felt, trace::RowIndex};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -16,9 +16,10 @@ use miden_core::{
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host, ProcessState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
+    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
@@ -175,7 +176,7 @@ impl FastProcessor {
         Self::new_with_options(
             stack_inputs,
             advice_inputs,
-            ExecutionOptions::default().with_debugging(true).with_tracing(),
+            ExecutionOptions::default().with_debugging(true).with_tracing(true),
         )
     }
 
@@ -231,7 +232,7 @@ impl FastProcessor {
     ) -> Result<ResumeContext, ExecutionError> {
         self.advice
             .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+            .map_exec_err_no_ctx()?;
 
         Ok(ResumeContext {
             current_forest: program.mast_forest().clone(),
@@ -378,7 +379,7 @@ impl FastProcessor {
     pub async fn execute(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
         self.execute_with_tracer(program, host, &mut NoopTracer).await
     }
@@ -389,7 +390,7 @@ impl FastProcessor {
     pub async fn execute_for_trace(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
@@ -406,16 +407,14 @@ impl FastProcessor {
     pub async fn execute_with_tracer(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
     ) -> Result<ExecutionOutput, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice
-            .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         match self
             .execute_impl(
@@ -446,7 +445,7 @@ impl FastProcessor {
     /// Executes a single clock cycle
     pub async fn step(
         &mut self,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         let ResumeContext {
@@ -494,7 +493,7 @@ impl FastProcessor {
         continuation_stack: &mut ContinuationStack,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
         stopper: &impl Stopper,
     ) -> ControlFlow<BreakReason, StackOutputs> {
@@ -592,15 +591,8 @@ impl FastProcessor {
                     tracer,
                     stopper,
                 )?,
-                Continuation::FinishLoop(node_id) => self.finish_loop_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishLoopUnentered(node_id) => self.finish_loop_node_unentered(
+                Continuation::FinishLoop { node_id, was_entered } => self.finish_loop_node(
+                    was_entered,
                     node_id,
                     current_forest,
                     continuation_stack,
@@ -719,7 +711,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         if !self.should_execute_decorators() {
             return ControlFlow::Continue(());
@@ -744,7 +736,7 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         if !self.in_debug_mode() {
             return ControlFlow::Continue(());
@@ -768,16 +760,15 @@ impl FastProcessor {
     fn execute_decorator(
         &mut self,
         decorator: &Decorator,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
-                    let clk = self.clk;
                     let process = &mut self.state();
                     if let Err(err) = host.on_debug(process, options) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { clk, err },
+                            ExecutionError::DebugHandlerError { err },
                         ));
                     }
                 }
@@ -787,11 +778,10 @@ impl FastProcessor {
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
-                    let clk = self.clk;
                     let process = &mut self.state();
                     if let Err(err) = host.on_trace(process, *id) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { clk, trace_id: *id, err },
+                            ExecutionError::TraceHandlerError { trace_id: *id, err },
                         ));
                     }
                 }
@@ -839,35 +829,38 @@ impl FastProcessor {
         }
     }
 
-    async fn load_mast_forest<E>(
+    async fn load_mast_forest(
         &mut self,
         node_digest: Word,
-        host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
-        err_ctx: &E,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
-    where
-        E: ErrorContext,
-    {
+        host: &mut impl Host,
+        get_mast_forest_failed: impl Fn(Word) -> OperationError,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))
+            .map_exec_err(current_forest, node_id, host)?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malformed_mast_forest_in_host(node_digest, err_ctx))?;
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
+                .map_exec_err(current_forest, node_id, host)
+                .unwrap_err()
+        })?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice
-            .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
+            current_forest,
+            node_id,
+            host,
+        )?;
 
         Ok((root_id, mast_forest))
     }
@@ -932,7 +925,7 @@ impl FastProcessor {
     /// Convenience sync wrapper to [Self::step].
     pub fn step_sync(
         &mut self,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
@@ -948,7 +941,7 @@ impl FastProcessor {
     pub fn execute_by_step_sync(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
         let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
@@ -993,7 +986,7 @@ impl FastProcessor {
     pub fn execute_sync(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
@@ -1026,7 +1019,7 @@ impl FastProcessor {
     pub fn execute_for_trace_sync(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
         match tokio::runtime::Handle::try_current() {
             Ok(_handle) => {
@@ -1058,15 +1051,13 @@ impl FastProcessor {
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
         // Merge the program's advice map into the advice provider
-        self.advice
-            .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
 
         let execute_fut = async {
             match self

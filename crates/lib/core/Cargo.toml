@@ -48,6 +48,7 @@ blake3.workspace = true
 criterion.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
+miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }

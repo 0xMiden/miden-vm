@@ -196,7 +196,7 @@ impl Assembler {
                 u32_ops::u32add(block_builder, Wrapping, Some(v.expect_value()))
             },
             Instruction::U32OverflowingAdd3 => block_builder.push_op(U32add3),
-            Instruction::U32WrappingAdd3 => block_builder.push_ops([U32add3, Drop]),
+            Instruction::U32WrappingAdd3 => block_builder.push_ops([U32add3, Swap, Drop]),
 
             Instruction::U32OverflowingSub => u32_ops::u32sub(block_builder, Overflowing, None),
             Instruction::U32OverflowingSubImm(v) => {
@@ -207,16 +207,16 @@ impl Assembler {
                 u32_ops::u32sub(block_builder, Wrapping, Some(v.expect_value()))
             },
 
-            Instruction::U32OverflowingMul => u32_ops::u32mul(block_builder, Overflowing, None),
-            Instruction::U32OverflowingMulImm(v) => {
+            Instruction::U32WideningMul => u32_ops::u32mul(block_builder, Overflowing, None),
+            Instruction::U32WideningMulImm(v) => {
                 u32_ops::u32mul(block_builder, Overflowing, Some(v.expect_value()))
             },
             Instruction::U32WrappingMul => u32_ops::u32mul(block_builder, Wrapping, None),
             Instruction::U32WrappingMulImm(v) => {
                 u32_ops::u32mul(block_builder, Wrapping, Some(v.expect_value()))
             },
-            Instruction::U32OverflowingMadd => block_builder.push_op(U32madd),
-            Instruction::U32WrappingMadd => block_builder.push_ops([U32madd, Drop]),
+            Instruction::U32WideningMadd => block_builder.push_op(U32madd),
+            Instruction::U32WrappingMadd => block_builder.push_ops([U32madd, Swap, Drop]),
 
             Instruction::U32Div => u32_ops::u32div(block_builder, proc_ctx, None)?,
             Instruction::U32DivImm(v) => {
