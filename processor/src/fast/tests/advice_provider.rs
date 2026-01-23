@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_utils::test_consistency_host::TestConsistencyHost;
+use crate::test_utils::TestConsistencyHost;
 
 #[test]
 fn test_advice_provider() {
