@@ -64,9 +64,6 @@ pub mod crypto;
 #[cfg(not(target_family = "wasm"))]
 pub mod rand;
 
-mod malicious_advice;
-pub use malicious_advice::MaliciousAdviceHandler;
-
 mod test_builders;
 
 use miden_core::sys_events::SystemEvent;

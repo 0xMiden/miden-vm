@@ -1,6 +1,3 @@
-use miden_core::EventName;
-use miden_utils_testing::MaliciousAdviceHandler;
-
 use super::*;
 
 #[test]
@@ -265,23 +262,17 @@ fn test_misaligned_key_value_find_key_fails() {
 
 // MALICIOUS ADVICE PROVIDER TESTS
 // ================================================================================================
-// These tests demonstrate how to test MASM code validation against malicious advice data.
-// The MaliciousAdviceHandler allows injecting arbitrary values onto the advice stack,
-// enabling verification that MASM code properly validates non-deterministic data.
-
-/// Event name used for injecting malicious advice data in tests.
-const MALICIOUS_ADVICE_EVENT: EventName = EventName::new("test::malicious_advice");
+// These tests verify that MASM code properly validates non-deterministic data from the advice
+// provider. By initializing the advice stack with known-bad values at the start of the test,
+// we can verify that validation logic correctly rejects invalid inputs.
 
 /// Tests that MASM validation catches an out-of-bounds pointer from malicious advice.
 ///
-/// This test injects a pointer value that is outside the valid range [start_ptr, end_ptr],
-/// verifying that the MASM code properly validates the pointer before using it.
+/// This test initializes the advice stack with a pointer value (200) that is outside
+/// the valid range [100, 112], verifying that the MASM code properly validates the
+/// pointer before using it.
 #[test]
 fn test_malicious_advice_invalid_pointer() {
-    // Create a handler that will inject an invalid pointer (200) and found flag (1)
-    // The valid range is [100, 112], so 200 is clearly out of bounds
-    let malicious_handler = MaliciousAdviceHandler::from_u64s([200, 1]);
-
     let source = format!(
         "
         use miden::core::collections::sorted_array
@@ -297,10 +288,7 @@ fn test_malicious_advice_invalid_pointer() {
             # Setup: [KEY, start_ptr, end_ptr]
             push.112 push.100 push.[8456,415,4922,593]
 
-            # Inject malicious advice data instead of using the real handler
-            emit.event(\"{MALICIOUS_ADVICE_EVENT}\")
-
-            # Pop the injected values from advice stack
+            # Pop the malicious values from advice stack (initialized at test start)
             # was_key_found, maybe_key_ptr
             adv_push.2
             # => [maybe_key_ptr, was_key_found, KEY, start_ptr, end_ptr, ...]
@@ -316,27 +304,22 @@ fn test_malicious_advice_invalid_pointer() {
     "
     );
 
-    let mut test = build_debug_test!(source, &[]);
-    test.add_event_handler(MALICIOUS_ADVICE_EVENT, malicious_handler.clone());
+    // Initialize advice stack with malicious values: [maybe_key_ptr=200, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // The valid range is [100, 112], so 200 is clearly out of bounds
+    let test = build_test!(source, &[], &[200, 1]);
 
     // Execution should fail because the pointer validation will catch the invalid value
     let result = test.execute();
     assert!(result.is_err(), "Expected validation to fail for out-of-bounds pointer");
-
-    // Verify the handler was called (may be called multiple times due to test framework)
-    assert!(malicious_handler.call_count() >= 1, "Handler should have been called");
 }
 
 /// Tests that MASM validation catches a misaligned pointer from malicious advice.
 ///
-/// Pointers must be word-aligned (multiple of 4). This test injects a non-aligned
-/// pointer to verify the alignment check works.
+/// Pointers must be word-aligned (multiple of 4). This test initializes the advice
+/// stack with a non-aligned pointer to verify the alignment check works.
 #[test]
 fn test_malicious_advice_misaligned_pointer() {
-    // Create a handler that injects a misaligned pointer (101 is not divisible by 4)
-    // and was_key_found=1 to trigger pointer validation
-    let malicious_handler = MaliciousAdviceHandler::from_u64s([101, 1]);
-
     let source = format!(
         "
         use miden::core::collections::sorted_array
@@ -350,10 +333,7 @@ fn test_malicious_advice_misaligned_pointer() {
             # Setup: [KEY, start_ptr, end_ptr]
             push.104 push.100 push.[8456,415,4922,593]
 
-            # Inject malicious advice data
-            emit.event(\"{MALICIOUS_ADVICE_EVENT}\")
-
-            # Pop the injected values
+            # Pop the malicious values from advice stack
             adv_push.2
             # => [maybe_key_ptr, was_key_found, ...]
 
@@ -369,25 +349,23 @@ fn test_malicious_advice_misaligned_pointer() {
     "
     );
 
-    let mut test = build_debug_test!(source, &[]);
-    test.add_event_handler(MALICIOUS_ADVICE_EVENT, malicious_handler.clone());
+    // Initialize advice stack with malicious values: [maybe_key_ptr=101, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // 101 is not divisible by 4, so it's misaligned
+    let test = build_test!(source, &[], &[101, 1]);
 
     // Execution should fail due to alignment check
     let result = test.execute();
     assert!(result.is_err(), "Expected validation to fail for misaligned pointer");
-    assert!(malicious_handler.call_count() >= 1);
 }
 
 /// Tests verification that the key at the returned pointer actually matches.
 ///
-/// This test injects a valid pointer but with was_key_found=1, then verifies
-/// that the MASM code checks if the key at that pointer actually matches the search key.
+/// This test initializes the advice stack with a valid pointer but with was_key_found=1,
+/// then verifies that the MASM code checks if the key at that pointer actually matches
+/// the search key.
 #[test]
 fn test_malicious_advice_wrong_key_found_flag() {
-    // Inject pointer=100 (valid) but was_key_found=1 even though we're searching
-    // for a key that doesn't exist at that location
-    let malicious_handler = MaliciousAdviceHandler::from_u64s([100, 1]);
-
     let source = format!(
         "
         use miden::core::collections::sorted_array
@@ -401,9 +379,7 @@ fn test_malicious_advice_wrong_key_found_flag() {
             # Search for a DIFFERENT key that is NOT in the array
             push.104 push.100 push.[9999,9999,9999,9999]
 
-            # Inject malicious data claiming the key was found at ptr=100
-            emit.event(\"{MALICIOUS_ADVICE_EVENT}\")
-
+            # Pop the malicious values from advice stack
             adv_push.2
             # => [maybe_key_ptr=100, was_key_found=1, KEY_search, start_ptr, end_ptr]
 
@@ -433,11 +409,12 @@ fn test_malicious_advice_wrong_key_found_flag() {
     "
     );
 
-    let mut test = build_debug_test!(source, &[]);
-    test.add_event_handler(MALICIOUS_ADVICE_EVENT, malicious_handler.clone());
+    // Initialize advice stack with malicious values: [maybe_key_ptr=100, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // Claiming the key was found at ptr=100, but we're searching for a different key
+    let test = build_test!(source, &[], &[100, 1]);
 
     // Should fail because the key at ptr=100 doesn't match the search key
     let result = test.execute();
     assert!(result.is_err(), "Expected validation to fail for wrong key_found flag");
-    assert!(malicious_handler.call_count() >= 1);
 }
