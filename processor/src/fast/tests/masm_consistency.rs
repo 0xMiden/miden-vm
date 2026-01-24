@@ -410,5 +410,7 @@ fn test_log_precompile_correctness() {
 // See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
 #[fixture]
 fn testname() -> String {
-    std::thread::current().name().unwrap().to_string()
+    // Replace `::` with `__` to make snapshot file names Windows-compatible.
+    // Windows does not allow `:` in file names.
+    std::thread::current().name().unwrap().replace("::", "__")
 }

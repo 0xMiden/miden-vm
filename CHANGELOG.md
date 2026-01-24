@@ -14,6 +14,7 @@
 - Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484)).
 - Added missing `as_canonical_u64()` method to `IntValue` in `miden-assembly-syntax`, fixing compilation errors in the generated grammar code ([#2589](https://github.com/0xMiden/miden-vm/pull/2589)).
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
+- Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
 
 #### Changes
 
