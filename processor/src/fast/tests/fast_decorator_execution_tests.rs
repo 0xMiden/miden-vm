@@ -7,7 +7,7 @@ use miden_core::{
     stack::StackInputs,
 };
 
-use crate::{AdviceInputs, Program, fast::FastProcessor, test_utils::TestConsistencyHost};
+use crate::{AdviceInputs, Program, fast::FastProcessor, test_utils::TestHost};
 
 // Test helper to create a basic block with decorators for fast processor
 fn create_test_program(
@@ -322,7 +322,7 @@ fn test_decorator_bypass_in_release_mode() {
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
     let processor = FastProcessor::new(StackInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
 
     processor.execute_sync(&program, &mut host).unwrap();
     assert_eq!(counter.get(), 0, "decorators should not be retrieved in release mode");
@@ -334,7 +334,7 @@ fn test_decorator_bypass_in_debug_mode() {
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
 
     processor.execute_sync(&program, &mut host).unwrap();
     assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
