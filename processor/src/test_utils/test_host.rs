@@ -1,4 +1,9 @@
-use alloc::{collections::BTreeMap, string::String, string::ToString, sync::Arc, vec::Vec};
+use alloc::{
+    collections::BTreeMap,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 
 use miden_core::{DebugOptions, Felt, field::PrimeField64};
 use miden_debug_types::{
@@ -77,16 +82,10 @@ impl DebugHandler for TraceCollector {
 
 /// A unified testing host that combines trace collection, event handling,
 /// debug handling, and process state consistency checking.
-///
-/// This host merges functionality from the previous separate `TestHost` and
-/// `TestConsistencyHost` implementations, providing a single host for all testing needs.
 #[derive(Debug, Clone)]
-pub struct TestConsistencyHost<S: SourceManager = DefaultSourceManager> {
+pub struct TestHost<S: SourceManager = DefaultSourceManager> {
     /// Trace collection functionality (counts and execution order)
     trace_collector: TraceCollector,
-
-    /// List of trace IDs that have been received (simple list for compatibility)
-    pub trace_handler: Vec<u32>,
 
     /// List of event IDs that have been received
     pub event_handler: Vec<u32>,
@@ -104,12 +103,11 @@ pub struct TestConsistencyHost<S: SourceManager = DefaultSourceManager> {
     pub source_manager: Arc<S>,
 }
 
-impl TestConsistencyHost {
-    /// Creates a new TestConsistencyHost with minimal functionality for basic testing.
+impl TestHost {
+    /// Creates a new TestHost with minimal functionality for basic testing.
     pub fn new() -> Self {
         Self {
             trace_collector: TraceCollector::new(),
-            trace_handler: Vec::new(),
             event_handler: Vec::new(),
             debug_handler: Vec::new(),
             snapshots: BTreeMap::new(),
@@ -118,13 +116,12 @@ impl TestConsistencyHost {
         }
     }
 
-    /// Creates a new TestConsistencyHost with a kernel forest for full consistency testing.
+    /// Creates a new TestHost with a kernel forest for full consistency testing.
     pub fn with_kernel_forest(kernel_forest: Arc<MastForest>) -> Self {
         let mut store = MemMastForestStore::default();
         store.insert(kernel_forest.clone());
         Self {
             trace_collector: TraceCollector::new(),
-            trace_handler: Vec::new(),
             event_handler: Vec::new(),
             debug_handler: Vec::new(),
             snapshots: BTreeMap::new(),
@@ -149,13 +146,13 @@ impl TestConsistencyHost {
     }
 }
 
-impl Default for TestConsistencyHost {
+impl Default for TestHost {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<S> Host for TestConsistencyHost<S>
+impl<S> Host for TestHost<S>
 where
     S: SourceManagerSync,
 {
@@ -177,8 +174,7 @@ where
         &mut self,
         _process: &ProcessorState,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        // Record the event ID for testing verification
-        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap_or(0);
+        let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
         async move { Ok(Vec::new()) }
     }
@@ -214,9 +210,6 @@ where
         // Forward to trace collector for counting and execution order tracking
 >>>>>>> 1a162643 (refactor(processor): merge TestConsistencyHost and TestHost)
         self.trace_collector.on_trace(process, trace_id)?;
-
-        // Record trace ID in simple list for compatibility with old TestHost API
-        self.trace_handler.push(trace_id);
 
         // Also collect process state snapshot for consistency checking
         let snapshot = ProcessorStateSnapshot::from(process);
