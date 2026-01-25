@@ -33,7 +33,7 @@ use crate::{
 #[cfg(any(test, feature = "testing"))]
 mod test_utils;
 #[cfg(any(test, feature = "testing"))]
-pub use test_utils::{ProcessStateSnapshot, TestConsistencyHost, TestHost, TraceCollector};
+pub use test_utils::{ProcessStateSnapshot, TestHost, TraceCollector};
 
 #[cfg(test)]
 mod tests;
