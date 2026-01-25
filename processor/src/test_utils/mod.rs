@@ -1,6 +1,3 @@
-mod test_consistency_host;
+mod test_host;
 
-pub use test_consistency_host::{ProcessStateSnapshot, TestConsistencyHost, TraceCollector};
-
-/// Type alias for compatibility - `TestHost` is the same as `TestConsistencyHost`.
-pub type TestHost = TestConsistencyHost;
+pub use test_host::{ProcessStateSnapshot, TestHost, TraceCollector};
