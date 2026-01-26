@@ -9,6 +9,7 @@ use miden_core::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
     },
+    stack::StackInputs,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
@@ -98,7 +99,7 @@ fn test_syscall_fail() {
     let mut host = DefaultHost::default();
 
     // set the initial FMP to a value close to FMP_MAX
-    let stack_inputs = vec![Felt::from_u32(5)];
+    let stack_inputs = StackInputs::new(&[Felt::from_u32(5)]).unwrap();
     let program = {
         let mut program = MastForest::new();
         let basic_block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
@@ -112,7 +113,7 @@ fn test_syscall_fail() {
         Program::new(program.into(), root_id)
     };
 
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(stack_inputs);
 
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
@@ -147,7 +148,8 @@ fn test_cycle_limit_exceeded() {
     // the total number of operations is certain to be greater than `MIN_TRACE_LEN`.
     let program = simple_program_with_ops(vec![Operation::Swap; MIN_TRACE_LEN]);
 
-    let processor = FastProcessor::new_with_options(&[], AdviceInputs::default(), options);
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
@@ -159,10 +161,10 @@ fn test_assert() {
 
     // Case 1: the stack top is ONE
     {
-        let stack_inputs = vec![ONE];
+        let stack_inputs = StackInputs::new(&[ONE]).unwrap();
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
-        let processor = FastProcessor::new(&stack_inputs);
+        let processor = FastProcessor::new(stack_inputs);
         let result = processor.execute_sync(&program, &mut host);
 
         // Check that the execution succeeds
@@ -171,10 +173,10 @@ fn test_assert() {
 
     // Case 2: the stack top is not ONE
     {
-        let stack_inputs = vec![ZERO];
+        let stack_inputs = StackInputs::new(&[ZERO]).unwrap();
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
-        let processor = FastProcessor::new(&stack_inputs);
+        let processor = FastProcessor::new(stack_inputs);
         let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
         // Check that the error is due to a failed assertion
@@ -201,10 +203,10 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
     let program = simple_program_with_ops(vec![Operation::And]);
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
-    assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
+    assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
 
 /// Tests all valid inputs for the `Or` operation.
@@ -220,10 +222,10 @@ fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_
     let program = simple_program_with_ops(vec![Operation::Or]);
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
-    assert_eq!(stack_outputs.stack_truncated(1)[0], expected_output);
+    assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
 
 /// Tests a valid set of inputs for the `Frie2f4` operation. This test reuses most of the logic of
@@ -240,7 +242,7 @@ fn test_frie2f4() {
     //
     // With d_seg=2, query_values[2] = (v4, v5) must equal prev_value = (pe0, pe1).
     let previous_value: [Felt; 2] = [Felt::from_u32(10), Felt::from_u32(11)];
-    let stack_inputs = vec![
+    let stack_inputs = StackInputs::new(&[
         Felt::from_u32(16), // pos 0 -> pos 1 (v1) after push
         Felt::from_u32(15), // pos 1 -> pos 2 (v2) after push
         Felt::from_u32(14), // pos 2 -> pos 3 (v3) after push
@@ -257,13 +259,14 @@ fn test_frie2f4() {
         Felt::from_u32(2),  // pos 13 -> pos 14 (a0) after push
         Felt::from_u32(1),  // pos 14 -> pos 15 (cptr) after push
         Felt::from_u32(0),  // pos 15 -> overflow after push
-    ];
+    ])
+    .unwrap();
 
     let program =
         simple_program_with_ops(vec![Operation::Push(Felt::new(42_u64)), Operation::FriE2F4]);
 
     // fast processor
-    let fast_processor = FastProcessor::new(&stack_inputs);
+    let fast_processor = FastProcessor::new(stack_inputs);
     let stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
 
     insta::assert_debug_snapshot!(stack_outputs);
@@ -326,30 +329,33 @@ fn test_call_node_preserves_stack_overflow_table() {
     };
 
     // initial stack: (top) [1, 2, 3, 4, ..., 16] (bot)
-    let mut processor = FastProcessor::new(&[
-        Felt::from_u32(1),
-        Felt::from_u32(2),
-        Felt::from_u32(3),
-        Felt::from_u32(4),
-        Felt::from_u32(5),
-        Felt::from_u32(6),
-        Felt::from_u32(7),
-        Felt::from_u32(8),
-        Felt::from_u32(9),
-        Felt::from_u32(10),
-        Felt::from_u32(11),
-        Felt::from_u32(12),
-        Felt::from_u32(13),
-        Felt::from_u32(14),
-        Felt::from_u32(15),
-        Felt::from_u32(16),
-    ]);
+    let mut processor = FastProcessor::new(
+        StackInputs::new(&[
+            Felt::from_u32(1),
+            Felt::from_u32(2),
+            Felt::from_u32(3),
+            Felt::from_u32(4),
+            Felt::from_u32(5),
+            Felt::from_u32(6),
+            Felt::from_u32(7),
+            Felt::from_u32(8),
+            Felt::from_u32(9),
+            Felt::from_u32(10),
+            Felt::from_u32(11),
+            Felt::from_u32(12),
+            Felt::from_u32(13),
+            Felt::from_u32(14),
+            Felt::from_u32(15),
+            Felt::from_u32(16),
+        ])
+        .unwrap(),
+    );
 
     // Execute the program
     let result = processor.execute_sync_mut(&program, &mut host).unwrap();
 
     assert_eq!(
-        result.stack_truncated(16),
+        result.get_num_elements(16),
         &[
             // the sum from the call to foo
             Felt::from_u32(30),
@@ -412,7 +418,7 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new_debug(&alloc::vec::Vec::new(), AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);

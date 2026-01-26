@@ -3,7 +3,7 @@ use std::sync::Arc;
 use miden_core::DebugOptions;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
-    AdviceMutation, DebugError, EventError, FutureMaybeSend, Host, MastForest, ProcessState,
+    AdviceMutation, DebugError, EventError, FutureMaybeSend, Host, MastForest, ProcessorState,
     TraceError,
 };
 use miden_prover::Word;
@@ -41,7 +41,7 @@ impl Host for TestHost {
 
     fn on_event(
         &mut self,
-        process: &ProcessState<'_>,
+        process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let event_id = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
@@ -50,14 +50,14 @@ impl Host for TestHost {
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessState,
+        _process: &mut ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(&mut self, _process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, _process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.trace_handler.push(trace_id);
         Ok(())
     }

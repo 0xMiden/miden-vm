@@ -1,6 +1,7 @@
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
+    stack::StackInputs,
 };
 use proptest::prelude::*;
 
@@ -105,7 +106,7 @@ proptest! {
             end_ptr,                              // position 15 (will be pushed to overflow)
         ];
 
-        let mut processor = FastProcessor::new(&stack_inputs);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Push v0 to the top of the stack

@@ -12,7 +12,7 @@ use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{AdviceMutation, EventError, ProcessState};
+use miden_processor::{AdviceMutation, EventError, ProcessorState};
 
 use crate::handlers::read_memory_region;
 
@@ -47,7 +47,7 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::cryp
 /// 1. The MASM procedure re-verifies the tag when decrypting
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
-pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     // Stack: [event_id, key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)

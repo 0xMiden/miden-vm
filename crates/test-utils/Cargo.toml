@@ -26,7 +26,7 @@ std = [
 [dependencies]
 miden-air.workspace = true
 miden-assembly = { workspace = true, features = ["testing"] }
-miden-core.workspace = true
+miden-core = { workspace = true, features = ["testing"] }
 miden-crypto.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
 miden-prover.workspace = true
@@ -34,7 +34,9 @@ miden-verifier.workspace = true
 test-case = "3.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-pretty_assertions = { version = "1.4", default-features = false, features = ["alloc"] }
+pretty_assertions = { version = "1.4", default-features = false, features = [
+    "alloc",
+] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 env_logger.workspace = true

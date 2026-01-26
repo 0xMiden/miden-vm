@@ -15,7 +15,7 @@ use miden_core::{
     utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::rpo::Rpo256;
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 use sha2::{Digest, Sha512};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
@@ -35,7 +35,7 @@ impl EventHandler for Sha512Precompile {
     /// ## Input Format
     /// - **Stack**: `[event_id, ptr, len_bytes, ...]`
     /// - **Memory**: bytes packed into u32 field elements starting at `ptr`
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_canonical_u64();
         let len_bytes = process.get_stack_item(2).as_canonical_u64();

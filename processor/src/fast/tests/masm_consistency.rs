@@ -260,12 +260,12 @@ fn test_masm_consistency(
     }
 
     // fast processor
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
 
     // fast processor by step
     let stepped_stack_outputs = {
-        let processor = FastProcessor::new(&stack_inputs);
+        let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         processor.execute_by_step_sync(&program, &mut host).unwrap()
     };
 
@@ -339,12 +339,12 @@ fn test_masm_errors_consistency(
     }
 
     // fast processor
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     // fast processor by step
     let fast_stepped_err = {
-        let processor = FastProcessor::new(&stack_inputs);
+        let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         processor.execute_by_step_sync(&program, &mut host).unwrap_err()
     };
 
@@ -394,12 +394,12 @@ fn test_log_precompile_correctness() {
     };
 
     let mut host = DefaultHost::default();
-    let processor = FastProcessor::new(&stack_inputs);
+    let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    let actual_r0 = execution_output.stack.get_stack_word(0).unwrap();
-    let actual_r1 = execution_output.stack.get_stack_word(4).unwrap();
-    let actual_cap = execution_output.stack.get_stack_word(8).unwrap();
+    let actual_r0 = execution_output.stack.get_word(0).unwrap();
+    let actual_r1 = execution_output.stack.get_word(4).unwrap();
+    let actual_cap = execution_output.stack.get_word(8).unwrap();
 
     assert_eq!(expected_r0, actual_r0, "R0 mismatch");
     assert_eq!(expected_r1, actual_r1, "R1 mismatch");

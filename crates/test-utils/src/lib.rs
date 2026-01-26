@@ -29,7 +29,7 @@ pub use miden_core::{
 use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
-    ProcessState,
+    ProcessorState,
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, EventHandler, Program,
@@ -277,11 +277,10 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
         let processor = if self.in_debug_mode {
-            FastProcessor::new_debug(&stack_inputs, self.advice_inputs.clone())
+            FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
         } else {
-            FastProcessor::new_with_advice_inputs(&stack_inputs, self.advice_inputs.clone())
+            FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
         };
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
@@ -386,11 +385,9 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_stack_result = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
-            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_processor = FastProcessor::new_with_options(
-                &stack_inputs,
-                advice_inputs,
+                self.stack_inputs,
+                self.advice_inputs.clone(),
                 miden_processor::ExecutionOptions::default()
                     .with_debugging(self.in_debug_mode)
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
@@ -423,10 +420,7 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let processor = FastProcessor::new_debug(
-            &self.stack_inputs.into_iter().collect::<Vec<Felt>>(),
-            self.advice_inputs.clone(),
-        );
+        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -444,10 +438,7 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new_debug(
-            &self.stack_inputs.into_iter().collect::<Vec<Felt>>(),
-            self.advice_inputs.clone(),
-        );
+        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -482,7 +473,7 @@ impl Test {
 
         let program_info = ProgramInfo::from(program);
         if test_fail {
-            stack_outputs.stack_mut()[0] += ONE;
+            stack_outputs.as_mut()[0] += ONE;
             assert!(
                 miden_verifier::verify(program_info, stack_inputs, stack_outputs, proof).is_err()
             );
@@ -579,12 +570,10 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let stack_inputs: Vec<Felt> = self.stack_inputs.into_iter().collect();
-            let advice_inputs: AdviceInputs = self.advice_inputs.clone();
             let fast_process = if self.in_debug_mode {
-                FastProcessor::new_debug(&stack_inputs, advice_inputs)
+                FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
             } else {
-                FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs)
+                FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
             };
             fast_process.execute_by_step_sync(&program, &mut host)
         };

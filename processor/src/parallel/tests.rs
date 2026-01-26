@@ -9,6 +9,7 @@ use miden_core::{
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
+    stack::StackInputs,
 };
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
@@ -315,7 +316,7 @@ fn test_trace_generation_at_fragment_boundaries(
 
     let trace_from_fragments = {
         let processor = FastProcessor::new_with_options(
-            stack_inputs,
+            StackInputs::new(stack_inputs).unwrap(),
             AdviceInputs::default(),
             ExecutionOptions::default()
                 .with_core_trace_fragment_size(fragment_size)
@@ -336,7 +337,7 @@ fn test_trace_generation_at_fragment_boundaries(
 
     let trace_from_single_fragment = {
         let processor = FastProcessor::new_with_options(
-            stack_inputs,
+            StackInputs::new(stack_inputs).unwrap(),
             AdviceInputs::default(),
             ExecutionOptions::default()
                 .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)

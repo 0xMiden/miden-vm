@@ -294,13 +294,17 @@ impl InputFile {
 
     /// Parse and return the stack inputs for the program.
     pub fn parse_stack_inputs(&self) -> Result<StackInputs, String> {
-        let stack_inputs = self
+        let stack_inputs: Vec<Felt> = self
             .operand_stack
             .iter()
-            .map(|v| v.parse::<u64>().map_err(|e| e.to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|v| {
+                let value = v.parse::<u64>().map_err(|e| e.to_string())?;
+                Felt::from_canonical_checked(value)
+                    .ok_or_else(|| format!("failed to convert stack input value '{v}' to Felt"))
+            })
+            .collect::<Result<_, _>>()?;
 
-        StackInputs::try_from_ints(stack_inputs).map_err(|e| e.to_string())
+        StackInputs::new(&stack_inputs).map_err(|e| e.to_string())
     }
 }
 

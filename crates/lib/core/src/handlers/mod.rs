@@ -2,7 +2,7 @@ use miden_core::{
     Felt, WORD_SIZE,
     field::{PrimeCharacteristicRing, PrimeField64},
 };
-use miden_processor::ProcessState;
+use miden_processor::ProcessorState;
 
 pub mod aead_decrypt;
 use alloc::vec::Vec;
@@ -55,7 +55,7 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
 ///     .ok_or(MyError::MemoryReadFailed)?;
 /// ```
 pub(crate) fn read_memory_region(
-    process: &ProcessState,
+    process: &ProcessorState,
     start_ptr: u64,
     len: u64,
 ) -> Option<alloc::vec::Vec<Felt>> {
@@ -112,7 +112,7 @@ pub(crate) fn read_memory_region(
 /// // Returns: [0x01, 0x02, 0x03, 0x04, 0x05]
 /// ```
 pub(crate) fn read_memory_packed_u32(
-    process: &ProcessState,
+    process: &ProcessorState,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, MemoryReadError> {

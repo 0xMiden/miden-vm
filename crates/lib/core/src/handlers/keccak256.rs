@@ -33,7 +33,7 @@ use miden_core::{
     utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
@@ -58,7 +58,7 @@ impl EventHandler for KeccakPrecompile {
     /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` (least significant u32 on top)
     /// - **Precompile Request**: Stores tag `[event_id, len_bytes, 0, 0]` and raw preimage bytes
     ///   for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
         let ptr = process.get_stack_item(1).as_canonical_u64();
         let len_bytes = process.get_stack_item(2).as_canonical_u64();

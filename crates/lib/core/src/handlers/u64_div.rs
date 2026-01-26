@@ -6,7 +6,7 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{EventName, field::PrimeField64};
-use miden_processor::{AdviceMutation, EventError, ProcessState};
+use miden_processor::{AdviceMutation, EventError, ProcessorState};
 
 use crate::handlers::u64_to_u32_elements;
 
@@ -32,7 +32,7 @@ pub const U64_DIV_EVENT_NAME: EventName = EventName::new("miden::core::math::u64
 ///
 /// # Errors
 /// Returns an error if the divisor is ZERO.
-pub fn handle_u64_div(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_u64_div(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     // Read divisor from positions 1 (lo) and 2 (hi) - b is on top of stack
     let divisor = {
         let divisor_lo = process.get_stack_item(1).as_canonical_u64();
