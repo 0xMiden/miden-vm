@@ -11,6 +11,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
+#[rustfmt::skip]
 pub mod chiplets;
 pub mod range;
 pub mod stack;
