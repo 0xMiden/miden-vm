@@ -6,7 +6,7 @@ use miden_core::{EventName, ZERO, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
-    ProcessState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    ProcessorState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{
@@ -62,7 +62,7 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 /// - SIGNATURE is the signature being verified.
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
-pub fn push_falcon_signature(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     use miden_core::utils::Deserializable;
 
     let pub_key = process.get_stack_word(1);

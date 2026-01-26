@@ -104,8 +104,8 @@ fn test_sha512_hash_memory_impl(bytes: &[u8]) {
 
     let preimage = Sha512Preimage::new(request.calldata().to_vec());
 
-    let commitment = stack.get_stack_word(0).unwrap();
-    let tag = stack.get_stack_word(4).unwrap();
+    let commitment = stack.get_word(0).unwrap();
+    let tag = stack.get_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment = Sha512Precompile.verify(preimage.as_ref()).unwrap();
     assert_eq!(precompile_commitment, verifier_commitment, "commitment mismatch");

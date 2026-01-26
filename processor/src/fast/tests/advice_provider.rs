@@ -133,8 +133,6 @@ fn test_advice_provider() {
     end
     ";
 
-    let stack_inputs = Vec::new();
-
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
 
@@ -148,7 +146,7 @@ fn test_advice_provider() {
     };
 
     let mut fast_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
-    let processor = FastProcessor::new_debug(&stack_inputs, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
 
     // check outputs

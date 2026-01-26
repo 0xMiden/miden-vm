@@ -6,7 +6,7 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
-    stack::MIN_STACK_DEPTH,
+    stack::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
 
@@ -69,7 +69,7 @@ proptest! {
             Felt::new(s14), // position 14
             Felt::new(s15), // position 15 (bottom)
         ];
-        let mut processor = FastProcessor::new(&stack_inputs);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Compute expected result
@@ -176,7 +176,7 @@ proptest! {
             ZERO,                    // position 14
             ZERO,                    // position 15 (bottom)
         ];
-        let mut processor = FastProcessor::new(&stack_inputs);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Store plaintext in memory at src_addr
@@ -306,7 +306,7 @@ proptest! {
             Felt::new(acc_0),       // position 14 (acc low)
             Felt::new(acc_1),       // position 15 (bottom, acc high)
         ];
-        let mut processor = FastProcessor::new(&stack_inputs);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Store alpha in memory at ALPHA_ADDR
@@ -431,7 +431,7 @@ proptest! {
             Felt::new(acc_0),       // position 14 (low)
             Felt::new(acc_1),       // position 15 (bottom, high)
         ];
-        let mut processor = FastProcessor::new(&stack_inputs);
+        let mut processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
         let mut tracer = NoopTracer;
 
         // Store alpha in memory at ALPHA_ADDR
@@ -556,7 +556,7 @@ proptest! {
             ZERO,                  // position 14
             ZERO,                  // position 15 (bottom)
         ];
-        let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let mut processor = FastProcessor::new_with_advice_inputs(StackInputs::new(&stack_inputs).unwrap(), advice_inputs);
         let mut tracer = NoopTracer;
         let program = MastForest::default();
 
@@ -651,7 +651,7 @@ proptest! {
             ZERO,                     // position 14
             ZERO,                     // position 15 (bottom)
         ];
-        let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+        let mut processor = FastProcessor::new_with_advice_inputs(StackInputs::new(&stack_inputs).unwrap(), advice_inputs);
         let mut tracer = NoopTracer;
 
         // Execute the operation
@@ -755,7 +755,10 @@ fn test_op_mrupdate_merge_subtree() {
         ZERO,                    // position 14
         ZERO,                    // position 15 (bottom)
     ];
-    let mut processor = FastProcessor::new_with_advice_inputs(&stack_inputs, advice_inputs);
+    let mut processor = FastProcessor::new_with_advice_inputs(
+        StackInputs::new(&stack_inputs).unwrap(),
+        advice_inputs,
+    );
     let mut tracer = NoopTracer;
 
     // Execute the operation

@@ -16,7 +16,7 @@ use miden_core_lib::{
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
 use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::helpers::masm_store_felts;
@@ -65,7 +65,7 @@ fn test_ecdsa_verify_cases() {
         let output = test.execute().unwrap();
 
         // Assert result
-        let result = output.stack_outputs().get_stack_item(0).unwrap();
+        let result = output.stack_outputs().get_element(0).unwrap();
         assert_eq!(result, Felt::from_bool(expected_valid));
 
         // Verify the precompile request was logged with the right event ID
@@ -112,8 +112,8 @@ fn test_ecdsa_verify_impl_commitment() {
         // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
         // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
         // Use get_stack_word to match LE stack convention
-        let commitment = stack.get_stack_word(0).unwrap();
-        let tag = stack.get_stack_word(4).unwrap();
+        let commitment = stack.get_word(0).unwrap();
+        let tag = stack.get_word(4).unwrap();
         // Commitment and tag must match verifier output
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
         let verifier_commitment =
@@ -124,7 +124,7 @@ fn test_ecdsa_verify_impl_commitment() {
         );
 
         // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
-        let result = stack.get_stack_item(5).unwrap();
+        let result = stack.get_element(5).unwrap();
         assert_eq!(
             result,
             Felt::from_bool(expected_valid),
@@ -156,7 +156,7 @@ impl EcdsaSignatureHandler {
 }
 
 impl EventHandler for EcdsaSignatureHandler {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
         // Position 0 has the event ID, so pk_commitment starts at position 1
         let provided_pk_rpo = process.get_stack_word(1);

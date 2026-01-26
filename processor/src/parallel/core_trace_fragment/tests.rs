@@ -16,6 +16,7 @@ use miden_core::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
+    stack::StackInputs,
 };
 use miden_utils_testing::rand::rand_value;
 
@@ -1602,7 +1603,7 @@ const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
     let processor = FastProcessor::new_with_options(
-        &stack_inputs,
+        StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
@@ -1642,7 +1643,7 @@ fn build_call_trace_helper(
     kernel: Kernel,
 ) -> (SystemTrace, DecoderTrace, usize) {
     let processor = FastProcessor::new_with_options(
-        &[],
+        StackInputs::default(),
         AdviceInputs::default(),
         ExecutionOptions::default()
             .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)

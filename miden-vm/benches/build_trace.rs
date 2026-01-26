@@ -57,7 +57,8 @@ fn build_trace(c: &mut Criterion) {
                     let program = assembler
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
-                    let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
+                    let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();
+                    let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
 
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
@@ -66,7 +67,7 @@ fn build_trace(c: &mut Criterion) {
                                 .unwrap();
 
                             let processor = FastProcessor::new_with_options(
-                                &stack_inputs,
+                                stack_inputs,
                                 advice_inputs.clone(),
                                 ExecutionOptions::default()
                                     .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)

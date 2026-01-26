@@ -209,7 +209,7 @@ let (outputs, proof) = miden_vm::prove_sync(
 .unwrap();
 
 // fetch the stack outputs, truncating to the first element
-let stack = outputs.stack_truncated(1);
+let stack = outputs.get_num_elements(1);
 
 // the output should be the 50th Fibonacci number
 assert_eq!(12586269025, stack[0].as_canonical_u64());

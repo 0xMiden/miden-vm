@@ -8,7 +8,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::{DebugOptions, EventId, EventName, sys_events::SystemEvent};
 
-use crate::{AdviceMutation, ExecutionError, ProcessState};
+use crate::{AdviceMutation, ExecutionError, ProcessorState};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================
@@ -20,19 +20,19 @@ use crate::{AdviceMutation, ExecutionError, ProcessState};
 /// be stored in the process's advice provider.
 pub trait EventHandler: Send + Sync + 'static {
     /// Handles the event when triggered.
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError>;
 }
 
 /// Default implementation for both free functions and closures with signature
-/// `fn(&ProcessState) -> Result<(), HandlerError>`
+/// `fn(&ProcessorState) -> Result<(), HandlerError>`
 impl<F> EventHandler for F
 where
-    F: for<'a> Fn(&'a ProcessState) -> Result<Vec<AdviceMutation>, EventError>
+    F: for<'a> Fn(&'a ProcessorState) -> Result<Vec<AdviceMutation>, EventError>
         + Send
         + Sync
         + 'static,
 {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         self(process)
     }
 }
@@ -41,7 +41,7 @@ where
 pub struct NoopEventHandler;
 
 impl EventHandler for NoopEventHandler {
-    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(Vec::new())
     }
 }
@@ -61,7 +61,7 @@ impl EventHandler for NoopEventHandler {
 ///
 /// fn try_something() -> Result<(), MyError> { /* ... */ }
 ///
-/// fn my_handler(process: &mut ProcessState) -> Result<(), HandlerError> {
+/// fn my_handler(process: &mut ProcessorState) -> Result<(), HandlerError> {
 ///     // ...
 ///     try_something()?;
 ///     // ...
@@ -96,7 +96,7 @@ pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
 /// impl Host for MyHost {
 ///     fn on_event(
 ///         &mut self,
-///         process: &mut ProcessState,
+///         process: &mut ProcessorState,
 ///         event_id: u32,
 ///     ) -> Result<(), EventError> {
 ///         if self
@@ -170,7 +170,7 @@ impl EventHandlerRegistry {
     pub fn handle_event(
         &self,
         id: EventId,
-        process: &ProcessState,
+        process: &ProcessorState,
     ) -> Result<Option<Vec<AdviceMutation>>, EventError> {
         if let Some((_event_name, handler)) = self.handlers.get(&id) {
             let mutations = handler.on_event(process)?;
@@ -196,7 +196,7 @@ pub trait DebugHandler: Sync {
     /// This function is invoked when the `Debug` decorator is executed.
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = crate::host::debug::DefaultDebugHandler::default();
@@ -204,7 +204,7 @@ pub trait DebugHandler: Sync {
     }
 
     /// This function is invoked when the `Trace` decorator is executed.
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         let _ = (&process, trace_id);
         #[cfg(feature = "std")]
         std::println!(

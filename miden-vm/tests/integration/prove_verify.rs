@@ -200,7 +200,7 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::{ExecutionProof, Felt, HashFunction};
+    use miden_core::{ExecutionProof, HashFunction};
     use miden_processor::{
         AdviceInputs, ExecutionOptions, StackInputs, fast::FastProcessor, parallel::build_trace,
     };
@@ -234,13 +234,11 @@ mod fast_parallel {
         let mut host =
             DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
 
-        let stack_inputs_vec: Vec<Felt> = stack_inputs.into_iter().collect();
-
         let options = ExecutionOptions::default()
             .with_core_trace_fragment_size(FRAGMENT_SIZE)
             .unwrap();
         let fast_processor =
-            FastProcessor::new_with_options(&stack_inputs_vec, advice_inputs.clone(), options);
+            FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
         let (execution_output, trace_context) = fast_processor
             .execute_for_trace_sync(&program, &mut host)
             .expect("Fast processor execution failed");
