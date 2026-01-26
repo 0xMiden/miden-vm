@@ -164,7 +164,7 @@ impl ProveCmd {
             OutputFile::write(&stack_outputs, output_path).map_err(Report::msg)?;
         } else {
             // if no output path was provided, get the stack outputs for printing to the screen.
-            let stack = stack_outputs.stack_truncated(self.num_outputs).to_vec();
+            let stack = stack_outputs.get_num_elements(self.num_outputs).to_vec();
 
             // write all outputs to default location if none was provided
             let default_output_path = self.program_file.with_extension("outputs");

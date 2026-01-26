@@ -119,7 +119,7 @@ fn test_basic_block(
     let program = simple_program_with_ops(operations);
 
     let mut host = DefaultHost::default();
-    let fast_processor = FastProcessor::new(&stack_inputs);
+    let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let fast_stack_outputs =
         fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
 

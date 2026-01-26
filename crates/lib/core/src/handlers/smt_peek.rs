@@ -10,7 +10,7 @@ use miden_core::{
     EventName, Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
 };
-use miden_processor::{AdviceMutation, EventError, ProcessState};
+use miden_processor::{AdviceMutation, EventError, ProcessorState};
 
 /// Event name for the smt_peek operation.
 pub const SMT_PEEK_EVENT_NAME: EventName =
@@ -36,7 +36,7 @@ pub const SMT_PEEK_EVENT_NAME: EventName =
 ///
 /// # Panics
 /// Will panic as unimplemented if the target depth is `64`.
-pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_smt_peek(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
     let empty_leaf = EmptySubtreeRoots::entry(SMT_DEPTH, SMT_DEPTH);
     // fetch the arguments from the operand stack
     // Stack at emit: [event_id, KEY, ROOT, ...] where KEY and ROOT are structural words.
@@ -81,7 +81,7 @@ pub fn handle_smt_peek(process: &ProcessState) -> Result<Vec<AdviceMutation>, Ev
 
 /// Retrieves the preimage of an SMT leaf node from the advice provider.
 fn get_smt_leaf_preimage(
-    process: &ProcessState,
+    process: &ProcessorState,
     node: Word,
 ) -> Result<Vec<(Word, Word)>, SmtPeekError> {
     let kv_pairs = process

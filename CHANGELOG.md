@@ -46,6 +46,8 @@
 - [BREAKING] Removed `SyncHost` and `BaseHost`, and renamed `AsyncHost` to `Host` ([#2595](https://github.com/0xMiden/miden-vm/pull/2595)).
 - [BREAKING] Moved `ExecutionOptions` to `miden-processor`, `ProvingOptions` to `miden-prove`, and `ExecutionProof` to `miden-core` (all out of `miden-air`) ([#2597](https://github.com/0xMiden/miden-vm/pull/2597)).
 - [BREAKING] Removed `on_assert_failed` method from `Host` trait ([#2600](https://github.com/0xMiden/miden-vm/pull/2600)).
+- [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
+- [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
 
 ## 0.20.2 (TBD)
 

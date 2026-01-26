@@ -12,6 +12,7 @@ use miden_assembly::{
     report,
     utils::Deserializable,
 };
+use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
 use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
 use serde::{Deserialize, Serialize};
@@ -75,15 +76,18 @@ impl OutputFile {
 
     /// Converts stack output vector to [StackOutputs].
     pub fn stack_outputs(&self) -> Result<StackOutputs, String> {
-        let stack = self
+        let stack: Vec<Felt> = self
             .stack
             .iter()
-            .map(|v| v.parse::<u64>())
-            .collect::<Result<Vec<u64>, _>>()
+            .map(|v| {
+                let value = v.parse::<u64>().map_err(|e| e.to_string())?;
+                Felt::from_canonical_checked(value)
+                    .ok_or_else(|| format!("failed to convert stack input value '{v}' to Felt"))
+            })
+            .collect::<Result<_, _>>()
             .map_err(|err| format!("Failed to parse stack output as u64 - {err}"))?;
 
-        StackOutputs::try_from_ints(stack)
-            .map_err(|e| format!("Construct stack outputs failed {e}"))
+        StackOutputs::new(&stack).map_err(|e| format!("Construct stack outputs failed {e}"))
     }
 }
 

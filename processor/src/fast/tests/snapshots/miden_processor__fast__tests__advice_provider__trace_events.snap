@@ -4,7 +4,7 @@ expression: fast_host.snapshots()
 ---
 {
     0: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 9,
             ctx: 0,
             stack_state: [
@@ -88,7 +88,7 @@ expression: fast_host.snapshots()
         },
     ],
     1: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 13,
             ctx: 0,
             stack_state: [
@@ -170,7 +170,7 @@ expression: fast_host.snapshots()
                 ),
             ],
         },
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 22,
             ctx: 0,
             stack_state: [
@@ -254,7 +254,7 @@ expression: fast_host.snapshots()
         },
     ],
     2: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 35,
             ctx: 0,
             stack_state: [
@@ -338,7 +338,7 @@ expression: fast_host.snapshots()
         },
     ],
     3: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 52,
             ctx: 0,
             stack_state: [
@@ -422,7 +422,7 @@ expression: fast_host.snapshots()
         },
     ],
     4: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 71,
             ctx: 0,
             stack_state: [
@@ -506,7 +506,7 @@ expression: fast_host.snapshots()
         },
     ],
     5: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 95,
             ctx: 0,
             stack_state: [
@@ -598,7 +598,7 @@ expression: fast_host.snapshots()
         },
     ],
     6: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 111,
             ctx: 0,
             stack_state: [
@@ -697,7 +697,7 @@ expression: fast_host.snapshots()
         },
     ],
     7: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 122,
             ctx: 0,
             stack_state: [
@@ -787,7 +787,7 @@ expression: fast_host.snapshots()
         },
     ],
     8: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 131,
             ctx: 0,
             stack_state: [
@@ -901,7 +901,7 @@ expression: fast_host.snapshots()
         },
     ],
     9: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 137,
             ctx: 0,
             stack_state: [
@@ -1015,7 +1015,7 @@ expression: fast_host.snapshots()
         },
     ],
     10: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 137,
             ctx: 0,
             stack_state: [
@@ -1129,7 +1129,7 @@ expression: fast_host.snapshots()
         },
     ],
     11: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 146,
             ctx: 0,
             stack_state: [
@@ -1259,7 +1259,7 @@ expression: fast_host.snapshots()
                 ),
             ],
         },
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 199,
             ctx: 0,
             stack_state: [
@@ -1439,7 +1439,7 @@ expression: fast_host.snapshots()
         },
     ],
     12: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 153,
             ctx: 0,
             stack_state: [
@@ -1577,7 +1577,7 @@ expression: fast_host.snapshots()
         },
     ],
     13: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 177,
             ctx: 0,
             stack_state: [
@@ -1739,7 +1739,7 @@ expression: fast_host.snapshots()
         },
     ],
     14: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 207,
             ctx: 0,
             stack_state: [
@@ -1925,7 +1925,7 @@ expression: fast_host.snapshots()
         },
     ],
     15: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 230,
             ctx: 0,
             stack_state: [
@@ -2111,7 +2111,7 @@ expression: fast_host.snapshots()
         },
     ],
     16: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 237,
             ctx: 0,
             stack_state: [
@@ -2298,7 +2298,7 @@ expression: fast_host.snapshots()
         },
     ],
     17: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 242,
             ctx: 0,
             stack_state: [
@@ -2484,7 +2484,7 @@ expression: fast_host.snapshots()
         },
     ],
     18: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 248,
             ctx: 0,
             stack_state: [
@@ -2671,7 +2671,7 @@ expression: fast_host.snapshots()
         },
     ],
     19: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 253,
             ctx: 0,
             stack_state: [
@@ -2857,7 +2857,7 @@ expression: fast_host.snapshots()
         },
     ],
     20: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 264,
             ctx: 0,
             stack_state: [
@@ -3042,7 +3042,7 @@ expression: fast_host.snapshots()
                 ),
             ],
         },
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 272,
             ctx: 0,
             stack_state: [
@@ -3227,7 +3227,7 @@ expression: fast_host.snapshots()
                 ),
             ],
         },
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 280,
             ctx: 0,
             stack_state: [
@@ -3414,7 +3414,7 @@ expression: fast_host.snapshots()
         },
     ],
     21: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 289,
             ctx: 0,
             stack_state: [
@@ -3601,7 +3601,7 @@ expression: fast_host.snapshots()
         },
     ],
     22: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 362,
             ctx: 0,
             stack_state: [
@@ -3805,7 +3805,7 @@ expression: fast_host.snapshots()
         },
     ],
     100: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 173,
             ctx: 167,
             stack_state: [
@@ -3913,7 +3913,7 @@ expression: fast_host.snapshots()
         },
     ],
     101: [
-        ProcessStateSnapshot {
+        ProcessorStateSnapshot {
             clk: 227,
             ctx: 0,
             stack_state: [

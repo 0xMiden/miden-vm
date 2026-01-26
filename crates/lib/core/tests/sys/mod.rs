@@ -10,7 +10,7 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, EventHandler, ProcessState, Program,
+    AdviceInputs, AdviceMutation, DefaultHost, EventError, EventHandler, ProcessorState, Program,
     StackInputs,
 };
 use miden_prover::ProvingOptions;
@@ -153,7 +153,7 @@ struct DummyLogPrecompileHandler {
 }
 
 impl EventHandler for DummyLogPrecompileHandler {
-    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(vec![AdviceMutation::extend_precompile_requests([PrecompileRequest::new(
             self.event_id,
             self.calldata.clone(),
