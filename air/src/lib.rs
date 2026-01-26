@@ -6,8 +6,6 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use core::borrow::Borrow;
-
 use alloc::vec::Vec;
 
 use miden_core::{
@@ -16,14 +14,22 @@ use miden_core::{
 };
 
 pub mod config;
+
+#[cfg(feature = "constraint_eval")]
 mod constraints;
 
 pub mod unedited_constraints;
-pub use unedited_constraints::*;
 use p3_miden_air::BusType;
+pub use unedited_constraints::*;
 
 pub mod trace;
-use trace::{AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
+
+use trace::{AuxTraceBuilder, TRACE_WIDTH};
+
+#[cfg(feature = "constraint_eval")]
+use core::borrow::Borrow;
+#[cfg(feature = "constraint_eval")]
+use trace::MainTraceRow;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -140,7 +146,7 @@ pub struct ProcessorAir<A, EF, B = ()>
 where
     A: MidenAir<Felt, EF>,
     EF: ExtensionField<Felt>,
-    B: AuxTraceBuilder<EF>
+    B: AuxTraceBuilder<EF>,
 {
     inner: Option<A>,
     /// Auxiliary trace builder for generating auxiliary columns.
@@ -151,14 +157,14 @@ where
 impl<A, EF> ProcessorAir<A, EF, ()>
 where
     A: MidenAir<Felt, EF>,
-    EF: ExtensionField<Felt>
+    EF: ExtensionField<Felt>,
 {
     /// Creates a new ProcessorAir without auxiliary trace support.
     pub fn new(a: Option<A>) -> Self {
-        Self { 
+        Self {
             inner: a,
             aux_builder: None,
-            phantom: core::marker::PhantomData
+            phantom: core::marker::PhantomData,
         }
     }
 }
@@ -171,10 +177,10 @@ where
 {
     /// Creates a new ProcessorAir with auxiliary trace support.
     pub fn with_aux_builder(a: Option<A>, builder: B) -> Self {
-        Self { 
+        Self {
             inner: a,
             aux_builder: Some(builder),
-            phantom: core::marker::PhantomData
+            phantom: core::marker::PhantomData,
         }
     }
 }
@@ -238,7 +244,10 @@ where
     }
 
     fn num_randomness(&self) -> usize {
-        self.inner.as_ref().map(|inner| inner.num_randomness()).unwrap_or(trace::AUX_TRACE_RAND_ELEMENTS)
+        self.inner
+            .as_ref()
+            .map(|inner| inner.num_randomness())
+            .unwrap_or(trace::AUX_TRACE_RAND_ELEMENTS)
     }
 
     fn aux_width(&self) -> usize {
@@ -260,7 +269,11 @@ where
 
         Some(builders.build_aux_columns(main, challenges))
     }
-    
+
+    #[cfg(not(feature = "constraint_eval"))]
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+
+    #[cfg(feature = "constraint_eval")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         if let Some(inner) = &self.inner {
             inner.eval(builder);

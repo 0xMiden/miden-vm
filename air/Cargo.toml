@@ -22,6 +22,7 @@ default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
 concurrent = ["std"]
 testing = []
+constraint_eval = []
 
 [dependencies]
 # Miden dependencies

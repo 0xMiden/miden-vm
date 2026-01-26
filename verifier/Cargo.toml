@@ -20,6 +20,7 @@ doctest = false
 [features]
 default = ["std"]
 std = ["miden-air/std", "miden-core/std", "thiserror/std"]
+constraint_eval = ["miden-air/constraint_eval"]
 
 [dependencies]
 # Miden dependencies
