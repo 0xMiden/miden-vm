@@ -1,4 +1,3 @@
-
 use alloc::vec::Vec;
 
 use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
@@ -7,12 +6,15 @@ use p3_matrix::dense::RowMajorMatrixView;
 use p3_matrix::stack::VerticalPair;
 use p3_miden_air::{BusType, MidenAir, MidenAirBuilder, RowMajorMatrix};
 
-pub const MAIN_WIDTH: usize = 80;
-pub const AUX_WIDTH: usize = 8;
+// FIXME: Current trace is 71 (system: 6, padding: 0), generated constraints trace is width 80 (system: 8, padding: 7)
+pub const MAIN_WIDTH: usize = 71; // 80
+// FIXME: Bus related constraints
+pub const AUX_WIDTH: usize = 0; // 8
 pub const NUM_PERIODIC_VALUES: usize = 29;
 pub const PERIOD: usize = 8;
-pub const NUM_PUBLIC_VALUES: usize = 44;
-pub const MAX_BETA_CHALLENGE_POWER: usize = 16;
+pub const NUM_PUBLIC_VALUES: usize = 36;
+// FIXME: Bus related constraints
+pub const MAX_BETA_CHALLENGE_POWER: usize = 0; // 16
 
 pub struct MidenVM;
 
@@ -63,7 +65,7 @@ where F: Field,
     }
 
     fn num_randomness(&self) -> usize {
-        1 + MAX_BETA_CHALLENGE_POWER
+        0
     }
 
     fn aux_width(&self) -> usize {
@@ -71,38 +73,38 @@ where F: Field,
     }
 
     fn bus_types(&self) -> &[BusType] {
+        // FIXME: Bus related constraints
         &[
-            BusType::Multiset,
-            BusType::Multiset,
-            BusType::Multiset,
-            BusType::Multiset,
-            BusType::Logup,
-            BusType::Multiset,
-            BusType::Multiset,
-            BusType::Logup,
+            //BusType::Multiset,
+            //BusType::Multiset,
+            //BusType::Multiset,
+            //BusType::Multiset,
+            //BusType::Logup,
+            //BusType::Multiset,
+            //BusType::Multiset,
+            //BusType::Logup,
         ]
     }
 
     fn eval<AB>(&self, builder: &mut AB)
     where AB: MidenAirBuilder<F = F>,
     {
-        let public_values: [_; NUM_PUBLIC_VALUES] = builder.public_values().try_into().expect("Wrong number of public values");
+        // Note: For now, public_values is unused in the constraints. We'll need to adapt them once we add them as currently, variable-length public inputs are included in the public_values.
+        //let public_values: [_; NUM_PUBLIC_VALUES] = builder.public_values().try_into().expect("Wrong number of public values");
         let periodic_values: [_; NUM_PERIODIC_VALUES] = builder.periodic_evals().try_into().expect("Wrong number of periodic values");
         // Note: for now, we do not have any preprocessed values
         // let preprocessed = builder.preprocessed();
         let main = builder.main();
-        let (main_current, main_next) = (
-            main.row_slice(0).unwrap(),
-            main.row_slice(1).unwrap(),
-        );
-        let (&alpha, beta_challenges) = builder.permutation_randomness().split_first().expect("Wrong number of randomness");
-        let beta_challenges: [_; MAX_BETA_CHALLENGE_POWER] = beta_challenges.try_into().expect("Wrong number of randomness");
-        let aux_bus_boundary_values: [_; AUX_WIDTH] = builder.aux_bus_boundary_values().try_into().expect("Wrong number of aux bus boundary values");
-        let aux = builder.permutation();
-        let (aux_current, aux_next) = (
-            aux.row_slice(0).unwrap(),
-            aux.row_slice(1).unwrap(),
-        );
+        let (main_current, main_next) = (main.row_slice(0).unwrap(), main.row_slice(1).unwrap());
+        // FIXME: Bus related constraints
+        //let (&alpha, beta_challenges) = builder.permutation_randomness().split_first().expect("Wrong number of randomness");
+        //let beta_challenges: [_; MAX_BETA_CHALLENGE_POWER] = beta_challenges.try_into().expect("Wrong number of randomness");
+        //let aux_bus_boundary_values: [_; AUX_WIDTH] = builder.aux_bus_boundary_values().try_into().expect("Wrong number of aux bus boundary values");
+        //let aux = builder.permutation();
+        //let (aux_current, aux_next) = (
+        //    aux.row_slice(0).unwrap(),
+        //    aux.row_slice(1).unwrap(),
+        //);
 
         //// Main boundary constraints
         builder.when_first_row().assert_zero(main_current[0].clone().into());
@@ -186,6 +188,6 @@ where F: Field,
         builder.when_transition().assert_zero(main_current[53].clone().into() * main_current[54].clone().into() * main_current[55].clone().into() * (AB::Expr::ONE - main_current[56].clone().into()) * main_next[56].clone().into() * (main_next[58].clone().into() - AB::Expr::ONE));
 
         //// Aux integrity/transition constraints
-        builder.when_transition().assert_zero_ext((alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(aux_current[4].clone().into()) + (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[51].clone().into()) - ((alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(aux_next[4].clone().into()) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[53].clone().into()) * AB::ExprEF::from(main_current[54].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[55].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[53].clone().into()) * AB::ExprEF::from(main_current[54].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[55].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into()))));
+        //builder.when_transition().assert_zero_ext((alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(aux_current[4].clone().into()) + (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[51].clone().into()) - ((alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(aux_next[4].clone().into()) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[53].clone().into()) * AB::ExprEF::from(main_current[54].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[55].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[53].clone().into()) * AB::ExprEF::from(main_current[54].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[55].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[21].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into())) + (alpha.into() + AB::ExprEF::from(main_current[52].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[67].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[68].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[18].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[19].clone().into()) * beta_challenges[0].into()) * (alpha.into() + AB::ExprEF::from(main_current[20].clone().into()) * beta_challenges[0].into()) * AB::ExprEF::from(main_current[15].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[13].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(main_current[14].clone().into()))));
     }
 }
