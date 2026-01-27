@@ -12,6 +12,17 @@
 //!     .validate()?;
 //! ```
 //!
+//! For maximum protection against denial-of-service attacks from malicious input, use
+//! [`UntrustedMastForest::read_from_bytes_with_budget`] which limits memory consumption:
+//!
+//! ```ignore
+//! use miden_core::mast::UntrustedMastForest;
+//!
+//! // Budget limits pre-allocation sizes and total bytes consumed
+//! let forest = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?
+//!     .validate()?;
+//! ```
+//!
 //! This recomputes all node hashes and checks structural invariants before returning a usable
 //! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
 //! hashes and should only be used for data from trusted sources (e.g. compiled locally).
@@ -48,8 +59,8 @@ pub use node::{
 use crate::{
     AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        hash_string_to_word,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, hash_string_to_word,
     },
 };
 
@@ -1315,5 +1326,43 @@ impl UntrustedMastForest {
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
         // Use 4× budget to account for allocation overhead during deserialization
         Self::read_from_bytes_with_budget(bytes, bytes.len().saturating_mul(4))
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.
+    ///
+    /// This method uses a [`BudgetedReader`] to limit memory consumption during deserialization,
+    /// protecting against denial-of-service attacks from malicious input that claims to contain
+    /// an excessive number of elements.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The serialized forest bytes
+    /// * `budget` - Maximum bytes to consume during deserialization. Set this to `bytes.len()` for
+    ///   typical use cases, or lower to enforce stricter limits.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Read from untrusted source with budget equal to input size
+    /// let untrusted = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?;
+    ///
+    /// // Validate before use
+    /// let forest = untrusted.validate()?;
+    /// ```
+    ///
+    /// # Security
+    ///
+    /// The budget limits:
+    /// - Pre-allocation sizes when deserializing collections (via `max_alloc`)
+    /// - Total bytes consumed during deserialization
+    ///
+    /// This prevents attacks where malicious input claims an unrealistic number of elements
+    /// (e.g., `len = 2^60`), causing excessive memory allocation before any data is read.
+    pub fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from(&mut reader)
     }
 }

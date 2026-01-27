@@ -13,8 +13,9 @@ pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     hash::blake::{Blake3_256, Blake3Digest},
     utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-        flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
+        uninit_vector,
     },
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};

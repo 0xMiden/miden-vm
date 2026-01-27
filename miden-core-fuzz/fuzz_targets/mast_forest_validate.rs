@@ -1,8 +1,9 @@
 //! Fuzz target for UntrustedMastForest deserialization and validation.
 //!
 //! This target tests the full untrusted deserialization pipeline:
-//! 1. UntrustedMastForest::read_from_bytes (deserialization)
+//! 1. UntrustedMastForest::read_from_bytes (budgeted deserialization)
 //! 2. UntrustedMastForest::validate() (structural + hash validation)
+//! 3. UntrustedMastForest::read_from_bytes_with_budget with small budget
 //!
 //! The validation path should never panic on any input.
 //!
@@ -22,6 +23,7 @@ fuzz_target!(|data: &[u8]| {
     // Validation should never panic, even on malformed forests
     let _ = untrusted.validate();
 
-    // Also test into_inner (the escape hatch) doesn't panic
-    let _ = untrusted_clone.into_inner();
+    // Test budgeted deserialization with a very small budget
+    // This should reject most inputs early without panicking
+    let _ = UntrustedMastForest::read_from_bytes_with_budget(data, 64);
 });
