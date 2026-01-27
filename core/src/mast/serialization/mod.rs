@@ -8,7 +8,7 @@
 //! - decorators count (`usize`) - 0 if stripped, reserved for future use in lazy loading (#2504)
 //!
 //! (Procedure roots section)
-//! - procedure roots (`Vec<u32>` as MastNodeId values)
+//! - procedure roots (length prefix + `u32` varints as MastNodeId values)
 //!
 //! (Basic block data section)
 //! - basic block data (padded operations + batch metadata)
@@ -129,6 +129,10 @@ fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, Deserialization
     })
 }
 
+fn write_u32_varint<W: ByteWriter>(target: &mut W, value: u32) {
+    target.write_usize(value as usize);
+}
+
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
@@ -159,7 +163,10 @@ impl MastForest {
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
-        roots.write_into(target);
+        target.write_usize(roots.len());
+        for root in roots {
+            write_u32_varint(target, root);
+        }
 
         // Prepare MAST node infos, but don't store them yet. We store them at the end to make
         // deserialization more efficient.
@@ -211,7 +218,11 @@ impl Deserializable for MastForest {
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
-        let roots: Vec<u32> = Deserializable::read_from(source)?;
+        let roots_len = source.read_usize()?;
+        let mut roots = Vec::with_capacity(roots_len);
+        for _ in 0..roots_len {
+            roots.push(read_u32_varint(source)?);
+        }
 
         // Reading nodes
         let basic_block_data: Vec<u8> = Deserializable::read_from(source)?;
