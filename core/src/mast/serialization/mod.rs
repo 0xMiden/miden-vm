@@ -182,6 +182,13 @@ impl Deserializable for MastForest {
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
