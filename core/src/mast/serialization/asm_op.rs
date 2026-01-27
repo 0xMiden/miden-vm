@@ -43,8 +43,8 @@ pub type AsmOpDataOffset = u32;
 /// has_location: u8 (0 or 1)
 /// [if has_location]:
 ///     uri_idx: u32 varint (index into string table)
-///     start: u32
-///     end: u32
+///     start: u32 varint
+///     end: u32 varint
 /// context_name_idx: u32 varint (index into string table)
 /// op_idx: u32 varint (index into string table)
 /// ```
@@ -79,8 +79,8 @@ impl AsmOpInfo {
         let location = if reader.read_bool()? {
             let uri_idx = read_u32_varint(&mut reader)? as usize;
             let uri = string_table.read_arc_str(uri_idx).map(Uri::from)?;
-            let start = reader.read_u32()?;
-            let end = reader.read_u32()?;
+            let start = read_u32_varint(&mut reader)?;
+            let end = read_u32_varint(&mut reader)?;
             Some(Location::new(uri, ByteIndex::new(start), ByteIndex::new(end)))
         } else {
             None
@@ -158,8 +158,8 @@ impl AsmOpDataBuilder {
             self.asm_op_data.write_bool(true); // has_location = true
             let uri_idx = self.string_table_builder.add_string(location.uri.as_str());
             write_u32_varint(&mut self.asm_op_data, uri_idx);
-            self.asm_op_data.write_u32(location.start.to_u32());
-            self.asm_op_data.write_u32(location.end.to_u32());
+            write_u32_varint(&mut self.asm_op_data, location.start.to_u32() as usize);
+            write_u32_varint(&mut self.asm_op_data, location.end.to_u32() as usize);
         } else {
             self.asm_op_data.write_bool(false); // has_location = false
         }
