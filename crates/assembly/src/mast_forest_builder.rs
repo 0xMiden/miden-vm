@@ -539,6 +539,21 @@ impl MastForestBuilder {
         }
     }
 
+    /// Adds a debug variable to the forest, and returns the [`DebugVarId`] associated with it.
+    ///
+    /// Unlike decorators, debug variables are not deduplicated since each occurrence
+    /// represents a specific point in program execution where the variable's location
+    /// is being tracked.
+    pub fn add_debug_var(
+        &mut self,
+        debug_var: miden_core::DebugVarInfo,
+    ) -> Result<miden_core::mast::DebugVarId, Report> {
+        self.mast_forest
+            .add_debug_var(debug_var)
+            .into_diagnostic()
+            .wrap_err("assembler failed to add debug variable")
+    }
+
     /// Adds a node to the forest, and returns the [`MastNodeId`] associated with it.
     ///
     /// Note that only one copy of nodes that have the same MAST root and decorators is added to the
@@ -878,6 +893,22 @@ impl MastForestBuilder {
         // Defer registration until build() to ensure sequential node order.
         self.pending_asm_op_mappings.push((node_id, vec![(0, asm_op_id)]));
         Ok(())
+    }
+
+    /// Registers debug variables for a specific node.
+    ///
+    /// This associates already-added debug variables with specific operations within a node.
+    /// Debug variables are stored in dedicated CSR storage and are only accessed by the debugger.
+    pub fn register_debug_vars_for_node(
+        &mut self,
+        node_id: MastNodeId,
+        debug_vars: Vec<(usize, miden_core::mast::DebugVarId)>,
+    ) -> Result<(), Report> {
+        self.mast_forest
+            .debug_info_mut()
+            .register_op_indexed_debug_vars(node_id, debug_vars)
+            .into_diagnostic()
+            .wrap_err("failed to register debug variables for node")
     }
 }
 

@@ -13,8 +13,8 @@ use miden_assembly_syntax::{
 use miden_core::{
     Felt,
     events::SystemEvent,
-    mast::{DecoratorId, MastNodeId},
-    operations::{AssemblyOp, Decorator, DecoratorList, Operation},
+    mast::{DebugVarId, DecoratorId, MastNodeId},
+    operations::{AssemblyOp, DebugVarInfo, Decorator, DecoratorList, Operation},
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};
@@ -55,6 +55,9 @@ struct PendingAsmOp {
 pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
     decorators: DecoratorList,
+    /// Debug variables attached to operations in this block.
+    /// Each entry is (op_index, debug_var_id) similar to decorators.
+    debug_vars: Vec<(usize, DebugVarId)>,
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
@@ -78,6 +81,7 @@ impl<'a> BasicBlockBuilder<'a> {
             Some(wrapper) => Self {
                 ops: wrapper.prologue,
                 decorators: Vec::new(),
+                debug_vars: Vec::new(),
                 epilogue: wrapper.epilogue,
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
@@ -86,6 +90,7 @@ impl<'a> BasicBlockBuilder<'a> {
             None => Self {
                 ops: Default::default(),
                 decorators: Default::default(),
+                debug_vars: Default::default(),
                 epilogue: Default::default(),
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
@@ -195,6 +200,17 @@ impl BasicBlockBuilder<'_> {
             },
         }
     }
+
+    /// Adds a debug variable to the list of debug variables for this basic block.
+    ///
+    /// Debug variables are stored in dedicated CSR storage (not as decorators) and are
+    /// only accessed by the debugger. They track source-level variable locations at
+    /// specific points in program execution.
+    pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) -> Result<(), Report> {
+        let debug_var_id = self.mast_forest_builder.add_debug_var(debug_var)?;
+        self.debug_vars.push((self.ops.len(), debug_var_id));
+        Ok(())
+    }
 }
 
 /// Basic Block Constructors
@@ -213,10 +229,17 @@ impl BasicBlockBuilder<'_> {
             let ops = self.ops.drain(..).collect();
             let decorators = self.decorators.drain(..).collect();
             let asm_ops = core::mem::take(&mut self.asm_ops);
+            let debug_vars: Vec<(usize, DebugVarId)> = self.debug_vars.drain(..).collect();
 
             let basic_block_node_id =
                 self.mast_forest_builder
                     .ensure_block(ops, decorators, asm_ops, vec![], vec![])?;
+
+            // Register debug variables for this node (stored separately from decorators)
+            if !debug_vars.is_empty() {
+                self.mast_forest_builder
+                    .register_debug_vars_for_node(basic_block_node_id, debug_vars)?;
+            }
 
             Ok(Some(basic_block_node_id))
         } else {

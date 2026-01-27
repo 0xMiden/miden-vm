@@ -589,7 +589,8 @@ impl Assembler {
             },
 
             Instruction::DebugVar(debug_var_info) => {
-                block_builder.push_decorator(Decorator::DebugVar(debug_var_info.clone()))?;
+                // Debug variables are stored in dedicated CSR storage, not as decorators
+                block_builder.push_debug_var(debug_var_info.clone())?;
             },
 
             // ----- emit instruction -------------------------------------------------------------

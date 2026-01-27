@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_crypto::field::PrimeField64;
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 #[cfg(all(feature = "arbitrary", feature = "std"))]
@@ -11,7 +10,7 @@ use super::{
     string_table::{StringTable, StringTableBuilder},
 };
 use crate::{
-    operations::{DebugOptions, DebugVarInfo, DebugVarLocation, Decorator},
+    operations::{DebugOptions, Decorator},
     serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
@@ -86,65 +85,6 @@ impl DecoratorInfo {
                 let value = data_reader.read_u16()?;
                 Ok(Decorator::Debug(DebugOptions::AdvStackTop(value)))
             },
-            EncodedDecoratorVariant::DebugVar => {
-                // Read variable name
-                let name_idx = data_reader.read_usize()?;
-                let name = string_table.read_string(name_idx)?;
-
-                // Read value location tag and data
-                let location_tag = data_reader.read_u8()?;
-                let value_location = match location_tag {
-                    0 => DebugVarLocation::Stack(data_reader.read_u8()?),
-                    1 => DebugVarLocation::Memory(data_reader.read_u32()?),
-                    2 => {
-                        let value = data_reader.read_u64()?;
-                        DebugVarLocation::Const(crate::Felt::new(value))
-                    },
-                    3 => DebugVarLocation::Local(data_reader.read_u16()? as i16),
-                    4 => {
-                        let len = data_reader.read_u16()? as usize;
-                        let bytes = data_reader.read_vec(len)?;
-                        DebugVarLocation::Expression(bytes)
-                    },
-                    _ => {
-                        return Err(DeserializationError::InvalidValue(format!(
-                            "invalid DebugVarLocation tag: {location_tag}"
-                        )));
-                    },
-                };
-
-                let mut debug_var = DebugVarInfo::new(name, value_location);
-
-                // Read optional type_id
-                if data_reader.read_bool()? {
-                    debug_var.set_type_id(data_reader.read_u32()?);
-                }
-
-                // Read optional arg_index (1-based, stored as raw u32)
-                if data_reader.read_bool()? {
-                    let arg_index = data_reader.read_u32()?;
-                    // set_arg_index expects a non-zero value for 1-based indices
-                    if arg_index > 0 {
-                        debug_var.set_arg_index(arg_index);
-                    }
-                }
-
-                // Read optional source location
-                if data_reader.read_bool()? {
-                    use miden_debug_types::{ColumnNumber, FileLineCol, LineNumber, Uri};
-                    let uri_idx = data_reader.read_usize()?;
-                    let uri = Uri::from(string_table.read_arc_str(uri_idx)?);
-                    let line = data_reader.read_u32()?;
-                    let column = data_reader.read_u32()?;
-                    debug_var.set_location(FileLineCol::new(
-                        uri,
-                        LineNumber::new(line).unwrap_or_default(),
-                        ColumnNumber::new(column).unwrap_or_default(),
-                    ));
-                }
-
-                Ok(Decorator::DebugVar(debug_var))
-            },
         }
     }
 }
@@ -195,7 +135,6 @@ pub enum EncodedDecoratorVariant {
     DebugOptionsLocalInterval = 4,
     DebugOptionsAdvStackTop = 5,
     Trace = 6,
-    DebugVar = 7,
 }
 
 impl EncodedDecoratorVariant {
@@ -225,7 +164,6 @@ impl From<&Decorator> for EncodedDecoratorVariant {
                 DebugOptions::AdvStackTop(_) => Self::DebugOptionsAdvStackTop,
             },
             Decorator::Trace(_) => Self::Trace,
-            Decorator::DebugVar(_) => Self::DebugVar,
         }
     }
 }
@@ -311,60 +249,6 @@ impl DecoratorDataBuilder {
             },
             Decorator::Trace(value) => {
                 self.decorator_data.extend(value.to_le_bytes());
-
-                Some(data_offset)
-            },
-            Decorator::DebugVar(debug_var) => {
-                // Write variable name
-                let name_offset = self.string_table_builder.add_string(debug_var.name());
-                self.decorator_data.write_usize(name_offset);
-
-                // Write value location with tag
-                match debug_var.value_location() {
-                    DebugVarLocation::Stack(pos) => {
-                        self.decorator_data.push(0); // tag
-                        self.decorator_data.push(*pos);
-                    },
-                    DebugVarLocation::Memory(addr) => {
-                        self.decorator_data.push(1); // tag
-                        self.decorator_data.extend(addr.to_le_bytes());
-                    },
-                    DebugVarLocation::Const(felt) => {
-                        self.decorator_data.push(2); // tag
-                        // Serialize Felt as u64
-                        self.decorator_data.extend(felt.as_canonical_u64().to_le_bytes());
-                    },
-                    DebugVarLocation::Local(offset) => {
-                        self.decorator_data.push(3); // tag
-                        self.decorator_data.extend(offset.to_le_bytes());
-                    },
-                    DebugVarLocation::Expression(bytes) => {
-                        self.decorator_data.push(4); // tag
-                        self.decorator_data.extend((bytes.len() as u16).to_le_bytes());
-                        self.decorator_data.extend(bytes);
-                    },
-                }
-
-                // Write optional type_id
-                self.decorator_data.write_bool(debug_var.type_id().is_some());
-                if let Some(type_id) = debug_var.type_id() {
-                    self.decorator_data.extend(type_id.to_le_bytes());
-                }
-
-                // Write optional arg_index (serialize NonZeroU32 as u32)
-                self.decorator_data.write_bool(debug_var.arg_index().is_some());
-                if let Some(arg_index) = debug_var.arg_index() {
-                    self.decorator_data.extend(arg_index.get().to_le_bytes());
-                }
-
-                // Write optional source location
-                self.decorator_data.write_bool(debug_var.location().is_some());
-                if let Some(loc) = debug_var.location() {
-                    let uri_offset = self.string_table_builder.add_string(loc.uri.as_str());
-                    self.decorator_data.write_usize(uri_offset);
-                    self.decorator_data.extend(loc.line.to_u32().to_le_bytes());
-                    self.decorator_data.extend(loc.column.to_u32().to_le_bytes());
-                }
 
                 Some(data_offset)
             },

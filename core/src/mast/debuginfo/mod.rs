@@ -57,7 +57,7 @@ use crate::{
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
         decorator::{DecoratorDataBuilder, DecoratorInfo},
     },
-    operations::AssemblyOp,
+    operations::{AssemblyOp, DebugVarInfo},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::{Idx, IndexVec},
 };
@@ -69,6 +69,9 @@ mod decorator_storage;
 pub use decorator_storage::{
     DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, OpToDecoratorIds,
 };
+
+mod debug_var_storage;
+pub use debug_var_storage::{DebugVarId, OpToDebugVarIds};
 
 mod node_decorator_storage;
 pub use node_decorator_storage::NodeToDecoratorIds;
@@ -95,6 +98,12 @@ pub struct DebugInfo {
     /// Efficient access to AssemblyOps per operation per node.
     asm_op_storage: OpToAsmOpId,
 
+    /// All debug variable information in the MAST forest.
+    debug_vars: IndexVec<DebugVarId, DebugVarInfo>,
+
+    /// Efficient access to debug variables per operation per node.
+    op_debug_var_storage: OpToDebugVarIds,
+
     /// Maps error codes to error messages.
     error_codes: BTreeMap<u64, Arc<str>>,
 
@@ -115,6 +124,8 @@ impl DebugInfo {
             node_decorator_storage: NodeToDecoratorIds::new(),
             asm_ops: IndexVec::new(),
             asm_op_storage: OpToAsmOpId::new(),
+            debug_vars: IndexVec::new(),
+            op_debug_var_storage: OpToDebugVarIds::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -137,6 +148,8 @@ impl DebugInfo {
             node_decorator_storage: NodeToDecoratorIds::with_capacity(nodes_capacity, 0, 0),
             asm_ops: IndexVec::new(),
             asm_op_storage: OpToAsmOpId::new(),
+            debug_vars: IndexVec::new(),
+            op_debug_var_storage: OpToDebugVarIds::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -157,6 +170,8 @@ impl DebugInfo {
             node_decorator_storage: NodeToDecoratorIds::new(),
             asm_ops: IndexVec::new(),
             asm_op_storage: OpToAsmOpId::new(),
+            debug_vars: IndexVec::new(),
+            op_debug_var_storage: OpToDebugVarIds::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -165,16 +180,18 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators, asm_ops, error codes, or procedure
-    /// names.
+    /// Returns true if this [DebugInfo] has no decorators, asm_ops, debug vars, error codes, or
+    /// procedure names.
     pub fn is_empty(&self) -> bool {
         self.decorators.is_empty()
             && self.asm_ops.is_empty()
+            && self.debug_vars.is_empty()
             && self.error_codes.is_empty()
             && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators, asm_ops, error codes, and procedure
+    /// Strips all debug information, removing decorators, asm_ops, debug vars, error codes, and
+    /// procedure
     /// names.
     ///
     /// This is used for release builds where debug info is not needed.
@@ -183,6 +200,8 @@ impl DebugInfo {
         self.decorators = IndexVec::new();
         self.asm_ops = IndexVec::new();
         self.asm_op_storage = OpToAsmOpId::new();
+        self.debug_vars = IndexVec::new();
+        self.op_debug_var_storage.clear();
         self.error_codes.clear();
         self.procedure_names.clear();
     }
@@ -232,6 +251,35 @@ impl DebugInfo {
         node_id: MastNodeId,
     ) -> Result<DecoratedLinks<'_>, DecoratorIndexError> {
         self.op_decorator_storage.decorator_links_for_node(node_id)
+    }
+
+    // DEBUG VARIABLE ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the number of debug variables.
+    pub fn num_debug_vars(&self) -> usize {
+        self.debug_vars.len()
+    }
+
+    /// Returns all debug variables as a slice.
+    pub fn debug_vars(&self) -> &[DebugVarInfo] {
+        self.debug_vars.as_slice()
+    }
+
+    /// Returns the debug variable with the given ID, if it exists.
+    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&DebugVarInfo> {
+        self.debug_vars.get(debug_var_id)
+    }
+
+    /// Returns debug variable IDs for a specific operation within a node.
+    pub fn debug_vars_for_operation(
+        &self,
+        node_id: MastNodeId,
+        local_op_idx: usize,
+    ) -> &[DebugVarId] {
+        self.op_debug_var_storage
+            .debug_var_ids_for_operation(node_id, local_op_idx)
+            .unwrap_or(&[])
     }
 
     // DECORATOR MUTATORS
@@ -345,6 +393,28 @@ impl DebugInfo {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
+    // DEBUG VARIABLE MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Adds a debug variable and returns its ID.
+    pub fn add_debug_var(
+        &mut self,
+        debug_var: DebugVarInfo,
+    ) -> Result<DebugVarId, MastForestError> {
+        self.debug_vars.push(debug_var).map_err(|_| MastForestError::TooManyDecorators)
+    }
+
+    /// Registers operation-indexed debug variables for a node.
+    ///
+    /// This associates already-added debug variables with specific operations within a node.
+    pub fn register_op_indexed_debug_vars(
+        &mut self,
+        node_id: MastNodeId,
+        debug_vars_info: Vec<(usize, DebugVarId)>,
+    ) -> Result<(), crate::mast::debuginfo::decorator_storage::DecoratorIndexError> {
+        self.op_debug_var_storage.add_debug_var_info_for_node(node_id, debug_vars_info)
+    }
+
     // ERROR CODE METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -426,8 +496,10 @@ impl DebugInfo {
     /// - All CSR structures in op_decorator_storage
     /// - All CSR structures in node_decorator_storage
     /// - All CSR structures in asm_op_storage
+    /// - All CSR structures in op_debug_var_storage
     /// - All decorator IDs reference valid decorators
     /// - All AsmOpIds reference valid AssemblyOps
+    /// - All debug var IDs reference valid debug vars
     pub(super) fn validate(&self) -> Result<(), String> {
         let decorator_count = self.decorators.len();
         let asm_op_count = self.asm_ops.len();
@@ -440,6 +512,10 @@ impl DebugInfo {
 
         // Validate OpToAsmOpId CSR
         self.asm_op_storage.validate_csr(asm_op_count)?;
+
+        // Validate OpToDebugVarIds CSR
+        let debug_var_count = self.debug_vars.len();
+        self.op_debug_var_storage.validate_csr(debug_var_count)?;
 
         Ok(())
     }
@@ -499,6 +575,12 @@ impl Serializable for DebugInfo {
 
         // 7. Serialize OpToAsmOpId CSR (dense representation)
         self.asm_op_storage.write_into(target);
+
+        // 8. Serialize debug variables
+        self.debug_vars.write_into(target);
+
+        // 9. Serialize OpToDebugVarIds CSR
+        self.op_debug_var_storage.write_into(target);
     }
 }
 
@@ -559,13 +641,21 @@ impl Deserializable for DebugInfo {
         // 9. Read OpToAsmOpId CSR (dense representation)
         let asm_op_storage = OpToAsmOpId::read_from(source, asm_ops.len())?;
 
-        // 10. Construct and validate DebugInfo
+        // 10. Read debug variables
+        let debug_vars: IndexVec<DebugVarId, DebugVarInfo> = Deserializable::read_from(source)?;
+
+        // 11. Read OpToDebugVarIds CSR
+        let op_debug_var_storage = OpToDebugVarIds::read_from(source, debug_vars.len())?;
+
+        // 12. Construct and validate DebugInfo
         let debug_info = DebugInfo {
             decorators,
             op_decorator_storage,
             node_decorator_storage,
             asm_ops,
             asm_op_storage,
+            debug_vars,
+            op_debug_var_storage,
             error_codes,
             procedure_names,
         };
