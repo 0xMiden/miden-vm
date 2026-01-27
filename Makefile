@@ -240,3 +240,33 @@ check-bench: ## Builds all benchmarks
 .PHONY: bench
 bench: ## Runs benchmarks
 	cargo bench --profile optimized --features internal
+
+# ============================================================
+# Fuzzing targets
+# ============================================================
+
+.PHONY: fuzz-mast-forest
+fuzz-mast-forest: ## Run fuzzing for MastForest deserialization
+	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz
+
+.PHONY: fuzz-mast-validate
+fuzz-mast-validate: ## Run fuzzing for UntrustedMastForest validation
+	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz
+
+.PHONY: fuzz-all
+fuzz-all: ## Run all fuzz targets (in sequence)
+	cargo +nightly fuzz run mast_forest_deserialize --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+	cargo +nightly fuzz run mast_forest_validate --release --fuzz-dir miden-core-fuzz -- -max_total_time=300
+
+.PHONY: fuzz-list
+fuzz-list: ## List available fuzz targets
+	cargo +nightly fuzz list --fuzz-dir miden-core-fuzz
+
+.PHONY: fuzz-coverage
+fuzz-coverage: ## Generate coverage report for fuzz targets
+	cargo +nightly fuzz coverage mast_forest_deserialize --fuzz-dir miden-core-fuzz
+	cargo +nightly fuzz coverage mast_forest_validate --fuzz-dir miden-core-fuzz
+
+.PHONY: fuzz-seeds
+fuzz-seeds: ## Generate seed corpus files for fuzzing
+	cargo test -p miden-core generate_fuzz_seeds -- --ignored --nocapture
