@@ -1639,3 +1639,33 @@ fn test_untrusted_forest_validates_stripped() {
     assert_eq!(forest.num_nodes(), validated.num_nodes());
     assert!(validated.debug_info.is_empty());
 }
+
+/// Test that deserialization rejects node counts exceeding MAX_NODES.
+#[test]
+fn test_deserialization_rejects_excessive_node_count() {
+    use crate::utils::{ByteWriter, Serializable};
+
+    // Craft a malicious payload with node_count exceeding MAX_NODES
+    let mut bytes = Vec::new();
+
+    // Write valid header
+    super::MAGIC.write_into(&mut bytes);
+    bytes.write_u8(0); // flags
+    super::VERSION.write_into(&mut bytes);
+
+    // Write excessive node count (MAX_NODES + 1)
+    let excessive_count: usize = MastForest::MAX_NODES + 1;
+    excessive_count.write_into(&mut bytes);
+
+    // Write decorator count
+    0usize.write_into(&mut bytes);
+
+    // Attempt to deserialize - should fail before any large allocation
+    let result = MastForest::read_from_bytes(&bytes);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("exceeds maximum"),
+        "Expected error about exceeding maximum, got: {err}"
+    );
+}
