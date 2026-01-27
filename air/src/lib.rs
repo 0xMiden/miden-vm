@@ -9,18 +9,20 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
-    precompile::PrecompileTranscriptState,
+    ProgramInfo, StackInputs, StackOutputs, crypto::hash::Rpo256, 
+    field::ExtensionField, precompile::PrecompileTranscriptState,
 };
+use p3_field::PrimeCharacteristicRing;
+use p3_miden_air::BusType;
+use p3_matrix::dense::RowMajorMatrix;
 
 pub mod config;
 
 #[cfg(feature = "constraint_eval")]
 mod constraints;
 
-pub mod unedited_constraints;
-use p3_miden_air::BusType;
-pub use unedited_constraints::*;
+mod unedited_constraints;
+pub use unedited_constraints::miden_vm_plonky3::MidenVM;
 
 pub mod trace;
 use crate::trace::{AuxTraceBuilder, AUX_TRACE_WIDTH, TRACE_WIDTH, CYCLE_ROW_0, INV_CYCLE_ROW_7, CYCLE_ROW_6, CYCLE_ROW_7};
@@ -181,10 +183,6 @@ where
         }
     }
 }
-
-use p3_matrix::dense::RowMajorMatrix;
-
-use crate::trace::AUX_TRACE_WIDTH;
 
 impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
