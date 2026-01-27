@@ -18,9 +18,8 @@ use crate::{
 
 /// Represents a serialized [`Decorator`].
 ///
-/// The serialized representation of [`DecoratorInfo`] is guaranteed to be fixed width, so that the
-/// decorators stored in the `decorators` table of the serialized [`MastForest`] can be accessed
-/// quickly by index.
+/// The serialized representation of [`DecoratorInfo`] uses a varint offset to keep the
+/// decorators table compact while still allowing direct indexing by position.
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(all(feature = "arbitrary", feature = "std"), derive(Arbitrary))]
 #[cfg_attr(
@@ -94,21 +93,21 @@ impl Serializable for DecoratorInfo {
         let Self { variant, decorator_data_offset } = self;
 
         variant.write_into(target);
-        decorator_data_offset.write_into(target);
+        target.write_usize(*decorator_data_offset as usize);
     }
 }
 
 impl Deserializable for DecoratorInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let variant = source.read()?;
-        let decorator_data_offset = source.read()?;
+        let decorator_data_offset = read_u32_varint(source)?;
 
         Ok(Self { variant, decorator_data_offset })
     }
 
-    /// Returns the minimum serialized size: 1 byte variant + 4 bytes offset.
+    /// Returns the minimum serialized size: 1 byte variant + 1 byte varint offset.
     fn min_serialized_size() -> usize {
-        5
+        2
     }
 }
 
@@ -189,6 +188,15 @@ impl Deserializable for EncodedDecoratorVariant {
     fn min_serialized_size() -> usize {
         1
     }
+}
+
+fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
+    let value = source.read_usize()?;
+    value.try_into().map_err(|_| {
+        DeserializationError::InvalidValue(format!(
+            "Invalid value: expected to fit in u32, but was {value}"
+        ))
+    })
 }
 
 // DECORATOR DATA BUILDER
