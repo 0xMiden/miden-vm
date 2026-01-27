@@ -545,6 +545,7 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 /// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
 #[test]
 fn mast_forest_deserialize_invalid_ops_offset_fails() {
+    use crate::serde::{ByteWriter, Serializable};
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
         .add_to_forest(&mut forest)
@@ -560,17 +561,38 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
     let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
-    // Calculate offset to MastNodeInfo:
-    // magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
-    // roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data
-    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+    let mut counter = CountingReader::new(&serialized);
+    let _header: [u8; 8] = counter.read_array().unwrap();
+    let _node_count: usize = counter.read().unwrap();
+    let _decorator_count: usize = counter.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut counter).unwrap();
+    let _bb_data: Vec<u8> = Deserializable::read_from(&mut counter).unwrap();
+    let node_info_offset = counter.position();
+
+    // Move to node info and capture ops_offset position/length.
+    let mut node_info_reader = SliceReader::new(&serialized[node_info_offset..]);
+    let _tag = node_info_reader.read_u8().unwrap();
+    let ops_offset_start = node_info_offset + 1;
+    let ops_offset_first_byte = serialized[ops_offset_start];
+    let ops_offset_len = ops_offset_first_byte.trailing_zeros() as usize + 1;
 
     // Corrupt the ops_offset field with an out-of-bounds value
-    let block_discriminant: u64 = 3;
-    let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
-
     let mut corrupted = serialized;
-    corrupted_value.write_into(&mut &mut corrupted[node_info_offset..node_info_offset + 8]);
+    let mut candidate = basic_block_data.len() + 1;
+    loop {
+        let mut encoded = Vec::new();
+        encoded.write_usize(candidate);
+        if encoded.len() == ops_offset_len {
+            corrupted[ops_offset_start..ops_offset_start + ops_offset_len]
+                .copy_from_slice(&encoded);
+            break;
+        }
+        candidate += 1;
+        assert!(
+            candidate - (basic_block_data.len() + 1) < 1024,
+            "failed to find same-length varint for ops_offset corruption"
+        );
+    }
 
     let result = MastForest::read_from_bytes(&corrupted);
     assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
@@ -1493,6 +1515,8 @@ fn test_untrusted_forest_detects_forward_reference() {
 /// Test that UntrustedMastForest::validate detects hash mismatches.
 #[test]
 fn test_untrusted_forest_detects_hash_mismatch() {
+    use crate::serde::SliceReader;
+
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
         .add_to_forest(&mut forest)
@@ -1505,21 +1529,37 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     // Format: magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
     //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
     //
-    // First, determine where the node info section starts
-    let mut reader = SliceReader::new(&bytes);
-    let _header: [u8; 8] = reader.read_array().unwrap();
-    let _node_count: usize = reader.read().unwrap();
-    let _decorator_count: usize = reader.read().unwrap();
-    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
-    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+    let mut counter = CountingReader::new(&bytes);
+    let _header: [u8; 8] = counter.read_array().unwrap();
+    let _node_count: usize = counter.read().unwrap();
+    let _decorator_count: usize = counter.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut counter).unwrap();
+    let _bb_data: Vec<u8> = Deserializable::read_from(&mut counter).unwrap();
+    let node_info_offset = counter.position();
 
-    // Node info starts after: 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + bb_data.len()
-    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+    // Node info format: type (1 byte + varints) + digest (32 bytes)
+    // Corrupt one byte in the digest (first byte after the type payload).
+    let mut node_info_reader = SliceReader::new(&bytes[node_info_offset..]);
+    let tag = node_info_reader.read_u8().unwrap();
+    let digest_offset = node_info_offset
+        + 1
+        + match tag {
+            0 | 1 => {
+                let first = bytes[node_info_offset + 1];
+                let len = first.trailing_zeros() as usize + 1;
+                let second = bytes[node_info_offset + 1 + len];
+                let len2 = second.trailing_zeros() as usize + 1;
+                len + len2
+            },
+            2..=5 => {
+                let first = bytes[node_info_offset + 1];
+                first.trailing_zeros() as usize + 1
+            },
+            _ => 0,
+        };
 
-    // Node info format: type (8 bytes) + digest (32 bytes = 4 x 8 bytes)
-    // Corrupt one byte in the digest (byte 8-15 of node info)
     let mut corrupted = bytes.clone();
-    corrupted[node_info_offset + 8] ^= 0xff; // Flip bits in first word of digest
+    corrupted[digest_offset] ^= 0xff;
 
     // Deserialize as untrusted and try to validate
     let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
@@ -1636,4 +1676,59 @@ fn test_deserialization_rejects_excessive_node_count() {
         err.to_string().contains("exceeds maximum"),
         "Expected error about exceeding maximum, got: {err}"
     );
+}
+
+struct CountingReader<'a> {
+    source: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> CountingReader<'a> {
+    fn new(source: &'a [u8]) -> Self {
+        Self { source, pos: 0 }
+    }
+
+    fn position(&self) -> usize {
+        self.pos
+    }
+}
+
+impl crate::serde::ByteReader for CountingReader<'_> {
+    fn read_u8(&mut self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        let result = self.source[self.pos];
+        self.pos += 1;
+        Ok(result)
+    }
+
+    fn peek_u8(&self) -> Result<u8, DeserializationError> {
+        self.check_eor(1)?;
+        Ok(self.source[self.pos])
+    }
+
+    fn read_slice(&mut self, len: usize) -> Result<&[u8], DeserializationError> {
+        self.check_eor(len)?;
+        let result = &self.source[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(result)
+    }
+
+    fn read_array<const N: usize>(&mut self) -> Result<[u8; N], DeserializationError> {
+        self.check_eor(N)?;
+        let mut result = [0_u8; N];
+        result.copy_from_slice(&self.source[self.pos..self.pos + N]);
+        self.pos += N;
+        Ok(result)
+    }
+
+    fn check_eor(&self, num_bytes: usize) -> Result<(), DeserializationError> {
+        if self.pos + num_bytes > self.source.len() {
+            return Err(DeserializationError::UnexpectedEOF);
+        }
+        Ok(())
+    }
+
+    fn has_more_bytes(&self) -> bool {
+        self.pos < self.source.len()
+    }
 }
