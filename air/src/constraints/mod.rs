@@ -14,7 +14,6 @@ use crate::MainTraceRow;
 #[rustfmt::skip]
 pub mod chiplets;
 pub mod range;
-pub mod stack;
 
 /// Enforces the clock constraint: clk' = clk + 1
 ///
