@@ -41,11 +41,11 @@ pub type AsmOpDataOffset = u32;
 /// num_cycles: u8
 /// has_location: u8 (0 or 1)
 /// [if has_location]:
-///     uri_idx: usize (index into string table)
+///     uri_idx: u32 varint (index into string table)
 ///     start: u32
 ///     end: u32
-/// context_name_idx: usize (index into string table)
-/// op_idx: usize (index into string table)
+/// context_name_idx: u32 varint (index into string table)
+/// op_idx: u32 varint (index into string table)
 /// ```
 #[derive(Debug, PartialEq, Eq)]
 pub struct AsmOpInfo {
@@ -75,7 +75,7 @@ impl AsmOpInfo {
         let num_cycles = reader.read_u8()?;
 
         let location = if reader.read_bool()? {
-            let uri_idx = reader.read_usize()?;
+            let uri_idx = read_u32_varint(&mut reader)? as usize;
             let uri = string_table.read_arc_str(uri_idx).map(Uri::from)?;
             let start = reader.read_u32()?;
             let end = reader.read_u32()?;
@@ -84,10 +84,10 @@ impl AsmOpInfo {
             None
         };
 
-        let context_name_idx = reader.read_usize()?;
+        let context_name_idx = read_u32_varint(&mut reader)? as usize;
         let context_name = string_table.read_string(context_name_idx)?;
 
-        let op_idx = reader.read_usize()?;
+        let op_idx = read_u32_varint(&mut reader)? as usize;
         let op = string_table.read_string(op_idx)?;
 
         Ok(AssemblyOp::new(location, context_name, num_cycles, op))
@@ -150,7 +150,7 @@ impl AsmOpDataBuilder {
         if let Some(location) = asm_op.location() {
             self.asm_op_data.write_bool(true); // has_location = true
             let uri_idx = self.string_table_builder.add_string(location.uri.as_str());
-            uri_idx.write_into(&mut self.asm_op_data);
+            write_u32_varint(&mut self.asm_op_data, uri_idx);
             self.asm_op_data.write_u32(location.start.to_u32());
             self.asm_op_data.write_u32(location.end.to_u32());
         } else {
@@ -159,11 +159,11 @@ impl AsmOpDataBuilder {
 
         // Serialize context_name
         let context_name_idx = self.string_table_builder.add_string(asm_op.context_name());
-        context_name_idx.write_into(&mut self.asm_op_data);
+        write_u32_varint(&mut self.asm_op_data, context_name_idx);
 
         // Serialize op
         let op_idx = self.string_table_builder.add_string(asm_op.op());
-        op_idx.write_into(&mut self.asm_op_data);
+        write_u32_varint(&mut self.asm_op_data, op_idx);
 
         let idx = self.asm_op_infos.len();
         self.asm_op_infos.push(AsmOpInfo::new(data_offset));
@@ -179,6 +179,11 @@ impl AsmOpDataBuilder {
     pub fn finalize(self) -> (Vec<u8>, Vec<AsmOpInfo>, StringTable) {
         (self.asm_op_data, self.asm_op_infos, self.string_table_builder.into_table())
     }
+}
+
+fn write_u32_varint<W: ByteWriter>(target: &mut W, value: usize) {
+    debug_assert!(value <= u32::MAX as usize, "string table index exceeds u32::MAX");
+    target.write_usize(value);
 }
 
 #[cfg(test)]
