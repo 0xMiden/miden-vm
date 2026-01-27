@@ -1,0 +1,52 @@
+[package]
+name = "miden-core-fuzz"
+version = "0.0.0"
+authors = ["Miden contributors"]
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.miden-core]
+path = "../core"
+features = ["std"]
+
+# Fuzz targets - each is a separate binary
+[[bin]]
+name = "mast_forest_deserialize"
+path = "fuzz_targets/mast_forest_deserialize.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mast_forest_validate"
+path = "fuzz_targets/mast_forest_validate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mast_node_info"
+path = "fuzz_targets/mast_node_info.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "basic_block_data"
+path = "fuzz_targets/basic_block_data.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "debug_info"
+path = "fuzz_targets/debug_info.rs"
+test = false
+doc = false
+bench = false
