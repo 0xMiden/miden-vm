@@ -121,6 +121,11 @@ impl Deserializable for MastNodeInfo {
 
         Ok(Self { ty, digest })
     }
+
+    /// Returns the minimum serialized size: 8 bytes for MastNodeType + 32 bytes for Word digest.
+    fn min_serialized_size() -> usize {
+        40
+    }
 }
 
 // MAST NODE TYPE
@@ -313,6 +318,11 @@ impl Deserializable for MastNodeType {
                 "Invalid tag for MAST node: {discriminant}"
             ))),
         }
+    }
+
+    /// Returns the fixed serialized size: always 8 bytes (u64).
+    fn min_serialized_size() -> usize {
+        8
     }
 }
 

@@ -1039,4 +1039,12 @@ impl Deserializable for Operation {
 
         Ok(operation)
     }
+
+    /// Returns the minimum serialized size: 1 byte opcode.
+    ///
+    /// Some operations have additional payload (e.g., Push has 8 bytes for Felt),
+    /// but the minimum is just the opcode byte.
+    fn min_serialized_size() -> usize {
+        1
+    }
 }
