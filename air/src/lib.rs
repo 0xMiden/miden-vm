@@ -142,43 +142,41 @@ impl Deserializable for PublicInputs {
 ///
 /// This struct defines the constraints for the Miden VM processor.
 /// Generic over aux trace builder to support different extension fields.
-pub struct ProcessorAir<A, EF, B = ()>
+pub struct ProcessorAir<EF, B = ()>
 where
-    A: MidenAir<Felt, EF>,
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
-    inner: Option<A>,
+    /// Inner MidenVM AIR instance, obtained from Plonky3 codegen of the Miden VM air-script constraints.
+    inner: Option<MidenVM>,
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
     phantom: core::marker::PhantomData<EF>,
 }
 
-impl<A, EF> ProcessorAir<A, EF, ()>
+impl<EF> ProcessorAir<EF, ()>
 where
-    A: MidenAir<Felt, EF>,
     EF: ExtensionField<Felt>,
 {
     /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new(a: Option<A>) -> Self {
+    pub fn new() -> Self {
         Self {
-            inner: a,
+            inner: Some(MidenVM {}),
             aux_builder: None,
             phantom: core::marker::PhantomData,
         }
     }
 }
 
-impl<A, EF, B> ProcessorAir<A, EF, B>
+impl<EF, B> ProcessorAir<EF, B>
 where
-    A: MidenAir<Felt, EF>,
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(a: Option<A>, builder: B) -> Self {
+    pub fn with_aux_builder(builder: B) -> Self {
         Self {
-            inner: a,
+            inner: Some(MidenVM {}),
             aux_builder: Some(builder),
             phantom: core::marker::PhantomData,
         }
@@ -189,22 +187,21 @@ use p3_matrix::dense::RowMajorMatrix;
 
 use crate::trace::AUX_TRACE_WIDTH;
 
-impl<A, EF, B> MidenAir<Felt, EF> for ProcessorAir<A, EF, B>
+impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
-    A: MidenAir<Felt, EF>,
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
-        self.inner.as_ref().map(|inner| inner.width()).unwrap_or(TRACE_WIDTH)
+        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width).unwrap_or(TRACE_WIDTH)
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.inner.as_ref().map(|inner| inner.preprocessed_trace()).unwrap_or(None)
+        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::preprocessed_trace).unwrap_or(None)
     }
 
     fn num_public_values(&self) -> usize {
-        self.inner.as_ref().map(|inner| inner.num_public_values()).unwrap_or(0) // todo
+        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values).unwrap_or(0) // todo
     }
 
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
@@ -246,16 +243,16 @@ where
     fn num_randomness(&self) -> usize {
         self.inner
             .as_ref()
-            .map(|inner| inner.num_randomness())
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_randomness)
             .unwrap_or(trace::AUX_TRACE_RAND_ELEMENTS)
     }
 
     fn aux_width(&self) -> usize {
-        self.inner.as_ref().map(|inner| inner.aux_width()).unwrap_or(AUX_TRACE_WIDTH)
+        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::aux_width).unwrap_or(AUX_TRACE_WIDTH)
     }
 
     fn bus_types(&self) -> &[BusType] {
-        self.inner.as_ref().map(|inner| inner.bus_types()).unwrap_or(&[]) // todo
+        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::bus_types).unwrap_or(&[]) // todo
     }
 
     fn build_aux_trace(
@@ -276,7 +273,7 @@ where
     #[cfg(feature = "constraint_eval")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         if let Some(inner) = &self.inner {
-            inner.eval(builder);
+            <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(inner, builder);
         } else {
             use p3_matrix::Matrix;
 

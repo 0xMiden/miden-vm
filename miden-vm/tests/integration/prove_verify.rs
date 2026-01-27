@@ -254,12 +254,7 @@ mod fast_parallel {
         let public_values = trace.to_public_values();
 
         // Create AIR with aux trace builders
-        let inner = miden_air::unedited_constraints::miden_vm_plonky3::MidenVM {};
-        let air = miden_air::ProcessorAir::with_aux_builder(
-            Some(inner),
-            trace.aux_trace_builders().clone(),
-        );
-        //let air = miden_air::ProcessorAir::with_aux_builder(None::<miden_air::unedited_constraints::miden_vm_plonky3::MidenVM>, trace.aux_trace_builders().clone());
+        let air = miden_air::ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
 
         // Generate proof using Blake3_256
         let config = config::create_blake3_256_config();

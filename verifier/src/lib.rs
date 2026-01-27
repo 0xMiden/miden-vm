@@ -133,9 +133,7 @@ fn verify_stark(
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
     let public_values = pub_inputs.to_elements();
 
-    let inner = miden_air::unedited_constraints::miden_vm_plonky3::MidenVM {};
-    let air = miden_air::ProcessorAir::new(Some(inner));
-    //let air = miden_air::ProcessorAir::new(None::<miden_air::unedited_constraints::miden_vm_plonky3::MidenVM>);
+    let air = miden_air::ProcessorAir::new();
 
     match hash_fn {
         HashFunction::Blake3_256 => {

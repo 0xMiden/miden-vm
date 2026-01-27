@@ -11,9 +11,9 @@ pub const MAIN_WIDTH: usize = 71; // 80
 // FIXME: Bus related constraints
 pub const AUX_WIDTH: usize = 0; // 8
 pub const NUM_PERIODIC_VALUES: usize = 29;
-pub const PERIOD: usize = 8;
 pub const NUM_PUBLIC_VALUES: usize = 36;
 // FIXME: Bus related constraints
+#[allow(dead_code)]
 pub const MAX_BETA_CHALLENGE_POWER: usize = 0; // 16
 
 pub struct MidenVM;
