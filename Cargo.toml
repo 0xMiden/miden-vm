@@ -27,7 +27,7 @@ readme = "README.md"
 authors = ["Miden contributors"]
 homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
-exclude = [".github/", "miden-core-fuzz"]
+exclude = [".github/"]
 rust-version = "1.90"
 version = "0.21.0"
 
