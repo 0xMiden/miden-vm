@@ -290,7 +290,7 @@ const SAMPLE_WORD = [5,6,7,8]
 const SAMPLE_VALUE = 9
 
 begin
-    push.SAMPLE_WORD[1..3]  # is equivalent to push.6.7, with 6 on top
+    push.SAMPLE_WORD[1..3]  # is equivalent to push.7 push.6
     push.SAMPLE_WORD[0]     # is equivalent to push.5
 
     push.SAMPLE_VALUE[1..3] # returns an error: invalid slice constant
