@@ -143,6 +143,11 @@ impl Deserializable for DecoratorInfo {
 
         Ok(Self { variant, decorator_data_offset })
     }
+
+    /// Returns the minimum serialized size: 1 byte variant + 4 bytes offset.
+    fn min_serialized_size() -> usize {
+        5
+    }
 }
 
 // ENCODED DATA VARIANT
@@ -217,6 +222,11 @@ impl Deserializable for EncodedDecoratorVariant {
                 "invalid decorator discriminant: {discriminant}"
             ))
         })
+    }
+
+    /// Returns the fixed serialized size: 1 byte discriminant.
+    fn min_serialized_size() -> usize {
+        1
     }
 }
 
