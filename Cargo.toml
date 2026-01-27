@@ -118,3 +118,6 @@ p3-miden-prover  = { version = "0.4.2", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
+
+[workspace.lints.rust]
+unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
