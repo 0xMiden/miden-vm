@@ -119,17 +119,6 @@ impl ExecutionTrace {
         public_inputs.to_elements()
     }
 
-    /// Returns the public values for this execution trace.
-    pub fn to_variable_length_public_values(&self) -> Vec<Felt> {
-        let public_inputs = PublicInputs::new(
-            self.program_info.clone(),
-            self.init_stack_state(),
-            self.stack_outputs,
-            self.final_pc_transcript.state(),
-        );
-        public_inputs.to_elements()
-    }
-
     /// Returns a clone of the auxiliary trace builders.
     pub fn aux_trace_builders(&self) -> AuxTraceBuilders {
         self.aux_trace_builders.clone()
