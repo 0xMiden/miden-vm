@@ -145,10 +145,6 @@ In the benchmarks below we execute the same Fibonacci calculator program for 2<s
 | AMD Ryzen 9 5950X (16 threads) |     270 ms     |   59.3 sec   |                   |
 | Amazon Graviton 3 (64 threads) |     330 ms     |   21.7 sec   |     14.9 sec      |
 
-In the above, proof generation on some platforms can be hardware-accelerated. Specifically:
-
-- On the Graviton platform, SVE vector extension is used to accelerate Poseidon2 computations.
-
 ### STARK Proving System
 
 Miden VM uses [Plonky3](https://github.com/0xMiden/Plonky3), a modular STARK proving framework.
