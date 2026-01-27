@@ -13,7 +13,10 @@ use alloc::vec::Vec;
 
 use miden_debug_types::{ByteIndex, Location, Uri};
 
-use super::string_table::{StringTable, StringTableBuilder};
+use super::{
+    read_u32_varint,
+    string_table::{StringTable, StringTableBuilder},
+};
 use crate::{
     AssemblyOp,
     utils::{
@@ -109,15 +112,6 @@ impl Deserializable for AsmOpInfo {
     fn min_serialized_size() -> usize {
         1
     }
-}
-
-fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
-    let value = source.read_usize()?;
-    value.try_into().map_err(|_| {
-        DeserializationError::InvalidValue(format!(
-            "Invalid value: expected to fit in u32, but was {value}"
-        ))
-    })
 }
 
 // ASM OP DATA BUILDER

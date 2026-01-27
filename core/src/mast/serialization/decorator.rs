@@ -6,7 +6,7 @@ use num_traits::{FromPrimitive, ToPrimitive};
 use proptest_derive::Arbitrary;
 
 use super::{
-    DecoratorDataOffset,
+    DecoratorDataOffset, read_u32_varint,
     string_table::{StringTable, StringTableBuilder},
 };
 use crate::{
@@ -188,15 +188,6 @@ impl Deserializable for EncodedDecoratorVariant {
     fn min_serialized_size() -> usize {
         1
     }
-}
-
-fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
-    let value = source.read_usize()?;
-    value.try_into().map_err(|_| {
-        DeserializationError::InvalidValue(format!(
-            "Invalid value: expected to fit in u32, but was {value}"
-        ))
-    })
 }
 
 // DECORATOR DATA BUILDER
