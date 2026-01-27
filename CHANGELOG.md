@@ -6,6 +6,7 @@
 
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
+- Add deserialization of the `MastForest` from untrusted sources. Add fuzzing for MastForest deserialization. ([#2590](https://github.com/0xMiden/miden-vm/pull/2590)).
 
 #### Fixes
 
