@@ -172,11 +172,7 @@ where
 
     fn on_event(
         &mut self,
-<<<<<<< HEAD
-        _process: &ProcessorState,
-=======
-        process: &ProcessState,
->>>>>>> 1a162643 (refactor(processor): merge TestConsistencyHost and TestHost)
+        process: &ProcessorState,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let event_id: u32 = process.get_stack_item(0).as_canonical_u64().try_into().unwrap();
         self.event_handler.push(event_id);
@@ -185,26 +181,15 @@ where
 
     fn on_debug(
         &mut self,
-<<<<<<< HEAD
         _process: &mut ProcessorState,
-        _options: &DebugOptions,
-=======
-        _process: &mut ProcessState,
         options: &DebugOptions,
->>>>>>> 1a162643 (refactor(processor): merge TestConsistencyHost and TestHost)
     ) -> Result<(), DebugError> {
-        // Record the debug command for testing verification
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-<<<<<<< HEAD
     fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-        // Forward to trace collector for counting
-=======
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
         // Forward to trace collector for counting and execution order tracking
->>>>>>> 1a162643 (refactor(processor): merge TestConsistencyHost and TestHost)
         self.trace_collector.on_trace(process, trace_id)?;
 
         // Also collect process state snapshot for consistency checking
