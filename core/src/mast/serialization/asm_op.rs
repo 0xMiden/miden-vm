@@ -27,7 +27,9 @@ pub type AsmOpDataOffset = u32;
 // ASM OP INFO
 // ================================================================================================
 
-/// Fixed-width serialized representation of an [`AssemblyOp`].
+/// Compact serialized representation of an [`AssemblyOp`].
+///
+/// Each record stores a varint offset (1-5 bytes) into the AssemblyOp data blob.
 ///
 /// Each `AsmOpInfo` stores an offset into the variable-length data blob where the AssemblyOp's
 /// payload is stored. The payload format is:
@@ -91,15 +93,24 @@ impl AsmOpInfo {
 
 impl Serializable for AsmOpInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        self.data_offset.write_into(target);
+        target.write_usize(self.data_offset as usize);
     }
 }
 
 impl Deserializable for AsmOpInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let data_offset = source.read()?;
+        let data_offset = read_u32_varint(source)?;
         Ok(Self { data_offset })
     }
+}
+
+fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
+    let value = source.read_usize()?;
+    value.try_into().map_err(|_| {
+        DeserializationError::InvalidValue(format!(
+            "Invalid value: expected to fit in u32, but was {value}"
+        ))
+    })
 }
 
 // ASM OP DATA BUILDER
