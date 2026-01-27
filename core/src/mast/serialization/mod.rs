@@ -298,6 +298,42 @@ where
     })
 }
 
+// UNTRUSTED DESERIALIZATION
+// ================================================================================================
+
+impl Deserializable for super::UntrustedMastForest {
+    /// Deserializes an [`UntrustedMastForest`] from bytes.
+    ///
+    /// This performs the same deserialization as [`MastForest::read_from`], but wraps
+    /// the result in [`UntrustedMastForest`] to indicate that validation has not yet
+    /// been performed.
+    ///
+    /// After deserialization, callers should use [`UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let forest = MastForest::read_from(source)?;
+        Ok(super::UntrustedMastForest(forest))
+    }
+
+    /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
+    ///
+    /// This method uses a [`crate::utils::BudgetedReader`] with a budget of 4× the input size to
+    /// protect against denial-of-service attacks from malicious input.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        // Use 4× budget to account for allocation overhead during deserialization
+        let mut reader = crate::utils::BudgetedReader::new(
+            crate::utils::SliceReader::new(bytes),
+            bytes.len().saturating_mul(4),
+        );
+        Self::read_from(&mut reader)
+    }
+}
+
 // STRIPPED SERIALIZATION
 // ================================================================================================
 
