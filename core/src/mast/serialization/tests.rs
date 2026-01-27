@@ -9,7 +9,7 @@ use crate::{
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        SplitNodeBuilder,
+        SplitNodeBuilder, UntrustedMastForest,
     },
     operations::Operation,
 };
@@ -1459,4 +1459,183 @@ fn test_debuginfo_serialization_dense() {
             );
         }
     }
+}
+
+// UNTRUSTED MAST FOREST VALIDATION TESTS
+// ================================================================================================
+
+/// Test that UntrustedMastForest::validate succeeds for a valid forest.
+#[test]
+fn test_untrusted_forest_valid_roundtrip() {
+    let mut forest = MastForest::new();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join_id);
+
+    // Serialize
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    assert_eq!(forest, validated);
+}
+
+/// Test that UntrustedMastForest::validate detects forward references.
+#[test]
+fn test_untrusted_forest_detects_forward_reference() {
+    // Create a forest with forward references by swapping node order
+    let mut forest = MastForest::new();
+    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
+
+    // Swap the Join node (index 3) with the first basic block (index 0)
+    // This creates a forest where Join(1, 2) is at index 0, referencing nodes 1 and 2
+    // which are forward references
+    forest.nodes.swap_remove(zero.to_usize());
+
+    // Serialize the corrupted forest
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and try to validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::ForwardReference(_, _)));
+}
+
+/// Test that UntrustedMastForest::validate detects hash mismatches.
+#[test]
+fn test_untrusted_forest_detects_hash_mismatch() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    // Corrupt the digest of the node by modifying bytes in the node info section
+    // Format: magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
+    //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
+    //
+    // First, determine where the node info section starts
+    use crate::utils::SliceReader;
+    let mut reader = SliceReader::new(&bytes);
+    let _header: [u8; 8] = reader.read_array().unwrap();
+    let _node_count: usize = reader.read().unwrap();
+    let _decorator_count: usize = reader.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+
+    // Node info starts after: 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + bb_data.len()
+    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+
+    // Node info format: type (8 bytes) + digest (32 bytes = 4 x 8 bytes)
+    // Corrupt one byte in the digest (byte 8-15 of node info)
+    let mut corrupted = bytes.clone();
+    corrupted[node_info_offset + 8] ^= 0xff; // Flip bits in first word of digest
+
+    // Deserialize as untrusted and try to validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::HashMismatch { .. }));
+}
+
+/// Test that UntrustedMastForest::validate succeeds for forests with all node types.
+#[test]
+fn test_untrusted_forest_validates_all_node_types() {
+    let mut forest = MastForest::new();
+
+    // Create basic blocks
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Join node
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+
+    // Split node
+    let split_id = SplitNodeBuilder::new([block1_id, block2_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Loop node
+    let loop_id = LoopNodeBuilder::new(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Call node
+    let call_id = CallNodeBuilder::new(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Syscall node
+    let syscall_id = CallNodeBuilder::new_syscall(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Dyn node
+    let dyn_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+
+    // Dyncall node
+    let dyncall_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+
+    // External node (will be skipped in hash validation)
+    let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(join_id);
+    forest.make_root(split_id);
+    forest.make_root(loop_id);
+    forest.make_root(call_id);
+    forest.make_root(syscall_id);
+    forest.make_root(dyn_id);
+    forest.make_root(dyncall_id);
+    forest.make_root(external_id);
+
+    // Serialize
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    assert_eq!(forest, validated);
+}
+
+/// Test that UntrustedMastForest::validate works with stripped serialization.
+#[test]
+fn test_untrusted_forest_validates_stripped() {
+    let mut forest = MastForest::new();
+
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Serialize stripped (no debug info)
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&stripped_bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    // Structure should be preserved, but debug info should be empty
+    assert_eq!(forest.num_nodes(), validated.num_nodes());
+    assert!(validated.debug_info.is_empty());
 }
