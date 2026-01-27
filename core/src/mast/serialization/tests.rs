@@ -561,14 +561,20 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
     let _node_count: usize = reader.read().unwrap();
     let _decorator_count: usize = reader.read().unwrap();
-    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let roots_len: usize = reader.read().unwrap();
+    for _ in 0..roots_len {
+        let _: usize = reader.read().unwrap();
+    }
     let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
 
     let mut counter = CountingReader::new(&serialized);
     let _header: [u8; 8] = counter.read_array().unwrap();
     let _node_count: usize = counter.read().unwrap();
     let _decorator_count: usize = counter.read().unwrap();
-    let _roots: Vec<u32> = Deserializable::read_from(&mut counter).unwrap();
+    let roots_len: usize = counter.read().unwrap();
+    for _ in 0..roots_len {
+        let _: usize = counter.read().unwrap();
+    }
     let _bb_data: Vec<u8> = Deserializable::read_from(&mut counter).unwrap();
     let node_info_offset = counter.position();
 
@@ -1544,14 +1550,18 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     let bytes = forest.to_bytes();
 
     // Corrupt the digest of the node by modifying bytes in the node info section
-    // Format: magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
-    //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
+    // Format: magic (4) + flags (1) + version (3) + node_count (varint)
+    //         + decorator_count (varint) + roots_len (varint) + 1 root (varint)
+    //         + bb_data_len (varint) + bb_data + node_info
     //
     let mut counter = CountingReader::new(&bytes);
     let _header: [u8; 8] = counter.read_array().unwrap();
     let _node_count: usize = counter.read().unwrap();
     let _decorator_count: usize = counter.read().unwrap();
-    let _roots: Vec<u32> = Deserializable::read_from(&mut counter).unwrap();
+    let roots_len: usize = counter.read().unwrap();
+    for _ in 0..roots_len {
+        let _: usize = counter.read().unwrap();
+    }
     let _bb_data: Vec<u8> = Deserializable::read_from(&mut counter).unwrap();
     let node_info_offset = counter.position();
 
