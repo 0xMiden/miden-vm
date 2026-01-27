@@ -1307,9 +1307,8 @@ impl UntrustedMastForest {
 
     /// Deserializes an [`UntrustedMastForest`] from bytes.
     ///
-    /// This method uses a [`BudgetedReader`] with a budget of 4× the input size to protect
-    /// against denial-of-service attacks from malicious input while allowing reasonable overhead
-    /// for legitimate deserialization.
+    /// This method uses a [`BudgetedReader`] with a budget equal to the input size to protect
+    /// against denial-of-service attacks from malicious input.
     ///
     /// For stricter limits, use
     /// [`read_from_bytes_with_budget`](Self::read_from_bytes_with_budget) with a custom budget.
@@ -1324,8 +1323,7 @@ impl UntrustedMastForest {
     /// let forest = untrusted.validate()?;
     /// ```
     pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        // Use 4× budget to account for allocation overhead during deserialization
-        Self::read_from_bytes_with_budget(bytes, bytes.len().saturating_mul(4))
+        Self::read_from_bytes_with_budget(bytes, bytes.len())
     }
 
     /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.

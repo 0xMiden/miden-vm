@@ -327,19 +327,14 @@ impl Deserializable for super::UntrustedMastForest {
 
     /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
     ///
-    /// This method uses a [`miden_crypto::utils::BudgetedReader`] with a budget of 4× the input size to
-    /// protect against denial-of-service attacks from malicious input.
+    /// This method uses a [`crate::utils::BudgetedReader`] with a budget equal to the input size
+    /// to protect against denial-of-service attacks from malicious input.
     ///
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
     fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
-        // Use 4× budget to account for allocation overhead during deserialization
-        let mut reader = miden_crypto::utils::BudgetedReader::new(
-            crate::utils::SliceReader::new(bytes),
-            bytes.len().saturating_mul(4),
-        );
-        Self::read_from(&mut reader)
+        super::UntrustedMastForest::read_from_bytes(bytes)
     }
 }
 
