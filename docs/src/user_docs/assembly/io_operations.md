@@ -46,7 +46,7 @@ You can also use slices with word constants to push only a portion of the word:
 const WORD = [5,6,7,8]
 
 push.WORD[0]      # is equivalent to push.5
-push.WORD[1..3]   # is equivalent to `push.6 push.7`
+push.WORD[1..3]   # is equivalent to `push.7 push.6`
 push.WORD[0..4]   # is equivalent to push.[5,6,7,8]
 ```
 
