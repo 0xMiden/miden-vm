@@ -312,13 +312,12 @@ where
 // ================================================================================================
 
 impl Deserializable for super::UntrustedMastForest {
-    /// Deserializes an [`UntrustedMastForest`] from bytes.
+    /// Deserializes an [`super::UntrustedMastForest`] from a byte reader.
     ///
-    /// This performs the same deserialization as [`MastForest::read_from`], but wraps
-    /// the result in [`UntrustedMastForest`] to indicate that validation has not yet
-    /// been performed.
+    /// Note: This method does not apply budgeting. For untrusted input, prefer using
+    /// [`read_from_bytes`](Self::read_from_bytes) which applies budgeted deserialization.
     ///
-    /// After deserialization, callers should use [`UntrustedMastForest::validate()`]
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
     /// to verify structural integrity and recompute all node hashes before using
     /// the forest.
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
