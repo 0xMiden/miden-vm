@@ -13,10 +13,6 @@ use crate::{
 // ================================================================================================
 
 /// Represents a serialized [`MastNode`], with some data inlined in its [`MastNodeType`].
-///
-/// The serialized representation of [`MastNodeInfo`] is guaranteed to be fixed width, so that the
-/// nodes stored in the `nodes` table of the serialized [`MastForest`] can be accessed quickly by
-/// index.
 #[derive(Debug)]
 pub struct MastNodeInfo {
     ty: MastNodeType,
@@ -122,9 +118,9 @@ impl Deserializable for MastNodeInfo {
         Ok(Self { ty, digest })
     }
 
-    /// Returns the minimum serialized size: 8 bytes for MastNodeType + 32 bytes for Word digest.
+    /// Returns the minimum serialized size: 1 byte for MastNodeType + 32 bytes for Word digest.
     fn min_serialized_size() -> usize {
-        40
+        33
     }
 }
 
@@ -144,9 +140,6 @@ const EXTERNAL: u8 = 8;
 /// Represents the variant of a [`MastNode`], as well as any additional data. For example, for more
 /// efficient decoding, and because of the frequency with which these node types appear, we directly
 /// represent the child indices for `Join`, `Split`, and `Loop`, `Call` and `SysCall` inline.
-///
-/// The serialized representation of the MAST node type is guaranteed to be 8 bytes, so that
-/// [`MastNodeInfo`] (which contains it) can be of fixed width.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum MastNodeType {
@@ -214,29 +207,38 @@ impl MastNodeType {
 
 impl Serializable for MastNodeType {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        let discriminant = self.discriminant() as u64;
-        assert!(discriminant <= 0b1111);
+        let discriminant = self.discriminant();
+        target.write_u8(discriminant);
 
-        let payload = match *self {
+        match *self {
             MastNodeType::Join {
                 left_child_id: left,
                 right_child_id: right,
-            } => Self::encode_u32_pair(left, right),
+            } => {
+                target.write_usize(left as usize);
+                target.write_usize(right as usize);
+            },
             MastNodeType::Split {
                 if_branch_id: if_branch,
                 else_branch_id: else_branch,
-            } => Self::encode_u32_pair(if_branch, else_branch),
-            MastNodeType::Loop { body_id: body } => Self::encode_u32_payload(body),
-            MastNodeType::Block { ops_offset } => Self::encode_u32_payload(ops_offset),
-            MastNodeType::Call { callee_id } => Self::encode_u32_payload(callee_id),
-            MastNodeType::SysCall { callee_id } => Self::encode_u32_payload(callee_id),
-            MastNodeType::Dyn => 0,
-            MastNodeType::Dyncall => 0,
-            MastNodeType::External => 0,
-        };
-
-        let value = (discriminant << 60) | payload;
-        target.write_u64(value);
+            } => {
+                target.write_usize(if_branch as usize);
+                target.write_usize(else_branch as usize);
+            },
+            MastNodeType::Loop { body_id: body } => {
+                target.write_usize(body as usize);
+            },
+            MastNodeType::Block { ops_offset } => {
+                target.write_usize(ops_offset as usize);
+            },
+            MastNodeType::Call { callee_id } => {
+                target.write_usize(callee_id as usize);
+            },
+            MastNodeType::SysCall { callee_id } => {
+                target.write_usize(callee_id as usize);
+            },
+            MastNodeType::Dyn | MastNodeType::Dyncall | MastNodeType::External => {},
+        }
     }
 }
 
@@ -250,65 +252,37 @@ impl MastNodeType {
         // here: https://doc.rust-lang.org/std/mem/fn.discriminant.html
         unsafe { *<*const _>::from(self).cast::<u8>() }
     }
-
-    /// Encodes two u32 numbers in the first 60 bits of a `u64`.
-    ///
-    /// # Panics
-    /// - Panics if either `left_value` or `right_value` doesn't fit in 30 bits.
-    fn encode_u32_pair(left_value: u32, right_value: u32) -> u64 {
-        assert!(
-            left_value.leading_zeros() >= 2,
-            "MastNodeType::encode_u32_pair: left value doesn't fit in 30 bits: {left_value}",
-        );
-        assert!(
-            right_value.leading_zeros() >= 2,
-            "MastNodeType::encode_u32_pair: right value doesn't fit in 30 bits: {right_value}",
-        );
-
-        ((left_value as u64) << 30) | (right_value as u64)
-    }
-
-    fn encode_u32_payload(payload: u32) -> u64 {
-        payload as u64
-    }
 }
 
 impl Deserializable for MastNodeType {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        let (discriminant, payload) = {
-            let value = source.read_u64()?;
-
-            // 4 bits
-            let discriminant = (value >> 60) as u8;
-            // 60 bits
-            let payload = value & 0x0f_ff_ff_ff_ff_ff_ff_ff;
-
-            (discriminant, payload)
-        };
+        let discriminant = source.read_u8()?;
 
         match discriminant {
             JOIN => {
-                let (left_child_id, right_child_id) = Self::decode_u32_pair(payload);
+                let left_child_id = read_u32_varint(source)?;
+                let right_child_id = read_u32_varint(source)?;
                 Ok(Self::Join { left_child_id, right_child_id })
             },
             SPLIT => {
-                let (if_branch_id, else_branch_id) = Self::decode_u32_pair(payload);
+                let if_branch_id = read_u32_varint(source)?;
+                let else_branch_id = read_u32_varint(source)?;
                 Ok(Self::Split { if_branch_id, else_branch_id })
             },
             LOOP => {
-                let body_id = Self::decode_u32_payload(payload)?;
+                let body_id = read_u32_varint(source)?;
                 Ok(Self::Loop { body_id })
             },
             BLOCK => {
-                let ops_offset = Self::decode_u32_payload(payload)?;
+                let ops_offset = read_u32_varint(source)?;
                 Ok(Self::Block { ops_offset })
             },
             CALL => {
-                let callee_id = Self::decode_u32_payload(payload)?;
+                let callee_id = read_u32_varint(source)?;
                 Ok(Self::Call { callee_id })
             },
             SYSCALL => {
-                let callee_id = Self::decode_u32_payload(payload)?;
+                let callee_id = read_u32_varint(source)?;
                 Ok(Self::SysCall { callee_id })
             },
             DYN => Ok(Self::Dyn),
@@ -320,32 +294,19 @@ impl Deserializable for MastNodeType {
         }
     }
 
-    /// Returns the fixed serialized size: always 8 bytes (u64).
+    /// Returns the minimum serialized size: 1 byte discriminant.
     fn min_serialized_size() -> usize {
-        8
+        1
     }
 }
 
-/// Deserialization helpers
-impl MastNodeType {
-    /// Decodes two `u32` numbers from a 60-bit payload.
-    fn decode_u32_pair(payload: u64) -> (u32, u32) {
-        let left_value = (payload >> 30) as u32;
-        let right_value = (payload & 0x3f_ff_ff_ff) as u32;
-
-        (left_value, right_value)
-    }
-
-    /// Decodes one `u32` number from a 60-bit payload.
-    ///
-    /// Returns an error if the payload doesn't fit in a `u32`.
-    pub fn decode_u32_payload(payload: u64) -> Result<u32, DeserializationError> {
-        payload.try_into().map_err(|_| {
-            DeserializationError::InvalidValue(format!(
-                "Invalid payload: expected to fit in u32, but was {payload}"
-            ))
-        })
-    }
+fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
+    let value = source.read_usize()?;
+    value.try_into().map_err(|_| {
+        DeserializationError::InvalidValue(format!(
+            "Invalid value: expected to fit in u32, but was {value}"
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -355,11 +316,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serialize_deserialize_60_bit_payload() {
-        // each child needs 30 bits
+    fn serialize_deserialize_payload_roundtrip() {
         let mast_node_type = MastNodeType::Join {
-            left_child_id: 0x3f_ff_ff_ff,
-            right_child_id: 0x3f_ff_ff_ff,
+            left_child_id: u32::MAX,
+            right_child_id: 0,
         };
 
         let serialized = mast_node_type.to_bytes();
@@ -369,40 +329,24 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn serialize_large_payloads_fails_1() {
-        // left child needs 31 bits
-        let mast_node_type = MastNodeType::Join {
-            left_child_id: 0x4f_ff_ff_ff,
-            right_child_id: 0x0,
-        };
-
-        // must panic
-        let _serialized = mast_node_type.to_bytes();
-    }
-
-    #[test]
-    #[should_panic]
-    fn serialize_large_payloads_fails_2() {
-        // right child needs 31 bits
-        let mast_node_type = MastNodeType::Join {
-            left_child_id: 0x0,
-            right_child_id: 0x4f_ff_ff_ff,
-        };
-
-        // must panic
-        let _serialized = mast_node_type.to_bytes();
-    }
-
-    #[test]
-    fn deserialize_large_payloads_fails() {
-        // Serialized `CALL` with a 33-bit payload
+    fn deserialize_invalid_tag_fails() {
         let serialized = {
-            let serialized_value = ((CALL as u64) << 60) | (u32::MAX as u64 + 1_u64);
-
             let mut serialized_buffer: Vec<u8> = Vec::new();
-            serialized_value.write_into(&mut serialized_buffer);
+            serialized_buffer.write_u8(0xff);
+            serialized_buffer
+        };
 
+        let deserialized_result = MastNodeType::read_from_bytes(&serialized);
+
+        assert_matches!(deserialized_result, Err(DeserializationError::InvalidValue(_)));
+    }
+
+    #[test]
+    fn deserialize_large_payload_fails() {
+        let serialized = {
+            let mut serialized_buffer: Vec<u8> = Vec::new();
+            serialized_buffer.write_u8(CALL);
+            serialized_buffer.write_usize(u32::MAX as usize + 1);
             serialized_buffer
         };
 
