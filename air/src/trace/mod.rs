@@ -17,6 +17,9 @@ pub use main_trace::{MainTrace, MainTraceRow};
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
+mod periodic_table;
+pub use periodic_table::{CYCLE_ROW_0, INV_CYCLE_ROW_7, CYCLE_ROW_6, CYCLE_ROW_7};
+
 // CONSTANTS
 // ================================================================================================
 
