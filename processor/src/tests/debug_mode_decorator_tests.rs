@@ -1,7 +1,7 @@
 use miden_core::{
+    Decorator, Operation,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    operations::{DebugOptions, Decorator, Operation},
-    program::StackInputs,
+    stack::StackInputs,
 };
 
 use crate::{
@@ -33,8 +33,6 @@ fn create_debug_test_program() -> Program {
 /// Test that verifies decorators only execute in debug mode
 #[test]
 fn test_decorators_only_execute_in_debug_mode() {
-    // Test implementation to verify decorators only execute in debug mode
-
     // Create program with Trace decorator
     let mut forest = MastForest::new();
     let decorator = Decorator::Trace(999);
@@ -62,29 +60,9 @@ fn test_decorators_only_execute_in_debug_mode() {
     );
 
     // Test with debug mode ON - decorator should execute
-<<<<<<< HEAD
-<<<<<<< HEAD
-    let mut host_debug_on = TestHost { decorator_executed: false };
-<<<<<<< HEAD
-    let process_debug_on = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .with_debugging(true)
-        .with_tracing(true);
-=======
+    let mut host_debug_on = TestHost::new();
     let process_debug_on =
         FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
-=======
-<<<<<<< HEAD
-    let mut host_debug_on = TestHost::new();
-=======
-    let mut host_debug_on = TestConsistencyHost::new();
-=======
-    let mut host_debug_on = TestHost::new();
->>>>>>> c5f58a93 (use-TestHost)
->>>>>>> f743788d (use-TestHost)
-    let process_debug_on = FastProcessor::new_debug(&[], AdviceInputs::default());
->>>>>>> 1a162643 (refactor(processor): merge TestConsistencyHost and TestHost)
->>>>>>> f8f7f52d (refactor(processor): merge TestConsistencyHost and TestHost)
 
     let result = process_debug_on.execute_sync(&program, &mut host_debug_on);
     assert!(result.is_ok(), "Execution failed: {:?}", result);
@@ -132,10 +110,7 @@ fn test_decorators_only_execute_in_debug_mode_on() {
     let mut host = TestHost::new();
 
     // Create processor with debug mode ON (tracing enabled)
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .with_debugging(true)
-        .with_tracing(true);
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -183,13 +158,8 @@ fn test_zero_overhead_when_debug_off() {
     let program = Program::new(mast_forest.into(), basic_block_id);
 
     // Test with debug mode OFF
-<<<<<<< HEAD
-    let mut host_off = TestConsistencyHost::new();
-    let processor_off = FastProcessor::new(StackInputs::default());
-=======
     let mut host_off = TestHost::new();
-    let processor_off = FastProcessor::new(&[]);
->>>>>>> c5f58a93 (use-TestHost)
+    let processor_off = FastProcessor::new(StackInputs::default());
 
     let result_off = processor_off.execute_sync(&program, &mut host_off);
     assert!(result_off.is_ok());
@@ -200,20 +170,8 @@ fn test_zero_overhead_when_debug_off() {
     assert_eq!(host_off.get_trace_count(300), 0);
 
     // Test with debug mode ON
-<<<<<<< HEAD
-    let mut host_on = TestConsistencyHost::new();
-<<<<<<< HEAD
-    let processor_on = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .with_debugging(true)
-        .with_tracing(true);
-=======
-    let processor_on = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
-=======
     let mut host_on = TestHost::new();
-    let processor_on = FastProcessor::new_debug(&[], AdviceInputs::default());
->>>>>>> c5f58a93 (use-TestHost)
->>>>>>> f743788d (use-TestHost)
+    let processor_on = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     let result_on = processor_on.execute_sync(&program, &mut host_on);
     assert!(result_on.is_ok());
