@@ -48,7 +48,7 @@ fn test_before_enter_decorator_executed_once_fast() {
     let program =
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
@@ -75,7 +75,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
     let program =
         create_test_program(&before_enter_decorators, &[after_exit_decorator], &operations);
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
@@ -118,7 +118,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
     let program =
         create_test_program(&[before_enter_decorator], &after_exit_decorators, &operations);
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
@@ -167,7 +167,7 @@ fn test_decorator_execution_order_fast() {
     let program =
         create_test_program(&before_enter_decorators, &after_exit_decorators, &operations);
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
@@ -214,7 +214,7 @@ fn test_processor_decorator_execution() {
     let program =
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     let execution_result = processor.execute_sync(&program, &mut host);
@@ -254,7 +254,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
         &[(0, inner_decorator)], // Inner decorator at operation 0
     );
 
-    let mut host = TestConsistencyHost::new();
+    let mut host = TestHost::new();
     let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
