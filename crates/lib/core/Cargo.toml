@@ -21,6 +21,10 @@ doctest = false
 name = "compilation"
 harness = false
 
+[[bench]]
+name = "mast_serialization_size"
+harness = false
+
 [[test]]
 name = "core-lib"
 path = "tests/main.rs"
