@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder};
+use super::{NodeDataOffset, basic_blocks::BasicBlockDataDecoder, read_u32_varint};
 use crate::{
     mast::{
         MastForestContributor, MastNode, MastNodeId, Word,
@@ -298,15 +298,6 @@ impl Deserializable for MastNodeType {
     fn min_serialized_size() -> usize {
         1
     }
-}
-
-fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
-    let value = source.read_usize()?;
-    value.try_into().map_err(|_| {
-        DeserializationError::InvalidValue(format!(
-            "Invalid value: expected to fit in u32, but was {value}"
-        ))
-    })
 }
 
 #[cfg(test)]

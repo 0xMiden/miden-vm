@@ -117,6 +117,18 @@ const FLAGS_RESERVED_MASK: u8 = 0xfe;
 ///   Removed `breakpoint` instruction (#2655).
 const VERSION: [u8; 3] = [0, 0, 2];
 
+// SHARED SERIALIZATION HELPERS
+// ================================================================================================
+
+fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
+    let value = source.read_usize()?;
+    value.try_into().map_err(|_| {
+        DeserializationError::InvalidValue(format!(
+            "Invalid value: expected to fit in u32, but was {value}"
+        ))
+    })
+}
+
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
