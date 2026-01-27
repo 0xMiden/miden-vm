@@ -104,6 +104,11 @@ impl Deserializable for AsmOpInfo {
         let data_offset = read_u32_varint(source)?;
         Ok(Self { data_offset })
     }
+
+    /// Returns the minimum serialized size: 1 byte varint offset.
+    fn min_serialized_size() -> usize {
+        1
+    }
 }
 
 fn read_u32_varint<R: ByteReader>(source: &mut R) -> Result<u32, DeserializationError> {
