@@ -1,13 +1,16 @@
 # Changelog
 
+## 0.20.3 (2026-01-27)
+
+- Fixed issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
+
 ## 0.20.2 (2026-01-05)
 
-- Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
-- Fix issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
+- Fixed issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
 
 ## 0.20.1 (2025-12-14)
 
-- Fix issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
+- Fixed issue where calling procedures from statically linked libraries did not import their decorators ([#2459](https://github.com/0xMiden/miden-vm/pull/2459)).
 
 ## 0.20.0 (2025-12-05)
 
