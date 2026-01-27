@@ -54,6 +54,9 @@ pub(crate) mod string_table;
 pub(crate) use string_table::StringTable;
 
 #[cfg(test)]
+mod seed_gen;
+
+#[cfg(test)]
 mod tests;
 
 // TYPE ALIASES
