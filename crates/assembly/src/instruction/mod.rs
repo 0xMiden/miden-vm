@@ -51,17 +51,16 @@ impl Assembler {
 
         // For node-creating instructions, finalize the AssemblyOp now (it will have 0 cycles
         // since no operations have been added yet for this instruction).
-        let pending_node_asm_op =
-            if can_create_node && !matches!(instruction.inner(), Instruction::Exec(_)) {
-                // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
-                // since the instruction creates exactly one node (call/syscall/dyn).
-                block_builder.set_instruction_cycle_count().map(|mut asm_op| {
-                    asm_op.set_num_cycles(1);
-                    asm_op
-                })
-            } else {
-                None
-            };
+        let pending_node_asm_op = if can_create_node {
+            // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
+            // since the instruction creates exactly one node (call/syscall/dyn).
+            block_builder.set_instruction_cycle_count().map(|mut asm_op| {
+                asm_op.set_num_cycles(1);
+                asm_op
+            })
+        } else {
+            None
+        };
 
         // Compile the instruction (decorators are now always empty for this path).
         let opt_new_node_id =

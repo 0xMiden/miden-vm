@@ -116,9 +116,7 @@ fn confirm_operation_and_decorator_structure() {
         Operation::LogPrecompile => (),
     };
 
-    // Decorator variants - exhaustiveness check for serialization coverage.
-    // Note: AssemblyOp was removed from Decorator enum; AssemblyOps are now stored
-    // separately in DebugInfo's asm_op storage.
+    // Decorator variants - exhaustiveness check to ensure serialization coverage.
     match Decorator::Trace(0) {
         Decorator::Debug(debug_options) => match debug_options {
             DebugOptions::StackAll => (),
