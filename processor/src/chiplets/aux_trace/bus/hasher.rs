@@ -5,8 +5,9 @@ use miden_air::trace::{
     chiplets::{
         hasher,
         hasher::{
-            HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, LINEAR_HASH_LABEL, MP_VERIFY_LABEL,
-            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
+            HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, LAST_CYCLE_ROW, LAST_CYCLE_ROW_FELT,
+            LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL,
+            RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
     },
     log_precompile::{
@@ -104,7 +105,7 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let end_block_message = EndBlockMessage {
-        addr: main_trace.addr(row) + Felt::from_u8((HASH_CYCLE_LEN - 1) as u8),
+        addr: main_trace.addr(row) + LAST_CYCLE_ROW_FELT,
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         digest: main_trace.decoder_hasher_state(row)[..4].try_into().unwrap(),
     };
@@ -161,7 +162,7 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     };
     let output_req = HasherMessage {
         transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
-        addr_next: helper_0 + Felt::from_u8((HASH_CYCLE_LEN - 1) as u8),
+        addr_next: helper_0 + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: [
             s0_nxt, s1_nxt, s2_nxt, s3_nxt, s4_nxt, s5_nxt, s6_nxt, s7_nxt, s8_nxt, s9_nxt,
@@ -239,7 +240,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
 
     let output_req = HasherMessage {
         transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
-        addr_next: addr + Felt::from_u8((HASH_CYCLE_LEN - 1) as u8),
+        addr_next: addr + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
         source: "log_precompile output",
@@ -476,7 +477,7 @@ where
     }
 
     // f_hout, f_sout, f_abp == 1
-    if row.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1 {
+    if row.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW {
         // Trace is already in sponge order [RATE0, RATE1, CAP]
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);

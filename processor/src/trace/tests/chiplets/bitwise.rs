@@ -9,7 +9,7 @@ use miden_core::field::{Field, PrimeCharacteristicRing};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    ONE, Operation, build_trace_from_ops, rand_array, rand_value,
+    LAST_CYCLE_ROW, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It
@@ -134,7 +134,7 @@ fn b_chip_trace_bitwise() {
     // At the end of the hasher cycle, the hasher provides the `SPAN` hash. Its multiplicand should
     // cancel out the earlier request.
     assert_ne!(expected, b_chip[HASH_CYCLE_LEN]);
-    let span_response_mult = b_chip[HASH_CYCLE_LEN] * b_chip[HASH_CYCLE_LEN - 1].inverse();
+    let span_response_mult = b_chip[HASH_CYCLE_LEN] * b_chip[LAST_CYCLE_ROW].inverse();
     assert_eq!(span_request_mult * span_response_mult, ONE);
     expected *= span_response_mult;
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);

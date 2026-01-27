@@ -47,8 +47,7 @@ fn hasher_permute() {
     // make sure the trace is correct
     check_selector_trace(&trace, 0, LINEAR_HASH, RETURN_STATE);
     check_hasher_state_trace(&trace, 0, init_state);
-    assert_eq!(trace.last().unwrap().len(), HASH_CYCLE_LEN);
-    assert!(trace.last().unwrap().iter().all(|&v| v == ZERO));
+    assert_eq!(trace.last().unwrap(), &[ZERO; HASH_CYCLE_LEN]);
 
     // --- test two permutations ----------------------------------------------
 
@@ -80,8 +79,7 @@ fn hasher_permute() {
     check_selector_trace(&trace, HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE);
     check_hasher_state_trace(&trace, 0, init_state1);
     check_hasher_state_trace(&trace, HASH_CYCLE_LEN, init_state2);
-    assert_eq!(trace.last().unwrap().len(), 2 * HASH_CYCLE_LEN);
-    assert!(trace.last().unwrap().iter().all(|&v| v == ZERO));
+    assert_eq!(trace.last().unwrap(), &[ZERO; 2 * HASH_CYCLE_LEN]);
 }
 
 // MERKLE TREE TESTS

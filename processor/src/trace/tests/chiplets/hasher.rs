@@ -6,10 +6,10 @@ use miden_air::trace::{
     chiplets::{
         HASHER_NODE_INDEX_COL_IDX, HASHER_STATE_COL_RANGE, HASHER_TRACE_OFFSET,
         hasher::{
-            CAPACITY_DOMAIN_IDX, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState, LINEAR_HASH,
-            LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW, MR_UPDATE_NEW_LABEL,
-            MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH, RETURN_HASH_LABEL,
-            RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
+            CAPACITY_DOMAIN_IDX, DIGEST_RANGE, HASH_CYCLE_LEN, HasherState, LAST_CYCLE_ROW,
+            LINEAR_HASH, LINEAR_HASH_LABEL, MP_VERIFY, MP_VERIFY_LABEL, MR_UPDATE_NEW,
+            MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD, MR_UPDATE_OLD_LABEL, RATE_LEN, RETURN_HASH,
+            RETURN_HASH_LABEL, RETURN_STATE, RETURN_STATE_LABEL, STATE_WIDTH, Selectors,
         },
     },
     decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
@@ -112,7 +112,7 @@ pub fn b_chip_span() {
     }
 
     // At the end of the hash cycle, the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -211,7 +211,7 @@ pub fn b_chip_span_with_respan() {
 
     // At the end of the first hash cycle, the absorption of the next operation batch is provided
     // by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // Nothing changes when there is no communication with the hash chiplet.
@@ -220,7 +220,8 @@ pub fn b_chip_span_with_respan() {
     }
 
     // At the end of the second hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    expected *=
+        build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
     assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -327,7 +328,7 @@ pub fn b_chip_merge() {
     }
 
     // At the end of the merge hash cycle, the result of the merge is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // At the start of the next hash cycle, the initialization of the hash of the span block for the
@@ -342,7 +343,8 @@ pub fn b_chip_merge() {
 
     // At the end of the false branch hash cycle, the result of the span block for the false branch
     // is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    expected *=
+        build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
     assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -441,7 +443,7 @@ pub fn b_chip_permutation() {
     }
 
     // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // At the start of the next hash cycle, the initialization of the hperm hash is provided by the
@@ -455,7 +457,8 @@ pub fn b_chip_permutation() {
     }
 
     // At the end of the hperm hash cycle, the result of the hperm hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    expected *=
+        build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
     assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -567,7 +570,7 @@ pub fn b_chip_log_precompile() {
     }
 
     // at cycle 7 the result of the span hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // at cycle 8 the initialization of the log_precompile hash is provided by the hasher
@@ -580,7 +583,8 @@ pub fn b_chip_log_precompile() {
     }
 
     // at cycle 15 the result of the log_precompile hash is provided by the hasher
-    expected *= build_expected_from_trace(&trace, &alphas, (2 * HASH_CYCLE_LEN - 1).into());
+    expected *=
+        build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN + LAST_CYCLE_ROW).into());
     assert_eq!(expected, b_chip[2 * HASH_CYCLE_LEN]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
@@ -685,7 +689,7 @@ fn b_chip_mpverify() {
     }
 
     // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // At the start of the next hash cycle, the initialization of the merkle path is provided by
@@ -846,7 +850,7 @@ fn b_chip_mrupdate() {
     }
 
     // At the end of the span hash cycle, the result of the span hash is provided by the hasher.
-    expected *= build_expected_from_trace(&trace, &alphas, (HASH_CYCLE_LEN - 1).into());
+    expected *= build_expected_from_trace(&trace, &alphas, LAST_CYCLE_ROW.into());
     assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
 
     // At the start of the next hash cycle, the initialization of the first merkle path is provided
@@ -951,7 +955,7 @@ fn build_expected_from_trace(trace: &ExecutionTrace, alphas: &[Felt], row: RowIn
     let mut next_state = [ZERO; STATE_WIDTH];
     for (i, col_idx) in HASHER_STATE_COL_RANGE.enumerate() {
         state[i] = trace.main_trace.get_column(col_idx)[row];
-        if cycle_row == HASH_CYCLE_LEN - 1 && label == LINEAR_HASH_LABEL {
+        if cycle_row == LAST_CYCLE_ROW && label == LINEAR_HASH_LABEL {
             next_state[i] = trace.main_trace.get_column(col_idx)[row + 1];
         }
     }
@@ -1040,7 +1044,7 @@ fn addr_to_cycle_row(addr: Felt) -> usize {
     let cycle = (addr.as_canonical_u64() - 1) as usize;
     let cycle_row = cycle % HASH_CYCLE_LEN;
     debug_assert!(
-        cycle_row == 0 || cycle_row == HASH_CYCLE_LEN - 1,
+        cycle_row == 0 || cycle_row == LAST_CYCLE_ROW,
         "invalid address for hasher lookup"
     );
 

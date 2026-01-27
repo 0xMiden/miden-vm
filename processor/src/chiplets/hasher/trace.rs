@@ -65,7 +65,7 @@ impl HasherTrace {
         // append the first row of the permutation cycle
         self.append_row(init_selectors, state, init_index);
 
-        // append the next 6 rows of the permutation cycle. for these rows:
+        // append the next NUM_ROUNDS - 1 rows of the permutation cycle. for these rows:
         // - the last two selectors are carried over from row to row; the first selector is set to
         //   ZERO.
         // - hasher state is updated by applying a single round of the hash function for every row.

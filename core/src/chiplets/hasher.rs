@@ -16,7 +16,9 @@ pub const RATE_LEN: usize = 8;
 
 /// Number of "round steps" used by the hasher chiplet per permutation.
 ///
-/// For Poseidon2, we model the permutation as 31 step transitions:
+/// For Poseidon2, we model the permutation as 31 step transitions. This corresponds to an
+/// initial external linear layer, 4 initial external (partial) rounds, 22 internal (full) rounds,
+/// and 4 terminal external (partial) rounds:
 /// - step 0: initial external linear layer
 /// - steps 1..=4: initial external rounds
 /// - steps 5..=26: internal rounds
@@ -75,19 +77,23 @@ pub fn apply_permutation(state: &mut [Felt; STATE_WIDTH]) {
 fn apply_poseidon2_step(state: &mut [Felt; STATE_WIDTH], step: usize) {
     match step {
         0 => {
+            // Initial external linear layer.
             Hasher::apply_matmul_external(state);
         },
         1..=4 => {
+            // Initial external partial rounds.
             Hasher::add_rc(state, &Hasher::ARK_EXT_INITIAL[step - 1]);
             Hasher::apply_sbox(state);
             Hasher::apply_matmul_external(state);
         },
         5..=26 => {
+            // Internal full rounds.
             state[0] += Hasher::ARK_INT[step - 5];
             state[0] = state[0].exp_const_u64::<7>();
             Hasher::matmul_internal(state, Hasher::MAT_DIAG);
         },
         27..=30 => {
+            // Terminal external partial rounds.
             Hasher::add_rc(state, &Hasher::ARK_EXT_TERMINAL[step - 27]);
             Hasher::apply_sbox(state);
             Hasher::apply_matmul_external(state);

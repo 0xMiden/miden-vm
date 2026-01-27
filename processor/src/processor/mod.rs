@@ -372,7 +372,7 @@ pub trait OperationHelperRegisters {
     ) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add operation.
-    fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add3 operation.
     fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];

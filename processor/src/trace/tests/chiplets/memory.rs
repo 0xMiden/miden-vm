@@ -1,5 +1,3 @@
-const HASH_CYCLE_LEN_MINUS_ONE: usize = HASH_CYCLE_LEN - 1;
-
 use miden_air::trace::{
     RowIndex,
     chiplets::{
@@ -20,7 +18,7 @@ use miden_core::{
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
+    LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 use crate::PrimeField64;
 
@@ -164,7 +162,7 @@ fn b_chip_trace_mem() {
 
     let memory_start = HASH_CYCLE_LEN;
     assert_ne!(expected, b_chip[memory_start]);
-    let span_response_mult = b_chip[memory_start] * b_chip[HASH_CYCLE_LEN_MINUS_ONE].inverse();
+    let span_response_mult = b_chip[memory_start] * b_chip[LAST_CYCLE_ROW].inverse();
     assert_eq!(span_request_mult * span_response_mult, ONE);
     expected *= span_response_mult;
     assert_eq!(expected, b_chip[memory_start]);

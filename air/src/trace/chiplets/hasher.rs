@@ -74,10 +74,14 @@ pub const DIGEST_LEN: usize = 4;
 /// The output portion of the hash state, located in the first rate word (RATE0).
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
-/// Number of needed to complete a single permutation.
+/// Number of round steps used to complete a single permutation.
 ///
 /// For Poseidon2, we model a permutation as 31 step transitions, resulting in a 32-row cycle.
-pub const NUM_ROUNDS: usize = 31;
+pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
+
+/// Index of the last row in a permutation cycle (0-based).
+pub const LAST_CYCLE_ROW: usize = NUM_ROUNDS;
+pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;

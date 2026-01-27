@@ -293,7 +293,7 @@ pub trait PrecompileVerifier: Send + Sync {
 /// Precompile transcript implemented with a Poseidon2 sponge.
 ///
 /// # Structure
-/// Standard Poseidon2 sponge: 12 elements = capacity (4 elements) + rate (8 elements)
+/// Standard Poseidon2 sponge: 12 elements = rate (8 elements) + capacity (4 elements)
 ///
 /// # Operation
 /// - **Record**: Each precompile commitment is recorded by absorbing it into the rate, updating the

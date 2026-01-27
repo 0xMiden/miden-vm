@@ -303,7 +303,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(_carry: Felt, _sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
