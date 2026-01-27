@@ -3,6 +3,7 @@
 ## 0.20.2 (2026-01-05)
 
 - Fix issue where decorator access was not bypassed properly in release mode ([#2529](https://github.com/0xMiden/miden-vm/pull/2529)).
+- Fix issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
 
 ## 0.20.1 (2025-12-14)
 

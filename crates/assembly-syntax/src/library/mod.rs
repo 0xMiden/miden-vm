@@ -605,11 +605,12 @@ impl Deserializable for Library {
                     } else {
                         None
                     };
+                    let attributes = AttributeSet::read_from(source)?;
                     LibraryExport::Procedure(ProcedureExport {
                         node,
                         path: path.clone(),
                         signature,
-                        attributes: Default::default(),
+                        attributes,
                     })
                 },
                 1 => {
@@ -775,7 +776,7 @@ impl Serializable for LibraryExport {
                 node,
                 path: name,
                 signature,
-                attributes: _,
+                attributes,
             }) => {
                 target.write_u8(0);
                 name.write_into(target);
@@ -786,6 +787,7 @@ impl Serializable for LibraryExport {
                 } else {
                     target.write_bool(false);
                 }
+                attributes.write_into(target);
             },
             LibraryExport::Constant(ConstantExport { path: name, value }) => {
                 target.write_u8(1);
