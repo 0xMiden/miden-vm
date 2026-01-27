@@ -3,11 +3,11 @@
 //! ## Wire Format
 //!
 //! - Padded operations (variable size)
-//! - Batch count (4 bytes)
+//! - Batch count (varint `usize`, 1-10 bytes)
 //! - Delta-encoded indptr per batch (4 bytes each: 8 deltas × 4 bits, packed)
 //! - Padding flags per batch (1 byte each, bit-packed)
 //!
-//! **Total**: `ops_size + 4 + (5 * num_batches)` bytes
+//! **Total**: `ops_size + num_batches_len + (5 * num_batches)` bytes
 
 use alloc::vec::Vec;
 
@@ -15,7 +15,7 @@ use super::NodeDataOffset;
 use crate::{
     mast::{BasicBlockNode, OP_GROUP_SIZE},
     operations::Operation,
-    serde::{ByteReader, DeserializationError, Serializable, SliceReader},
+    serde::{ByteReader, ByteWriter, DeserializationError, Serializable, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER
@@ -51,8 +51,8 @@ impl BasicBlockDataBuilder {
         let op_batches = basic_block.op_batches();
         let num_batches = op_batches.len();
 
-        // Write number of batches
-        (num_batches as u32).write_into(&mut self.node_data);
+        // Write number of batches (varint)
+        self.node_data.write_usize(num_batches);
 
         // Write delta-encoded indptr arrays for each batch (4 bytes per batch)
         for batch in op_batches {
@@ -173,9 +173,8 @@ impl BasicBlockDataDecoder<'_> {
         // Read padded operations
         let operations: Vec<Operation> = ops_data_reader.read()?;
 
-        // Read batch count
-        let num_batches: u32 = ops_data_reader.read()?;
-        let num_batches = num_batches as usize;
+        // Read batch count (varint)
+        let num_batches = ops_data_reader.read_usize()?;
 
         // Read delta-encoded indptr arrays (4 bytes per batch)
         let mut batch_indptrs: Vec<[usize; 9]> = Vec::with_capacity(num_batches);
