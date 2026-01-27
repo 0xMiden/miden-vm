@@ -28,7 +28,6 @@
 //! hashes and should only be used for data from trusted sources (e.g. compiled locally).
 
 use alloc::{
-    boxed::Box,
     collections::{BTreeMap, BTreeSet},
     string::String,
     sync::Arc,
@@ -66,8 +65,8 @@ use crate::{
 
 mod debuginfo;
 pub use debuginfo::{
-    DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds,
-    OpToDecoratorIds,
+    AsmOpIndexError, DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError,
+    NodeToDecoratorIds, OpToAsmOpId, OpToDecoratorIds,
 };
 
 mod serialization;
@@ -188,6 +187,9 @@ impl MastForest {
 
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
+
+        // Remap the asm_op_storage to use the new node IDs
+        self.debug_info.remap_asm_op_storage(&id_remappings);
 
         // Invalidate the cached commitment since we modified the forest structure
         self.commitment_cache.take();
@@ -590,74 +592,19 @@ impl MastForest {
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
 
-    /// Returns the [`AssemblyOp`] associated with this node and operation (if provided), if any.
+    /// Returns the [`AssemblyOp`] associated with a node.
     ///
-    /// If the `target_op_idx` is provided, the method treats the node as having operations and will
-    /// return the assembly op associated with the operation at the corresponding index. If no
-    /// `target_op_idx` is provided, the method will return the first assembly op found
-    /// (effectively assuming that the node has at most one associated [`AssemblyOp`]).
+    /// For basic block nodes with a `target_op_idx`, returns the AssemblyOp for that operation.
+    /// For other nodes or when no `target_op_idx` is provided, returns the first AssemblyOp.
     pub fn get_assembly_op(
         &self,
         node_id: MastNodeId,
         target_op_idx: Option<usize>,
     ) -> Option<&AssemblyOp> {
-        let node = &self[node_id];
-
-        // Replicate the behavior of the original MastNodeErrorContext::decorators method
-        // by collecting all decorators in the correct order for each node type
-        let decorator_links: Box<dyn Iterator<Item = (usize, DecoratorId)>> = match node {
-            MastNode::Block(block_node) => {
-                let num_ops: usize = block_node.num_operations() as usize;
-                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
-                let op_iter = self
-                    .decorator_links_for_node(node_id)
-                    .expect("Block node must have some valid set of decorator links");
-                let after_iter =
-                    self.after_exit_decorators(node_id).iter().map(move |&id| (num_ops, id));
-
-                Box::new(before_iter.chain(op_iter).chain(after_iter))
-            },
-            _ => {
-                // For all other node types: before_enter at index 0, after_exit at index 1
-                let before_iter = self.before_enter_decorators(node_id).iter().map(|&id| (0, id));
-
-                let after_iter = self.after_exit_decorators(node_id).iter().map(|&id| (1, id));
-
-                Box::new(before_iter.chain(after_iter))
-            },
-        };
-
         match target_op_idx {
-            // If a target operation index is provided, return the assembly op associated with that
-            // operation.
-            Some(target_op_idx) => {
-                for (op_idx, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
-                    {
-                        // when an instruction compiles down to multiple operations, only the first
-                        // operation is associated with the assembly op. We need to check if the
-                        // target operation index falls within the range of operations associated
-                        // with the assembly op.
-                        if target_op_idx >= op_idx
-                            && target_op_idx < op_idx + assembly_op.num_cycles() as usize
-                        {
-                            return Some(assembly_op);
-                        }
-                    }
-                }
-            },
-            // If no target operation index is provided, return the first assembly op found.
-            None => {
-                for (_, decorator_id) in decorator_links {
-                    if let Some(Decorator::AsmOp(assembly_op)) = self.decorator_by_id(decorator_id)
-                    {
-                        return Some(assembly_op);
-                    }
-                }
-            },
+            Some(op_idx) => self.debug_info.asm_op_for_operation(node_id, op_idx),
+            None => self.debug_info.first_asm_op_for_node(node_id),
         }
-
-        None
     }
 }
 
@@ -838,6 +785,19 @@ impl MastForest {
             "attempted to insert procedure name for digest that is not a procedure root"
         );
         self.debug_info.insert_procedure_name(digest, name);
+    }
+
+    /// Returns a reference to the debug info for this forest.
+    pub fn debug_info(&self) -> &DebugInfo {
+        &self.debug_info
+    }
+
+    /// Returns a mutable reference to the debug info.
+    ///
+    /// This is intended for use by the assembler to register AssemblyOps and other debug
+    /// information during compilation.
+    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
+        &mut self.debug_info
     }
 }
 
@@ -1150,6 +1110,58 @@ impl Serializable for DecoratorId {
 }
 
 impl Deserializable for DecoratorId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
+// ASM OP ID
+// ================================================================================================
+
+/// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
+///
+/// Unlike decorators (which are executed at runtime), AssemblyOps are metadata
+/// used only for error context and debugging tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct AsmOpId(u32);
+
+impl AsmOpId {
+    /// Creates a new [`AsmOpId`] with the provided inner value.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<u32> for AsmOpId {
+    fn from(value: u32) -> Self {
+        AsmOpId::new(value)
+    }
+}
+
+impl Idx for AsmOpId {}
+
+impl From<AsmOpId> for u32 {
+    fn from(id: AsmOpId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for AsmOpId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AsmOpId({})", self.0)
+    }
+}
+
+impl Serializable for AsmOpId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+}
+
+impl Deserializable for AsmOpId {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let value = u32::read_from(source)?;
         Ok(Self(value))

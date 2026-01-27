@@ -141,6 +141,25 @@ impl BasicBlockNode {
             .map(|(raw_idx, dec_id)| (raw_idx + raw2pad[raw_idx], dec_id))
             .collect()
     }
+
+    /// Adjusts raw operation indices to padded indices for AssemblyOp mappings.
+    ///
+    /// Similar to `adjust_decorators`, but works with AssemblyOp mappings `(raw_idx, id)` pairs.
+    /// The op_batches contain padding NOOPs that shift operation indices. This method adjusts
+    /// the raw indices to account for this padding so lookups during execution use correct indices.
+    pub fn adjust_asm_op_indices<T: Copy>(
+        asm_ops: Vec<(usize, T)>,
+        op_batches: &[OpBatch],
+    ) -> Vec<(usize, T)> {
+        let raw2pad = RawToPaddedPrefix::new(op_batches);
+        asm_ops
+            .into_iter()
+            .map(|(raw_idx, id)| {
+                let padded = raw_idx + raw2pad[raw_idx];
+                (padded, id)
+            })
+            .collect()
+    }
 }
 
 // ------------------------------------------------------------------------------------------------

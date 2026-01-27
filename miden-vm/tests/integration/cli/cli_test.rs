@@ -59,7 +59,6 @@ fn cli_run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 use miden_assembly::Library;
-use miden_core::Decorator;
 
 #[test]
 fn cli_bundle_debug() {
@@ -73,9 +72,9 @@ fn cli_bundle_debug() {
     cmd.assert().success();
 
     let lib = Library::deserialize_from_file(&output_file).unwrap();
-    // If there are any AsmOp decorators in the forest, the bundle is in debug mode.
-    let found_one_asm_op =
-        lib.mast_forest().decorators().iter().any(|d| matches!(d, Decorator::AsmOp(_)));
+    // If there are any AssemblyOps in the forest, the bundle is in debug mode.
+    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
+    let found_one_asm_op = lib.mast_forest().debug_info().num_asm_ops() > 0;
     assert!(found_one_asm_op);
     fs::remove_file(&output_file).unwrap();
 }

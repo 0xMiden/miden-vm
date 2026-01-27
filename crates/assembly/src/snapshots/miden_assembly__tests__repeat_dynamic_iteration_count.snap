@@ -8,15 +8,10 @@ begin
         push(4294967294)
         mstore
         drop
-        asmOp(add, 1)
         add
-        asmOp(add, 1)
         add
-        asmOp(add, 1)
         add
-        asmOp(add, 1)
         add
-        asmOp(add, 1)
         add
         noop
     end

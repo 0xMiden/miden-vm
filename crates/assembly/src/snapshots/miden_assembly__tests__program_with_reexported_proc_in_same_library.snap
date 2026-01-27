@@ -10,9 +10,7 @@ begin
                 push(4294967294)
                 mstore
                 drop
-                asmOp(push.4, 1)
                 push(4)
-                asmOp(push.3, 1)
                 push(3)
                 noop
                 noop

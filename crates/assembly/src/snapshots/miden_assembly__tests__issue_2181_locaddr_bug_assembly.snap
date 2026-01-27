@@ -15,20 +15,17 @@ begin
         push(4294967294)
         mstore
         drop
-        asmOp(locaddr.0, 4)
         push(18446744069414584317)
         noop
         push(4294967294)
         mload
         add
         debug(stack.4)
-        asmOp(locaddr.0, 4)
         push(18446744069414584317)
         push(4294967294)
         mload
         add
         debug(stack.4)
-        asmOp(locaddr.0, 4)
         push(18446744069414584317)
         noop
         push(4294967294)
@@ -36,10 +33,8 @@ begin
         add
         debug(stack.4)
         debug(stack.4)
-        asmOp(nop, 1)
         noop
         debug(stack.4)
-        asmOp(dropw, 4)
         drop
         drop
         drop

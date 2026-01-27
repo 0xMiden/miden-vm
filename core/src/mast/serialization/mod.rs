@@ -42,6 +42,7 @@ use crate::{
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
@@ -111,7 +112,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfe;
 ///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
 ///   serialization in CSR format (eliminates per-node decorator sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
-const VERSION: [u8; 3] = [0, 0, 1];
+/// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
+///   separately in DebugInfo.
+const VERSION: [u8; 3] = [0, 0, 2];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
