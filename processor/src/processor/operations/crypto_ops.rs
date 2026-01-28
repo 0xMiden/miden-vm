@@ -47,7 +47,23 @@ pub(super) fn op_hperm<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
     // Build sponge state from stack: state[i] = stack.get(i)
-    let input_state: [Felt; STATE_WIDTH] = core::array::from_fn(|i| processor.stack().get(i));
+    // Read first 8 elements using get_double_word, then remaining 4 elements
+    let double_word: [Felt; 8] = processor.stack().get_double_word(0);
+    let word: Word = processor.stack().get_word(8);
+    let input_state: [Felt; STATE_WIDTH] = [
+        double_word[0],
+        double_word[1],
+        double_word[2],
+        double_word[3],
+        double_word[4],
+        double_word[5],
+        double_word[6],
+        double_word[7],
+        word[0],
+        word[1],
+        word[2],
+        word[3],
+    ];
 
     // Apply RPO permutation
     let (addr, output_state) = processor.hasher().permute(input_state);
@@ -289,7 +305,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     };
 
     // Read the coefficients from the stack (top 8 elements)
-    let coef: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
+    let coef: [Felt; 8] = processor.stack().get_double_word(0);
 
     let c0 = QuadFelt::from(coef[0]);
     let c1 = QuadFelt::from(coef[1]);
@@ -535,7 +551,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
     // Get rate (keystream) from stack[0..7]
-    let rate: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
+    let rate: [Felt; 8] = processor.stack().get_double_word(0);
 
     // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
     let ciphertext_word1 = [

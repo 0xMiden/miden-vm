@@ -151,6 +151,22 @@ pub trait StackInterface {
     /// Word[0] corresponds to the top of stack.
     fn get_word(&self, start_idx: usize) -> Word;
 
+    /// Returns two words (8 elements) from the stack starting at index `start_idx`.
+    ///
+    /// This is equivalent to reading 8 consecutive elements from the stack, or to reading the words
+    /// as `Self::get_word(0)` and `Self::get_word(4)`.
+    ///
+    /// For example, if the stack looks like this:
+    ///
+    /// top                                                       bottom
+    /// v                                                           v
+    /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
+    ///
+    /// Then `get_double_word(0)` returns `[a, b, c, d, e, f, g, h]`.
+    fn get_double_word(&self, start_idx: usize) -> [Felt; 8] {
+        core::array::from_fn(|i| self.get(start_idx + i))
+    }
+
     /// Returns the number of elements on the stack in the current context.
     fn depth(&self) -> u32;
 
