@@ -14,6 +14,7 @@ use miden_core::{
     Felt, ONE, Program, Word, ZERO,
     field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    stack::StackInputs,
 };
 
 use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Kernel, Operation, fast::FastProcessor};
@@ -119,7 +120,7 @@ fn build_trace(
 ) -> (ChipletsTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new(*v)).collect();
     let processor = FastProcessor::new_with_options(
-        &stack_inputs,
+        StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
         ExecutionOptions::default().with_core_trace_fragment_size(1 << 10).unwrap(),
     );

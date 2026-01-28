@@ -46,7 +46,7 @@ use miden_crypto::{
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
     hash::rpo::Rpo256,
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 
 use crate::handlers::read_memory_packed_u32;
 
@@ -82,7 +82,7 @@ impl EventHandler for EcdsaPrecompile {
     /// - **Advice Stack**: Extended with verification result (1 for valid, 0 for invalid)
     /// - **Precompile Request**: Stores tag `[event_id, result, 0, 0]` and serialized request data
     ///   (pk || digest || sig) for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr_pk, ptr_digest, ptr_sig, ...]
         let ptr_pk = process.get_stack_item(1).as_canonical_u64();
         let ptr_digest = process.get_stack_item(2).as_canonical_u64();

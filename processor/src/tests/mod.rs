@@ -9,6 +9,7 @@ use miden_core::{
     AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    stack::StackInputs,
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
@@ -78,7 +79,7 @@ fn test_diagnostic_advice_map_key_already_present() {
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    let processor = FastProcessor::new(&[]);
+    let processor = FastProcessor::new(StackInputs::default());
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_diagnostic_lines!(
@@ -742,7 +743,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -800,7 +801,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -861,7 +862,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1085,7 +1086,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,

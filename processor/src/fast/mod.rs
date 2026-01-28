@@ -10,13 +10,14 @@ use miden_core::{
     Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     precompile::PrecompileTranscript,
-    stack::MIN_STACK_DEPTH,
+    stack::{MIN_STACK_DEPTH, StackInputs},
     utils::range,
 };
 use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host, ProcessState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
+    ProcessorState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
@@ -151,28 +152,19 @@ impl FastProcessor {
 
     /// Creates a new `FastProcessor` instance with the given stack inputs, where debug and tracing
     /// are disabled.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new(stack_inputs: &[Felt]) -> Self {
+    pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
     }
 
     /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where debug
     /// and tracing are disabled.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new_with_advice_inputs(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
+    pub fn new_with_advice_inputs(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
         Self::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
     }
 
     /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where
     /// debugging and tracing are enabled.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new_debug(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
+    pub fn new_debug(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
         Self::new_with_options(
             stack_inputs,
             advice_inputs,
@@ -181,17 +173,11 @@ impl FastProcessor {
     }
 
     /// Most general constructor unifying all the other ones.
-    ///
-    /// Stack inputs are stored in natural order: the first element of `stack_inputs` will be at
-    /// position 0 (top of stack). For example, if `stack_inputs = [1, 2, 3]`, then the stack will
-    /// be initialized as `[1, 2, 3, 0, 0, ...]`, with `1` being on top.
     pub fn new_with_options(
-        stack_inputs: &[Felt],
+        stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
         options: ExecutionOptions,
     ) -> Self {
-        assert!(stack_inputs.len() <= MIN_STACK_DEPTH);
-
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
@@ -690,11 +676,11 @@ impl FastProcessor {
         }
 
         match StackOutputs::new(
-            self.stack[self.stack_bot_idx..self.stack_top_idx]
+            &self.stack[self.stack_bot_idx..self.stack_top_idx]
                 .iter()
                 .rev()
                 .copied()
-                .collect(),
+                .collect::<Vec<_>>(),
         ) {
             Ok(stack_outputs) => ControlFlow::Continue(stack_outputs),
             Err(_) => ControlFlow::Break(BreakReason::Err(ExecutionError::OutputStackOverflow(
@@ -957,11 +943,11 @@ impl FastProcessor {
                         None => {
                             // End of program was reached
                             break Ok(StackOutputs::new(
-                                self.stack[self.stack_bot_idx..self.stack_top_idx]
+                                &self.stack[self.stack_bot_idx..self.stack_top_idx]
                                     .iter()
                                     .rev()
                                     .copied()
-                                    .collect(),
+                                    .collect::<Vec<_>>(),
                             )
                             .unwrap());
                         },
@@ -1113,18 +1099,14 @@ pub struct ExecutionOutput {
     pub final_pc_transcript: PrecompileTranscript,
 }
 
-// FAST PROCESS STATE
+// PROCESSOR STATE
 // ===============================================================================================
 
-#[derive(Debug)]
-pub struct FastProcessState<'a> {
-    pub(super) processor: &'a mut FastProcessor,
-}
-
+/// Processor state accessor.
 impl FastProcessor {
     #[inline(always)]
-    pub fn state(&mut self) -> ProcessState<'_> {
-        ProcessState::Fast(FastProcessState { processor: self })
+    pub fn state(&mut self) -> ProcessorState<'_> {
+        ProcessorState { processor: self }
     }
 }
 

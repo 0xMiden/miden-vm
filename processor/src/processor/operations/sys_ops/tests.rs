@@ -1,6 +1,10 @@
 use alloc::vec;
 
-use miden_core::{Felt, ONE, ZERO, mast::MastForest, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Felt, ONE, ZERO,
+    mast::MastForest,
+    stack::{MIN_STACK_DEPTH, StackInputs},
+};
 
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
@@ -17,7 +21,7 @@ fn test_op_assert() {
     let mut tracer = NoopTracer;
 
     // Calling assert with a minimum stack should be ok, as long as the top value is ONE.
-    let mut processor = FastProcessor::new(&[ONE]);
+    let mut processor = FastProcessor::new(StackInputs::new(&[ONE]).unwrap());
 
     assert!(op_assert(&mut processor, ZERO, &program, &mut tracer).is_ok());
 }
@@ -27,7 +31,7 @@ fn test_op_sdepth() {
     let mut tracer = NoopTracer;
 
     // stack is empty
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
 
     op_sdepth(&mut processor, &mut tracer).unwrap();
     let expected = build_expected(&[MIN_STACK_DEPTH as u64]);
@@ -58,7 +62,7 @@ fn test_op_sdepth() {
 #[test]
 fn test_op_clk() {
     let mut tracer = NoopTracer;
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
 
     // initial value of clk register should be 0
     //

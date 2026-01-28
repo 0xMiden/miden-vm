@@ -7,12 +7,12 @@ use miden_debug_types::{
 
 use crate::{
     AdviceMutation, DebugError, DebugHandler, EventError, FutureMaybeSend, Host, MastForest,
-    MastForestStore, MemMastForestStore, ProcessState, TraceError, Word,
+    MastForestStore, MemMastForestStore, ProcessorState, TraceError, Word,
 };
 
-/// A snapshot of the process state for consistency checking between processors.
+/// A snapshot of the processor state for consistency checking between processors.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProcessStateSnapshot {
+pub struct ProcessorStateSnapshot {
     clk: u32,
     ctx: u32,
     stack_state: Vec<Felt>,
@@ -20,9 +20,9 @@ pub struct ProcessStateSnapshot {
     mem_state: Vec<(crate::MemoryAddress, Felt)>,
 }
 
-impl From<&ProcessState<'_>> for ProcessStateSnapshot {
-    fn from(state: &ProcessState) -> Self {
-        ProcessStateSnapshot {
+impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
+    fn from(state: &ProcessorState) -> Self {
+        ProcessorStateSnapshot {
             clk: state.clk().into(),
             ctx: state.ctx().into(),
             stack_state: state.get_stack_state(),
@@ -64,7 +64,7 @@ impl TraceCollector {
 }
 
 impl DebugHandler for TraceCollector {
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         // Count the trace event
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
@@ -82,7 +82,7 @@ pub struct TestConsistencyHost<S: SourceManager = DefaultSourceManager> {
     trace_collector: TraceCollector,
 
     /// Process state snapshots for consistency checking
-    snapshots: BTreeMap<u32, Vec<ProcessStateSnapshot>>,
+    snapshots: BTreeMap<u32, Vec<ProcessorStateSnapshot>>,
 
     /// MAST forest store for external node resolution
     store: MemMastForestStore,
@@ -125,7 +125,7 @@ impl TestConsistencyHost {
     }
 
     /// Gets mutable access to all snapshots.
-    pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessStateSnapshot>> {
+    pub fn snapshots(&self) -> &BTreeMap<u32, Vec<ProcessorStateSnapshot>> {
         &self.snapshots
     }
 }
@@ -156,25 +156,25 @@ where
 
     fn on_event(
         &mut self,
-        _process: &ProcessState,
+        _process: &ProcessorState,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async move { Ok(Vec::new()) } // For testing, return empty mutations
     }
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessState,
+        _process: &mut ProcessorState,
         _options: &DebugOptions,
     ) -> Result<(), DebugError> {
         Ok(())
     }
 
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
         // Also collect process state snapshot for consistency checking
-        let snapshot = ProcessStateSnapshot::from(&*process);
+        let snapshot = ProcessorStateSnapshot::from(&*process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())

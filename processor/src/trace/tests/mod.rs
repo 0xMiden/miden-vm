@@ -31,7 +31,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
-        &stack_inputs,
+        StackInputs::new(&stack_inputs).unwrap(),
         AdviceInputs::default(),
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)
@@ -75,7 +75,7 @@ pub fn build_trace_from_ops_with_inputs(
     let program = Program::new(mast_forest.into(), basic_block_id);
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
-        stack_inputs.as_ref(),
+        stack_inputs,
         advice_inputs,
         ExecutionOptions::default()
             .with_core_trace_fragment_size(TEST_TRACE_FRAGMENT_SIZE)

@@ -6,7 +6,7 @@ use core::{fmt, ops::RangeInclusive};
 
 use miden_core::{DebugOptions, FMP_ADDR, Felt};
 
-use crate::{DebugError, PrimeField64, ProcessState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, PrimeField64, ProcessorState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -56,7 +56,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         match *options {
@@ -84,7 +84,7 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
         .map_err(DebugError::from)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
@@ -103,7 +103,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         stack: &[Felt],
         n: Option<usize>,
         stack_type: &str,
-        process: &ProcessState,
+        process: &ProcessorState,
     ) -> fmt::Result {
         if stack.is_empty() {
             writeln!(self.writer, "{stack_type} empty before step {}.", process.clk())?;
@@ -147,7 +147,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
-    fn print_mem_all(&mut self, process: &ProcessState) -> fmt::Result {
+    fn print_mem_all(&mut self, process: &ProcessorState) -> fmt::Result {
         let mem = process.get_mem_state(process.ctx());
 
         writeln!(
@@ -169,7 +169,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Writes memory values in the provided addresses interval.
     fn print_mem_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         range: RangeInclusive<u32>,
     ) -> fmt::Result {
         let start = *range.start();
@@ -212,7 +212,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// The interval given is inclusive on *both* ends.
     fn print_local_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         range: RangeInclusive<u16>,
         num_locals: u32,
     ) -> fmt::Result {

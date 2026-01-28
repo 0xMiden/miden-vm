@@ -5,7 +5,7 @@ use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManage
 
 use crate::{
     AdviceMutation, DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    Host, MastForestStore, MemMastForestStore, ProcessState, TraceError,
+    Host, MastForestStore, MemMastForestStore, ProcessorState, TraceError,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 
@@ -75,7 +75,7 @@ where
     /// Registers a single [`EventHandler`] into this host.
     ///
     /// The handler can be either a closure or a free function with signature
-    /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
+    /// `fn(&mut ProcessorState) -> Result<(), EventHandler>`
     pub fn register_handler(
         &mut self,
         event: EventName,
@@ -137,7 +137,7 @@ where
 
     fn on_event(
         &mut self,
-        process: &ProcessState<'_>,
+        process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         let event_id = EventId::from_felt(process.get_stack_item(0));
         let result = match self.event_handlers.handle_event(event_id, process) {
@@ -160,13 +160,13 @@ where
 
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &mut ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
@@ -201,7 +201,7 @@ impl Host for NoopHost {
     #[inline(always)]
     fn on_event(
         &mut self,
-        _process: &ProcessState<'_>,
+        _process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async { Ok(Vec::new()) }
     }

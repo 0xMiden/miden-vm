@@ -31,7 +31,6 @@ pub use miden_core::{
 pub(crate) mod continuation_stack;
 
 pub mod fast;
-use fast::FastProcessState;
 pub mod parallel;
 pub(crate) mod processor;
 
@@ -181,8 +180,7 @@ pub async fn execute(
     host: &mut impl Host,
     options: ExecutionOptions,
 ) -> Result<ExecutionTrace, ExecutionError> {
-    let stack_inputs: Vec<Felt> = stack_inputs.into_iter().collect();
-    let processor = FastProcessor::new_with_options(&stack_inputs, advice_inputs, options);
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
@@ -231,52 +229,41 @@ pub fn execute_sync(
     }
 }
 
-// PROCESS STATE
-// ================================================================================================
+// PROCESSOR STATE
+// ===============================================================================================
 
+/// A view into the current state of the processor.
+///
+/// This struct provides read access to the processor's state, including the stack, memory,
+/// advice provider, and execution context information.
 #[derive(Debug)]
-pub enum ProcessState<'a> {
-    Fast(FastProcessState<'a>),
-    /// A process state that does nothing. Calling any of its methods results in a panic. It is
-    /// expected to be used in conjunction with the `NoopHost`.
-    Noop(()),
+pub struct ProcessorState<'a> {
+    processor: &'a mut FastProcessor,
 }
 
-impl<'a> ProcessState<'a> {
+impl<'a> ProcessorState<'a> {
     /// Returns a reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider(&self) -> &AdviceProvider {
-        match self {
-            ProcessState::Fast(state) => &state.processor.advice,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        &self.processor.advice
     }
 
     /// Returns a mutable reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        match self {
-            ProcessState::Fast(state) => &mut state.processor.advice,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        &mut self.processor.advice
     }
 
     /// Returns the current clock cycle of a process.
     #[inline(always)]
     pub fn clk(&self) -> RowIndex {
-        match self {
-            ProcessState::Fast(state) => state.processor.clk,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.clk
     }
 
     /// Returns the current execution context ID.
     #[inline(always)]
     pub fn ctx(&self) -> ContextId {
-        match self {
-            ProcessState::Fast(state) => state.processor.ctx,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.ctx
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.
@@ -284,10 +271,7 @@ impl<'a> ProcessState<'a> {
     /// This method can access elements beyond the top 16 positions by using the overflow table.
     #[inline(always)]
     pub fn get_stack_item(&self, pos: usize) -> Felt {
-        match self {
-            ProcessState::Fast(state) => state.processor.stack_get(pos),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.stack_get(pos)
     }
 
     /// Returns a word starting at the specified element index on the stack.
@@ -303,30 +287,21 @@ impl<'a> ProcessState<'a> {
     /// Creating a word does not change the state of the stack.
     #[inline(always)]
     pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        match self {
-            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.stack_get_word(start_idx)
     }
 
     /// Returns stack state at the current clock cycle. This includes the top 16 items of the
     /// stack + overflow entries.
     #[inline(always)]
     pub fn get_stack_state(&self) -> Vec<Felt> {
-        match self {
-            ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.stack().iter().rev().copied().collect()
     }
 
     /// Returns the element located at the specified context/address, or None if the address hasn't
     /// been accessed previously.
     #[inline(always)]
     pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        match self {
-            ProcessState::Fast(state) => state.processor.memory.read_element_impl(ctx, addr),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.memory.read_element_impl(ctx, addr)
     }
 
     /// Returns the batch of elements starting at the specified context/address.
@@ -335,10 +310,7 @@ impl<'a> ProcessState<'a> {
     /// - If the address is not word aligned.
     #[inline(always)]
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        match self {
-            ProcessState::Fast(state) => state.processor.memory.read_word_impl(ctx, addr),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.memory.read_word_impl(ctx, addr)
     }
 
     /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
@@ -372,9 +344,6 @@ impl<'a> ProcessState<'a> {
     /// have been accessed at least once.
     #[inline(always)]
     pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        match self {
-            ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
+        self.processor.memory.get_memory_state(ctx)
     }
 }

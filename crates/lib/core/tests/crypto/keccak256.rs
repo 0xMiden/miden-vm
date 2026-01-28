@@ -124,14 +124,14 @@ fn test_keccak_hash_bytes_impl(input_u8: &[u8]) {
     let output = test.execute().unwrap();
 
     let stack = output.stack_outputs();
-    let commitment = stack.get_stack_word(0).unwrap();
-    let tag = stack.get_stack_word(4).unwrap();
+    let commitment = stack.get_word(0).unwrap();
+    let tag = stack.get_word(4).unwrap();
     let precompile_commitment = PrecompileCommitment::new(tag, commitment);
     let verifier_commitment = KeccakPrecompile.verify(preimage.as_ref()).unwrap();
     assert_eq!(precompile_commitment, verifier_commitment);
 
     // Digest occupies the elements after COMM/TAG
-    let digest: [Felt; 8] = array::from_fn(|i| stack.get_stack_item(8 + i).unwrap());
+    let digest: [Felt; 8] = array::from_fn(|i| stack.get_element(8 + i).unwrap());
     assert_eq!(&digest, preimage.digest().as_ref(), "output digest does not match");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();

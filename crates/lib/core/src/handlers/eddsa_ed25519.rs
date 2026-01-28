@@ -24,7 +24,7 @@ use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, Signature},
     hash::rpo::Rpo256,
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 
 use crate::handlers::{MemoryReadError, read_memory_packed_u32};
 
@@ -46,7 +46,7 @@ const PRECOMPILE_REQUEST_LEN: usize =
 pub struct EddsaPrecompile;
 
 impl EventHandler for EddsaPrecompile {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, pk_ptr, k_digest_ptr, sig_ptr, ...]
         let pk_ptr = process.get_stack_item(1).as_canonical_u64();
         let k_digest_ptr = process.get_stack_item(2).as_canonical_u64();

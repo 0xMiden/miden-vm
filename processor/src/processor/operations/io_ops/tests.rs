@@ -1,6 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, Word, ZERO, field::PrimeField64, stack::MIN_STACK_DEPTH};
+use miden_core::{
+    Felt, Word, ZERO,
+    field::PrimeField64,
+    stack::{MIN_STACK_DEPTH, StackInputs},
+};
 
 use super::{
     super::stack_ops::{op_pad, op_push},
@@ -20,7 +24,8 @@ fn test_op_advpop() {
     // popping from the advice stack should push the value onto the operand stack
     let advice_stack: Vec<u64> = vec![3];
     let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
-    let mut processor = FastProcessor::new_with_advice_inputs(&[], advice_inputs);
+    let mut processor =
+        FastProcessor::new_with_advice_inputs(StackInputs::default(), advice_inputs);
     let mut tracer = NoopTracer;
 
     op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
@@ -43,7 +48,8 @@ fn test_op_advpopw() {
     // word[0]=3 goes to stack position 0 (top), so result is [3, 4, 5, 6, 1].
     let advice_stack: Vec<u64> = vec![3, 4, 5, 6];
     let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
-    let mut processor = FastProcessor::new_with_advice_inputs(&[], advice_inputs);
+    let mut processor =
+        FastProcessor::new_with_advice_inputs(StackInputs::default(), advice_inputs);
     let mut tracer = NoopTracer;
 
     op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
@@ -65,7 +71,7 @@ fn test_op_advpopw() {
 
 #[test]
 fn test_op_mloadw() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -104,13 +110,13 @@ fn test_op_mloadw() {
     assert!(op_mloadw(&mut processor, &mut tracer).is_err());
 
     // --- calling MLOADW with a stack of minimum depth is ok ----------------
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     assert!(op_mloadw(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_mload() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -143,13 +149,13 @@ fn test_op_mload() {
     assert!(op_mload(&mut processor, &mut tracer).is_err());
 
     // --- calling MLOAD with a stack of minimum depth is ok ----------------
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     assert!(op_mload(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_mstream() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     // save two words into memory addresses 4 and 8
@@ -212,7 +218,7 @@ fn test_op_mstream() {
 
 #[test]
 fn test_op_mstorew() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -253,13 +259,13 @@ fn test_op_mstorew() {
     assert!(op_mstorew(&mut processor, &mut tracer).is_err());
 
     // --- calling MSTOREW with a stack of minimum depth is ok ----------------
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     assert!(op_mstorew(&mut processor, &mut tracer).is_ok());
 }
 
 #[test]
 fn test_op_mstore() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -306,7 +312,7 @@ fn test_op_mstore() {
     assert!(op_mstore(&mut processor, &mut tracer).is_err());
 
     // --- calling MSTORE with a stack of minimum depth is ok ----------------
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     assert!(op_mstore(&mut processor, &mut tracer).is_ok());
 }
 
@@ -317,7 +323,8 @@ fn test_op_pipe() {
     // pop_stack_dword pops: 30, 29, 28, 27 -> words[0], then 26, 25, 24, 23 -> words[1]
     let advice_stack: Vec<u64> = vec![30, 29, 28, 27, 26, 25, 24, 23];
     let advice_inputs = AdviceInputs::default().with_stack_values(advice_stack).unwrap();
-    let mut processor = FastProcessor::new_with_advice_inputs(&[], advice_inputs);
+    let mut processor =
+        FastProcessor::new_with_advice_inputs(StackInputs::default(), advice_inputs);
     let mut tracer = NoopTracer;
 
     // arrange the stack such that:
@@ -376,7 +383,7 @@ fn test_op_pipe() {
 #[test]
 #[ignore = "Re-enable when addressing issue 2276"]
 fn test_read_and_write_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -390,7 +397,7 @@ fn test_read_and_write_in_same_clock_cycle() {
 #[test]
 #[ignore = "Re-enable when addressing issue 2276"]
 fn test_write_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());
@@ -403,7 +410,7 @@ fn test_write_twice_in_same_clock_cycle() {
 /// Ensures that reading twice in the same clock cycle does NOT result in an error.
 #[test]
 fn test_read_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(&[]);
+    let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
     assert_eq!(0, processor.memory.num_accessed_words());

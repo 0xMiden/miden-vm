@@ -7,7 +7,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, EventError, ProcessState, TraceError};
+use crate::{DebugError, EventError, ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -90,7 +90,7 @@ pub trait Host {
     /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(
         &mut self,
-        process: &ProcessState<'_>,
+        process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
 
     // PROVIDED METHODS
@@ -99,7 +99,7 @@ pub trait Host {
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
-        process: &mut ProcessState,
+        process: &mut ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = debug::DefaultDebugHandler::default();
@@ -107,7 +107,7 @@ pub trait Host {
     }
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }

@@ -7,7 +7,7 @@ use miden_core::{
     sys_events::SystemEvent,
 };
 
-use crate::{AdviceError, MemoryError, PrimeField64, ProcessState, errors::OperationError};
+use crate::{AdviceError, MemoryError, PrimeField64, ProcessorState, errors::OperationError};
 
 // SYSTEM EVENT ERROR
 // ================================================================================================
@@ -31,7 +31,7 @@ pub enum SystemEventError {
 pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
 
 pub fn handle_system_event(
-    process: &mut ProcessState,
+    process: &mut ProcessorState,
     system_event: SystemEvent,
 ) -> Result<(), SystemEventError> {
     match system_event {
@@ -79,7 +79,7 @@ pub fn handle_system_event(
 /// - `start_addr` is greater than or equal to 2^32.
 /// - `end_addr` is greater than or equal to 2^32.
 /// - `start_addr` > `end_addr`.
-fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn insert_mem_values_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     let addr_range = process.get_mem_addr_range(5, 6)?;
     let ctx = process.ctx();
 
@@ -109,7 +109,7 @@ fn insert_mem_values_into_adv_map(process: &mut ProcessState) -> Result<(), Syst
 /// Where A is the first word after event_id (positions 1-4) and B is the second (positions 5-8).
 /// KEY is computed as `hash(A || B, domain)`, which matches `hmerge` on stack `[A, B, ...]`.
 fn insert_hdword_into_adv_map(
-    process: &mut ProcessState,
+    process: &mut ProcessorState,
     domain: Felt,
 ) -> Result<(), SystemEventError> {
     // Stack: [event_id, A, B, ...] where A is at positions 1-4, B at positions 5-8.
@@ -143,7 +143,7 @@ fn insert_hdword_into_adv_map(
 ///
 /// Where A is at positions 1-4, B at 5-8, C at 9-12, D at 13-16.
 /// KEY is computed as `hash_elements([A, B, C, D].concat())` (two-round absorption).
-fn insert_hqword_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn insert_hqword_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // Stack: [event_id, A, B, C, D, ...] where A is at positions 1-4, B at 5-8, etc.
     let a = process.get_stack_word(1);
     let b = process.get_stack_word(5);
@@ -178,7 +178,7 @@ fn insert_hqword_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEv
 ///
 /// Where `KEY` is computed by applying `hperm` to the 12-element state and extracting the digest.
 /// The state is read as `[RATE1, RATE2, CAP]` matching the LE sponge convention.
-fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn insert_hperm_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // Read the 12-element state from stack positions 1-12.
     // State layout: [RATE1, RATE2, CAP] where RATE1 is at positions 1-4.
     // We read in reverse order to build the state array.
@@ -228,7 +228,7 @@ fn insert_hperm_into_adv_map(process: &mut ProcessState) -> Result<(), SystemEve
 /// provider (i.e., the input trees are not removed).
 ///
 /// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
-fn merge_merkle_nodes(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn merge_merkle_nodes(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // fetch the arguments from the stack
     let lhs = process.get_stack_word(5);
     let rhs = process.get_stack_word(1);
@@ -259,7 +259,7 @@ fn merge_merkle_nodes(process: &mut ProcessState) -> Result<(), SystemEventError
 /// - The specified depth is either zero or greater than the depth of the Merkle tree identified by
 ///   the specified root.
 /// - Value of the node at the specified depth and index is not known to the advice provider.
-fn copy_merkle_node_to_adv_stack(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn copy_merkle_node_to_adv_stack(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // Stack at this point is `[event_id, d, i, R, ...]` where:
     // - `d` is depth,
     // - `i` is index,
@@ -301,7 +301,7 @@ fn copy_merkle_node_to_adv_stack(process: &mut ProcessState) -> Result<(), Syste
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
 fn copy_map_value_to_adv_stack(
-    process: &mut ProcessState,
+    process: &mut ProcessorState,
     include_len: bool,
     pad_to: u8,
 ) -> Result<(), SystemEventError> {
@@ -328,7 +328,9 @@ fn copy_map_value_to_adv_stack(
 ///
 /// # Errors
 /// Returns an error if the required key was not found in the key-value map.
-fn copy_map_value_length_to_adv_stack(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn copy_map_value_length_to_adv_stack(
+    process: &mut ProcessorState,
+) -> Result<(), SystemEventError> {
     let key = process.get_stack_word(1);
     let advice_provider = process.advice_provider_mut();
 
@@ -357,7 +359,7 @@ fn copy_map_value_length_to_adv_stack(process: &mut ProcessState) -> Result<(), 
 /// Outputs:
 ///   Advice stack: [has_mapkey, ...]
 /// ```
-pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), SystemEventError> {
+pub fn push_key_presence_flag(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     let map_key = process.get_stack_word(1);
 
     let presence_flag = process.advice_provider().contains_map_key(&map_key);
@@ -384,7 +386,7 @@ pub fn push_key_presence_flag(process: &mut ProcessState) -> Result<(), SystemEv
 ///
 /// # Errors
 /// Returns an error if the input is a zero element in the extension field.
-fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_ext2_inv_result(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // Stack layout: [event_id, a0, a1, ...] with event_id on top, a0 (low) at position 1
     // Read from positions 1 and 2 (skipping event_id at position 0)
     let coef0 = process.get_stack_item(1); // low coefficient
@@ -416,7 +418,7 @@ fn push_ext2_inv_result(process: &mut ProcessState) -> Result<(), SystemEventErr
 /// Outputs:
 ///   Advice stack: [leading_zeros, ...]
 /// ```
-fn push_leading_zeros(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_leading_zeros(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.leading_zeros()))
 }
 
@@ -430,7 +432,7 @@ fn push_leading_zeros(process: &mut ProcessState) -> Result<(), SystemEventError
 /// Outputs:
 ///   Advice stack: [trailing_zeros, ...]
 /// ```
-fn push_trailing_zeros(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_trailing_zeros(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.trailing_zeros()))
 }
 
@@ -444,7 +446,7 @@ fn push_trailing_zeros(process: &mut ProcessState) -> Result<(), SystemEventErro
 /// Outputs:
 ///   Advice stack: [leading_ones, ...]
 /// ```
-fn push_leading_ones(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_leading_ones(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.leading_ones()))
 }
 
@@ -458,7 +460,7 @@ fn push_leading_ones(process: &mut ProcessState) -> Result<(), SystemEventError>
 /// Outputs:
 ///   Advice stack: [trailing_ones, ...]
 /// ```
-fn push_trailing_ones(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_trailing_ones(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     push_transformed_stack_top(process, |stack_top| Felt::from_u32(stack_top.trailing_ones()))
 }
 
@@ -475,7 +477,7 @@ fn push_trailing_ones(process: &mut ProcessState) -> Result<(), SystemEventError
 ///
 /// # Errors
 /// Returns an error if the logarithm argument (top stack element) equals `ZERO`.
-fn push_ilog2(process: &mut ProcessState) -> Result<(), SystemEventError> {
+fn push_ilog2(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     let n = process.get_stack_item(1).as_canonical_u64();
     if n == 0 {
         return Err(OperationError::LogArgumentZero.into());
@@ -492,7 +494,7 @@ fn push_ilog2(process: &mut ProcessState) -> Result<(), SystemEventError> {
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.
 fn push_transformed_stack_top(
-    process: &mut ProcessState,
+    process: &mut ProcessorState,
     f: impl FnOnce(u32) -> Felt,
 ) -> Result<(), SystemEventError> {
     let stack_top = process.get_stack_item(1);
