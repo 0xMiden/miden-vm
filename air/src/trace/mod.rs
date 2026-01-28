@@ -17,8 +17,11 @@ pub use main_trace::{MainTrace, MainTraceRow};
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
-mod periodic_table;
-pub use periodic_table::{CYCLE_ROW_0, INV_CYCLE_ROW_7, CYCLE_ROW_6, CYCLE_ROW_7};
+mod periodic_columns;
+pub use periodic_columns::{
+    CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7, NUM_PERIODIC_VALUES, PERIOD,
+    RPO256_ARK1, RPO256_ARK2,
+};
 
 // CONSTANTS
 // ================================================================================================

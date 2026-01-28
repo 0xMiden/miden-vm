@@ -20,7 +20,6 @@ mod proving_options;
 
 pub use miden_air::{DeserializationError, ProcessorAir, config};
 pub use miden_core::{ExecutionProof, HashFunction};
-
 pub use miden_crypto::{
     stark,
     stark::{Commitments, OpenedValues, Proof},

@@ -9,12 +9,12 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, crypto::hash::Rpo256, 
-    field::ExtensionField, precompile::PrecompileTranscriptState,
+    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
+    precompile::PrecompileTranscriptState,
 };
 use p3_field::PrimeCharacteristicRing;
-use p3_miden_air::BusType;
 use p3_matrix::dense::RowMajorMatrix;
+use p3_miden_air::BusType;
 
 pub mod config;
 
@@ -25,12 +25,16 @@ mod unedited_constraints;
 pub use unedited_constraints::miden_vm_plonky3::MidenVM;
 
 pub mod trace;
-use crate::trace::{AuxTraceBuilder, AUX_TRACE_WIDTH, TRACE_WIDTH, CYCLE_ROW_0, INV_CYCLE_ROW_7, CYCLE_ROW_6, CYCLE_ROW_7};
-
 #[cfg(feature = "constraint_eval")]
 use core::borrow::Borrow;
+
 #[cfg(feature = "constraint_eval")]
 use trace::MainTraceRow;
+
+use crate::trace::{
+    AUX_TRACE_WIDTH, AuxTraceBuilder, CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7,
+    RPO256_ARK1, RPO256_ARK2, TRACE_WIDTH,
+};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -45,9 +49,6 @@ mod export {
 }
 
 pub use export::*;
-
-pub const NUM_PERIODIC_VALUES: usize = 29;
-pub const PERIOD: usize = 8;
 
 // PUBLIC INPUTS
 // ================================================================================================
@@ -148,7 +149,8 @@ where
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
-    /// Inner MidenVM AIR instance, obtained from Plonky3 codegen of the Miden VM air-script constraints.
+    /// Inner MidenVM AIR instance, obtained from Plonky3 codegen of the Miden VM air-script
+    /// constraints.
     inner: Option<MidenVM>,
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
@@ -166,6 +168,15 @@ where
             aux_builder: None,
             phantom: core::marker::PhantomData,
         }
+    }
+}
+
+impl<EF> Default for ProcessorAir<EF, ()>
+where
+    EF: ExtensionField<Felt>,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -190,41 +201,59 @@ where
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width).unwrap_or(TRACE_WIDTH)
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width)
+            .unwrap_or(TRACE_WIDTH)
     }
 
     fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::preprocessed_trace).unwrap_or(None)
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::preprocessed_trace)
+            .unwrap_or(None)
     }
 
     fn num_public_values(&self) -> usize {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values).unwrap_or(0) // todo
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values)
+            .unwrap_or(0) // todo
     }
 
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table).unwrap_or_else(|| {
-            let mut periodic_table = Vec::new();
-            periodic_table.push(CYCLE_ROW_0.to_vec());
-            periodic_table.push(INV_CYCLE_ROW_7.to_vec());
-            periodic_table.push(CYCLE_ROW_0.to_vec());
-            periodic_table.push(CYCLE_ROW_6.to_vec());
-            periodic_table.push(CYCLE_ROW_7.to_vec());
-            let ark1 = Rpo256::ARK1.iter().map(|&v| {
-                let mut v = v.to_vec();
-                v.push(Felt::ZERO);
-                v
-            }).collect::<Vec<_>>();
-            let ark2 = Rpo256::ARK2.iter().map(|&v| {
-                let mut v = v.to_vec();
-                v.push(Felt::ZERO);
-                v
-            }).collect::<Vec<_>>();
-            periodic_table.extend_from_slice(&ark1);
-            periodic_table.extend_from_slice(&ark2);
-            periodic_table
-        }
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table)
+            .unwrap_or_else(|| {
+                let mut periodic_table = vec![
+                    CYCLE_ROW_0.to_vec(),
+                    INV_CYCLE_ROW_7.to_vec(),
+                    CYCLE_ROW_0.to_vec(),
+                    CYCLE_ROW_6.to_vec(),
+                    CYCLE_ROW_7.to_vec(),
+                ];
 
-        )
+                let ark1 = RPO256_ARK1
+                    .iter()
+                    .map(|&v| {
+                        let mut v = v.to_vec();
+                        v.push(Felt::ZERO);
+                        v
+                    })
+                    .collect::<Vec<_>>();
+                let ark2 = RPO256_ARK2
+                    .iter()
+                    .map(|&v| {
+                        let mut v = v.to_vec();
+                        v.push(Felt::ZERO);
+                        v
+                    })
+                    .collect::<Vec<_>>();
+                periodic_table.extend_from_slice(&ark1);
+                periodic_table.extend_from_slice(&ark2);
+                periodic_table
+            })
     }
 
     fn num_randomness(&self) -> usize {
@@ -235,11 +264,17 @@ where
     }
 
     fn aux_width(&self) -> usize {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::aux_width).unwrap_or(AUX_TRACE_WIDTH)
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::aux_width)
+            .unwrap_or(AUX_TRACE_WIDTH)
     }
 
     fn bus_types(&self) -> &[BusType] {
-        self.inner.as_ref().map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::bus_types).unwrap_or(&[]) // todo
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::bus_types)
+            .unwrap_or(&[]) // todo
     }
 
     fn build_aux_trace(
