@@ -90,7 +90,7 @@ pub async fn prove(
     let public_values = trace.to_public_values();
 
     // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    let air = miden_air::ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {

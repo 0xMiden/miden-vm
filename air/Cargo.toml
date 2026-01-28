@@ -22,6 +22,7 @@ default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
 concurrent = ["std"]
 testing = []
+constraint_eval = []
 
 [dependencies]
 # Miden dependencies
@@ -37,6 +38,8 @@ tracing.workspace = true
 p3-blake3.workspace = true
 p3-commit.workspace = true
 p3-dft.workspace = true
+p3-field.workspace = true
+p3-miden-air.workspace = true
 p3-miden-fri.workspace = true
 p3-keccak.workspace = true
 p3-matrix.workspace = true

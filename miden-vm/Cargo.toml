@@ -50,6 +50,7 @@ path = "tests/integration/main.rs"
 
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
+constraint_eval = ["miden-air/constraint_eval"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
@@ -100,3 +101,4 @@ pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 rand_chacha = { version = "0.9" }
 walkdir = { version = "2.5" }
+miden-air = { workspace = true }

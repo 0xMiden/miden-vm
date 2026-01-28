@@ -7,18 +7,32 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use core::borrow::Borrow;
 
 use miden_core::{
     ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
     precompile::PrecompileTranscriptState,
 };
+use p3_field::PrimeCharacteristicRing;
+use p3_miden_air::BusType;
 
 pub mod config;
+
+#[cfg(feature = "constraint_eval")]
 mod constraints;
+#[cfg(feature = "constraint_eval")]
+use constraints::enforce_constraints;
+
+mod unedited_constraints;
+pub use unedited_constraints::miden_vm_plonky3::MidenVM;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
+#[cfg(feature = "constraint_eval")]
+use trace::{MainTraceRow, NUM_PERIODIC_VALUES};
+
+use crate::trace::{
+    AUX_TRACE_WIDTH, AuxTraceBuilder, CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7,
+    RPO256_ARK1, RPO256_ARK2, TRACE_WIDTH,
+};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -128,48 +142,130 @@ impl Deserializable for PublicInputs {
 ///
 /// This struct defines the constraints for the Miden VM processor.
 /// Generic over aux trace builder to support different extension fields.
-pub struct ProcessorAir<B = ()> {
+pub struct ProcessorAir<EF, B = ()>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
+    /// Inner MidenVM AIR instance, obtained from Plonky3 codegen of the Miden VM air-script
+    /// constraints.
+    inner: Option<MidenVM>,
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
+    phantom: core::marker::PhantomData<EF>,
 }
 
-impl Default for ProcessorAir<()> {
+impl<EF> ProcessorAir<EF, ()>
+where
+    EF: ExtensionField<Felt>,
+{
+    /// Creates a new ProcessorAir without auxiliary trace support.
+    pub fn new() -> Self {
+        Self {
+            inner: Some(MidenVM {}),
+            aux_builder: None,
+            phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<EF> Default for ProcessorAir<EF, ()>
+where
+    EF: ExtensionField<Felt>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ProcessorAir<()> {
-    /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
-    }
-}
-
-impl<B> ProcessorAir<B> {
+impl<EF, B> ProcessorAir<EF, B>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
     /// Creates a new ProcessorAir with auxiliary trace support.
     pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
+        Self {
+            inner: Some(MidenVM {}),
+            aux_builder: Some(builder),
+            phantom: core::marker::PhantomData,
+        }
     }
 }
 
-impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
+impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
-        TRACE_WIDTH
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width)
+            .unwrap_or(TRACE_WIDTH)
     }
 
-    fn aux_width(&self) -> usize {
-        // Return the number of extension field columns
-        // The prover will interpret the returned base field data as EF columns
-        AUX_TRACE_WIDTH
+    fn num_public_values(&self) -> usize {
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values)
+            .unwrap_or(0) // todo
+    }
+
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table)
+            .unwrap_or_else(|| {
+                let mut periodic_table = vec![
+                    CYCLE_ROW_0.to_vec(),
+                    INV_CYCLE_ROW_7.to_vec(),
+                    CYCLE_ROW_0.to_vec(),
+                    CYCLE_ROW_6.to_vec(),
+                    CYCLE_ROW_7.to_vec(),
+                ];
+
+                let ark1 = RPO256_ARK1
+                    .iter()
+                    .map(|&v| {
+                        let mut v = v.to_vec();
+                        v.push(Felt::ZERO);
+                        v
+                    })
+                    .collect::<Vec<_>>();
+                let ark2 = RPO256_ARK2
+                    .iter()
+                    .map(|&v| {
+                        let mut v = v.to_vec();
+                        v.push(Felt::ZERO);
+                        v
+                    })
+                    .collect::<Vec<_>>();
+                periodic_table.extend_from_slice(&ark1);
+                periodic_table.extend_from_slice(&ark2);
+                periodic_table
+            })
     }
 
     fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_ELEMENTS
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_randomness)
+            .unwrap_or(trace::AUX_TRACE_RAND_ELEMENTS)
+    }
+
+    fn aux_width(&self) -> usize {
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::aux_width)
+            .unwrap_or(AUX_TRACE_WIDTH)
+    }
+
+    fn bus_types(&self) -> &[BusType] {
+        self.inner
+            .as_ref()
+            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::bus_types)
+            .unwrap_or(&[]) // todo
     }
 
     fn build_aux_trace(
@@ -184,27 +280,15 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
+    #[cfg(not(feature = "constraint_eval"))]
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+
+    #[cfg(feature = "constraint_eval")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        use p3_matrix::Matrix;
-
-        use crate::constraints;
-
-        let main = builder.main();
-
-        // Access the two rows: current (local) and next
-        let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-        let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
-
-        // Use structured column access via MainTraceCols
-        let local: &MainTraceRow<AB::Var> = (*local).borrow();
-        let next: &MainTraceRow<AB::Var> = (*next).borrow();
-
-        // SYSTEM CONSTRAINTS
-        constraints::enforce_clock_constraint(builder, local, next);
-
-        // RANGE CHECKER CONSTRAINTS
-        constraints::range::enforce_range_boundary_constraints(builder, local);
-        constraints::range::enforce_range_transition_constraint(builder, local, next);
-        constraints::range::enforce_range_bus_constraint(builder, local);
+        if let Some(inner) = &self.inner {
+            <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(inner, builder);
+        } else {
+            enforce_constraints(builder);
+        }
     }
 }

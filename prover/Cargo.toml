@@ -16,6 +16,7 @@ edition.workspace = true
 [features]
 default = ["std"]
 concurrent = ["std", "miden-processor/concurrent"]
+constraint_eval = ["miden-air/constraint_eval"]
 std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
 
 [dependencies]
@@ -25,6 +26,7 @@ miden-core.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-crypto.workspace = true
+p3-miden-air.workspace = true
 
 # External dependencies
 bincode = "1.3"

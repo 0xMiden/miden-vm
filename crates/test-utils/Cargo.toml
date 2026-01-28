@@ -22,6 +22,7 @@ std = [
     "miden-prover/std",
     "miden-verifier/std",
 ]
+constraint_eval = ["miden-air/constraint_eval"]
 
 [dependencies]
 miden-air.workspace = true

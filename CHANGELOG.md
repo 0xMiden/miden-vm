@@ -51,6 +51,7 @@
 - Added malicious advice provider tests for MASM validation using advice stack initialization ([#2583](https://github.com/0xMiden/miden-vm/pull/2583)).
 - [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
 - [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
+- Restore AIR constraints using AirScript with Plonky3 backend ([#2562](https://github.com/0xMiden/miden-vm/pull/2562)).
 
 ## 0.20.3 (2026-01-27)
 
