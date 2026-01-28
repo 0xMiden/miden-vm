@@ -41,6 +41,8 @@ pub(crate) mod row_major_adapter;
 mod system;
 pub use system::ContextId;
 
+pub mod tracer;
+
 #[cfg(test)]
 mod test_utils;
 

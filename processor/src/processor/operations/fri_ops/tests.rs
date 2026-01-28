@@ -10,7 +10,10 @@ use super::{
     compute_evaluation_points, fold4 as fri_fold4, get_domain_segment_flags, get_tau_factor,
     op_fri_ext2fold4,
 };
-use crate::fast::{FastProcessor, NoopTracer, step::NeverStopper};
+use crate::{
+    fast::{FastProcessor, step::NeverStopper},
+    tracer::NoopTracer,
+};
 
 // FRI FOLDING TESTS
 // --------------------------------------------------------------------------------------------

@@ -3,10 +3,10 @@ use miden_air::Felt;
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 pub use crate::errors::IoError;
 use crate::{
-    fast::Tracer,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
     },
+    tracer::Tracer,
 };
 
 #[cfg(test)]
@@ -24,8 +24,8 @@ pub(super) fn op_advpop<P: Processor>(
     let value = processor.advice_provider().pop_stack()?;
     tracer.record_advice_pop_stack(value);
 
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, value);
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, value);
 
     Ok(())
 }
@@ -44,7 +44,7 @@ pub(super) fn op_advpopw<P: Processor>(
     tracer.record_advice_pop_stack_word(word);
 
     // Set word on stack (word[0] at top).
-    processor.stack().set_word(0, &word);
+    processor.stack_mut().set_word(0, &word);
 
     Ok(())
 }
@@ -67,17 +67,17 @@ pub(super) fn op_mloadw<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack().get(0);
+    let addr = processor.stack_mut().get(0);
     let ctx = processor.system().ctx();
     let clk = processor.system().clk();
 
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
 
     let word = processor.memory().read_word(ctx, addr, clk)?;
     tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
 
     // Set word on stack (word[0] at top).
-    processor.stack().set_word(0, &word);
+    processor.stack_mut().set_word(0, &word);
 
     Ok(())
 }
@@ -98,19 +98,19 @@ pub(super) fn op_mstorew<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack().get(0);
+    let addr = processor.stack_mut().get(0);
     // Address is at position 0, so word starts at position 1
     let word = [
-        processor.stack().get(1),
-        processor.stack().get(2),
-        processor.stack().get(3),
-        processor.stack().get(4),
+        processor.stack_mut().get(1),
+        processor.stack_mut().get(2),
+        processor.stack_mut().get(3),
+        processor.stack_mut().get(4),
     ]
     .into();
     let ctx = processor.system().ctx();
     let clk = processor.system().clk();
 
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
 
     processor.memory().write_word(ctx, addr, clk, word)?;
     tracer.record_memory_write_word(word, addr, processor.system().ctx(), processor.system().clk());
@@ -132,7 +132,7 @@ pub(super) fn op_mload<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
     let ctx = processor.system().ctx();
-    let addr = processor.stack().get(0);
+    let addr = processor.stack_mut().get(0);
 
     let element = processor.memory().read_element(ctx, addr)?;
     tracer.record_memory_read_element(
@@ -142,7 +142,7 @@ pub(super) fn op_mload<P: Processor>(
         processor.system().clk(),
     );
 
-    processor.stack().set(0, element);
+    processor.stack_mut().set(0, element);
 
     Ok(())
 }
@@ -160,11 +160,11 @@ pub(super) fn op_mstore<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack().get(0);
-    let value = processor.stack().get(1);
+    let addr = processor.stack_mut().get(0);
+    let value = processor.stack_mut().get(1);
     let ctx = processor.system().ctx();
 
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
 
     processor.memory().write_element(ctx, addr, value)?;
     tracer.record_memory_write_element(
@@ -202,7 +202,7 @@ pub(super) fn op_mstream<P: Processor>(
     let clk = processor.system().clk();
 
     // load two words from memory
-    let addr_first_word = processor.stack().get(MEM_ADDR_STACK_IDX);
+    let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
     let words = {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
@@ -227,11 +227,13 @@ pub(super) fn op_mstream<P: Processor>(
 
     // Replace the stack elements with the elements from memory (in stack order). The word at
     // address `addr` is at the top of the stack.
-    processor.stack().set_word(0, &words[0]);
-    processor.stack().set_word(4, &words[1]);
+    processor.stack_mut().set_word(0, &words[0]);
+    processor.stack_mut().set_word(4, &words[1]);
 
     // increment the address by 8 (2 words)
-    processor.stack().set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
+    processor
+        .stack_mut()
+        .set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
 
     Ok(())
 }
@@ -264,7 +266,7 @@ pub(super) fn op_pipe<P: Processor>(
 
     let clk = processor.system().clk();
     let ctx = processor.system().ctx();
-    let addr_first_word = processor.stack().get(MEM_ADDR_STACK_IDX);
+    let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
     let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
     // pop two words from the advice stack
@@ -290,11 +292,13 @@ pub(super) fn op_pipe<P: Processor>(
 
     // Replace the elements on the stack with the word elements (in stack order).
     // words[0] goes to top positions (0-3), words[1] goes to positions (4-7).
-    processor.stack().set_word(0, &words[0]);
-    processor.stack().set_word(4, &words[1]);
+    processor.stack_mut().set_word(0, &words[0]);
+    processor.stack_mut().set_word(4, &words[1]);
 
     // increment the address by 8 (2 words)
-    processor.stack().set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
+    processor
+        .stack_mut()
+        .set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
 
     Ok(())
 }

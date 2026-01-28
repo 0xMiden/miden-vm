@@ -7,8 +7,9 @@ use miden_core::{
 
 use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};
 use crate::{
-    fast::{FastProcessor, NoopTracer},
+    fast::FastProcessor,
     processor::{Processor, StackInterface},
+    tracer::NoopTracer,
 };
 
 // TESTS
@@ -73,19 +74,19 @@ fn test_op_drop() {
     op_push(&mut processor, Felt::new(2), &mut tracer).unwrap();
 
     // drop the first value
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
     let expected = build_expected(&[1]);
     assert_eq!(expected, processor.stack_top());
     assert_eq!(MIN_STACK_DEPTH as u32 + 1, processor.stack_depth());
 
     // drop the next value
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
     let expected = build_expected(&[]);
     assert_eq!(expected, processor.stack_top());
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
 
     // calling drop with a minimum stack depth should be ok
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
 }
 
 #[test]
@@ -106,7 +107,7 @@ fn test_op_dup() {
     // duplicating non-existent item from the min stack range should be ok (dup2)
     dup_nth(&mut processor, 2, &mut tracer).unwrap();
     // drop it again before continuing the tests and stack comparison
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
 
     // put 15 more items onto the stack
     let mut expected_arr = [ONE; 16];
@@ -133,10 +134,10 @@ fn test_op_dup() {
     assert_eq!(ONE, processor.stack_get(1));
 
     // remove 4 items off the stack
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
-    Processor::stack(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 15, processor.stack_depth());
 
@@ -181,13 +182,13 @@ fn test_op_swapw() {
         .unwrap(),
     );
 
-    Processor::stack(&mut processor).swapw_nth(1);
+    Processor::stack_mut(&mut processor).swapw_nth(1);
     let expected = build_expected(&[5, 4, 3, 2, 9, 8, 7, 6, 1]);
     assert_eq!(expected, processor.stack_top());
 
     // swapping with a minimum stack should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    Processor::stack(&mut processor).swapw_nth(1);
+    Processor::stack_mut(&mut processor).swapw_nth(1);
 }
 
 #[test]
@@ -212,13 +213,13 @@ fn test_op_swapw2() {
         .unwrap(),
     );
 
-    Processor::stack(&mut processor).swapw_nth(2);
+    Processor::stack_mut(&mut processor).swapw_nth(2);
     let expected = build_expected(&[5, 4, 3, 2, 9, 8, 7, 6, 13, 12, 11, 10, 1]);
     assert_eq!(expected, processor.stack_top());
 
     // swapping with a minimum stack should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    Processor::stack(&mut processor).swapw_nth(2);
+    Processor::stack_mut(&mut processor).swapw_nth(2);
 }
 
 #[test]
@@ -246,13 +247,13 @@ fn test_op_swapw3() {
         .unwrap(),
     );
 
-    Processor::stack(&mut processor).swapw_nth(3);
+    Processor::stack_mut(&mut processor).swapw_nth(3);
     let expected = build_expected(&[4, 3, 2, 1, 12, 11, 10, 9, 8, 7, 6, 5, 16, 15, 14, 13]);
     assert_eq!(expected, processor.stack_top());
 
     // swapping with a minimum stack should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    Processor::stack(&mut processor).swapw_nth(3);
+    Processor::stack_mut(&mut processor).swapw_nth(3);
 }
 
 #[test]
@@ -320,28 +321,28 @@ fn test_op_movup() {
     );
 
     // movup2: rotate_left(3) - moves element at index 2 to top
-    Processor::stack(&mut processor).rotate_left(3);
+    Processor::stack_mut(&mut processor).rotate_left(3);
     let expected = build_expected(&[3, 1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movup3: rotate_left(4)
-    Processor::stack(&mut processor).rotate_left(4);
+    Processor::stack_mut(&mut processor).rotate_left(4);
     let expected = build_expected(&[4, 3, 1, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movup7: rotate_left(8)
-    Processor::stack(&mut processor).rotate_left(8);
+    Processor::stack_mut(&mut processor).rotate_left(8);
     let expected = build_expected(&[8, 4, 3, 1, 2, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movup8: rotate_left(9)
-    Processor::stack(&mut processor).rotate_left(9);
+    Processor::stack_mut(&mut processor).rotate_left(9);
     let expected = build_expected(&[9, 8, 4, 3, 1, 2, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // executing movup with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    Processor::stack(&mut processor).rotate_left(3);
+    Processor::stack_mut(&mut processor).rotate_left(3);
 }
 
 #[test]
@@ -370,28 +371,28 @@ fn test_op_movdn() {
     );
 
     // movdn2: rotate_right(3) - moves top element to index 2
-    Processor::stack(&mut processor).rotate_right(3);
+    Processor::stack_mut(&mut processor).rotate_right(3);
     let expected = build_expected(&[2, 3, 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movdn3: rotate_right(4)
-    Processor::stack(&mut processor).rotate_right(4);
+    Processor::stack_mut(&mut processor).rotate_right(4);
     let expected = build_expected(&[3, 1, 4, 2, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movdn7: rotate_right(8)
-    Processor::stack(&mut processor).rotate_right(8);
+    Processor::stack_mut(&mut processor).rotate_right(8);
     let expected = build_expected(&[1, 4, 2, 5, 6, 7, 8, 3, 9, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // movdn8: rotate_right(9)
-    Processor::stack(&mut processor).rotate_right(9);
+    Processor::stack_mut(&mut processor).rotate_right(9);
     let expected = build_expected(&[4, 2, 5, 6, 7, 8, 3, 9, 1, 10, 11, 12, 13, 14, 15, 16]);
     assert_eq!(expected, processor.stack_top());
 
     // executing movdn with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    Processor::stack(&mut processor).rotate_right(3);
+    Processor::stack_mut(&mut processor).rotate_right(3);
 }
 
 #[test]

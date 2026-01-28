@@ -6,9 +6,9 @@ use miden_core::{
 
 use crate::{
     OperationError,
-    fast::Tracer,
     operations::utils::assert_binary,
     processor::{OperationHelperRegisters, Processor, StackInterface},
+    tracer::Tracer,
 };
 
 #[cfg(test)]
@@ -25,8 +25,8 @@ pub(super) fn op_add<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// onto the stack.
 #[inline(always)]
 pub(super) fn op_neg<P: Processor>(processor: &mut P) {
-    let element = processor.stack().get(0);
-    processor.stack().set(0, -element);
+    let element = processor.stack_mut().get(0);
+    processor.stack_mut().set(0, -element);
 }
 
 /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
@@ -43,7 +43,7 @@ pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// Returns an error if the value on the top of the stack is ZERO.
 #[inline(always)]
 pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
-    let top = processor.stack().get_mut(0);
+    let top = processor.stack_mut().get_mut(0);
     if (*top) == ZERO {
         return Err(OperationError::DivideByZero);
     }
@@ -54,7 +54,7 @@ pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationErr
 /// Pops an element off the stack, adds ONE to it, and pushes the result back onto the stack.
 #[inline(always)]
 pub(super) fn op_incr<P: Processor>(processor: &mut P) {
-    *processor.stack().get_mut(0) += ONE;
+    *processor.stack_mut().get_mut(0) += ONE;
 }
 
 /// Pops two elements off the stack, computes their boolean AND, and pushes the result back
@@ -110,7 +110,7 @@ pub(super) fn op_or<P: Processor>(
 /// Returns an error if the value on the top of the stack is not a binary value.
 #[inline(always)]
 pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
-    let top = processor.stack().get_mut(0);
+    let top = processor.stack_mut().get_mut(0);
     if *top == ZERO {
         *top = ONE;
     } else if *top == ONE {
@@ -128,14 +128,14 @@ pub(super) fn op_eq<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    let b = processor.stack().get(0);
-    let a = processor.stack().get(1);
+    let b = processor.stack_mut().get(0);
+    let a = processor.stack_mut().get(1);
 
     // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
     // to return user op helpers, which makes the abstraction less suitable here.
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
     let result = if a == b { ONE } else { ZERO };
-    processor.stack().set(0, result);
+    processor.stack_mut().set(0, result);
 
     P::HelperRegisters::op_eq_registers(a, b)
 }
@@ -144,7 +144,7 @@ pub(super) fn op_eq<P: Processor>(
 /// onto the stack, otherwise pushes ZERO onto the stack.
 #[inline(always)]
 pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
-    let top = processor.stack().get_mut(0);
+    let top = processor.stack_mut().get_mut(0);
     let old_top = *top;
 
     if old_top == ZERO {
@@ -183,9 +183,9 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
 /// of 5).
 #[inline(always)]
 pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
-    let old_base = processor.stack().get(1);
-    let old_acc = processor.stack().get(2);
-    let old_exp_int = processor.stack().get(3).as_canonical_u64();
+    let old_base = processor.stack_mut().get(1);
+    let old_acc = processor.stack_mut().get(2);
+    let old_exp_int = processor.stack_mut().get(3).as_canonical_u64();
 
     // Compute new exponent.
     let new_exp = Felt::new(old_exp_int >> 1);
@@ -199,10 +199,10 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
     // Compute the new base.
     let new_base = old_base * old_base;
 
-    processor.stack().set(0, Felt::new(exp_lsb));
-    processor.stack().set(1, new_base);
-    processor.stack().set(2, new_acc);
-    processor.stack().set(3, new_exp);
+    processor.stack_mut().set(0, Felt::new(exp_lsb));
+    processor.stack_mut().set(1, new_base);
+    processor.stack_mut().set(2, new_acc);
+    processor.stack_mut().set(3, new_exp);
 
     P::HelperRegisters::op_expacc_registers(acc_update_val)
 }
@@ -218,7 +218,7 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const SEVEN: Felt = Felt::new(7);
     // get_word returns [s0, s1, s2, s3] where s0 is top of stack
     // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
-    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack_mut().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 
@@ -226,8 +226,8 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     let b1_times_a1 = b1 * a1;
     let c1 = (b0 + b1) * (a1 + a0) - b0_times_a0 - b1_times_a1;
     let c0 = b0_times_a0 + SEVEN * b1_times_a1;
-    processor.stack().set(2, c0); // c0 (low) at position 2
-    processor.stack().set(3, c1); // c1 (high) at position 3
+    processor.stack_mut().set(2, c0); // c0 (low) at position 2
+    processor.stack_mut().set(3, c1); // c1 (high) at position 3
 }
 
 // HELPERS
@@ -243,11 +243,11 @@ fn pop2_applyfn_push<P: Processor>(
     f: impl FnOnce(Felt, Felt) -> Felt,
     tracer: &mut impl Tracer,
 ) {
-    let b = processor.stack().get(0);
-    let a = processor.stack().get(1);
+    let b = processor.stack_mut().get(0);
+    let a = processor.stack_mut().get(1);
 
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, f(a, b));
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, f(a, b));
 }
 
 /// Pops the top two elements from the stack, applies the given function to them, and pushes the
@@ -260,11 +260,11 @@ fn pop2_applyfn_push_op<P: Processor>(
     f: impl FnOnce(Felt, Felt) -> Result<Felt, OperationError>,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    let b = processor.stack().get(0);
-    let a = processor.stack().get(1);
+    let b = processor.stack_mut().get(0);
+    let a = processor.stack_mut().get(1);
 
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, f(a, b)?);
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, f(a, b)?);
 
     Ok(())
 }

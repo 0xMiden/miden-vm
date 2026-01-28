@@ -10,8 +10,8 @@ use miden_core::{
 use crate::{
     AdviceError, ContextId, ExecutionError, Host, MemoryError,
     errors::{AceEvalError, OperationError},
-    fast::Tracer,
     processor::operations::execute_sync_op,
+    tracer::Tracer,
 };
 
 mod operations;
@@ -29,11 +29,17 @@ pub trait Processor: Sized {
     // REQUIRED METHODS
     // -------------------------------------------------------------------------------------------
 
+    /// Returns a reference to the internal stack.
+    fn stack(&self) -> &Self::Stack;
+
     /// Returns a mutable reference to the internal stack.
-    fn stack(&mut self) -> &mut Self::Stack;
+    fn stack_mut(&mut self) -> &mut Self::Stack;
+
+    /// Returns a reference to the internal system.
+    fn system(&self) -> &Self::System;
 
     /// Returns a mutable reference to the internal system.
-    fn system(&mut self) -> &mut Self::System;
+    fn system_mut(&mut self) -> &mut Self::System;
 
     /// Returns a mutable reference to the internal advice provider.
     fn advice_provider(&mut self) -> &mut Self::AdviceProvider;

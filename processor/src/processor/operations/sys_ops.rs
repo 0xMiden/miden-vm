@@ -3,8 +3,8 @@ use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 use crate::{
     ExecutionError,
     errors::OperationError,
-    fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
+    tracer::Tracer,
 };
 
 #[cfg(test)]
@@ -21,11 +21,11 @@ pub(super) fn op_assert<P: Processor>(
     program: &MastForest,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    if processor.stack().get(0) != ONE {
+    if processor.stack_mut().get(0) != ONE {
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
     Ok(())
 }
 
@@ -35,9 +35,9 @@ pub(super) fn op_sdepth<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let depth = processor.stack().depth();
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, Felt::from_u32(depth));
+    let depth = processor.stack_mut().depth();
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, Felt::from_u32(depth));
 
     Ok(())
 }
@@ -46,7 +46,7 @@ pub(super) fn op_sdepth<P: Processor>(
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(processor: &mut P) -> Result<(), ExecutionError> {
     let caller_hash = processor.system().caller_hash();
-    processor.stack().set_word(0, &caller_hash);
+    processor.stack_mut().set_word(0, &caller_hash);
 
     Ok(())
 }
@@ -58,8 +58,8 @@ pub(super) fn op_clk<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let clk: Felt = processor.system().clk().into();
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, clk);
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, clk);
 
     Ok(())
 }

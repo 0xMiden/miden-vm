@@ -29,7 +29,12 @@ impl Processor for FastProcessor {
     type Hasher = Self;
 
     #[inline(always)]
-    fn stack(&mut self) -> &mut Self::Stack {
+    fn stack(&self) -> &Self::Stack {
+        self
+    }
+
+    #[inline(always)]
+    fn stack_mut(&mut self) -> &mut Self::Stack {
         self
     }
 
@@ -49,7 +54,12 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn system(&mut self) -> &mut Self::System {
+    fn system(&self) -> &Self::System {
+        self
+    }
+
+    #[inline(always)]
+    fn system_mut(&mut self) -> &mut Self::System {
         self
     }
 
@@ -83,7 +93,7 @@ impl Processor for FastProcessor {
     /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
     ///
     /// Note that we do not record any memory reads in this operation (through a
-    /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
+    /// [crate::tracer::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
     fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack_get(2);

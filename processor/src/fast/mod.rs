@@ -25,6 +25,7 @@ use crate::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
         step::{BreakReason, NeverStopper, StepStopper, Stopper},
     },
+    tracer::{NoopTracer, Tracer},
 };
 
 pub mod execution_tracer;
@@ -38,8 +39,6 @@ pub(crate) mod step;
 pub use step::ResumeContext;
 
 pub mod trace_state;
-mod tracer;
-pub use tracer::{NoopTracer, Tracer};
 
 mod basic_block;
 mod call_and_dyn;

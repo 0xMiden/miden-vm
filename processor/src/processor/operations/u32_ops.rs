@@ -6,8 +6,8 @@ use paste::paste;
 
 use crate::{
     ExecutionError, OperationError,
-    fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
+    tracer::Tracer,
     utils::split_element,
 };
 
@@ -48,14 +48,14 @@ pub(super) fn op_u32split<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (top_hi, top_lo) = {
-        let top = processor.stack().get(0);
+        let top = processor.stack_mut().get(0);
         split_element(top)
     };
     tracer.record_u32_range_checks(processor.system().clk(), top_lo, top_hi);
 
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, top_lo);
-    processor.stack().set(1, top_hi);
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, top_lo);
+    processor.stack_mut().set(1, top_hi);
 
     Ok(P::HelperRegisters::op_u32split_registers(top_lo, top_hi))
 }
@@ -77,8 +77,8 @@ pub(super) fn op_u32add<P: Processor>(
     };
     tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
 
-    processor.stack().set(0, sum);
-    processor.stack().set(1, carry);
+    processor.stack_mut().set(0, sum);
+    processor.stack_mut().set(1, carry);
 
     Ok(P::HelperRegisters::op_u32add_registers(sum, carry))
 }
@@ -104,9 +104,9 @@ pub(super) fn op_u32add3<P: Processor>(
     tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
 
     // write sum to the new top of the stack, and carry after
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, sum);
-    processor.stack().set(1, carry);
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, sum);
+    processor.stack_mut().set(1, carry);
 
     Ok(P::HelperRegisters::op_u32add3_registers(sum, carry))
 }
@@ -130,8 +130,8 @@ pub(super) fn op_u32sub<P: Processor>(
 
     tracer.record_u32_range_checks(processor.system().clk(), diff, ZERO);
 
-    processor.stack().set(0, borrow);
-    processor.stack().set(1, diff);
+    processor.stack_mut().set(0, borrow);
+    processor.stack_mut().set(1, diff);
 
     Ok(P::HelperRegisters::op_u32sub_registers(diff))
 }
@@ -152,8 +152,8 @@ pub(super) fn op_u32mul<P: Processor>(
     let (hi, lo) = split_element(result);
     tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
-    processor.stack().set(0, lo);
-    processor.stack().set(1, hi);
+    processor.stack_mut().set(0, lo);
+    processor.stack_mut().set(1, hi);
 
     Ok(P::HelperRegisters::op_u32mul_registers(lo, hi))
 }
@@ -176,9 +176,9 @@ pub(super) fn op_u32madd<P: Processor>(
     tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
 
     // write lo to the new top of the stack, and hi after
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, lo);
-    processor.stack().set(1, hi);
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, lo);
+    processor.stack_mut().set(1, hi);
 
     Ok(P::HelperRegisters::op_u32madd_registers(lo, hi))
 }
@@ -212,8 +212,8 @@ pub(super) fn op_u32div<P: Processor>(
     let remainder = numerator - quotient * denominator;
 
     // remainder is placed on top of the stack, followed by quotient
-    processor.stack().set(0, Felt::new(remainder));
-    processor.stack().set(1, Felt::new(quotient));
+    processor.stack_mut().set(0, Felt::new(remainder));
+    processor.stack_mut().set(1, Felt::new(quotient));
 
     // These range checks help enforce that quotient <= numerator.
     let lo = Felt::new(numerator - quotient);
@@ -240,8 +240,8 @@ pub(super) fn op_u32and<P: Processor>(
     let result = a.as_canonical_u64() & b.as_canonical_u64();
 
     // Update stack
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, Felt::new(result));
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, Felt::new(result));
     Ok(())
 }
 
@@ -261,8 +261,8 @@ pub(super) fn op_u32xor<P: Processor>(
     let result = a.as_canonical_u64() ^ b.as_canonical_u64();
 
     // Update stack
-    processor.stack().decrement_size(tracer);
-    processor.stack().set(0, Felt::new(result));
+    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().set(0, Felt::new(result));
     Ok(())
 }
 

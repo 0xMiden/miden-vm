@@ -12,8 +12,9 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::{FastProcessor, NoopTracer, step::NeverStopper},
+    fast::{FastProcessor, step::NeverStopper},
     processor::{Processor, StackInterface},
+    tracer::NoopTracer,
 };
 
 // ADVICE INPUT TESTS
@@ -174,7 +175,7 @@ fn test_op_mstream() {
 
     // clear the stack (drop the 8 elements we pushed while storing)
     for _ in 0..8 {
-        Processor::stack(&mut processor).decrement_size(&mut tracer);
+        Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
         let _ = processor.increment_clk(&mut tracer, &NeverStopper);
     }
 

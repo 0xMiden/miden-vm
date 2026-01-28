@@ -10,11 +10,11 @@ use miden_core::{
 use crate::{
     chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::FastProcessor,
+    processor::Processor,
     system::ContextId,
 };
 
-/// A trait for tracing the execution of a [FastProcessor].
+/// A trait for tracing the execution of a processor.
 pub trait Tracer {
     /// Signals the start of a new clock cycle, guaranteed to be called before executing the
     /// operation at the given clock cycle. For example, it is safe to access the processor's stack
@@ -35,13 +35,14 @@ pub trait Tracer {
     ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
-    fn start_clock_cycle(
+    fn start_clock_cycle<P>(
         &mut self,
-        processor: &FastProcessor,
+        processor: &P,
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    );
+    ) where
+        P: Processor;
 
     /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].
     ///
@@ -161,7 +162,9 @@ pub trait Tracer {
     fn increment_clk(&mut self);
 
     /// Signals that the stack depth is incremented as a result of pushing a new element.
-    fn increment_stack_size(&mut self, processor: &FastProcessor);
+    fn increment_stack_size<P>(&mut self, processor: &P)
+    where
+        P: Processor;
 
     /// Signals that the stack depth is decremented as a result of popping an element off the stack.
     ///
@@ -183,13 +186,15 @@ pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     #[inline(always)]
-    fn start_clock_cycle(
+    fn start_clock_cycle<P>(
         &mut self,
-        _processor: &FastProcessor,
+        _processor: &P,
         _continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
-    ) {
+    ) where
+        P: Processor,
+    {
         // do nothing
     }
 
@@ -321,7 +326,10 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
+    fn increment_stack_size<P>(&mut self, _processor: &P)
+    where
+        P: Processor,
+    {
         // do nothing
     }
 

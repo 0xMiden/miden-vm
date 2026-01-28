@@ -6,9 +6,9 @@ use miden_core::{
 };
 
 use crate::{
-    fast::NoopTracer,
     parallel::core_trace_fragment::{BasicBlockContext, CoreTraceFragmentFiller},
     processor::StackInterface,
+    tracer::NoopTracer,
 };
 
 impl<'a> CoreTraceFragmentFiller<'a> {
