@@ -436,7 +436,7 @@ impl Tracer for ExecutionTracer {
         P: Processor,
     {
         // check if we need to start a new trace state
-        if processor.system().clk().as_usize().is_multiple_of(self.fragment_size) {
+        if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
                 SystemState::from_processor(processor),
                 processor
@@ -634,7 +634,7 @@ impl Tracer for ExecutionTracer {
         P: Processor,
     {
         let new_overflow_value = processor.stack().get(15);
-        self.overflow_table.push(new_overflow_value, processor.system().clk());
+        self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 
     fn decrement_stack_size(&mut self) {

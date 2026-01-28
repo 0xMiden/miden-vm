@@ -33,7 +33,7 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub(super) fn execute_sync_op(
+pub fn execute_sync_op(
     processor: &mut impl Processor,
     op: &Operation,
     current_forest: &MastForest,

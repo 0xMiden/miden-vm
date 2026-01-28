@@ -51,7 +51,7 @@ pub(super) fn op_u32split<P: Processor>(
         let top = processor.stack_mut().get(0);
         split_element(top)
     };
-    tracer.record_u32_range_checks(processor.system().clk(), top_lo, top_hi);
+    tracer.record_u32_range_checks(processor.system().clock(), top_lo, top_hi);
 
     processor.stack_mut().increment_size(tracer)?;
     processor.stack_mut().set(0, top_lo);
@@ -75,7 +75,7 @@ pub(super) fn op_u32add<P: Processor>(
         let result = Felt::new(a.as_canonical_u64() + b.as_canonical_u64());
         split_element(result)
     };
-    tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
+    tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
 
     processor.stack_mut().set(0, sum);
     processor.stack_mut().set(1, carry);
@@ -101,7 +101,7 @@ pub(super) fn op_u32add3<P: Processor>(
         let result = Felt::new(a.as_canonical_u64() + b.as_canonical_u64() + c.as_canonical_u64());
         split_element(result)
     };
-    tracer.record_u32_range_checks(processor.system().clk(), sum, carry);
+    tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
 
     // write sum to the new top of the stack, and carry after
     processor.stack_mut().decrement_size(tracer);
@@ -128,7 +128,7 @@ pub(super) fn op_u32sub<P: Processor>(
     let borrow = Felt::new(result >> 63);
     let diff = Felt::new(result & u32::MAX as u64);
 
-    tracer.record_u32_range_checks(processor.system().clk(), diff, ZERO);
+    tracer.record_u32_range_checks(processor.system().clock(), diff, ZERO);
 
     processor.stack_mut().set(0, borrow);
     processor.stack_mut().set(1, diff);
@@ -150,7 +150,7 @@ pub(super) fn op_u32mul<P: Processor>(
 
     let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64());
     let (hi, lo) = split_element(result);
-    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
+    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
 
     processor.stack_mut().set(0, lo);
     processor.stack_mut().set(1, hi);
@@ -173,7 +173,7 @@ pub(super) fn op_u32madd<P: Processor>(
 
     let result = Felt::new(a.as_canonical_u64() * b.as_canonical_u64() + c.as_canonical_u64());
     let (hi, lo) = split_element(result);
-    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
+    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
 
     // write lo to the new top of the stack, and hi after
     processor.stack_mut().decrement_size(tracer);
@@ -220,7 +220,7 @@ pub(super) fn op_u32div<P: Processor>(
     // These range checks help enforce that remainder < denominator.
     let hi = Felt::new(denominator - remainder - 1);
 
-    tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
+    tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
     Ok(P::HelperRegisters::op_u32div_registers(lo, hi))
 }
 
@@ -277,7 +277,7 @@ pub(super) fn op_u32assert2<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     let (first, second) = require_u32_operands!(processor, [0, 1]);
 
-    tracer.record_u32_range_checks(processor.system().clk(), first, second);
+    tracer.record_u32_range_checks(processor.system().clock(), first, second);
 
     // Stack remains unchanged for assert operations
 

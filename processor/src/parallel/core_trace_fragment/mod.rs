@@ -1,3 +1,4 @@
+use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_air::{
@@ -17,13 +18,15 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ExecutionError,
+    ContextId, ExecutionError, Host,
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
     errors::AceEvalError,
+    execution::execute_sync_op,
     fast::{
         eval_circuit_fast_,
+        step::BreakReason,
         trace_state::{
             AdviceReplay, CoreTraceFragmentContext, ExecutionContextSystemInfo,
             HasherResponseReplay, MemoryReadsReplay,
@@ -409,7 +412,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
-                    self.execute_sync_op(
+                    execute_sync_op(
+                        self,
                         op,
                         current_forest,
                         node_id,
@@ -576,7 +580,7 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         // push the last element on the overflow table
         {
             let last_element = self.get(MIN_STACK_DEPTH - 1);
-            self.context.state.stack.push_overflow(last_element, self.clk());
+            self.context.state.stack.push_overflow(last_element, self.clock());
         }
 
         // Shift all other elements down
@@ -648,6 +652,19 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         &mut self.context.replay.hasher
     }
 
+    fn save_context_and_truncate_stack(&mut self, _tracer: &mut impl Tracer) {
+        // Note: in the final implementation, this will also save the `ExecutionContextInfo` (to be
+        // used when writing the trace row).
+        let _ = self.context.state.stack.start_context();
+    }
+
+    fn restore_context(&mut self, _tracer: &mut impl Tracer) -> Result<(), crate::OperationError> {
+        let ctx_info = self.context.replay.block_stack.replay_execution_context();
+        self.restore_context_from_replay(&ctx_info);
+
+        Ok(())
+    }
+
     fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
         self.context.state.system.pc_transcript_state
     }
@@ -665,7 +682,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         let _circuit_evaluation = eval_circuit_parallel_(
             ctx,
             ptr,
-            self.system().clk(),
+            self.system().clock(),
             num_read,
             num_eval,
             self,
@@ -674,6 +691,48 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
 
         Ok(())
     }
+
+    fn execute_before_enter_decorators(
+        &mut self,
+        _node_id: MastNodeId,
+        _current_forest: &MastForest,
+        _host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        // do nothing - we don't execute decorators in this processor
+        ControlFlow::Continue(())
+    }
+
+    fn execute_after_exit_decorators(
+        &mut self,
+        _node_id: MastNodeId,
+        _current_forest: &MastForest,
+        _host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        // do nothing - we don't execute decorators in this processor
+        ControlFlow::Continue(())
+    }
+
+    fn execute_decorators_for_op(
+        &mut self,
+        _node_id: MastNodeId,
+        _op_idx_in_block: usize,
+        _current_forest: &MastForest,
+        _host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        // do nothing - we don't execute decorators in this processor
+        ControlFlow::Continue(())
+    }
+
+    fn execute_end_of_block_decorators(
+        &mut self,
+        _basic_block_node: &BasicBlockNode,
+        _node_id: MastNodeId,
+        _current_forest: &Arc<MastForest>,
+        _host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        // do nothing - we don't execute decorators in this processor
+        ControlFlow::Continue(())
+    }
 }
 
 impl<'a> SystemInterface for CoreTraceFragmentFiller<'a> {
@@ -681,12 +740,24 @@ impl<'a> SystemInterface for CoreTraceFragmentFiller<'a> {
         self.context.state.system.fn_hash
     }
 
-    fn clk(&self) -> RowIndex {
+    fn clock(&self) -> RowIndex {
         self.context.state.system.clk
     }
 
     fn ctx(&self) -> ContextId {
         self.context.state.system.ctx
+    }
+
+    fn increment_clock(&mut self) {
+        self.context.state.system.clk += 1u32;
+    }
+
+    fn set_caller_hash(&mut self, caller_hash: Word) {
+        self.context.state.system.fn_hash = caller_hash;
+    }
+
+    fn set_ctx(&mut self, ctx: ContextId) {
+        self.context.state.system.ctx = ctx;
     }
 }
 

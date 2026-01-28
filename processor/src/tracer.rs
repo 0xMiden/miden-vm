@@ -15,10 +15,21 @@ use crate::{
 };
 
 /// A trait for tracing the execution of a processor.
+///
+/// Allows for recording different aspects of the processor's execution. For example, the
+/// [`crate::fast::FastProcessor::execute_for_trace`] execution mode needs to build a
+/// [`crate::fast::execution_tracer::TraceGenerationContext`] which records information necessary to
+/// build the trace at each clock cycle.
+///
+/// A useful mental model to differentiate between the processor and the tracer is:
+/// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)
+///   as execution progresses
+/// - Tracer: records auxiliary information *derived from* the processor state
 pub trait Tracer {
-    /// Signals the start of a new clock cycle, guaranteed to be called before executing the
-    /// operation at the given clock cycle. For example, it is safe to access the processor's stack
-    /// and memory state as they are before executing the operation at this clock cycle.
+    /// Signals the start of a new clock cycle, guaranteed to be called at the start of the clock
+    /// cycle, before any mutations to the processor state is made. For example, it is safe to
+    /// access the processor's stack and memory state as they are before executing the operation at
+    /// the current clock cycle.
     ///
     /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
     /// `continuation_stack` represents whatever comes after execution `continuation`.
@@ -32,7 +43,6 @@ pub trait Tracer {
     ///   after-exit decorators are executed at the end of an `END` operation; never at the start of
     ///   a clock cycle
     ///
-    ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
     fn start_clock_cycle<P>(
@@ -45,7 +55,7 @@ pub trait Tracer {
         P: Processor;
 
     /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
-    /// clock.
+    /// clock, and after all mutations to the processor state have been applied.
     ///
     /// Implementations should use this method to finalize any tracing information related to the
     /// just-completed clock cycle.

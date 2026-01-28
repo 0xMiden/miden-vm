@@ -139,6 +139,7 @@ impl ExecutionOptions {
     // --------------------------------------------------------------------------------------------
 
     /// Returns maximum number of cycles a program is allowed to execute for.
+    #[inline(always)]
     pub fn max_cycles(&self) -> u32 {
         self.max_cycles
     }

@@ -288,7 +288,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
     let ctx = processor.system().ctx();
 
     // Read the evaluation point alpha from memory
@@ -393,7 +393,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
     let ctx = processor.system().ctx();
 
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
@@ -413,7 +413,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
             word,
             addr,
             processor.system().ctx(),
-            processor.system().clk(),
+            processor.system().clock(),
         );
 
         (
@@ -533,7 +533,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     const DST_PTR_IDX: usize = 13;
 
     let ctx = processor.system().ctx();
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
 
     // Get source and destination pointers
     let src_addr = processor.stack_mut().get(SRC_PTR_IDX);

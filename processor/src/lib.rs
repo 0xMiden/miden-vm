@@ -7,7 +7,10 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use core::fmt::{Display, LowerHex};
+use core::{
+    fmt::{Display, LowerHex},
+    ops::ControlFlow,
+};
 
 pub use miden_air::trace::RowIndex;
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
@@ -29,10 +32,11 @@ pub use miden_core::{
 };
 
 pub(crate) mod continuation_stack;
+pub(crate) mod execution;
 
 pub mod fast;
 pub mod parallel;
-pub(crate) mod processor;
+pub mod processor;
 
 mod operations;
 
@@ -85,7 +89,12 @@ mod tests;
 
 mod debug;
 
-use crate::{fast::FastProcessor, parallel::build_trace};
+use crate::{
+    continuation_stack::Continuation,
+    fast::{FastProcessor, step::BreakReason},
+    parallel::build_trace,
+    processor::Processor,
+};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -348,4 +357,27 @@ impl<'a> ProcessorState<'a> {
     pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
         self.processor.memory.get_memory_state(ctx)
     }
+}
+
+// STOPPER
+// ===============================================================================================
+
+/// A trait for types that determine whether execution should be stopped at a given point.
+pub trait Stopper {
+    type Processor: Processor;
+
+    /// Determines whether execution should be stopped.
+    ///
+    /// The `continuation_after_stop` is provided in cases where simply resuming execution from the
+    /// top of the continuation stack is not sufficient to continue execution correctly. For
+    /// example, when stopping execution in the middle of a basic block, we need to provide a
+    /// `ResumeBasicBlock` continuation to ensure that execution resumes at the correct operation
+    /// within the basic block (i.e. the operation right after the one that was last executed before
+    /// being stopped). No continuation is provided in case of error, since it is expected that
+    /// execution will not be resumed.
+    fn should_stop(
+        &self,
+        processor: &Self::Processor,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason>;
 }

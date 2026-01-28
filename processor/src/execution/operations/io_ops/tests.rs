@@ -12,8 +12,8 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::{FastProcessor, step::NeverStopper},
-    processor::{Processor, StackInterface},
+    fast::FastProcessor,
+    processor::{Processor, StackInterface, SystemInterface},
     tracer::NoopTracer,
 };
 
@@ -30,9 +30,9 @@ fn test_op_advpop() {
     let mut tracer = NoopTracer;
 
     op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     op_advpop(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     let expected = build_expected(&[3, 1]);
     assert_eq!(expected, processor.stack_top());
@@ -54,13 +54,13 @@ fn test_op_advpopw() {
     let mut tracer = NoopTracer;
 
     op_push(&mut processor, Felt::new(1), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     for _ in 0..4 {
         op_pad(&mut processor, &mut tracer).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
     op_advpopw(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // word[0]=3 at top, word[3]=6 at position 3
     let expected = build_expected(&[3, 4, 5, 6, 1]);
@@ -84,14 +84,14 @@ fn test_op_mloadw() {
     // push four zeros onto the stack (padding)
     for _ in 0..4 {
         op_pad(&mut processor, &mut tracer).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
 
     // push the address onto the stack and load the word
     op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     op_mloadw(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // word[0] at top. Store puts Word([1,3,5,7]) in memory,
     // load puts [1,3,5,7,...] on stack. First 4 positions are loaded word,
@@ -107,7 +107,7 @@ fn test_op_mloadw() {
 
     // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
     op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     assert!(op_mloadw(&mut processor, &mut tracer).is_err());
 
     // --- calling MLOADW with a stack of minimum depth is ok ----------------
@@ -128,9 +128,9 @@ fn test_op_mload() {
 
     // push the address onto the stack and load the element
     op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     op_mload(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // Element at addr 4 is word[0] = 1.
     // After store, stack is [1, 3, 5, 7, ...]. After push addr: [4, 1, 3, 5, 7, ...]
@@ -146,7 +146,7 @@ fn test_op_mload() {
 
     // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
     op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     assert!(op_mload(&mut processor, &mut tracer).is_err());
 
     // --- calling MLOAD with a stack of minimum depth is ok ----------------
@@ -176,7 +176,7 @@ fn test_op_mstream() {
     // clear the stack (drop the 8 elements we pushed while storing)
     for _ in 0..8 {
         Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
 
     // arrange the stack such that:
@@ -184,17 +184,17 @@ fn test_op_mstream() {
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
     op_push(&mut processor, Felt::new(101), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     for i in 1..13 {
         op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
 
     // execute the MSTREAM operation
     op_mstream(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // Word at addr 4 (word1) goes to positions 0-3, word at addr 8 (word2) to 4-7.
     // word[0] at lowest position.
@@ -256,7 +256,7 @@ fn test_op_mstorew() {
 
     // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
     op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     assert!(op_mstorew(&mut processor, &mut tracer).is_err());
 
     // --- calling MSTOREW with a stack of minimum depth is ok ----------------
@@ -309,7 +309,7 @@ fn test_op_mstore() {
 
     // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
     op_push(&mut processor, Felt::new(u64::MAX / 2), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     assert!(op_mstore(&mut processor, &mut tracer).is_err());
 
     // --- calling MSTORE with a stack of minimum depth is ok ----------------
@@ -333,17 +333,17 @@ fn test_op_pipe() {
     // - 4 (the address) is at position 12
     // - values 1 - 12 are at positions 0 - 11
     op_push(&mut processor, Felt::new(101), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     op_push(&mut processor, Felt::new(4), &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     for i in 1..13 {
         op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
 
     // execute the PIPE operation
     op_pipe(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // check memory state contains the words from the advice stack
     // pop_stack_dword returns [Word([30,29,28,27]), Word([26,25,24,23])]
@@ -430,26 +430,26 @@ fn store_word(processor: &mut FastProcessor, addr: u64, word: Word, tracer: &mut
     // So push word[3], then word[2], word[1], word[0], then addr.
     for &value in word.iter().rev() {
         op_push(processor, value, tracer).unwrap();
-        let _ = processor.increment_clk(tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
     }
     // Push address
     op_push(processor, Felt::new(addr), tracer).unwrap();
-    let _ = processor.increment_clk(tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     // Store the word (LE: stack pos 1-4 -> word[0-3])
     op_mstorew(processor, tracer).unwrap();
-    let _ = processor.increment_clk(tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 }
 
 fn store_element(processor: &mut FastProcessor, addr: u64, value: Felt, tracer: &mut NoopTracer) {
     // Push value
     op_push(processor, value, tracer).unwrap();
-    let _ = processor.increment_clk(tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     // Push address
     op_push(processor, Felt::new(addr), tracer).unwrap();
-    let _ = processor.increment_clk(tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     // Store the element
     op_mstore(processor, tracer).unwrap();
-    let _ = processor.increment_clk(tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 }
 
 /// Builds an expected stack state from the given values.

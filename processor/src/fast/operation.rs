@@ -1,3 +1,6 @@
+use alloc::sync::Arc;
+use core::ops::ControlFlow;
+
 use miden_air::{
     Felt,
     trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
@@ -6,11 +9,13 @@ use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
     field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
+use super::step::BreakReason;
 use crate::{
-    AdviceProvider, ContextId, ExecutionError,
+    AdviceProvider, ContextId, ExecutionError, Host,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
@@ -64,6 +69,16 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
+    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+        self.save_context_and_truncate_stack(tracer);
+    }
+
+    #[inline(always)]
+    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
+        self.restore_context(tracer)
+    }
+
+    #[inline(always)]
     fn precompile_transcript_state(&self) -> PrecompileTranscriptState {
         self.pc_transcript.state()
     }
@@ -95,6 +110,7 @@ impl Processor for FastProcessor {
     /// Note that we do not record any memory reads in this operation (through a
     /// [crate::tracer::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
+    #[inline(always)]
     fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
@@ -106,6 +122,57 @@ impl Processor for FastProcessor {
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
         Ok(())
+    }
+
+    #[inline(always)]
+    fn execute_before_enter_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_before_enter_decorators(node_id, current_forest, host)
+    }
+
+    #[inline(always)]
+    fn execute_after_exit_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    #[inline(always)]
+    fn execute_decorators_for_op(
+        &mut self,
+        node_id: MastNodeId,
+        op_idx_in_block: usize,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        if self.should_execute_decorators() {
+            #[cfg(test)]
+            self.record_decorator_retrieval();
+
+            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
+                self.execute_decorator(decorator, host)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    #[inline(always)]
+    fn execute_end_of_block_decorators(
+        &mut self,
+        basic_block_node: &BasicBlockNode,
+        node_id: MastNodeId,
+        current_forest: &Arc<MastForest>,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }
 
@@ -167,13 +234,28 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn clk(&self) -> RowIndex {
+    fn clock(&self) -> RowIndex {
         self.clk
     }
 
     #[inline(always)]
     fn ctx(&self) -> ContextId {
         self.ctx
+    }
+
+    #[inline(always)]
+    fn increment_clock(&mut self) {
+        self.clk += 1_u32;
+    }
+
+    #[inline(always)]
+    fn set_caller_hash(&mut self, caller_hash: Word) {
+        self.caller_hash = caller_hash;
+    }
+
+    #[inline(always)]
+    fn set_ctx(&mut self, ctx: ContextId) {
+        self.ctx = ctx;
     }
 }
 

@@ -57,7 +57,7 @@ pub(super) fn op_clk<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let clk: Felt = processor.system().clk().into();
+    let clk: Felt = processor.system().clock().into();
     processor.stack_mut().increment_size(tracer)?;
     processor.stack_mut().set(0, clk);
 

@@ -45,7 +45,7 @@ use crate::{
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
-mod core_trace_fragment;
+pub(crate) mod core_trace_fragment;
 
 #[cfg(test)]
 mod tests;

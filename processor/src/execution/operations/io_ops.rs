@@ -69,12 +69,17 @@ pub(super) fn op_mloadw<P: Processor>(
 ) -> Result<(), IoError> {
     let addr = processor.stack_mut().get(0);
     let ctx = processor.system().ctx();
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
 
     processor.stack_mut().decrement_size(tracer);
 
     let word = processor.memory().read_word(ctx, addr, clk)?;
-    tracer.record_memory_read_word(word, addr, processor.system().ctx(), processor.system().clk());
+    tracer.record_memory_read_word(
+        word,
+        addr,
+        processor.system().ctx(),
+        processor.system().clock(),
+    );
 
     // Set word on stack (word[0] at top).
     processor.stack_mut().set_word(0, &word);
@@ -108,12 +113,17 @@ pub(super) fn op_mstorew<P: Processor>(
     ]
     .into();
     let ctx = processor.system().ctx();
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
 
     processor.stack_mut().decrement_size(tracer);
 
     processor.memory().write_word(ctx, addr, clk, word)?;
-    tracer.record_memory_write_word(word, addr, processor.system().ctx(), processor.system().clk());
+    tracer.record_memory_write_word(
+        word,
+        addr,
+        processor.system().ctx(),
+        processor.system().clock(),
+    );
 
     Ok(())
 }
@@ -139,7 +149,7 @@ pub(super) fn op_mload<P: Processor>(
         element,
         addr,
         processor.system().ctx(),
-        processor.system().clk(),
+        processor.system().clock(),
     );
 
     processor.stack_mut().set(0, element);
@@ -171,7 +181,7 @@ pub(super) fn op_mstore<P: Processor>(
         value,
         addr,
         processor.system().ctx(),
-        processor.system().clk(),
+        processor.system().clock(),
     );
 
     Ok(())
@@ -199,7 +209,7 @@ pub(super) fn op_mstream<P: Processor>(
     const MEM_ADDR_STACK_IDX: usize = 12;
 
     let ctx = processor.system().ctx();
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
 
     // load two words from memory
     let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
@@ -211,7 +221,7 @@ pub(super) fn op_mstream<P: Processor>(
             first_word,
             addr_first_word,
             processor.system().ctx(),
-            processor.system().clk(),
+            processor.system().clock(),
         );
 
         let second_word = processor.memory().read_word(ctx, addr_second_word, clk)?;
@@ -219,7 +229,7 @@ pub(super) fn op_mstream<P: Processor>(
             second_word,
             addr_second_word,
             processor.system().ctx(),
-            processor.system().clk(),
+            processor.system().clock(),
         );
 
         [first_word, second_word]
@@ -264,7 +274,7 @@ pub(super) fn op_pipe<P: Processor>(
     // The stack index where the memory address to load the words from is stored.
     const MEM_ADDR_STACK_IDX: usize = 12;
 
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
     let ctx = processor.system().ctx();
     let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
     let addr_second_word = addr_first_word + WORD_SIZE_FELT;
@@ -279,7 +289,7 @@ pub(super) fn op_pipe<P: Processor>(
         words[0],
         addr_first_word,
         processor.system().ctx(),
-        processor.system().clk(),
+        processor.system().clock(),
     );
 
     processor.memory().write_word(ctx, addr_second_word, clk, words[1])?;
@@ -287,7 +297,7 @@ pub(super) fn op_pipe<P: Processor>(
         words[1],
         addr_second_word,
         processor.system().ctx(),
-        processor.system().clk(),
+        processor.system().clock(),
     );
 
     // Replace the elements on the stack with the word elements (in stack order).

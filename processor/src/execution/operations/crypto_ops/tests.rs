@@ -15,7 +15,8 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::{FastProcessor, step::NeverStopper},
+    fast::FastProcessor,
+    processor::{Processor, SystemInterface},
     tracer::NoopTracer,
 };
 
@@ -98,7 +99,7 @@ proptest! {
 
         // Execute the operation
         let _ = op_hperm(&mut processor, &mut tracer);
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
@@ -190,7 +191,7 @@ proptest! {
             processor.clk,
             plaintext_word1,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         processor.memory.write_word(
             ContextId::root(),
@@ -198,12 +199,12 @@ proptest! {
             processor.clk,
             plaintext_word2,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation
         let result = op_crypto_stream(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected ciphertext: ciphertext = plaintext + rate
         let expected_cipher1 = [
@@ -319,7 +320,7 @@ proptest! {
             processor.clk,
             alpha_word,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation.
         //
@@ -327,7 +328,7 @@ proptest! {
         // `FastProcessor` does not generate them (as they are only relevant in trace generation).
         let result = op_horner_eval_base(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected result
         let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
@@ -444,12 +445,12 @@ proptest! {
             processor.clk,
             alpha_word,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation
         let result = op_horner_eval_ext(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected result
         let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
@@ -564,7 +565,7 @@ proptest! {
         // Execute the operation
         let result = op_mpverify(&mut processor, ZERO, &program, &mut tracer);
         prop_assert!(result.is_ok(), "op_mpverify failed: {:?}", result.err());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // The stack should remain unchanged after verification
         let stack = processor.stack_top();
@@ -658,7 +659,7 @@ proptest! {
         // Execute the operation
         let result = op_mrupdate(&mut processor, &mut tracer);
         prop_assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
@@ -765,7 +766,7 @@ fn test_op_mrupdate_merge_subtree() {
     // Execute the operation
     let result = op_mrupdate(&mut processor, &mut tracer);
     assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // Check the result
     let stack = processor.stack_top();

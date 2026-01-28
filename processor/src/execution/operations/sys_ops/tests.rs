@@ -8,8 +8,9 @@ use miden_core::{
 
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
-    fast::{FastProcessor, step::NeverStopper},
-    processor::{Processor, StackInterface, operations::stack_ops::op_push},
+    execution::operations::stack_ops::op_push,
+    fast::FastProcessor,
+    processor::{Processor, StackInterface, SystemInterface},
     tracer::NoopTracer,
 };
 
@@ -70,17 +71,17 @@ fn test_op_clk() {
     // Note though that in a real program, the first operation executed is never clk, since at least
     // one SPAN must be executed first.
     op_clk(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     let expected = build_expected(&[0]);
     assert_eq!(expected, processor.stack_top());
 
     // push another value onto the stack
     op_push(&mut processor, ONE, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // clk is 2 after executing two operations
     op_clk(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     let expected = build_expected(&[2, 1, 0]);
     assert_eq!(expected, processor.stack_top());
