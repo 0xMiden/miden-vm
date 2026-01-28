@@ -1,0 +1,19 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+RANGE CHECK TRACE LAYOUT
+============================
+
+Main Trace:
+  Offset: 49
+  Width: 2
+  Range: 49..51
+  - M column (multiplicity): 49
+  - V column (values being range-checked): 50
+
+Auxiliary Trace:
+  Offset: 4
+  Width: 1
+  Range: 4..5
+  - B column (running product): 4

@@ -1,0 +1,25 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+MEMORY CHIPLET LAYOUT
+==========================
+
+Chiplet Selectors:
+  Number of memory selectors: 3
+  Trace offset: 54
+  Trace width: 15
+
+Column Indices (ordered by index):
+  - 54: Is read column
+  - 55: Is word access column
+  - 56: Context column
+  - 57: Word column
+  - 58: Index 0 column
+  - 59: Index 1 column
+  - 60: Clock column
+  - 61..65: Value columns
+  - 65: Delta 0 column
+  - 66: Delta 1 column
+  - 67: Delta inverse column
+  - 68: Same context and word flag

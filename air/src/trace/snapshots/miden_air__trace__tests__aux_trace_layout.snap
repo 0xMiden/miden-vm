@@ -1,0 +1,39 @@
+---
+source: air/src/trace/tests.rs
+expression: layout
+---
+AUXILIARY TRACE LAYOUT
+==========================
+
+Decoder Auxiliary Trace:
+  Offset: 0
+  Width: 3
+  Range: 0..3
+
+Stack Auxiliary Trace:
+  Offset: 3
+  Width: 1
+  Range: 3..4
+
+Range Check Auxiliary Trace:
+  Offset: 4
+  Width: 1
+  Range: 4..5
+
+Hasher/Kernel ROM Virtual Table Auxiliary Trace:
+  Offset: 5
+  Width: 1
+  Range: 5..6
+
+Chiplets Bus Auxiliary Trace:
+  Offset: 6
+  Width: 1
+  Range: 6..7
+
+ACE Chiplet Wiring Bus:
+  Offset: 7
+  Width: 1
+  Range: 7..8
+
+Total Auxiliary Trace Width: 8
+Auxiliary Trace Random Elements: 16
