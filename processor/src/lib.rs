@@ -41,8 +41,10 @@ pub(crate) mod row_major_adapter;
 mod system;
 pub use system::ContextId;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 mod test_utils;
+#[cfg(any(test, feature = "testing"))]
+pub use test_utils::{ProcessorStateSnapshot, TestHost, TraceCollector};
 
 pub(crate) mod decoder;
 

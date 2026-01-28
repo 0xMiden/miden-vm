@@ -1,1 +1,3 @@
-pub mod test_consistency_host;
+mod test_host;
+
+pub use test_host::{ProcessorStateSnapshot, TestHost, TraceCollector};
