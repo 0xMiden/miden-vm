@@ -13,7 +13,6 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
 };
 use p3_field::PrimeCharacteristicRing;
-use p3_matrix::dense::RowMajorMatrix;
 use p3_miden_air::BusType;
 
 pub mod config;
@@ -29,7 +28,7 @@ pub mod trace;
 use core::borrow::Borrow;
 
 #[cfg(feature = "constraint_eval")]
-use trace::MainTraceRow;
+use trace::{MainTraceRow, NUM_PERIODIC_VALUES};
 
 use crate::trace::{
     AUX_TRACE_WIDTH, AuxTraceBuilder, CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7,
@@ -205,13 +204,6 @@ where
             .as_ref()
             .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width)
             .unwrap_or(TRACE_WIDTH)
-    }
-
-    fn preprocessed_trace(&self) -> Option<RowMajorMatrix<Felt>> {
-        self.inner
-            .as_ref()
-            .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::preprocessed_trace)
-            .unwrap_or(None)
     }
 
     fn num_public_values(&self) -> usize {
