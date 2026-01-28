@@ -185,7 +185,9 @@ fn parse_module_with_ast(label: &str, file_path: &Path) -> io::Result<DocPayload
                 }
             },
             // TODO: Update doc format to allow for other item types
-            ast::Export::Constant(_) | ast::Export::Type(_) => continue,
+            ast::Export::Constant(_) | ast::Export::Type(_) | ast::Export::AdviceMapEntry(_) => {
+                continue;
+            },
         }
     }
 

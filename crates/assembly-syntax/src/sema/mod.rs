@@ -9,7 +9,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Rpo256};
+use miden_core::{Felt, Word, crypto::hash::Rpo256};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -229,6 +229,14 @@ fn visit_items(module: &mut Module, analyzer: &mut AnalysisContext) -> Result<()
                 }
                 module.items.push(Export::Constant(constant));
             },
+            Export::AdviceMapEntry(mut entry) => {
+                log::debug!(target: "verify-invoke", "visiting advice map entry {}", entry.name());
+                {
+                    let mut visitor = VerifyInvokeTargets::new(analyzer, module, &locals, None);
+                    let _ = visitor.visit_mut_advice_entry(&mut entry);
+                }
+                module.items.push(Export::AdviceMapEntry(entry));
+            },
             Export::Type(mut ty) => {
                 log::debug!(target: "verify-invoke", "visiting type {}", ty.name());
                 {
@@ -302,9 +310,18 @@ fn add_advice_map_entry(
     entry: AdviceMapEntry,
     context: &mut AnalysisContext,
 ) -> Result<(), SyntaxError> {
+    let elements: Vec<Felt> = entry
+        .value
+        .iter()
+        .map(|v| match v {
+            Immediate::Constant(_) => Felt::default(),
+            Immediate::Value(_) => (*v).expect_value(),
+        })
+        .collect();
+
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
-        None => Rpo256::hash_elements(&entry.value),
+        None => Rpo256::hash_elements(&elements),
     };
     let cst = Constant::new(
         entry.span,
@@ -313,13 +330,13 @@ fn add_advice_map_entry(
         ConstantExpr::Word(Span::new(entry.span, WordValue(*key))),
     );
     context.define_constant(module, cst);
-    match module.advice_map.get(&key) {
-        Some(_) => {
+
+    match module.advice_map.insert(key) {
+        true => {},
+        false => {
             context.error(SemanticAnalysisError::AdvMapKeyAlreadyDefined { span: entry.span });
         },
-        None => {
-            module.advice_map.insert(key, entry.value);
-        },
-    }
+    };
+
     Ok(())
 }

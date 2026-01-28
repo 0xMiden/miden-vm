@@ -302,6 +302,9 @@ impl Linker {
                             ast::Export::Procedure(item) => {
                                 SymbolItem::Procedure(RefCell::new(Box::new(item)))
                             },
+                            ast::Export::AdviceMapEntry(_) => {
+                                todo!("I will implement this case later.")
+                            },
                         },
                     )
                 })
@@ -314,7 +317,6 @@ impl Linker {
             ModuleSource::Ast,
             module.path().into(),
         )
-        .with_advice_map(module.advice_map().clone())
         .with_symbols(symbols);
 
         self.modules.push(link_module);
