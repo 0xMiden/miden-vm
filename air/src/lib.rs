@@ -19,14 +19,13 @@ pub mod config;
 
 #[cfg(feature = "constraint_eval")]
 mod constraints;
+#[cfg(feature = "constraint_eval")]
+use constraints::enforce_constraints;
 
 mod unedited_constraints;
 pub use unedited_constraints::miden_vm_plonky3::MidenVM;
 
 pub mod trace;
-#[cfg(feature = "constraint_eval")]
-use core::borrow::Borrow;
-
 #[cfg(feature = "constraint_eval")]
 use trace::{MainTraceRow, NUM_PERIODIC_VALUES};
 
@@ -289,44 +288,7 @@ where
         if let Some(inner) = &self.inner {
             <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(inner, builder);
         } else {
-            use p3_matrix::Matrix;
-
-            use crate::constraints;
-
-            let main = builder.main();
-
-            // Access the two rows: current (local) and next
-            let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-            let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
-
-            // Use structured column access via MainTraceCols
-            let local: &MainTraceRow<AB::Var> = (*local).borrow();
-            let next: &MainTraceRow<AB::Var> = (*next).borrow();
-
-            let periodic_values: [_; NUM_PERIODIC_VALUES] =
-                builder.periodic_evals().try_into().expect("Wrong number of periodic values");
-
-            // SYSTEM CONSTRAINTS
-            constraints::enforce_clock_constraint(builder, local, next);
-
-            // STACK CONSTRAINTS
-            //constraints::stack::enforce_stack_boundary_constraints(builder, local);
-            //constraints::stack::enforce_stack_transition_constraint(builder, local, next);
-            //constraints::stack::enforce_stack_bus_constraint(builder, local);
-
-            // RANGE CHECKER CONSTRAINTS
-            constraints::range::enforce_range_boundary_constraints(builder, local);
-            constraints::range::enforce_range_transition_constraint(builder, local, next);
-            constraints::range::enforce_range_bus_constraint(builder, local);
-
-            // CHIPLETS CONSTRAINTS
-            constraints::chiplets::enforce_chiplets_transition_constraint(
-                builder,
-                local,
-                next,
-                &periodic_values,
-            );
-            constraints::chiplets::enforce_chiplets_bus_constraint(builder, local);
+            enforce_constraints(builder);
         }
     }
 }
