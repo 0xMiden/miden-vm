@@ -39,6 +39,41 @@ fn test_encrypt_zero_blocks_roundtrip() {
 }
 
 #[test]
+fn test_encrypt_zero_blocks_roundtrip_prove_verify() {
+    // Mirror the execution test but run a full prove/verify cycle.
+    let source = r#"
+    use miden::core::crypto::aead
+
+    begin
+        # No plaintext needed; num_blocks = 0
+        push.0              # num_blocks
+        push.2000           # dst_ptr
+        push.1000           # src_ptr
+        push.[1,2,3,4]        # nonce
+        push.[5,6,7,8]        # key
+
+        # Encrypt: writes encrypted padding at dst_ptr, returns tag(4) on stack
+        exec.aead::encrypt
+
+        # Store tag to memory at dst_ptr + 8 (immediately after encrypted padding)
+        push.2008 mem_storew_le dropw
+
+        # Decrypt back with num_blocks=0; should succeed (empty plaintext)
+        push.0              # num_blocks
+        push.3000           # dst_ptr (plaintext output)
+        push.2000           # src_ptr (ciphertext location)
+        push.[1,2,3,4]        # nonce
+        push.[5,6,7,8]        # key
+        exec.aead::decrypt
+    end
+    "#;
+
+    let test = build_test!(source, &[]);
+    test.expect_stack(&[]);
+    test.prove_and_verify(vec![], false)
+}
+
+#[test]
 fn test_encrypt_with_known_values() {
     let seed = [2_u8; 32];
     let mut rng = ChaCha20Rng::from_seed(seed);

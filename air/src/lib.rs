@@ -30,6 +30,7 @@ mod export {
         },
     };
     pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+    pub use p3_miden_air::BusType;
 }
 
 pub use export::*;
@@ -131,25 +132,35 @@ impl Deserializable for PublicInputs {
 pub struct ProcessorAir<B = ()> {
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
+    /// Public inputs needed for aux finals verification.
+    public_inputs: PublicInputs,
 }
 
 impl Default for ProcessorAir<()> {
     fn default() -> Self {
-        Self::new()
+        Self::new(PublicInputs::new(
+            ProgramInfo::default(),
+            StackInputs::default(),
+            StackOutputs::default(),
+            PrecompileTranscriptState::default(),
+        ))
     }
 }
 
 impl ProcessorAir<()> {
     /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
+    pub fn new(public_inputs: PublicInputs) -> Self {
+        Self { aux_builder: None, public_inputs }
     }
 }
 
 impl<B> ProcessorAir<B> {
     /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
+    pub fn with_aux_builder(public_inputs: PublicInputs, builder: B) -> Self {
+        Self {
+            aux_builder: Some(builder),
+            public_inputs,
+        }
     }
 }
 
@@ -184,6 +195,15 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        // Combine hasher (32-row cycle) and bitwise (8-row cycle) periodic columns
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        let [k_first, k_transition] = constraints::chiplets::bitwise::periodic_columns();
+        cols.push(k_first);
+        cols.push(k_transition);
+        cols
+    }
+
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         use p3_matrix::Matrix;
 
@@ -199,12 +219,15 @@ where
         let local: &MainTraceRow<AB::Var> = (*local).borrow();
         let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
-        // SYSTEM CONSTRAINTS
-        constraints::enforce_clock_constraint(builder, local, next);
+        // Compute operation flags ONCE from decoder columns.
+        // These flags are used by stack, decoder, system, and bus constraints.
+        let accessor = constraints::ExprDecoderAccess::<AB::Var, AB::Expr>::new(local);
+        let op_flags = constraints::OpFlags::new(accessor);
 
-        // RANGE CHECKER CONSTRAINTS
-        constraints::range::enforce_range_boundary_constraints(builder, local);
-        constraints::range::enforce_range_transition_constraint(builder, local, next);
-        constraints::range::enforce_range_bus_constraint(builder, local);
+        // Main trace constraints (system, decoder, stack, range, chiplets).
+        constraints::enforce_main(builder, local, next, &op_flags);
+
+        // Auxiliary (bus) constraints.
+        constraints::enforce_bus(builder, local, next, &op_flags);
     }
 }

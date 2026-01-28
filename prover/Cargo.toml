@@ -16,7 +16,7 @@ edition.workspace = true
 [features]
 default = ["std"]
 concurrent = ["std", "miden-crypto/concurrent", "miden-processor/concurrent"]
-std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
+std = ["miden-air/std", "miden-crypto/std", "miden-debug-types/std", "miden-processor/std"]
 
 [dependencies]
 # Miden dependencies
@@ -41,4 +41,3 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
 # On wasm32, only basic tokio features are supported
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
-

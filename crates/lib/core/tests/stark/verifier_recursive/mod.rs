@@ -70,7 +70,7 @@ pub fn generate_advice_inputs(
     advice_stack.push(num_kernel_procedures_digests as u64);
 
     // create AIR instance for the computation specified in the proof
-    let air = ProcessorAir::new(proof.trace_info().to_owned(), pub_inputs, proof.options().clone());
+    let air = ProcessorAir::new(pub_inputs);
     let seed_digest = Poseidon2::hash_elements(&public_coin_seed);
     let mut public_coin: RpoRandomCoin = RpoRandomCoin::new(seed_digest);
     let mut channel = VerifierChannel::new(&air, proof)?;

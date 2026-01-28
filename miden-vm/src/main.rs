@@ -135,6 +135,23 @@ pub fn main() -> Result<(), Report> {
     let registry =
         tracing_subscriber::registry::Registry::default().with(EnvFilter::from_env("MIDEN_LOG"));
 
+    #[cfg(feature = "tracing-perfetto")]
+    let (perfetto_layer, _perfetto_guard) = tracing_profile::PerfettoLayer::new_from_env()
+        .map_err(|err| Report::msg(format!("failed to init perfetto tracing: {err:?}")))?;
+    #[cfg(feature = "tracing-perfetto")]
+    let registry = registry.with(perfetto_layer);
+
+    #[cfg(feature = "tracing-chrome")]
+    let (chrome_layer, _chrome_guard) = {
+        let trace_path = std::env::var("CHROME_TRACE").unwrap_or_else(|_| "trace.json".to_string());
+        tracing_chrome::ChromeLayerBuilder::new()
+            .file(trace_path)
+            .include_args(true)
+            .build()
+    };
+    #[cfg(feature = "tracing-chrome")]
+    let registry = registry.with(chrome_layer);
+
     #[cfg(feature = "tracing-forest")]
     registry.with(ForestLayer::default()).init();
 

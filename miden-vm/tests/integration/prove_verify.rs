@@ -251,10 +251,14 @@ mod fast_parallel {
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = trace.to_public_values();
+        let public_inputs = trace.public_inputs();
+        let public_values = public_inputs.to_elements();
 
         // Create AIR with aux trace builders
-        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+        let air = ProcessorAir::with_aux_builder(
+            public_inputs.clone(),
+            trace.aux_trace_builders().clone(),
+        );
 
         // Generate proof using Blake3_256
         let config = config::create_blake3_256_config();

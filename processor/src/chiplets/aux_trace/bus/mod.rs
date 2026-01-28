@@ -8,9 +8,9 @@ use hasher::{
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
-    build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
-    build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
-    build_pipe_request,
+    build_cryptostream_request, build_hornerbase_eval_request, build_hornerext_eval_request,
+    build_mem_mload_mstore_request, build_mem_mloadw_mstorew_request,
+    build_memory_chiplet_responses, build_mstream_request, build_pipe_request,
 };
 use miden_air::trace::{
     MainTrace, RowIndex,
@@ -23,11 +23,11 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    Kernel, ONE, OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_EVALCIRCUIT,
-    OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN, OPCODE_LOGPRECOMPILE,
-    OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY, OPCODE_MRUPDATE, OPCODE_MSTORE,
-    OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
-    OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, ZERO,
+    Kernel, ONE, OPCODE_CALL, OPCODE_CRYPTOSTREAM, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END,
+    OPCODE_EVALCIRCUIT, OPCODE_HORNERBASE, OPCODE_HORNEREXT, OPCODE_HPERM, OPCODE_JOIN,
+    OPCODE_LOGPRECOMPILE, OPCODE_LOOP, OPCODE_MLOAD, OPCODE_MLOADW, OPCODE_MPVERIFY,
+    OPCODE_MRUPDATE, OPCODE_MSTORE, OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN,
+    OPCODE_SPAN, OPCODE_SPLIT, OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR, ZERO,
     field::{ExtensionField, PrimeCharacteristicRing},
 };
 
@@ -47,9 +47,8 @@ mod hasher;
 mod kernel;
 mod memory;
 
+pub use kernel::build_kernel_init_requests;
 pub use memory::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
-
-use crate::chiplets::aux_trace::bus::kernel::build_kernel_init_requests;
 
 // BUS COLUMN BUILDER
 // ================================================================================================
@@ -138,6 +137,7 @@ where
             OPCODE_MPVERIFY => build_mpverify_request(main_trace, alphas, row, debugger),
             OPCODE_MRUPDATE => build_mrupdate_request(main_trace, alphas, row, debugger),
             OPCODE_PIPE => build_pipe_request(main_trace, alphas, row, debugger),
+            OPCODE_CRYPTOSTREAM => build_cryptostream_request(main_trace, alphas, row, debugger),
             OPCODE_EVALCIRCUIT => build_ace_chiplet_requests(main_trace, alphas, row, debugger),
             _ => E::ONE,
         }
@@ -169,10 +169,14 @@ where
     fn init_requests(
         &self,
         _main_trace: &MainTrace,
-        alphas: &[E],
+        _alphas: &[E],
         _debugger: &mut BusDebugger<E>,
     ) -> E {
-        build_kernel_init_requests(self.kernel.proc_hashes(), alphas, _debugger)
+        // Start the bus at 1. The kernel ROM INIT_LABEL responses will multiply in the
+        // kernel procedure hashes, so aux_final[b_chip] = reduced_kernel_digests.
+        // The verifier checks this against expected value from kernel hashes (variable-length
+        // public inputs).
+        E::ONE
     }
 }
 

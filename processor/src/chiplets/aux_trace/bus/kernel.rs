@@ -14,8 +14,12 @@ use crate::{
 // REQUESTS
 // ================================================================================================
 
-/// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
-pub(super) fn build_kernel_init_requests<E>(
+/// Builds the reduced value for kernel procedure digests.
+///
+/// This computes the product of reduced kernel procedure hashes, which equals the expected
+/// final value of the chiplets bus (b_chip) auxiliary column. The verifier uses this to
+/// check aux_final[b_chip] against kernel hashes provided as variable-length public inputs.
+pub fn build_kernel_init_requests<E>(
     proc_hashes: &[Word],
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,

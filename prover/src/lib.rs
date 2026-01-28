@@ -86,11 +86,13 @@ pub async fn prove(
         execution_trace_to_row_major(&trace)
     };
 
-    // Build public values
-    let public_values = trace.to_public_values();
+    // Build public inputs/values
+    let public_inputs = trace.public_inputs();
+    let public_values = public_inputs.to_elements();
 
     // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    let air =
+        ProcessorAir::with_aux_builder(public_inputs.clone(), trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {

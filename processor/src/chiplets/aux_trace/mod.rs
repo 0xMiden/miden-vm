@@ -9,6 +9,7 @@ use super::{super::trace::AuxColumnBuilder, Felt, ace::AceHints};
 mod bus;
 pub use bus::{
     BusColumnBuilder, build_ace_memory_read_element_request, build_ace_memory_read_word_request,
+    build_kernel_init_requests,
 };
 
 mod virtual_table;
@@ -71,7 +72,17 @@ impl AuxTraceBuilder {
         let log_up_final_value = wiring_bus.last().copied().unwrap_or(E::ZERO);
 
         debug_assert_eq!(log_up_final_value, E::ZERO);
-        debug_assert_eq!(v_table_final_value * chiplets_bus_final_value, E::ONE);
+
+        // The chiplets bus starts at 1 and kernel ROM INIT_LABEL responses multiply in the
+        // kernel procedure hashes. So aux_final[b_chip] = reduced_kernel_digests.
+        // Combined with v_table (which balances to 1), the product should equal the
+        // reduced kernel digests.
+        let expected_kernel_value = build_kernel_init_requests(
+            self.kernel.proc_hashes(),
+            rand_elements,
+            &mut crate::debug::BusDebugger::new("kernel init check".into()),
+        );
+        debug_assert_eq!(v_table_final_value * chiplets_bus_final_value, expected_kernel_value);
 
         [t_chip, b_chip, wiring_bus]
     }
