@@ -800,9 +800,10 @@ impl FastProcessor {
         stopper: &impl Stopper,
         continuation: impl FnOnce() -> Option<Continuation>,
     ) -> ControlFlow<BreakReason> {
-        self.clk += 1_u32;
+        // Signal the end of clock cycle to tracer (before incrementing clock).
+        tracer.finalize_clock_cycle();
 
-        tracer.increment_clk();
+        self.clk += 1_u32;
 
         if self.clk >= self.options.max_cycles() as usize {
             ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(

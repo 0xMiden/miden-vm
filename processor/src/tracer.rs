@@ -44,6 +44,13 @@ pub trait Tracer {
     ) where
         P: Processor;
 
+    /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
+    /// clock.
+    ///
+    /// Implementations should use this method to finalize any tracing information related to the
+    /// just-completed clock cycle.
+    fn finalize_clock_cycle(&mut self);
+
     /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].
     ///
     /// Note that when execution encounters a [miden_core::mast::ExternalNode], the external node
@@ -157,9 +164,6 @@ pub trait Tracer {
 
     // MISCELLANEOUS
     // -----------------------------------------------
-
-    /// Signals that the processor clock is being incremented.
-    fn increment_clk(&mut self);
 
     /// Signals that the stack depth is incremented as a result of pushing a new element.
     fn increment_stack_size<P>(&mut self, processor: &P)
@@ -321,7 +325,7 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn increment_clk(&mut self) {
+    fn finalize_clock_cycle(&mut self) {
         // do nothing
     }
 

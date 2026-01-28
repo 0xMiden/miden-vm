@@ -625,7 +625,7 @@ impl Tracer for ExecutionTracer {
         self.ace.record_circuit_evaluation(clk, circuit_eval);
     }
 
-    fn increment_clk(&mut self) {
+    fn finalize_clock_cycle(&mut self) {
         // do nothing
     }
 
