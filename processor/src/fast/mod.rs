@@ -23,8 +23,9 @@ use crate::{
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
-        step::{BreakReason, NeverStopper, StepStopper, Stopper},
+        step::{BreakReason, NeverStopper, StepStopper},
     },
+    processor::Stopper,
     tracer::{NoopTracer, Tracer},
 };
 

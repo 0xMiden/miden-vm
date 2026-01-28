@@ -10,7 +10,8 @@ use crate::{
     Host,
     continuation_stack::{Continuation, ContinuationStack},
     errors::OperationError,
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
+    fast::{BreakReason, FastProcessor, Tracer},
+    processor::Stopper,
 };
 
 impl FastProcessor {

@@ -6,7 +6,8 @@ use miden_core::mast::{JoinNode, MastForest, MastNodeId};
 use crate::{
     Host,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
+    fast::{BreakReason, FastProcessor, Tracer},
+    processor::Stopper,
 };
 
 impl FastProcessor {

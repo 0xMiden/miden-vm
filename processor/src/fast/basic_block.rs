@@ -11,9 +11,9 @@ use crate::{
     Host,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, advice_error_with_context, event_error_with_context},
-    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
+    fast::{BreakReason, FastProcessor, Tracer},
     operations::sys_ops::sys_event_handlers::handle_system_event,
-    processor::Processor,
+    processor::{Processor, Stopper},
 };
 
 impl FastProcessor {

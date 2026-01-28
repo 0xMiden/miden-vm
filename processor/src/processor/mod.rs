@@ -443,3 +443,13 @@ pub trait OperationHelperRegisters {
         acc_tmp: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS];
 }
+
+// STOPPER
+// ===============================================================================================
+
+/// A trait for types that determine whether execution should be stopped at a given point.
+pub trait Stopper {
+    fn should_stop<P>(&self, processor: &P) -> bool
+    where
+        P: Processor;
+}

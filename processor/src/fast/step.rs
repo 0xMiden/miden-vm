@@ -1,5 +1,4 @@
-//! This module defines items relevant to controlling execution stopping conditions, through the
-//! `FastProcessor::step()` method.
+//! This module defines items relevant to controlling execution stopping conditions.
 
 use alloc::sync::Arc;
 
@@ -8,7 +7,7 @@ use miden_core::{Kernel, mast::MastForest};
 use crate::{
     ExecutionError,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::FastProcessor,
+    processor::{Processor, Stopper},
 };
 
 // RESUME CONTEXT
@@ -40,19 +39,17 @@ impl ResumeContext {
     }
 }
 
-// STOPPER
+// STOPPERS
 // ===============================================================================================
-
-/// A trait for types that determine whether execution should be stopped at a given point.
-pub trait Stopper {
-    fn should_stop(&self, processor: &FastProcessor) -> bool;
-}
 
 /// A [`Stopper`] that never stops execution.
 pub struct NeverStopper;
 
 impl Stopper for NeverStopper {
-    fn should_stop(&self, _processor: &FastProcessor) -> bool {
+    fn should_stop<P>(&self, _processor: &P) -> bool
+    where
+        P: Processor,
+    {
         false
     }
 }
@@ -61,7 +58,10 @@ impl Stopper for NeverStopper {
 pub struct StepStopper;
 
 impl Stopper for StepStopper {
-    fn should_stop(&self, _processor: &FastProcessor) -> bool {
+    fn should_stop<P>(&self, _processor: &P) -> bool
+    where
+        P: Processor,
+    {
         true
     }
 }

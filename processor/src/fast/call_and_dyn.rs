@@ -14,8 +14,9 @@ use crate::{
     errors::{MapExecErr, OperationError},
     fast::{
         ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer,
-        step::{BreakReason, Stopper},
+        step::BreakReason,
     },
+    processor::Stopper,
 };
 
 impl FastProcessor {
