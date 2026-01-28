@@ -7,7 +7,7 @@ sidebar_position: 9
 Miden assembly provides a set of instructions for performing common cryptographic operations. These instructions are listed in the table below.
 
 ### Hashing and Merkle trees
-[Poseidon2](https://eprint.iacr.org/2023/323) is the native hash function of Miden VM. The parameters of the hash function were chosen to provide 128-bit security level against preimage and collision attacks. The function operates over a state of 12 field elements, and requires 7 rounds for a single permutation. However, due to its special status within the VM, computing Poseidon2 hashes can be done very efficiently. For example, applying a permutation of the hash function can be done in a single VM cycle.
+[Poseidon2](https://eprint.iacr.org/2023/323) is the native hash function of Miden VM. The parameters of the hash function were chosen to provide 128-bit security level against preimage and collision attacks. The function operates over a 12-element state (rate 8, capacity 4). Internally, a permutation is modeled as 31 step transitions, but the VM exposes it as a single-cycle `hperm` operation for efficient hashing.
 
 | Instruction                      | Stack_input        | Stack_output      | Notes                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------------- | ------------------ | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -46,12 +46,12 @@ The `hperm` instruction expects the sponge state to be on the stack as follows:
 ```
 Where R0 (first rate word) is on top, R1 (second rate word) is second, and C (capacity) is third. After permutation, the digest is in R0'.
 
-According to the Poseidon2 specifications, the capacity should be initialized as follows:
+We use a padding rule different from the Poseidon2 specification, following [this paper](https://eprint.iacr.org/2024/911.pdf). Under this rule, initialize the capacity as follows:
 
-- The first capacity element (i.e., `stack[8]`, the top element of word C) should be initialized to $n \mod 8$ where $n$ is the number of elements to be hashed across all permutations. For example, if we need to hash $100$ elements, the first capacity element must be initialized to $4$.
+- The first capacity element (i.e., `stack[8]`, the first element of word C) should be initialized to $n \mod 8$ where $n$ is the number of elements to be hashed across all permutations. For example, if we need to hash $100$ elements, the first capacity element must be initialized to $4$.
 - All other capacity elements must be initialized to zeros.
 
-The above rule is convenient as when we need to hash the number of elements divisible by $8$, all capacity elements should be initialized to zeros.
+The above rule is convenient as when the number of elements is divisible by $8$, all capacity elements should be initialized to zeros.
 
 Once the capacity elements have been initialized, we need to put the data we'd like to hash onto the stack. As mentioned above, this is done by populating the `RATE` section of the sponge. The sponge can absorb exactly $8$ elements per permutation. Thus, if we have fewer than $8$ elements to absorb, we need to put our data onto the stack and pad the remaining elements with zeros. For example, if we wanted to hash 3 elements (e.g., `a`, `b`, `c`), we would arrange the stack as follows before executing the `hperm` instruction:
 
@@ -63,7 +63,7 @@ If we have more than $8$ elements to absorb, we need to iteratively load the rat
 
 Once all the data has been absorbed, we can "squeeze" the resulting hash out of the sponge state by taking R0' (the first rate word after permutation). To do this, we can use a convenience procedure from the core library: `miden::core::crypto::hashes::poseidon2::squeeze_digest`.
 
-For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following, will absorb 24 elements from memory and compute their hash:
+For efficient hashing of long sequences of elements, `hperm` instruction can be paired up with `mem_stream` or `adv_pipe` instructions. For example, the following will absorb 24 elements from memory and compute their hash:
 
 ```
 # initialize the state of the sponge

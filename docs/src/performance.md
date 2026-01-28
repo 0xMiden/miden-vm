@@ -4,6 +4,10 @@ sidebar_position: 4
 ---
 
 # Performance
+
+> **Note:** The benchmark data in this document is currently outdated. The proving stack has recently
+transitioned from Winterfell to Plonky3, and these numbers should be refreshed.
+
 The benchmarks below should be viewed only as a rough guide for expected future performance. The reasons for this are twofold:
 1. Not all constraints have been implemented yet, and we expect that there will be some slowdown once constraint evaluation is completed.
 2. Many optimizations have not been applied yet, and we expect that there will be some speedup once we dedicate some time to performance optimizations.
