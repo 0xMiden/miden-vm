@@ -1,5 +1,5 @@
 use miden::core::stark::constants
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 
 #! Compute the LDE domain generator from the log2 of its size.
 #!

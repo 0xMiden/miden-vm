@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 
 # ===== MEMORY FUNCTIONS ==========================================================================
 
@@ -125,7 +125,7 @@ pub proc pipe_double_words_to_memory
   # loop until write_ptr reaches end_ptr (6 cycles per iteration + 1)
   # LOOP: [b, R0, R1, C, write_ptr, end_ptr, ...]
   while.true
-    adv_pipe exec.rpo256::permute # (2 cycles)
+    adv_pipe exec.poseidon2::permute # (2 cycles)
     # => [R0', R1', C', write_ptr', end_ptr, ...]
 
     dup.13 dup.13 neq # (4 cycles)
@@ -145,7 +145,7 @@ end
 #! - num_words is the number of words which will be copied to the memory.
 #! - write_ptr is the memory pointer where the words will be copied.
 #! - write_ptr' is the memory pointer to the end of the copied words.
-#! - R0, R1, C are the final RPO hasher state (R0 on top).
+#! - R0, R1, C are the final Poseidon2 hasher state (R0 on top).
 #!
 #! Total cycles:
 #!  - Even `num_words`: 43 + 9 * num_words / 2
@@ -186,7 +186,7 @@ pub proc pipe_words_to_memory
 
   # if(needs_padding) (17 cycles)
   if.true
-    # Rescue Prime Optimized uses overwrite mode, drop R1. (4 cycles)
+    # Poseidon2 uses overwrite mode, drop R1. (4 cycles)
     swapw dropw
     # => [R0, C, write_ptr, ...]
 
@@ -211,8 +211,8 @@ pub proc pipe_words_to_memory
     padw swapw
     # => [R0', R1, C, write_ptr+4, ...]
 
-    # Run RPO permutation (1 cycles)
-    exec.rpo256::permute
+    # Run Poseidon2 permutation (1 cycles)
+    exec.poseidon2::permute
     # => [R0'', R1', C', write_ptr+4, ...]
   end
 end
@@ -239,7 +239,7 @@ pub proc pipe_preimage_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave only the digest on the stack
-  exec.rpo256::squeeze_digest
+  exec.poseidon2::squeeze_digest
   # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Save the write_ptr (2 cycles)
@@ -277,7 +277,7 @@ pub proc pipe_double_words_preimage_to_memory
   # Setup the initial hasher state [R0, R1, C] with empty capacity.
   #
   # (12 cycles).
-  exec.rpo256::init_no_padding
+  exec.poseidon2::init_no_padding
   # => [R0, R1, C, write_ptr, end_ptr, COMMITMENT, ...]
 
   # (9 + 3 * num_words cycles)
@@ -286,7 +286,7 @@ pub proc pipe_double_words_preimage_to_memory
   # => [R0, R1, C, write_ptr', COMMITMENT, ...]
 
   # Leave just the digest on the stack (9 cycles).
-  exec.rpo256::squeeze_digest
+  exec.poseidon2::squeeze_digest
   # => [DIGEST, write_ptr', COMMITMENT, ...]
 
   # Move write_ptr out of the way so we can assert the commitment (2 cycles).

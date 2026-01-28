@@ -49,9 +49,11 @@ name = "miden-cli"
 path = "tests/integration/main.rs"
 
 [features]
-concurrent = ["miden-prover/concurrent", "std"]
+concurrent = ["dep:p3-miden-prover", "miden-prover/concurrent", "std"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
+tracing-perfetto = ["executable", "dep:tracing-profile", "tracing-profile/perfetto"]
+tracing-chrome = ["executable", "dep:tracing-chrome"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -87,6 +89,9 @@ serde_json = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
 tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
+tracing-profile = { workspace = true, optional = true }
+tracing-chrome = { workspace = true, optional = true }
+p3-miden-prover = { workspace = true, optional = true, features = ["parallel"] }
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }

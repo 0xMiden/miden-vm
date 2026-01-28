@@ -4,6 +4,7 @@ use miden_air::{
     ExecutionOptions,
     trace::{
         CTX_COL_IDX,
+        chiplets::hasher::HASH_CYCLE_LEN_FELT,
         decoder::{
             ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_RANGE, IN_SPAN_COL_IDX,
             NUM_HASHER_COLUMNS, NUM_OP_BATCH_FLAGS, NUM_OP_BITS, OP_BATCH_1_GROUPS,
@@ -372,7 +373,7 @@ fn test_basic_block_with_respan_decoding() {
     // NOOP inserted by the processor to make sure the group doesn't end with a PUSH
     check_op_decoding(&trace, 8, INIT_ADDR, Operation::Noop, 4, 7, 1);
     // RESPAN since the previous batch is full
-    let batch1_addr = INIT_ADDR + EIGHT;
+    let batch1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 9, INIT_ADDR, Operation::Respan, 4, 0, 0);
     check_op_decoding_with_imm(&trace, 10, batch1_addr, iv[7], 1, 3, 0, 1);
     check_op_decoding(&trace, 11, batch1_addr, Operation::Add, 2, 1, 1);
@@ -462,12 +463,12 @@ fn test_join_node_decoding() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting first span
-    let span1_addr = INIT_ADDR + EIGHT;
+    let span1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, span1_addr, Operation::Mul, 0, 0, 1);
     check_op_decoding(&trace, 3, span1_addr, Operation::End, 0, 0, 0);
     // starting second span
-    let span2_addr = INIT_ADDR + Felt::new(16);
+    let span2_addr = span1_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 4, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 5, span2_addr, Operation::Add, 0, 0, 1);
     check_op_decoding(&trace, 6, span2_addr, Operation::End, 0, 0, 0);
@@ -532,7 +533,7 @@ fn test_split_node_true_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + EIGHT;
+    let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 0, ZERO, Operation::Split, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, Operation::Mul, 0, 0, 1);
@@ -591,7 +592,7 @@ fn test_split_node_false_decoding() {
     let (trace, trace_len) = build_trace_helper(&[0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let basic_block_addr = INIT_ADDR + EIGHT;
+    let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 0, ZERO, Operation::Split, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, basic_block_addr, Operation::Add, 0, 0, 1);
@@ -651,7 +652,7 @@ fn test_loop_node_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let body_addr = INIT_ADDR + EIGHT;
+    let body_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 2, body_addr, Operation::Pad, 0, 0, 1);
@@ -758,8 +759,8 @@ fn test_loop_node_repeat_decoding() {
     let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program);
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
-    let iter1_addr = INIT_ADDR + EIGHT;
-    let iter2_addr = INIT_ADDR + Felt::new(16);
+    let iter1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
+    let iter2_addr = iter1_addr + HASH_CYCLE_LEN_FELT;
 
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Span, 1, 0, 0);
@@ -897,11 +898,11 @@ fn test_call_decoding() {
     check_op_decoding(&dec_trace, row_idx, ZERO, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
-    let inner_join_addr = INIT_ADDR + EIGHT;
+    let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
-    let first_basic_block_addr = inner_join_addr + EIGHT;
+    let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, Operation::Span, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
@@ -916,15 +917,15 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting CALL block for bar
-    let call_addr = first_basic_block_addr + EIGHT;
+    let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, Operation::Call, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
-    let bar_join_addr = call_addr + EIGHT;
+    let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, call_addr, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
-    let bar_basic_block_addr = bar_join_addr + EIGHT;
+    let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, Operation::Mul, 0, 0, 1);
@@ -933,11 +934,11 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting CALL to foo
-    let syscall_addr = bar_basic_block_addr + EIGHT;
+    let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, Operation::Call, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
-    let syscall_basic_block_addr = syscall_addr + EIGHT;
+    let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, syscall_addr, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, Operation::Add, 0, 0, 1);
@@ -959,7 +960,7 @@ fn test_call_decoding() {
     row_idx += 1;
 
     // starting the last SPAN block
-    let last_basic_block_addr = syscall_basic_block_addr + EIGHT;
+    let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop, 0, 0, 1);
@@ -1200,11 +1201,11 @@ fn test_syscall_decoding() {
     check_op_decoding(&dec_trace, row_idx, ZERO, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting the internal JOIN block
-    let inner_join_addr = INIT_ADDR + EIGHT;
+    let inner_join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting first SPAN block
-    let first_basic_block_addr = inner_join_addr + EIGHT;
+    let first_basic_block_addr = inner_join_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, Operation::Span, 4, 0, 0);
     row_idx += 1;
     check_op_decoding_with_imm(&dec_trace, row_idx, first_basic_block_addr, ONE, 1, 3, 0, 1);
@@ -1219,15 +1220,15 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting CALL block for bar
-    let call_addr = first_basic_block_addr + EIGHT;
+    let call_addr = first_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, inner_join_addr, Operation::Call, 0, 0, 0);
     row_idx += 1;
     // starting JOIN block inside bar
-    let bar_join_addr = call_addr + EIGHT;
+    let bar_join_addr = call_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, call_addr, Operation::Join, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block inside bar
-    let bar_basic_block_addr = bar_join_addr + EIGHT;
+    let bar_basic_block_addr = bar_join_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, bar_basic_block_addr, Operation::Mul, 0, 0, 1);
@@ -1236,11 +1237,11 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting SYSCALL block for bar
-    let syscall_addr = bar_basic_block_addr + EIGHT;
+    let syscall_addr = bar_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, bar_join_addr, Operation::SysCall, 0, 0, 0);
     row_idx += 1;
     // starting SPAN block within syscall
-    let syscall_basic_block_addr = syscall_addr + EIGHT;
+    let syscall_basic_block_addr = syscall_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, syscall_addr, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, syscall_basic_block_addr, Operation::Add, 0, 0, 1);
@@ -1262,7 +1263,7 @@ fn test_syscall_decoding() {
     row_idx += 1;
 
     // starting the last SPAN block
-    let last_basic_block_addr = syscall_basic_block_addr + EIGHT;
+    let last_basic_block_addr = syscall_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&dec_trace, row_idx, INIT_ADDR, Operation::Span, 1, 0, 0);
     row_idx += 1;
     check_op_decoding(&dec_trace, row_idx, last_basic_block_addr, Operation::Drop, 0, 0, 1);
@@ -1473,15 +1474,15 @@ fn test_dyn_node_decoding() {
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
     // starting inner join
-    let join_addr = INIT_ADDR + EIGHT;
+    let join_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 1, INIT_ADDR, Operation::Join, 0, 0, 0);
     // starting first span
-    let mstorew_basic_block_addr = join_addr + EIGHT;
+    let mstorew_basic_block_addr = join_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 2, join_addr, Operation::Span, 1, 0, 0);
     check_op_decoding(&trace, 3, mstorew_basic_block_addr, Operation::MStoreW, 0, 0, 1);
     check_op_decoding(&trace, 4, mstorew_basic_block_addr, Operation::End, 0, 0, 0);
     // starting second span
-    let push_basic_block_addr = mstorew_basic_block_addr + EIGHT;
+    let push_basic_block_addr = mstorew_basic_block_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 5, join_addr, Operation::Span, 2, 0, 0);
     check_op_decoding(&trace, 6, push_basic_block_addr, PUSH_40_OP, 1, 0, 1);
     check_op_decoding(&trace, 7, push_basic_block_addr, Operation::Noop, 0, 1, 1);
@@ -1491,8 +1492,8 @@ fn test_dyn_node_decoding() {
     // dyn
     check_op_decoding(&trace, 10, INIT_ADDR, Operation::Dyn, 0, 0, 0);
     // starting foo span
-    let dyn_addr = push_basic_block_addr + EIGHT;
-    let add_basic_block_addr = dyn_addr + EIGHT;
+    let dyn_addr = push_basic_block_addr + HASH_CYCLE_LEN_FELT;
+    let add_basic_block_addr = dyn_addr + HASH_CYCLE_LEN_FELT;
     check_op_decoding(&trace, 11, dyn_addr, Operation::Span, 2, 0, 0);
     check_op_decoding_with_imm(&trace, 12, add_basic_block_addr, ONE, 1, 1, 0, 1);
     check_op_decoding(&trace, 13, add_basic_block_addr, Operation::Add, 0, 1, 1);

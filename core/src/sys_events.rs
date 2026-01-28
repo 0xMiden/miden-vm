@@ -280,7 +280,7 @@ pub enum SystemEvent {
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying an RPO permutation to all three words.
+    /// under the key defined by applying a Poseidon2 permutation to all three words.
     ///
     /// Inputs:
     ///   Operand stack: [B, A, C, ...]

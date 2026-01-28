@@ -403,7 +403,7 @@ impl MastForest {
     ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
         digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
-        miden_crypto::hash::rpo::Rpo256::merge_many(&digests)
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
     }
 
     /// Returns the commitment to this MAST forest.

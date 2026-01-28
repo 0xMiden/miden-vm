@@ -14,8 +14,12 @@ use crate::{
 // REQUESTS
 // ================================================================================================
 
-/// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
-pub(super) fn build_kernel_init_requests<E>(
+/// Builds the reduced value for kernel procedure digests.
+///
+/// This computes the product of reduced kernel procedure hashes, which equals the expected
+/// final value of the chiplets bus (b_chip) auxiliary column. The verifier uses this to
+/// check aux_final[b_chip] against kernel hashes provided as variable-length public inputs.
+pub fn build_kernel_init_requests<E>(
     proc_hashes: &[Word],
     alphas: &[E],
     _debugger: &mut BusDebugger<E>,
@@ -33,7 +37,7 @@ where
         requests *= message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(std::boxed::Box::new(message), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
     }
     requests
 }
@@ -78,7 +82,7 @@ where
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(std::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
 
         value
     } else {
@@ -89,7 +93,7 @@ where
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(std::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
         value
     }
 }

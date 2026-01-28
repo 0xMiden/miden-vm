@@ -134,7 +134,7 @@ impl MastNodeExt for SplitNode {
     /// domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::SplitNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
     /// # let on_true_digest = Word::default();
     /// # let on_false_digest = Word::default();
     /// Hasher::merge_in_domain(&[on_true_digest, on_false_digest], SplitNode::DOMAIN);

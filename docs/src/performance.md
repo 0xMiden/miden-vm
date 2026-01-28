@@ -55,9 +55,9 @@ In the benchmarks below, the VM executes the same Fibonacci calculator program f
 | Amazon Graviton 3 (64 threads) | 330 ms         | 3.6 sec      | 8.5%        | 265 KHz           |
 
 ### Recursive proofs
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Rescue Prime Optimized (RPO), which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are considerably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are considerably slower than regular hash functions.
 
-In the benchmarks below we execute the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level using RPO hash function instead of BLAKE3:
+In the benchmarks below we execute the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
 
 | Machine                        | Execution time | Proving time | Proving time (HW) |
 | ------------------------------ | :------------: | :----------: | :---------------: |
@@ -69,4 +69,4 @@ In the benchmarks below we execute the same Fibonacci calculator program for 2<s
 In the above, proof generation on some platforms can be hardware-accelerated. Specifically:
 
 * On Apple M1/M2 platforms the built-in GPU is used for a part of proof generation process.
-* On the Graviton platform, SVE vector extension is used to accelerate RPO computations.
+* On the Graviton platform, SVE vector extension is used to accelerate Poseidon2 computations.

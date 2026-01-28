@@ -69,7 +69,7 @@ const COMPOSITION_POLY_COM_PTR = 3223322644
 ### Address to store the OOD evaluation point
 const Z_PTR = 3223322648
 
-### Address to store the zero word, mainly used in the context of RPO
+### Address to store the zero word, mainly used in the context of Poseidon2
 const ZERO_WORD_PTR = 3223322652
 
 ### Address to store the non-deterministically provided DEEP polynomial batching randomness
@@ -90,7 +90,7 @@ const VARIABLE_LEN_PUBLIC_INPUTS_ADDRESS_PTR = 3223322666
 ### Address storing a pointer to the public inputs
 const PUBLIC_INPUTS_ADDRESS_PTR = 3223322667
 
-### Addresses to store the state of RPO-based random coin
+### Addresses to store the state of Poseidon2-based random coin
 const C_PTR = 3223322668
 const R1_PTR = 3223322672
 const R2_PTR = 3223322676
@@ -367,17 +367,17 @@ pub proc public_inputs_address_ptr
     push.PUBLIC_INPUTS_ADDRESS_PTR
 end
 
-#! Returns the pointer to the capacity word of the RPO-based random coin.
+#! Returns the pointer to the capacity word of the Poseidon2-based random coin.
 pub proc c_ptr
     push.C_PTR
 end
 
-#! Returns the pointer to the first rate word of the RPO-based random coin.
+#! Returns the pointer to the first rate word of the Poseidon2-based random coin.
 pub proc r1_ptr
     push.R1_PTR
 end
 
-#! Returns the pointer to the second rate word of the RPO-based random coin.
+#! Returns the pointer to the second rate word of the Poseidon2-based random coin.
 pub proc r2_ptr
     push.R2_PTR
 end

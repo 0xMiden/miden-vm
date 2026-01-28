@@ -333,6 +333,101 @@ pub(super) fn build_pipe_request<E: ExtensionField<Felt>>(
     combined_value
 }
 
+/// Builds `CRYPTOSTREAM` requests made to the memory chiplet (two reads + two writes).
+pub(super) fn build_cryptostream_request<E: ExtensionField<Felt>>(
+    main_trace: &MainTrace,
+    alphas: &[E],
+    row: RowIndex,
+    _debugger: &mut BusDebugger<E>,
+) -> E {
+    let ctx = main_trace.ctx(row);
+    let clk = main_trace.clk(row);
+    let src = main_trace.stack_element(12, row);
+    let dst = main_trace.stack_element(13, row);
+
+    let rate = [
+        main_trace.stack_element(0, row),
+        main_trace.stack_element(1, row),
+        main_trace.stack_element(2, row),
+        main_trace.stack_element(3, row),
+        main_trace.stack_element(4, row),
+        main_trace.stack_element(5, row),
+        main_trace.stack_element(6, row),
+        main_trace.stack_element(7, row),
+    ];
+    let cipher = [
+        main_trace.stack_element(0, row + 1),
+        main_trace.stack_element(1, row + 1),
+        main_trace.stack_element(2, row + 1),
+        main_trace.stack_element(3, row + 1),
+        main_trace.stack_element(4, row + 1),
+        main_trace.stack_element(5, row + 1),
+        main_trace.stack_element(6, row + 1),
+        main_trace.stack_element(7, row + 1),
+    ];
+    let plain = [
+        cipher[0] - rate[0],
+        cipher[1] - rate[1],
+        cipher[2] - rate[2],
+        cipher[3] - rate[3],
+        cipher[4] - rate[4],
+        cipher[5] - rate[5],
+        cipher[6] - rate[6],
+        cipher[7] - rate[7],
+    ];
+
+    let read_label = Felt::from_u8(MEMORY_READ_WORD_LABEL);
+    let write_label = Felt::from_u8(MEMORY_WRITE_WORD_LABEL);
+
+    let read_req_1 = MemoryWordMessage {
+        op_label: read_label,
+        ctx,
+        addr: src,
+        clk,
+        word: [plain[0], plain[1], plain[2], plain[3]],
+        source: "cryptostream read 1",
+    };
+    let read_req_2 = MemoryWordMessage {
+        op_label: read_label,
+        ctx,
+        addr: src + FOUR,
+        clk,
+        word: [plain[4], plain[5], plain[6], plain[7]],
+        source: "cryptostream read 2",
+    };
+    let write_req_1 = MemoryWordMessage {
+        op_label: write_label,
+        ctx,
+        addr: dst,
+        clk,
+        word: [cipher[0], cipher[1], cipher[2], cipher[3]],
+        source: "cryptostream write 1",
+    };
+    let write_req_2 = MemoryWordMessage {
+        op_label: write_label,
+        ctx,
+        addr: dst + FOUR,
+        clk,
+        word: [cipher[4], cipher[5], cipher[6], cipher[7]],
+        source: "cryptostream write 2",
+    };
+
+    let value = read_req_1.value(alphas)
+        * read_req_2.value(alphas)
+        * write_req_1.value(alphas)
+        * write_req_2.value(alphas);
+
+    #[cfg(any(test, feature = "bus-debugger"))]
+    {
+        _debugger.add_request(alloc::boxed::Box::new(read_req_1), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(read_req_2), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_1), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(write_req_2), alphas);
+    }
+
+    value
+}
+
 /// Builds `HORNERBASE` requests made to the memory chiplet.
 pub(super) fn build_hornerbase_eval_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,

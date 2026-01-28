@@ -137,10 +137,10 @@ $$
 It should be noted that $a$ refers to a column in the decoder, as depicted. The addresses in this column are set using the address from the hasher chiplet for the corresponding hash initialization / absorption / return. In the case of $h_{abp}$ the value of the address in column $a$ in the current row of the decoder is set to equal the value of the address of the row in the hasher chiplet where the previous absorption (or initialization) occurred. $a'$ is the address of the next row of the decoder, which is set to equal the address in the hasher chiplet where the absorption referred to by the $h_{abp}$ label is happening.
 
 $$
-h_{res} = \alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (a + 7) + \sum_{i=0}^3(\alpha_{i + 8} \cdot h_i)
+h_{res} = \alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (a + 31) + \sum_{i=0}^3(\alpha_{i + 8} \cdot h_i)
 $$
 
-In the above, $a$ represents the address value in the decoder which corresponds to the hasher chiplet address at which the hasher was initialized (or the last absorption took place).  As such, $a + 7$ corresponds to the hasher chiplet address at which the result is returned.
+In the above, $a$ represents the address value in the decoder which corresponds to the hasher chiplet address at which the hasher was initialized (or the last absorption took place).  As such, $a + 31$ corresponds to the hasher chiplet address at which the result is returned.
 
 $$
 f_{ctrli} = f_{join} + f_{split} + f_{loop} \text{ | degree} = 5

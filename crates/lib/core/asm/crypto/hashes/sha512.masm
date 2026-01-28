@@ -1,7 +1,7 @@
 use miden::core::mem
 use miden::core::sys
 use miden::core::word
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 
 # ENCODING CONVENTIONS
 # ================================================================================================
@@ -50,26 +50,26 @@ pub proc hash_bytes_impl
     # => [ptr, len_u32, len_bytes, ...]
 
     # Load digest from advice stack (16 u32 limbs) and write to digest_ptr = locaddr.0
-    # simultaneously compute COMM_DIGEST = Rpo(DIGEST[0..16])
+    # simultaneously compute COMM_DIGEST = Poseidon2(DIGEST[0..16])
     locaddr.0
-    exec.rpo256::init_no_padding
+    exec.poseidon2::init_no_padding
     # => [R0, R1, C, digest_ptr, ptr, len_u32, len_bytes, ...]
     repeat.2
         adv_pipe
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
-    exec.rpo256::squeeze_digest
+    exec.poseidon2::squeeze_digest
     # => [COMM_DIGEST, digest_ptr, ptr, len_u32, len_bytes, ...]
 
     movup.4 drop
     # => [COMM_DIGEST, ptr, len_u32, len_bytes, ...]
 
-    # Compute COMM_INPUT = rpo::hash_elements(ptr, len_u32)
-    movup.5 movup.5 exec.rpo256::hash_elements
+    # Compute COMM_INPUT = poseidon2::hash_elements(ptr, len_u32)
+    movup.5 movup.5 exec.poseidon2::hash_elements
     # => [COMM_INPUT, COMM_DIGEST, len_bytes, ...]
 
     # Compute COMM = hash(COMM_INPUT || COMM_DIGEST)
-    exec.rpo256::merge
+    exec.poseidon2::merge
     # => [COMM, len_bytes, ...]
 
     # Prepare TAG = [SHA512_HASH_BYTES_EVENT, len_bytes, 0, 0]

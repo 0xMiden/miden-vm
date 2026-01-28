@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 use miden::core::crypto::hashes::sha512
 use miden::core::sys
 use miden::core::word
@@ -38,7 +38,7 @@ const SIG_LEN_FELTS = 16      # 64.div_ceil(4)
 #!   Advice stack:  []
 #!
 #! Where:
-#! - `PK_COMM`: RPO hash commitment of the 32-byte Ed25519 public key
+#! - `PK_COMM`: Poseidon2 hash commitment of the 32-byte Ed25519 public key
 #! - `MSG`: single word (4 field elements) representing the message to verify
 #! - `PK[8]`: 32-byte public key packed as 8 field elements on advice stack
 #! - `SIG[16]`: 64-byte signature packed as 16 field elements on advice stack
@@ -60,8 +60,8 @@ pub proc verify
     adv_loadw loc_storew_le.4 dropw
     # => [PK_COMM, MSG, ...]
 
-    # Compute the RPO hash of the public key and verify it matches PK_COMM
-    push.PK_LEN_FELTS locaddr.0 exec.rpo256::hash_elements
+    # Compute the Poseidon2 hash of the public key and verify it matches PK_COMM
+    push.PK_LEN_FELTS locaddr.0 exec.poseidon2::hash_elements
     assert_eqw.err="invalid public key commitment"
     # => [MSG, ...]
 
@@ -218,7 +218,7 @@ end
 #! Output: `[COMM, TAG, result, ...]`
 #!
 #! Where:
-#! - `COMM`: `Rpo256(Rpo256(Rpo256(pk) || Rpo256(k_digest)) || Rpo256(sig))`
+#! - `COMM`: `Poseidon2(Poseidon2(Poseidon2(pk) || Poseidon2(k_digest)) || Poseidon2(sig))`
 #! - `TAG`:  `[EDDSA_VERIFY_EVENT, result, 0, 0]`
 #! - `result`: host verification result (1 or 0)
 pub proc verify_prehash_impl
@@ -229,30 +229,30 @@ pub proc verify_prehash_impl
     adv_push.1
     # => [result, pk_ptr, k_digest_ptr, sig_ptr, ...]
 
-    # Compute COMM_PK = rpo::hash_memory(pk_ptr, PK_LEN_FELTS)
-    push.PK_LEN_FELTS movup.2 exec.rpo256::hash_elements
+    # Compute COMM_PK = poseidon2::hash_memory(pk_ptr, PK_LEN_FELTS)
+    push.PK_LEN_FELTS movup.2 exec.poseidon2::hash_elements
     # => [COMM_PK, result, k_digest_ptr, sig_ptr]
 
-    # Compute COMM_K = rpo::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
-    push.K_DIGEST_LEN_FELTS movup.6 exec.rpo256::hash_elements
+    # Compute COMM_K = poseidon2::hash_memory(k_digest_ptr, K_DIGEST_LEN_FELTS)
+    push.K_DIGEST_LEN_FELTS movup.6 exec.poseidon2::hash_elements
     # => [COMM_K, COMM_PK, result, sig_ptr]
 
-    # Merge COMM_PK and COMM_K into COMM_PK_K = rpo::merge(COMM_PK, COMM_K)
+    # Merge COMM_PK and COMM_K into COMM_PK_K = poseidon2::merge(COMM_PK, COMM_K)
     # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK on top
     swapw
     # => [COMM_PK, COMM_K, result, sig_ptr]
-    exec.rpo256::merge
+    exec.poseidon2::merge
     # => [COMM_PK_K, result, sig_ptr]
 
-    # Compute COMM_SIG = rpo::hash_memory(sig_ptr, SIG_LEN_FELTS)
-    push.SIG_LEN_FELTS movup.6 exec.rpo256::hash_elements
+    # Compute COMM_SIG = poseidon2::hash_memory(sig_ptr, SIG_LEN_FELTS)
+    push.SIG_LEN_FELTS movup.6 exec.poseidon2::hash_elements
     # => [COMM_SIG, COMM_PK_K, result]
 
-    # Merge into final commitment COMM = rpo::merge(COMM_PK_K, COMM_SIG)
+    # Merge into final commitment COMM = poseidon2::merge(COMM_PK_K, COMM_SIG)
     # hmerge([A, B]) computes merge(&[A, B]), so we need COMM_PK_K on top
     swapw
     # => [COMM_PK_K, COMM_SIG, result]
-    exec.rpo256::merge
+    exec.poseidon2::merge
     # => [COMM, result]
 
     # Create TAG = [EDDSA_VERIFY_EVENT, result, 0, 0] on stack

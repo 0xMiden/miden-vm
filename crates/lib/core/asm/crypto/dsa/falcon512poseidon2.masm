@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 use miden::core::math::u64
 
 # CONSTANTS
@@ -11,7 +11,7 @@ const M_DOUBLE = 24578
 const M_SQUARE = 151019521
 const SQUARE_NORM_BOUND = 34034726
 const MEMORY_POINTER_OFFSET_OF_HASH_TO_POINT_POLY_FROM_PRODUCT_POLY = 1024
-const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512rpo::falcon_div")
+const FALCON_DIV_EVENT = event("miden::core::crypto::dsa::falcon512poseidon2::falcon_div")
 
 # MODULAR REDUCTION FALCON PRIME
 # =============================================================================================
@@ -87,7 +87,7 @@ end
 # =============================================================================================
 
 #! Takes as input a message digest, a nonce of size 40 bytes represented as 8 field elements
-#! and a pointer. The procedure absorbs MSG and NONCE into a fresh RPO state and squeezes the
+#! and a pointer. The procedure absorbs MSG and NONCE into a fresh Poseidon2 state and squeezes the
 #! coefficients of a polynomial c representing the hash-to-point of (MSG || NONCE). The coefficients
 #! are then saved in the memory region [c_ptr, c_ptr + 512).
 #! This implementation of the `hash_to_point` procedure avoids the rejection-sampling step
@@ -108,11 +108,11 @@ pub proc hash_to_point
 
     # Absorb the nonce
     padw movdnw.2
-    exec.rpo256::permute
+    exec.poseidon2::permute
 
     # Absorb the message
     loc_loadw_le.4
-    exec.rpo256::permute
+    exec.poseidon2::permute
 
     # Squeeze the coefficients and save them
     repeat.63
@@ -122,7 +122,7 @@ pub proc hash_to_point
         dup.12 add.8 swap.13 add.4
         mem_storew_le
         swapw
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
 
     # Save the last remaining coefficients
@@ -224,7 +224,7 @@ pub proc load_h_s2_and_product
 
         horner_eval_base
 
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
     # => [Y, D, C, ptr, tau_inv_ptr, acc0, acc1, ...] where D is the digest expected to be PK
 
@@ -264,7 +264,7 @@ pub proc load_h_s2_and_product
         push.M u32overflowing_sub assert drop
 
         horner_eval_base
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
     # => [Y, Y, C, ptr, tau_inv_ptr, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
@@ -278,7 +278,7 @@ pub proc load_h_s2_and_product
     repeat.128
         adv_pipe
         horner_eval_base
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
     # => [Y, D, C, ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, s2(tau)_0, s2(tau)_1, h(tau)_0, h(tau)_1, ...]
 
@@ -681,7 +681,7 @@ end
 # =============================================================================================
 
 #! Moves the signature from the advice map to the advice stack, where the signature is stored in
-#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the RPO256 hash. The signature is
+#! the hashmap at key `hash(MSG || PK)`, where `hash()` is the Poseidon2 hash. The signature is
 #! expected to be stored in reverse order, so that it gets pushed on the advice stack in the
 #! correct order.
 #!

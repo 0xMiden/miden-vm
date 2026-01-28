@@ -1,6 +1,9 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, MainTrace, chiplets::hasher::P1_COL_IDX};
+use miden_air::trace::{
+    AUX_TRACE_RAND_ELEMENTS, MainTrace,
+    chiplets::hasher::{HASH_CYCLE_LEN, P1_COL_IDX},
+};
 use miden_core::{
     ONE, Operation, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
@@ -77,70 +80,74 @@ fn hasher_p1_mr_update(#[case] index: u64) {
         SiblingTableRow::new(Felt::new(index >> 2), path[2]).to_value(&trace.main_trace, &alphas),
     ];
 
-    // make sure the first entry is ONE
+    // Make sure the first entry is ONE.
     let mut expected_value = ONE;
     assert_eq!(expected_value, p1[0]);
 
-    // the running product does not change for the next 7 steps because the hasher computes the
-    // hash of the SPAN block
-    for value in p1.iter().take(8).skip(1) {
+    // The running product does not change while the hasher computes the hash of the SPAN block.
+    let row_add_1 = HASH_CYCLE_LEN + 1;
+    for value in p1.iter().take(row_add_1).skip(1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 8, computations of the "old Merkle root" is started and the first sibling is added
-    // to the table in the following row (step 9)
+    // When computation of the "old Merkle root" is started, the first sibling is added to the
+    // table in the following row.
     expected_value *= row_values[0];
-    assert_eq!(expected_value, p1[9]);
+    assert_eq!(expected_value, p1[row_add_1]);
 
-    // and then again for the next 6 steps the value remains the same
-    for value in p1.iter().take(16).skip(10) {
+    // The value remains the same until the next sibling is added.
+    let row_add_2 = 2 * HASH_CYCLE_LEN;
+    for value in p1.iter().take(row_add_2).skip(row_add_1 + 1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 15, the next sibling is added to the table in the following row (step 16)
+    // Next sibling is added.
     expected_value *= row_values[1];
-    assert_eq!(expected_value, p1[16]);
+    assert_eq!(expected_value, p1[row_add_2]);
 
-    // and then again for the next 6 steps the value remains the same
-    for value in p1.iter().take(24).skip(18) {
+    // The value remains the same until the last sibling is added.
+    let row_add_3 = 3 * HASH_CYCLE_LEN;
+    for value in p1.iter().take(row_add_3).skip(row_add_2 + 1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 23, the last sibling is added to the table in the following row (step 24)
+    // Last sibling is added.
     expected_value *= row_values[2];
-    assert_eq!(expected_value, p1[24]);
+    assert_eq!(expected_value, p1[row_add_3]);
 
-    // and then again for the next 7 steps the value remains the same
-    for value in p1.iter().take(33).skip(25) {
+    // The value remains the same until computation of the "new Merkle root" is started.
+    let row_remove_1 = 4 * HASH_CYCLE_LEN + 1;
+    for value in p1.iter().take(row_remove_1).skip(row_add_3 + 1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 32, computations of the "new Merkle root" is started and the first sibling is
-    // removed from the table in the following row (step 33)
+    // First sibling is removed from the table in the following row.
     expected_value *= row_values[0].inverse();
-    assert_eq!(expected_value, p1[33]);
+    assert_eq!(expected_value, p1[row_remove_1]);
 
-    // then, for the next 6 steps the value remains the same
-    for value in p1.iter().take(40).skip(33) {
+    // The value remains the same until the next sibling is removed.
+    let row_remove_2 = 5 * HASH_CYCLE_LEN;
+    for value in p1.iter().take(row_remove_2).skip(row_remove_1 + 1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 39, the next sibling is removed from the table in the following row (step 40)
+    // Next sibling is removed.
     expected_value *= row_values[1].inverse();
-    assert_eq!(expected_value, p1[40]);
+    assert_eq!(expected_value, p1[row_remove_2]);
 
-    // and then again for the next 6 steps the value remains the same
-    for value in p1.iter().take(48).skip(41) {
+    // The value remains the same until the last sibling is removed.
+    let row_remove_3 = 6 * HASH_CYCLE_LEN;
+    for value in p1.iter().take(row_remove_3).skip(row_remove_2 + 1) {
         assert_eq!(expected_value, *value);
     }
 
-    // on step 47, the last sibling is removed from the table in the following row (step 48)
+    // Last sibling is removed.
     expected_value *= row_values[2].inverse();
-    assert_eq!(expected_value, p1[48]);
+    assert_eq!(expected_value, p1[row_remove_3]);
 
     // at this point the table should be empty again, and it should stay empty until the end
     assert_eq!(expected_value, ONE);
-    for value in p1.iter().skip(50) {
+    for value in p1.iter().skip(row_remove_3 + 1) {
         assert_eq!(ONE, *value);
     }
 }

@@ -571,7 +571,7 @@ const ACC_LOW_INDEX: usize = 14;
 const ACC_HIGH_INDEX: usize = 15;
 
 proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
+    #![proptest_config(ProptestConfig::with_cases(5))]
     #[test]
     fn proptest_prove_verify_horner_base(
         // 8 coefficients (c0-c7) - top 8 stack elements

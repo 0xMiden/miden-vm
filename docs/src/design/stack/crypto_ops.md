@@ -11,7 +11,7 @@ Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chip
 Thus, to describe AIR constraints for the cryptographic operations, we need to define how to compute these input and output values within the stack. We do this in the following sections.
 
 ## HPERM
-The `HPERM` operation applies Rescue Prime Optimized permutation to the top $12$ elements of the stack. The stack is assumed to be arranged so that the $8$ elements of the rate are at the top of the stack. The capacity word follows, with the number of elements to be hashed at the deepest position in stack. The diagram below illustrates this graphically.
+The `HPERM` operation applies Poseidon2 permutation to the top $12$ elements of the stack. The stack is assumed to be arranged so that the $8$ elements of the rate are at the top of the stack. The capacity word follows, with the number of elements to be hashed at the deepest position in stack. The diagram below illustrates this graphically.
 
 ![hperm](../../img/design/stack/crypto_ops/HPERM.png)
 
@@ -20,14 +20,14 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `HPERM` operation, we define input and output values as follows:
 
 $$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{11-j})
+v_{input} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j)
 $$
 
 $$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_{11-j}')
+v_{output} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 31) + \sum_{j=0}^{11} (\alpha_{j+4} \cdot s_j')
 $$
 
-In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Rescue Prime Optimized permutation computation the index column is expected to be set to $0$.
+In the above, $op_{linhash}$ and $op_{retstate}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a linear hash and reading the full state of the hasher respectively. Also note that the term for $\alpha_3$ is missing from the above expressions because for Poseidon2 permutation computation the index column is expected to be set to $0$.
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
 
@@ -35,7 +35,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly $7$ rows apart.
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly $31$ rows apart.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $12$.
@@ -73,7 +73,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip} \text{ | degree} = 3
 $$
 
-The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly $8 \cdot d - 1$ rows apart, where $d$ is the depth of the node.
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly $32 \cdot d - 1$ rows apart, where $d$ is the depth of the node.
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$.
@@ -120,7 +120,7 @@ The $op_{mruold}$, $op_{mrunew}$, and $op_{rethash}$ are the unique [operation l
 > b_{chip}' \cdot v_{inputold} \cdot v_{outputold} \cdot v_{inputnew} \cdot v_{outputnew} = b_{chip} \text{ | degree} = 5
 > $$
 
-The above constraint enforces that the specified input and output rows for both, the old and the new node/root combinations, must be present in the trace of the hash chiplet, and that they must be exactly $8 \cdot d - 1$ rows apart, where $d$ is the depth of the node. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
+The above constraint enforces that the specified input and output rows for both, the old and the new node/root combinations, must be present in the trace of the hash chiplet, and that they must be exactly $32 \cdot d - 1$ rows apart, where $d$ is the depth of the node. It also ensures that the computation for the old node/root combination is immediately followed by the computation for the new node/root combination.
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
@@ -331,7 +331,7 @@ $$
 
 ## LOG_PRECOMPILE
 
-The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via an RPO sponge). Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via an Poseidon2 sponge). Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -342,7 +342,7 @@ The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`. See [Precompile
 
 Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[CAP_NEXT, R0, R1] = RPO([CAP_PREV, TAG, COMM])`, with the following stack transition
+The operation evaluates `[CAP_NEXT, R0, R1] = Poseidon2([CAP_PREV, TAG, COMM])`, with the following stack transition
 
 ```
 Before:  [COMM, TAG, PAD,      ...]
@@ -373,19 +373,19 @@ $$
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message therefore reduces the RPO state in the canonical order `[CAP_PREV, TAG, COMM]`:
+The input message therefore reduces the Poseidon2 state in the canonical order `[CAP_PREV, TAG, COMM]`:
 
 $$
 v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev},i} + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
 $$
 
-Seven rows later, the `op_retstate` response provides the permuted state `[CAP_{next}, R0, R1]`. Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R1, R0, CAP_NEXT]` in reverse order. Thus
+Thirty-one rows later, the `op_retstate` response provides the permuted state `[R0, R1, CAP_{next}]` (with R0 on top). Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R0, R1, CAP_NEXT]`. Thus
 
 $$
 \begin{aligned}
-\mathsf{R}_1{}_i &= s'_{3-i},\\
-\mathsf{R}_0{}_i &= s'_{7-i},\\
-\mathsf{CAP}^{\text{next}}_i &= s'_{11-i},
+\mathsf{R}_0{}_i &= s'_{i},\\
+\mathsf{R}_1{}_i &= s'_{4+i},\\
+\mathsf{CAP}^{\text{next}}_i &= s'_{8+i},
 \end{aligned}
 \qquad i \in \{0,1,2,3\},
 $$
@@ -393,7 +393,7 @@ $$
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 7) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i+ \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 31) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i+ \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:
@@ -402,7 +402,7 @@ $$
 b_{chip}' \cdot v_{input} \cdot v_{output} = b_{chip}
 $$
 
-The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly 7 rows apart. The RPO permutation outputs `[CAP, R0, R1]`; on the stack, the VM stores these words as `[R1, R0, CAP]`.
+The above constraint enforces that the specified input and output rows must be present in the trace of the hash chiplet, and that they must be exactly 31 rows apart. The Poseidon2 permutation outputs `[R0, R1, CAP]` (with R0 on top); on the stack, the VM stores these words as `[R0, R1, CAP]`.
 
 Given the similarity with the `HPERM` opcode which sends the same message, albeit from different variables in the trace, it should be possible to combine the bus constraint in a way that avoids increasing the degree of the overall bus expression.
 

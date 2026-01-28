@@ -80,7 +80,7 @@ pub(super) fn op_u32add<P: Processor>(
     processor.stack().set(0, sum);
     processor.stack().set(1, carry);
 
-    Ok(P::HelperRegisters::op_u32add_registers(sum, carry))
+    Ok(P::HelperRegisters::op_u32add_registers(carry, sum))
 }
 
 /// Pops three elements off the stack, adds them, splits the result into low and high 32-bit
