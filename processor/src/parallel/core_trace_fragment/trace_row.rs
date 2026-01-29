@@ -5,6 +5,7 @@ use core::ops::ControlFlow;
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
     SYS_TRACE_WIDTH,
+    chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS, OP_BATCH_FLAGS_OFFSET,
@@ -23,7 +24,7 @@ use miden_core::{
 use super::CoreTraceFragmentFiller;
 use crate::{
     decoder::block_stack::ExecutionContextInfo, parallel::core_trace_fragment::BasicBlockContext,
-    processor::StackInterface, utils::HASH_CYCLE_LEN_FELT,
+    processor::StackInterface,
 };
 
 // DECODER ROW

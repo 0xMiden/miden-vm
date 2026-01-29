@@ -137,8 +137,8 @@ pub struct FastProcessor {
     /// the size of core trace fragments during execution, etc.
     options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
-    /// sponge).
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
+    /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
 
     /// Tracks decorator retrieval calls for testing.

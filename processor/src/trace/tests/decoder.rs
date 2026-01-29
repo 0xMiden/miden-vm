@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS,
+    chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
@@ -40,7 +41,7 @@ fn decoder_p1_span_with_respan() {
 
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(Felt::new(9), ZERO, false).to_value(&alphas),
+        BlockStackTableRow::new(ONE + HASH_CYCLE_LEN_FELT, ZERO, false).to_value(&alphas),
     ];
 
     // make sure the first entry is ONE
@@ -97,12 +98,12 @@ fn decoder_p1_join() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9);
-    let a_17 = Felt::new(17);
+    let a_33 = ONE + HASH_CYCLE_LEN_FELT;
+    let a_65 = a_33 + HASH_CYCLE_LEN_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_17, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(a_65, ONE, false).to_value(&alphas),
     ];
 
     // make sure the first entry is ONE
@@ -170,10 +171,10 @@ fn decoder_p1_split() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9);
+    let a_33 = ONE + HASH_CYCLE_LEN_FELT;
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, false).to_value(&alphas),
-        BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
     ];
 
     // make sure the first entry is ONE
@@ -234,20 +235,21 @@ fn decoder_p1_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
 
-    let a_9 = Felt::new(9); // address of the JOIN block in the first iteration
-    let a_17 = Felt::new(17); // address of the first SPAN block in the first iteration
-    let a_25 = Felt::new(25); // address of the second SPAN block in the first iteration
-    let a_33 = Felt::new(33); // address of the JOIN block in the second iteration
-    let a_41 = Felt::new(41); // address of the first SPAN block in the second iteration
-    let a_49 = Felt::new(49); // address of the second SPAN block in the second iteration
+    // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
+    let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
+    let a_65 = a_33 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the first iteration
+    let a_97 = a_65 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the first iteration
+    let a_129 = a_97 + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the second iteration
+    let a_161 = a_129 + HASH_CYCLE_LEN_FELT; // address of the first SPAN block in the second iteration
+    let a_193 = a_161 + HASH_CYCLE_LEN_FELT; // address of the second SPAN block in the second iteration
     let row_values = [
         BlockStackTableRow::new(ONE, ZERO, true).to_value(&alphas),
-        BlockStackTableRow::new(a_9, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_17, a_9, false).to_value(&alphas),
-        BlockStackTableRow::new(a_25, a_9, false).to_value(&alphas),
         BlockStackTableRow::new(a_33, ONE, false).to_value(&alphas),
-        BlockStackTableRow::new(a_41, a_33, false).to_value(&alphas),
-        BlockStackTableRow::new(a_49, a_33, false).to_value(&alphas),
+        BlockStackTableRow::new(a_65, a_33, false).to_value(&alphas),
+        BlockStackTableRow::new(a_97, a_33, false).to_value(&alphas),
+        BlockStackTableRow::new(a_129, ONE, false).to_value(&alphas),
+        BlockStackTableRow::new(a_161, a_129, false).to_value(&alphas),
+        BlockStackTableRow::new(a_193, a_129, false).to_value(&alphas),
     ];
 
     // make sure the first entry is ONE
@@ -597,15 +599,16 @@ fn decoder_p2_loop_with_repeat() {
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
 
-    let a_9 = Felt::new(9); // address of the JOIN block in the first iteration
-    let a_33 = Felt::new(33); // address of the JOIN block in the second iteration
+    // The loop node consumes the first hasher cycle; join/span addresses follow sequentially.
+    let a_33 = ONE + HASH_CYCLE_LEN_FELT; // address of the JOIN block in the first iteration
+    let a_129 = a_33 + HASH_CYCLE_LEN_FELT * Felt::new(3); // address of the JOIN block in the second iteration
     let row_values = [
         BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas),
         BlockHashTableRow::new_test(ONE, join.digest(), false, true).collapse(&alphas),
-        BlockHashTableRow::new_test(a_9, basic_block_1.digest(), true, false).collapse(&alphas),
-        BlockHashTableRow::new_test(a_9, basic_block_2.digest(), false, false).collapse(&alphas),
         BlockHashTableRow::new_test(a_33, basic_block_1.digest(), true, false).collapse(&alphas),
         BlockHashTableRow::new_test(a_33, basic_block_2.digest(), false, false).collapse(&alphas),
+        BlockHashTableRow::new_test(a_129, basic_block_1.digest(), true, false).collapse(&alphas),
+        BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
     // make sure the first entry is initialized to program hash
@@ -810,7 +813,7 @@ fn decoder_p3_trace_two_batches() {
     // --- second batch ---------------------------------------------------------------------------
     // make sure entries for 3 group are inserted at clock cycle 10 (when RESPAN is executed)
     // group 3 consists of two DROP operations which do not fit into group 0
-    let batch1_addr = ONE + Felt::new(8);
+    let batch1_addr = ONE + HASH_CYCLE_LEN_FELT;
     let op_group3 = build_op_group(&[Operation::Drop; 2]);
     let b1_values = [
         OpGroupTableRow::new(batch1_addr, Felt::new(3), iv[7]).to_value(&alphas),

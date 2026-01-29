@@ -3,7 +3,7 @@
 //! This mirrors the Keccak256 precompile flow but targets SHA2-512. Execution-time handlers read
 //! packed bytes from memory, compute the digest, extend the advice stack with the 512-bit hash, and
 //! record calldata for deferred verification. Verification-time logic recomputes the digest and
-//! commits to both input and output using RPO hashing.
+//! commits to both input and output using Poseidon2 hashing.
 
 use alloc::{vec, vec::Vec};
 use core::array;
@@ -14,7 +14,7 @@ use miden_core::{
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::rpo::Rpo256;
+use miden_crypto::hash::poseidon2::Poseidon2;
 use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
 use sha2::{Digest, Sha512};
 
@@ -77,7 +77,7 @@ impl Sha512FeltDigest {
     }
 
     pub fn to_commitment(&self) -> Word {
-        Rpo256::hash_elements(&self.0)
+        Poseidon2::hash_elements(&self.0)
     }
 }
 
@@ -108,7 +108,7 @@ impl Sha512Preimage {
     }
 
     pub fn input_commitment(&self) -> Word {
-        Rpo256::hash_elements(&self.as_felts())
+        Poseidon2::hash_elements(&self.as_felts())
     }
 
     pub fn digest(&self) -> Sha512FeltDigest {
@@ -118,7 +118,7 @@ impl Sha512Preimage {
 
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
         let tag = self.precompile_tag();
-        let comm = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
+        let comm = Poseidon2::merge(&[self.input_commitment(), self.digest().to_commitment()]);
         PrecompileCommitment::new(tag, comm)
     }
 

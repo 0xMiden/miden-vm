@@ -4,7 +4,7 @@ use miden_air::{
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
-    crypto::{hash::Rpo256, merkle::MerklePath},
+    crypto::{hash::Poseidon2, merkle::MerklePath},
     field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
@@ -102,7 +102,7 @@ impl Processor for FastProcessor {
 impl HasherInterface for FastProcessor {
     #[inline(always)]
     fn permute(&mut self, mut input_state: HasherState) -> (Felt, HasherState) {
-        Rpo256::apply_permutation(&mut input_state);
+        Poseidon2::apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         (ZERO, input_state)
@@ -278,7 +278,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32split_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32split_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
@@ -303,12 +303,12 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(_carry: Felt, _sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
     #[inline(always)]
-    fn op_u32add3_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add3_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 

@@ -8,12 +8,12 @@ use crate::Report;
 // HASHING
 // ================================================================================================
 
-/// Appends HPERM and stack manipulation operations to compute a 1-to-1 RPO hash.
+/// Appends HPERM and stack manipulation operations to compute a 1-to-1 Poseidon2 hash.
 ///
 /// - Input:   the top 4 elements are the word `A` to be hashed.
 /// - Output:  the middle 4 elements are the digest word.
 ///
-/// Internally, this prepares the top 12 elements as an RPO state in `[RATE0, RATE1, CAPACITY]`
+/// Internally, this prepares the top 12 elements as a Poseidon2 state in `[RATE0, RATE1, CAPACITY]`
 /// layout, calls `hperm`, and then extracts the digest using squeeze_digest pattern.
 ///
 /// This operation takes 19 VM cycles.
@@ -48,7 +48,7 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
 }
 
 /// Appends HPERM and stack manipulation operations to the span block as required to compute a
-/// 2-to-1 RPO hash using the canonical `[RATE0, RATE1, CAPACITY]` state layout.
+/// 2-to-1 Poseidon2 hash using the canonical `[RATE0, RATE1, CAPACITY]` state layout.
 ///
 /// - Input:   the top 8 elements form the 2-word preimage `[A, B]` in stack order (A on top).
 /// - Output:  the middle 4 elements are the digest word, which is `hash(A, B)`.
@@ -56,7 +56,7 @@ pub(super) fn hash(block_builder: &mut BasicBlockBuilder) {
 /// Internally, this:
 /// 1. Pads a zero capacity word so the top 12 elements are `[CAP, A, B]`.
 /// 2. Reorders words to `[A, B, CAP]` required by `hperm`.
-/// 3. Applies `hperm` (RPO permutation) on the top 12 elements.
+/// 3. Applies `hperm` (Poseidon2 permutation) on the top 12 elements.
 /// 4. Extracts the digest.
 ///
 /// This operation takes 16 VM cycles.

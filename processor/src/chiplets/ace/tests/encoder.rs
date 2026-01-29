@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ZERO, crypto::hash::Rpo256, field::PrimeCharacteristicRing};
+use miden_core::{Felt, ZERO, crypto::hash::Poseidon2, field::PrimeCharacteristicRing};
 
 use super::*;
 use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
@@ -40,7 +40,7 @@ impl EncodedCircuit {
     /// Computes the hash of all circuit constants and instructions.
     #[expect(dead_code)]
     fn raw_circuit_hash(&self) -> Word {
-        Rpo256::hash_elements(&self.encoded_circuit)
+        Poseidon2::hash_elements(&self.encoded_circuit)
     }
 
     /// Returns the number of constants in the circuit.

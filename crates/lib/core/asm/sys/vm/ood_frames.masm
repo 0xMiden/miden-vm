@@ -1,8 +1,8 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 
 #! Processes the out-of-domain (OOD) evaluations of all committed polynomials.
 #!
-#! Takes as input an RPO hasher state and a pointer, and loads from the advice provider the OOD
+#! Takes as input an Poseidon2 hasher state and a pointer, and loads from the advice provider the OOD
 #! evaluations and stores at memory region using pointer `ptr` while absorbing the evaluations
 #! into the hasher state and simultaneously computing a random linear combination using Horner
 #! evaluation.
@@ -16,6 +16,6 @@ pub proc process_row_ood_evaluations
     repeat.24
         adv_pipe
         horner_eval_ext
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
 end

@@ -17,6 +17,7 @@ Miden assembly provides a set of instructions for moving data between the operan
 | Instruction                                                                     | Stack_input | Stack_output                                         | Notes                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | push._a_ <br /> - _(1-2 cycles)_ <br /> push._a_._b_ <br /> push._a_._b_._c_... | [ ... ]     | [a, ... ] <br /> [b, a, ... ] <br /> [c, b, a, ... ] | Pushes values $a$, $b$, $c$ etc. onto the stack. Up to $16$ values can be specified. All values must be valid field elements in decimal (e.g., $123$) or hexadecimal (e.g., $0x7b$) representation. |
+| push.[_a_,_b_,_c_,_d_] <br /> - _(4 cycles)_                                     | [ ... ]     | [a, b, c, d, ... ]                                   | Pushes a word (4 field elements) onto the stack. The first element $a$ ends up on top of the stack. All values must be valid field elements in decimal or hexadecimal representation. |
 
 The value can be specified in hexadecimal form without periods between individual values as long as it describes a full word ($4$ field elements or $32$ bytes). Note that hexadecimal values separated by periods (short hexadecimal strings) are assumed to be in big-endian order, while the strings specifying whole words (long hexadecimal strings) are assumed to be in little-endian order. That is, the following are semantically equivalent:
 
@@ -27,6 +28,27 @@ push.4660.22136.36882.43981
 ```
 
 In both case the values must still encode valid field elements.
+
+#### Word literal syntax
+
+The `push.[a,b,c,d]` syntax provides a convenient way to push a word (4 field elements) onto the stack. The elements are pushed such that the first element `a` ends up on top of the stack:
+
+```
+push.[1,2,3,4]   # Results in stack: [1, 2, 3, 4, ...]
+                 # where 1 is on top of the stack
+```
+
+This is equivalent to `push.4 push.3 push.2 push.1` but provides a more intuitive syntax when working with words, as the element order in the literal matches the resulting stack order (first element on top).
+
+You can also use slices with word constants to push only a portion of the word:
+
+```
+const WORD = [5,6,7,8]
+
+push.WORD[0]      # is equivalent to push.5
+push.WORD[1..3]   # is equivalent to `push.7 push.6`
+push.WORD[0..4]   # is equivalent to push.[5,6,7,8]
+```
 
 ### Environment inputs
 

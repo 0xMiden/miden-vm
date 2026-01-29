@@ -3,7 +3,7 @@ use std::{sync::Arc, vec};
 use miden_air::Felt;
 use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{EventName, ZERO, field::PrimeField64};
-use miden_core_lib::{CoreLibrary, dsa::falcon512_rpo};
+use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
     ProcessorState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
@@ -12,8 +12,8 @@ use miden_prover::ProvingOptions;
 use miden_utils_testing::{
     AdviceStackBuilder, Word,
     crypto::{
-        MerkleStore, Rpo256,
-        falcon512_rpo::{Polynomial, SecretKey},
+        MerkleStore, Poseidon2,
+        falcon512_poseidon2::{Polynomial, SecretKey},
     },
     expect_exec_error_matches,
     proptest::proptest,
@@ -23,21 +23,21 @@ use miden_utils_testing::{
 use rand::{Rng, SeedableRng, rng};
 use rand_chacha::ChaCha20Rng;
 
-/// Modulus used for rpo falcon 512.
+/// Modulus used for Falcon512-Poseidon2.
 const M: u64 = 12289;
 const Q: u64 = (M - 1) / 2;
 const N: usize = 512;
 const J: u64 = (N * M as usize * M as usize) as u64;
 
 const PROBABILISTIC_PRODUCT_SOURCE: &str = "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
         #=> [PK, ...]
         push.0
         #=> [h_ptr, PK, ...]
 
-        exec.falcon512rpo::load_h_s2_and_product
+        exec.falcon512poseidon2::load_h_s2_and_product
         #=> [...]
     end
     ";
@@ -77,11 +77,11 @@ pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutat
     let sk_bytes: Vec<u8> = pk_sk_felts.iter().map(|f| f.as_canonical_u64() as u8).collect();
 
     // Reconstruct SecretKey from bytes
-    let sk = falcon512_rpo::SecretKey::read_from_bytes(&sk_bytes)
-        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
+    let sk = falcon512_poseidon2::SecretKey::read_from_bytes(&sk_bytes)
+        .map_err(|_| FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
-    let signature_result = falcon512_rpo::sign(&sk, msg)
-        .ok_or(FalconError::MalformedSignatureKey { key_type: "RPO Falcon512" })?;
+    let signature_result = falcon512_poseidon2::sign(&sk, msg)
+        .ok_or(FalconError::MalformedSignatureKey { key_type: "Poseidon2 Falcon512" })?;
 
     Ok(vec![AdviceMutation::extend_stack(signature_result)])
 }
@@ -100,10 +100,10 @@ pub enum FalconError {
 #[test]
 fn test_falcon512_norm_sq() {
     let source = "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
-        exec.falcon512rpo::norm_sq
+        exec.falcon512poseidon2::norm_sq
     end
     ";
 
@@ -120,10 +120,10 @@ fn test_falcon512_norm_sq() {
 #[test]
 fn test_falcon512_diff_mod_m() {
     let source = "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
-        exec.falcon512rpo::diff_mod_M
+        exec.falcon512poseidon2::diff_mod_M
     end
     ";
     let v = Felt::ORDER_U64 - 1;
@@ -163,10 +163,10 @@ proptest! {
     fn diff_mod_m_proptest(v in 0..Felt::ORDER_U64, w in 0..J, u in 0..J) {
 
           let source = "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
-        exec.falcon512rpo::diff_mod_M
+        exec.falcon512poseidon2::diff_mod_M
     end
     ";
 
@@ -255,19 +255,20 @@ fn test_move_sig_to_adv_stack() {
     let message = random_word();
 
     let source = "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
-        exec.falcon512rpo::move_sig_from_map_to_adv_stack
-        exec.falcon512rpo::verify
+        exec.falcon512poseidon2::move_sig_from_map_to_adv_stack
+        exec.falcon512poseidon2::verify
     end
     ";
 
     let public_key = secret_key.public_key().to_commitment();
 
     let advice_map: Vec<(Word, Vec<Felt>)> = {
-        let sig_key = Rpo256::merge(&[public_key, message]);
-        let signature = falcon512_rpo::sign(&secret_key, message).expect("failed to sign message");
+        let sig_key = Poseidon2::merge(&[public_key, message]);
+        let signature =
+            falcon512_poseidon2::sign(&secret_key, message).expect("failed to sign message");
 
         vec![(sig_key, signature)]
     };
@@ -299,10 +300,10 @@ fn falcon_execution() {
 fn test_mod_12289_simple() {
     // Simple test to debug mod_12289 with a known input
     let source = "
-        use miden::core::crypto::dsa::falcon512rpo
+        use miden::core::crypto::dsa::falcon512poseidon2
 
         begin
-            exec.falcon512rpo::mod_12289
+            exec.falcon512poseidon2::mod_12289
         end
     ";
 
@@ -318,10 +319,10 @@ fn test_mod_12289_simple() {
 fn test_mod_12289_larger_value() {
     // Test with a larger value that requires the higher 32 bits
     let source = "
-        use miden::core::crypto::dsa::falcon512rpo
+        use miden::core::crypto::dsa::falcon512poseidon2
 
         begin
-            exec.falcon512rpo::mod_12289
+            exec.falcon512poseidon2::mod_12289
         end
     ";
 
@@ -373,11 +374,11 @@ fn generate_test(
 ) -> (String, Vec<u64>, Vec<u64>, MerkleStore, Vec<(Word, Vec<Felt>)>) {
     let source = format!(
         "
-    use miden::core::crypto::dsa::falcon512rpo
+    use miden::core::crypto::dsa::falcon512poseidon2
 
     begin
         emit.event(\"{EVENT_FALCON_SIG_TO_STACK}\")
-        exec.falcon512rpo::verify
+        exec.falcon512poseidon2::verify
     end
     "
     );
@@ -450,7 +451,7 @@ fn generate_data_probabilistic_product_test(
 
     // get the challenge point and push it to the advice stack
     // Push tau1 first, then tau0, so adv_push.2 produces _le format [tau0, tau1, ...] directly
-    let digest_polynomials = Rpo256::hash_elements(&polynomials[..]);
+    let digest_polynomials = Poseidon2::hash_elements(&polynomials[..]);
     let challenge = (digest_polynomials[0], digest_polynomials[1]);
     let mut builder = AdviceStackBuilder::new();
     builder.push_element(challenge.1);
@@ -459,7 +460,7 @@ fn generate_data_probabilistic_product_test(
     let advice_stack = builder.into_u64_vec();
 
     // compute hash of h and place it on the stack.
-    let h_hash = Rpo256::hash_elements(&to_elements(h.clone()));
+    let h_hash = Poseidon2::hash_elements(&to_elements(h.clone()));
     let operand_stack = stack_from_words(&[h_hash]);
 
     (operand_stack, advice_stack)

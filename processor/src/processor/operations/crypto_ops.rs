@@ -30,7 +30,7 @@ mod tests;
 // ================================================================================================
 
 /// Performs a hash permutation operation.
-/// Applies Rescue Prime Optimized permutation to the top 12 elements of the stack.
+/// Applies Poseidon2 permutation to the top 12 elements of the stack.
 ///
 /// Stack layout:
 /// ```text
@@ -47,9 +47,25 @@ pub(super) fn op_hperm<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
     // Build sponge state from stack: state[i] = stack.get(i)
-    let input_state: [Felt; STATE_WIDTH] = core::array::from_fn(|i| processor.stack().get(i));
+    // Read first 8 elements using get_double_word, then remaining 4 elements
+    let double_word: [Felt; 8] = processor.stack().get_double_word(0);
+    let word: Word = processor.stack().get_word(8);
+    let input_state: [Felt; STATE_WIDTH] = [
+        double_word[0],
+        double_word[1],
+        double_word[2],
+        double_word[3],
+        double_word[4],
+        double_word[5],
+        double_word[6],
+        double_word[7],
+        word[0],
+        word[1],
+        word[2],
+        word[3],
+    ];
 
-    // Apply RPO permutation
+    // Apply Poseidon2 permutation
     let (addr, output_state) = processor.hasher().permute(input_state);
 
     // Write result back to stack (state[0] at top).
@@ -289,7 +305,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     };
 
     // Read the coefficients from the stack (top 8 elements)
-    let coef: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
+    let coef: [Felt; 8] = processor.stack().get_double_word(0);
 
     let c0 = QuadFelt::from(coef[0]);
     let c1 = QuadFelt::from(coef[1]);
@@ -439,7 +455,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 /// `[COMM, TAG, PAD, ...] -> [R0, R1, CAP_NEXT, ...]`
 ///
 /// Where:
-/// - The hasher computes: `[R0, R1, CAP_NEXT] = Rpo([COMM, TAG, CAP_PREV])`
+/// - The hasher computes: `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`
 /// - `CAP_PREV` is the previous sponge capacity provided non-deterministically via helper
 ///   registers.
 /// - Stack elements are in LSB-first order (structural order).
@@ -455,14 +471,14 @@ pub(super) fn op_log_precompile<P: Processor>(
     // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_transcript_state();
 
-    // Build the full 12-element hasher state for RPO permutation
+    // Build the full 12-element hasher state for Poseidon2 permutation
     // State layout: [RATE0 = COMM, RATE1 = TAG, CAPACITY = CAP_PREV]
     let mut hasher_state: [Felt; STATE_WIDTH] = [ZERO; 12];
     hasher_state[STATE_RATE_0_RANGE].copy_from_slice(comm.as_slice());
     hasher_state[STATE_RATE_1_RANGE].copy_from_slice(tag.as_slice());
     hasher_state[STATE_CAP_RANGE].copy_from_slice(cap_prev.as_slice());
 
-    // Perform the RPO permutation
+    // Perform the Poseidon2 permutation
     let (addr, output_state) = processor.hasher().permute(hasher_state);
 
     // Extract R0, R1 and CAP_NEXT from the output state
@@ -494,7 +510,7 @@ pub(super) fn op_log_precompile<P: Processor>(
 // STREAM CIPHER OPERATION
 // ================================================================================================
 
-/// Encrypts data from source memory to destination memory using RPO sponge keystream.
+/// Encrypts data from source memory to destination memory using Poseidon2 sponge keystream.
 ///
 /// This operation performs AEAD encryption by:
 /// 1. Loading 8 elements (2 words) from source memory at stack[12]
@@ -535,7 +551,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
     // Get rate (keystream) from stack[0..7]
-    let rate: [Felt; 8] = core::array::from_fn(|i| processor.stack().get(i));
+    let rate: [Felt; 8] = processor.stack().get_double_word(0);
 
     // Encrypt: ciphertext = plaintext + rate (element-wise addition in field)
     let ciphertext_word1 = [

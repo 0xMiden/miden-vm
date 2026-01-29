@@ -1,6 +1,6 @@
 use miden_utils_testing::{
     PrimeField64, Word, build_op_test,
-    crypto::{MerkleStore, MerkleTree, Rpo256, init_merkle_leaf, init_merkle_store},
+    crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
 
@@ -85,7 +85,7 @@ fn mtree_merge() {
     let tree_b = MerkleTree::new(leaves_b.clone()).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
-    let root_merged = Rpo256::merge(&[root_a, root_b]);
+    let root_merged = Poseidon2::merge(&[root_a, root_b]);
     let mut store = MerkleStore::default();
     store.extend(tree_a.inner_nodes());
     store.extend(tree_b.inner_nodes());

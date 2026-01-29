@@ -4,7 +4,7 @@ use miden_core::{EMPTY_WORD, Felt, FieldElement, QuadFelt, Word};
 use miden_processor::crypto::{Hasher, RandomCoin, WinterRandomCoin};
 use miden_utils_testing::{
     MerkleTreeVC, PrimeField64,
-    crypto::{MerklePath, NodeIndex, PartialMerkleTree, Rpo256 as MidenHasher},
+    crypto::{MerklePath, NodeIndex, PartialMerkleTree, Poseidon2 as MidenHasher},
     group_slice_elements,
     math::fft,
 };

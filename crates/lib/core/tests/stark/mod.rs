@@ -85,7 +85,7 @@ pub fn generate_recursive_verifier_data(
     let mut host = DefaultHost::default();
 
     let options =
-        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
+        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Poseidon2);
 
     let (stack_outputs, proof) =
         prove(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();

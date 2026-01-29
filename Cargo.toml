@@ -63,7 +63,7 @@ miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-util
 miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.21", default-features = false }
+miden-crypto = { version = "0.22", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -118,5 +118,3 @@ p3-miden-prover  = { version = "0.4.2", default-features = false }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
-
-
