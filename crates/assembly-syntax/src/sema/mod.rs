@@ -9,7 +9,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{Word, crypto::hash::Rpo256};
+use miden_core::{Word, crypto::hash::Poseidon2};
 use miden_debug_types::{SourceFile, SourceManager, Span, Spanned};
 use smallvec::SmallVec;
 
@@ -304,7 +304,7 @@ fn add_advice_map_entry(
 ) -> Result<(), SyntaxError> {
     let key = match entry.key {
         Some(key) => Word::from(key.inner().0),
-        None => Rpo256::hash_elements(&entry.value),
+        None => Poseidon2::hash_elements(&entry.value),
     };
     let cst = Constant::new(
         entry.span,

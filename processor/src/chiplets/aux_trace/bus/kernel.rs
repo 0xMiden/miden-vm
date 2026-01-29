@@ -33,7 +33,7 @@ where
         requests *= message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(std::boxed::Box::new(message), alphas);
+        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
     }
     requests
 }
@@ -78,7 +78,7 @@ where
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(std::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
 
         value
     } else {
@@ -89,7 +89,7 @@ where
         let value = message.value(alphas);
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_response(std::boxed::Box::new(message), alphas);
+        _debugger.add_response(alloc::boxed::Box::new(message), alphas);
         value
     }
 }

@@ -5,7 +5,7 @@ use miden_air::trace::{
     chiplets::{
         NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
         bitwise::{BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH as BITWISE_TRACE_WIDTH},
-        hasher::{HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE},
+        hasher::{HASH_CYCLE_LEN, LAST_CYCLE_ROW, LINEAR_HASH, RETURN_STATE},
         kernel_rom::TRACE_WIDTH as KERNEL_ROM_TRACE_WIDTH,
         memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
@@ -173,7 +173,7 @@ fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
                 // selectors
                 assert_eq!(LINEAR_HASH, [trace[1][row], trace[2][row], trace[3][row]]);
             },
-            7 => {
+            r if r == LAST_CYCLE_ROW => {
                 // in the last row, the expected start of the trace should hold the final selectors
                 assert_eq!(RETURN_STATE, [trace[1][row], trace[2][row], trace[3][row]]);
             },

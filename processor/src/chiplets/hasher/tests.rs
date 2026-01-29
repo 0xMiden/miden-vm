@@ -42,12 +42,12 @@ fn hasher_permute() {
     assert_eq!(expected_state, final_state);
 
     // build the trace
-    let trace = build_trace(hasher, 8);
+    let trace = build_trace(hasher, HASH_CYCLE_LEN);
 
     // make sure the trace is correct
     check_selector_trace(&trace, 0, LINEAR_HASH, RETURN_STATE);
     check_hasher_state_trace(&trace, 0, init_state);
-    assert_eq!(trace.last().unwrap(), &[ZERO; 8]);
+    assert_eq!(trace.last().unwrap(), &[ZERO; HASH_CYCLE_LEN]);
 
     // --- test two permutations ----------------------------------------------
 
@@ -60,9 +60,9 @@ fn hasher_permute() {
     let init_state2: HasherState = rand_array();
     let (addr2, final_state2) = hasher.permute(init_state2);
 
-    // make sure the returned addresses are correct (they must be 8 rows apart)
+    // make sure the returned addresses are correct (they must be `HASH_CYCLE_LEN` rows apart)
     assert_eq!(ONE, addr1);
-    assert_eq!(Felt::new(9), addr2);
+    assert_eq!(Felt::new(HASH_CYCLE_LEN as u64 + 1), addr2);
 
     // make sure the results are correct
     let expected_state1 = apply_permutation(init_state1);
@@ -72,14 +72,14 @@ fn hasher_permute() {
     assert_eq!(expected_state2, final_state2);
 
     // build the trace
-    let trace = build_trace(hasher, 16);
+    let trace = build_trace(hasher, 2 * HASH_CYCLE_LEN);
 
     // make sure the trace is correct
     check_selector_trace(&trace, 0, LINEAR_HASH, RETURN_STATE);
-    check_selector_trace(&trace, 8, LINEAR_HASH, RETURN_STATE);
+    check_selector_trace(&trace, HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE);
     check_hasher_state_trace(&trace, 0, init_state1);
-    check_hasher_state_trace(&trace, 8, init_state2);
-    assert_eq!(trace.last().unwrap(), &[ZERO; 16]);
+    check_hasher_state_trace(&trace, HASH_CYCLE_LEN, init_state2);
+    assert_eq!(trace.last().unwrap(), &[ZERO; 2 * HASH_CYCLE_LEN]);
 }
 
 // MERKLE TREE TESTS
@@ -107,17 +107,18 @@ fn hasher_build_merkle_root() {
     let _ = hasher.build_merkle_root(leaves[1], &path1, ONE);
 
     // build the trace
-    let trace = build_trace(hasher, 16);
+    let trace = build_trace(hasher, 2 * HASH_CYCLE_LEN);
 
     // make sure the trace is correct
     check_selector_trace(&trace, 0, MP_VERIFY, RETURN_HASH);
-    check_selector_trace(&trace, 8, MP_VERIFY, RETURN_HASH);
+    check_selector_trace(&trace, HASH_CYCLE_LEN, MP_VERIFY, RETURN_HASH);
     check_hasher_state_trace(&trace, 0, init_state_from_words(&leaves[0], &path0[0]));
     check_hasher_state_trace(&trace, 0, init_state_from_words(&path1[0], &leaves[1]));
     let node_idx_column = trace.last().unwrap();
-    assert_eq!(&node_idx_column[..8], &[ZERO; 8]);
-    assert_eq!(node_idx_column[8], ONE);
-    assert_eq!(&node_idx_column[9..], &[ZERO; 7]);
+    assert_eq!(node_idx_column.len(), 2 * HASH_CYCLE_LEN);
+    assert!(node_idx_column[..HASH_CYCLE_LEN].iter().all(|&v| v == ZERO));
+    assert_eq!(node_idx_column[HASH_CYCLE_LEN], ONE);
+    assert!(node_idx_column[HASH_CYCLE_LEN + 1..].iter().all(|&v| v == ZERO));
 
     // --- Merkle tree with 8 leaves ------------------------------------------
 
@@ -131,7 +132,7 @@ fn hasher_build_merkle_root() {
     let _ = hasher.build_merkle_root(leaves[5], &path, Felt::new(5));
 
     // build and check the trace for validity
-    let trace = build_trace(hasher, 24);
+    let trace = build_trace(hasher, path.len() * HASH_CYCLE_LEN);
     check_merkle_path(&trace, 0, leaves[5], &path, 5, MP_VERIFY);
 
     // --- Merkle tree with 8 leaves (multiple branches) ----------------------
@@ -156,11 +157,11 @@ fn hasher_build_merkle_root() {
     let _ = hasher.build_merkle_root(leaves[3], &path3, Felt::new(3));
 
     // build and check the trace for validity
-    let trace = build_trace(hasher, 96);
+    let trace = build_trace(hasher, 4 * path0.len() * HASH_CYCLE_LEN);
     check_merkle_path(&trace, 0, leaves[0], &path0, 0, MP_VERIFY);
-    check_merkle_path(&trace, 24, leaves[3], &path3, 3, MP_VERIFY);
-    check_merkle_path(&trace, 48, leaves[7], &path7, 7, MP_VERIFY);
-    check_merkle_path(&trace, 72, leaves[3], &path3, 3, MP_VERIFY);
+    check_merkle_path(&trace, path0.len() * HASH_CYCLE_LEN, leaves[3], &path3, 3, MP_VERIFY);
+    check_merkle_path(&trace, 2 * path0.len() * HASH_CYCLE_LEN, leaves[7], &path7, 7, MP_VERIFY);
+    check_merkle_path(&trace, 3 * path0.len() * HASH_CYCLE_LEN, leaves[3], &path3, 3, MP_VERIFY);
 }
 
 #[test]
@@ -187,23 +188,36 @@ fn hasher_update_merkle_root() {
     tree.update_leaf(1, new_leaf1).unwrap();
 
     // build the trace
-    let trace = build_trace(hasher, 32);
+    let trace = build_trace(hasher, 4 * HASH_CYCLE_LEN);
 
     // make sure the trace is correct
     check_selector_trace(&trace, 0, MR_UPDATE_OLD, RETURN_HASH);
-    check_selector_trace(&trace, 8, MR_UPDATE_NEW, RETURN_HASH);
-    check_selector_trace(&trace, 16, MR_UPDATE_OLD, RETURN_HASH);
-    check_selector_trace(&trace, 24, MR_UPDATE_NEW, RETURN_HASH);
+    check_selector_trace(&trace, HASH_CYCLE_LEN, MR_UPDATE_NEW, RETURN_HASH);
+    check_selector_trace(&trace, 2 * HASH_CYCLE_LEN, MR_UPDATE_OLD, RETURN_HASH);
+    check_selector_trace(&trace, 3 * HASH_CYCLE_LEN, MR_UPDATE_NEW, RETURN_HASH);
     check_hasher_state_trace(&trace, 0, init_state_from_words(&leaves[0], &path0[0]));
-    check_hasher_state_trace(&trace, 8, init_state_from_words(&new_leaf0, &path0[0]));
-    check_hasher_state_trace(&trace, 16, init_state_from_words(&path1[0], &leaves[1]));
-    check_hasher_state_trace(&trace, 24, init_state_from_words(&path1[0], &new_leaf1));
+    check_hasher_state_trace(&trace, HASH_CYCLE_LEN, init_state_from_words(&new_leaf0, &path0[0]));
+    check_hasher_state_trace(
+        &trace,
+        2 * HASH_CYCLE_LEN,
+        init_state_from_words(&path1[0], &leaves[1]),
+    );
+    check_hasher_state_trace(
+        &trace,
+        3 * HASH_CYCLE_LEN,
+        init_state_from_words(&path1[0], &new_leaf1),
+    );
     let node_idx_column = trace.last().unwrap();
-    assert_eq!(&node_idx_column[..16], &[ZERO; 16]);
-    assert_eq!(node_idx_column[16], ONE);
-    assert_eq!(&node_idx_column[17..24], &[ZERO; 7]);
-    assert_eq!(node_idx_column[24], ONE);
-    assert_eq!(&node_idx_column[25..], &[ZERO; 7]);
+    assert_eq!(node_idx_column.len(), 4 * HASH_CYCLE_LEN);
+    assert!(node_idx_column[..2 * HASH_CYCLE_LEN].iter().all(|&v| v == ZERO));
+    assert_eq!(node_idx_column[2 * HASH_CYCLE_LEN], ONE);
+    assert!(
+        node_idx_column[2 * HASH_CYCLE_LEN + 1..3 * HASH_CYCLE_LEN]
+            .iter()
+            .all(|&v| v == ZERO)
+    );
+    assert_eq!(node_idx_column[3 * HASH_CYCLE_LEN], ONE);
+    assert!(node_idx_column[3 * HASH_CYCLE_LEN + 1..].iter().all(|&v| v == ZERO));
 
     // --- Merkle tree with 8 leaves ------------------------------------------
 
@@ -233,13 +247,14 @@ fn hasher_update_merkle_root() {
     assert_ne!(path3, path3_2);
 
     // build and check the trace for validity
-    let trace = build_trace(hasher, 144);
+    let leg_rows = path3.len() * HASH_CYCLE_LEN;
+    let trace = build_trace(hasher, 6 * leg_rows);
     check_merkle_path(&trace, 0, leaves[3], &path3, 3, MR_UPDATE_OLD);
-    check_merkle_path(&trace, 24, new_leaf3, &path3, 3, MR_UPDATE_NEW);
-    check_merkle_path(&trace, 48, leaves[6], &path6, 6, MR_UPDATE_OLD);
-    check_merkle_path(&trace, 72, new_leaf6, &path6, 6, MR_UPDATE_NEW);
-    check_merkle_path(&trace, 96, new_leaf3, &path3_2, 3, MR_UPDATE_OLD);
-    check_merkle_path(&trace, 120, new_leaf3_2, &path3_2, 3, MR_UPDATE_NEW);
+    check_merkle_path(&trace, leg_rows, new_leaf3, &path3, 3, MR_UPDATE_NEW);
+    check_merkle_path(&trace, 2 * leg_rows, leaves[6], &path6, 6, MR_UPDATE_OLD);
+    check_merkle_path(&trace, 3 * leg_rows, new_leaf6, &path6, 6, MR_UPDATE_NEW);
+    check_merkle_path(&trace, 4 * leg_rows, new_leaf3, &path3_2, 3, MR_UPDATE_OLD);
+    check_merkle_path(&trace, 5 * leg_rows, new_leaf3_2, &path3_2, 3, MR_UPDATE_NEW);
 }
 
 // MEMOIZATION TESTS
@@ -577,9 +592,9 @@ fn check_merkle_path(
     let mid_selectors = [ZERO, init_selectors[1], init_selectors[2]];
     check_selector_trace(trace, row_idx, init_selectors, init_selectors);
     for i in 1..path.len() - 1 {
-        check_selector_trace(trace, row_idx + i * 8, mid_selectors, init_selectors);
+        check_selector_trace(trace, row_idx + i * HASH_CYCLE_LEN, mid_selectors, init_selectors);
     }
-    let last_perm_row_addr = row_idx + (path.len() - 1) * 8;
+    let last_perm_row_addr = row_idx + (path.len() - 1) * HASH_CYCLE_LEN;
     check_selector_trace(trace, last_perm_row_addr, mid_selectors, RETURN_HASH);
 
     // make sure hasher states are correct
@@ -594,27 +609,27 @@ fn check_merkle_path(
             root = hasher::merge(&[node, root]);
             init_state_from_words(&node, &old_root)
         };
-        check_hasher_state_trace(trace, row_idx + i * 8, init_state);
+        check_hasher_state_trace(trace, row_idx + i * HASH_CYCLE_LEN, init_state);
     }
 
     // make sure node index is set correctly
     let node_idx_column = trace.last().unwrap();
     assert_eq!(Felt::new(node_index), node_idx_column[row_idx]);
     let mut node_index = node_index >> 1;
-    for i in 1..8 {
+    for i in 1..HASH_CYCLE_LEN {
         assert_eq!(Felt::new(node_index), node_idx_column[row_idx + i])
     }
 
     for i in 1..path.len() {
         node_index >>= 1;
-        for j in 0..8 {
-            assert_eq!(Felt::new(node_index), node_idx_column[row_idx + i * 8 + j])
+        for j in 0..HASH_CYCLE_LEN {
+            assert_eq!(Felt::new(node_index), node_idx_column[row_idx + i * HASH_CYCLE_LEN + j])
         }
     }
 }
 
-/// Makes sure that selector columns (columns 0, 1, 2) are valid for an 8-row cycle starting
-/// with row_idx.
+/// Makes sure that selector columns (columns 0, 1, 2) are valid for a `HASH_CYCLE_LEN`-row cycle
+/// starting with row_idx.
 fn check_selector_trace(
     trace: &[Vec<Felt>],
     row_idx: usize,
@@ -631,8 +646,8 @@ fn check_selector_trace(
     assert_row_equal(trace, row_idx + NUM_ROUNDS, &final_selectors);
 }
 
-/// Makes sure hasher state columns (columns 4 through 15) are valid for an 8-row cycle starting
-/// with row_idx.
+/// Makes sure hasher state columns (columns 4 through 15) are valid for a `HASH_CYCLE_LEN`-row
+/// cycle starting with row_idx.
 fn check_hasher_state_trace(trace: &[Vec<Felt>], row_idx: usize, init_state: HasherState) {
     let trace = &trace[STATE_COL_RANGE];
     let mut state = init_state;

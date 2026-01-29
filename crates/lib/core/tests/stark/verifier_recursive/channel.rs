@@ -4,7 +4,7 @@ use miden_air::ProcessorAir;
 use miden_core::{Felt, FieldElement, PrimeField64, QuadFelt, Word};
 use miden_utils_testing::{
     MerkleTreeVC, VerifierError,
-    crypto::{BatchMerkleProof, PartialMerkleTree, Rpo256},
+    crypto::{BatchMerkleProof, PartialMerkleTree, Poseidon2},
     group_slice_elements,
 };
 use winter_air::{
@@ -29,7 +29,7 @@ pub struct VerifierChannel {
     constraint_queries: Option<ConstraintQueries>,
     // FRI proof
     fri_roots: Option<Vec<Word>>,
-    fri_layer_proofs: Vec<BatchMerkleProof<Rpo256>>,
+    fri_layer_proofs: Vec<BatchMerkleProof<Poseidon2>>,
     fri_layer_queries: Vec<Vec<QuadFelt>>,
     fri_remainder: Option<Vec<QuadFelt>>,
     fri_num_partitions: usize,
@@ -70,7 +70,7 @@ impl VerifierChannel {
 
         // --- parse commitments ------------------------------------------------------------------
         let (trace_roots, constraint_root, fri_roots) = commitments
-            .parse::<Rpo256>(num_trace_segments, fri_options.num_fri_layers(lde_domain_size))
+            .parse::<Poseidon2>(num_trace_segments, fri_options.num_fri_layers(lde_domain_size))
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
         // --- parse trace and constraint queries -------------------------------------------------
         let trace_queries = TraceQueries::new(trace_queries, air, num_unique_queries as usize)?;
@@ -83,7 +83,7 @@ impl VerifierChannel {
             .parse_remainder()
             .map_err(|err| VerifierError::ProofDeserializationError(err.to_string()))?;
         let (fri_layer_queries, fri_layer_proofs) = fri_proof
-            .parse_layers::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
+            .parse_layers::<QuadFelt, Poseidon2, MerkleTreeVC<Poseidon2>>(
                 lde_domain_size,
                 fri_options.folding_factor(),
             )
@@ -209,7 +209,7 @@ impl VerifierChannel {
     }
 
     /// Returns the FRI layers Merkle batch proofs.
-    pub fn fri_layer_proofs(&self) -> Vec<BatchMerkleProof<Rpo256>> {
+    pub fn fri_layer_proofs(&self) -> Vec<BatchMerkleProof<Poseidon2>> {
         self.fri_layer_proofs.clone()
     }
 
@@ -256,7 +256,7 @@ impl VerifierChannel {
 // ================================================================================================
 
 impl FriVerifierChannel<QuadFelt> for VerifierChannel {
-    type Hasher = Rpo256;
+    type Hasher = Poseidon2;
     type VectorCommitment = MerkleTreeVC<Self::Hasher>;
 
     fn read_fri_num_partitions(&self) -> usize {
@@ -267,7 +267,7 @@ impl FriVerifierChannel<QuadFelt> for VerifierChannel {
         self.fri_roots.take().expect("already read")
     }
 
-    fn take_next_fri_layer_proof(&mut self) -> BatchMerkleProof<Rpo256> {
+    fn take_next_fri_layer_proof(&mut self) -> BatchMerkleProof<Poseidon2> {
         self.fri_layer_proofs.remove(0)
     }
 
@@ -289,7 +289,7 @@ impl FriVerifierChannel<QuadFelt> for VerifierChannel {
 ///
 /// Trace states for all auxiliary segments are stored in a single table.
 struct TraceQueries {
-    query_proofs: Vec<BatchMerkleProof<Rpo256>>,
+    query_proofs: Vec<BatchMerkleProof<Poseidon2>>,
     main_states: Table<Felt>,
     aux_states: Option<Table<QuadFelt>>,
 }
@@ -307,7 +307,7 @@ impl TraceQueries {
         let main_segment_width = air.trace_info().main_trace_width();
         let main_segment_queries = queries.remove(0);
         let (main_segment_query_proofs, main_segment_states) = main_segment_queries
-            .parse::<Felt, Rpo256, MerkleTreeVC<Rpo256>>(
+            .parse::<Felt, Poseidon2, MerkleTreeVC<Poseidon2>>(
                 air.lde_domain_size(),
                 num_queries,
                 main_segment_width,
@@ -329,7 +329,7 @@ impl TraceQueries {
             let aux_segment_queries = queries.remove(0);
 
             let (segment_query_proof, segment_trace_states) = aux_segment_queries
-                .parse::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
+                .parse::<QuadFelt, Poseidon2, MerkleTreeVC<Poseidon2>>(
                     air.lde_domain_size(),
                     num_queries,
                     segment_width,
@@ -362,7 +362,7 @@ impl TraceQueries {
 /// * Queried constraint evaluation values.
 /// * Merkle authentication paths for all queries.
 struct ConstraintQueries {
-    query_proofs: BatchMerkleProof<Rpo256>,
+    query_proofs: BatchMerkleProof<Poseidon2>,
     evaluations: Table<QuadFelt>,
 }
 
@@ -375,7 +375,7 @@ impl ConstraintQueries {
         num_queries: usize,
     ) -> Result<Self, VerifierError> {
         let (query_proofs, evaluations) = queries
-            .parse::<QuadFelt, Rpo256, MerkleTreeVC<Rpo256>>(
+            .parse::<QuadFelt, Poseidon2, MerkleTreeVC<Poseidon2>>(
                 air.lde_domain_size(),
                 num_queries,
                 air.ce_blowup_factor(),
@@ -400,10 +400,10 @@ impl ConstraintQueries {
 pub fn unbatch_to_partial_mt(
     positions: Vec<usize>,
     queries: Vec<Vec<Felt>>,
-    proof: BatchMerkleProof<Rpo256>,
+    proof: BatchMerkleProof<Poseidon2>,
 ) -> (PartialMerkleTree, Vec<(Word, Vec<Felt>)>) {
     // hash the query values in order to get the leaf
-    let leaves: Vec<Word> = queries.iter().map(|row| Rpo256::hash_elements(row)).collect();
+    let leaves: Vec<Word> = queries.iter().map(|row| Poseidon2::hash_elements(row)).collect();
 
     // use the computed leaves with the indices in order to unbatch the Merkle proof batch proof
     let unbatched_proof = proof

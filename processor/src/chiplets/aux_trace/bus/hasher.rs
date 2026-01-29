@@ -5,8 +5,9 @@ use miden_air::trace::{
     chiplets::{
         hasher,
         hasher::{
-            HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
-            MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
+            HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, LAST_CYCLE_ROW, LAST_CYCLE_ROW_FELT,
+            LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL,
+            RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
     },
     log_precompile::{
@@ -104,7 +105,7 @@ pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let end_block_message = EndBlockMessage {
-        addr: main_trace.addr(row) + Felt::from_u8(NUM_ROUNDS as u8),
+        addr: main_trace.addr(row) + LAST_CYCLE_ROW_FELT,
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         digest: main_trace.decoder_hasher_state(row)[..4].try_into().unwrap(),
     };
@@ -154,14 +155,14 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
         transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: helper_0,
         node_index: ZERO,
-        // Internal RPO state for HPERM is taken directly from the top 12
+        // Internal Poseidon2 state for HPERM is taken directly from the top 12
         // stack elements in order: [RATE0, RATE1, CAPACITY] = [s0..s11].
         hasher_state: [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11],
         source: "hperm input",
     };
     let output_req = HasherMessage {
         transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
-        addr_next: helper_0 + Felt::new(7),
+        addr_next: helper_0 + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: [
             s0_nxt, s1_nxt, s2_nxt, s3_nxt, s4_nxt, s5_nxt, s6_nxt, s7_nxt, s8_nxt, s9_nxt,
@@ -183,7 +184,7 @@ pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
 
 /// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
 ///
-/// The operation absorbs `[TAG, COMM]` into the transcript via an RPO permutation with
+/// The operation absorbs `[TAG, COMM]` into the transcript via a Poseidon2 permutation with
 /// capacity `CAP_PREV`, producing output `[R0, R1, CAP_NEXT]`.
 ///
 /// Stack layout (current row), structural (LSB-first) per word:
@@ -220,7 +221,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     // so we read them directly as [w0, w1, w2, w3].
     let comm = main_trace.stack_word(STACK_COMM_RANGE.start, row);
     let tag = main_trace.stack_word(STACK_TAG_RANGE.start, row);
-    // Internal RPO state is [RATE0, RATE1, CAPACITY] = [COMM, TAG, CAP_PREV]
+    // Internal Poseidon2 state is [RATE0, RATE1, CAPACITY] = [COMM, TAG, CAP_PREV]
     let state_input = [comm, tag, cap_prev];
 
     // Output state [R0, R1, CAP_NEXT] in sponge order
@@ -239,7 +240,7 @@ pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
 
     let output_req = HasherMessage {
         transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
-        addr_next: addr + Felt::new(7),
+        addr_next: addr + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
         source: "log_precompile output",
@@ -263,7 +264,9 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
+    // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
 
     let node_value = main_trace.stack_word(0, row);
     let node_depth = main_trace.stack_element(4, row);
@@ -288,7 +291,7 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
 
     let output = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + node_depth * Felt::from_u16(8) - ONE,
+        addr_next: helper_0 + node_depth * hash_cycle_len - ONE,
         node_index: ZERO,
         hasher_state: root_state,
         source: "mpverify output",
@@ -312,7 +315,10 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
+    // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
+    let two_hash_cycles_len = hash_cycle_len + hash_cycle_len;
 
     let old_node_value = main_trace.stack_word(0, row);
     let merkle_path_depth = main_trace.stack_element(4, row);
@@ -339,7 +345,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 
     let output_old = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8) - ONE,
+        addr_next: helper_0 + merkle_path_depth * hash_cycle_len - ONE,
         node_index: ZERO,
         hasher_state: old_root_state,
         source: "mrupdate output_old",
@@ -351,7 +357,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 
     let input_new = HasherMessage {
         transition_label: Felt::from_u8(MR_UPDATE_NEW_LABEL + 16),
-        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(8),
+        addr_next: helper_0 + merkle_path_depth * hash_cycle_len,
         node_index,
         hasher_state: new_node_state,
         source: "mrupdate input_new",
@@ -363,7 +369,7 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
 
     let output_new = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth * Felt::from_u16(16) - ONE,
+        addr_next: helper_0 + merkle_path_depth * two_hash_cycles_len - ONE,
         node_index: ZERO,
         hasher_state: new_root_state,
         source: "mrupdate output_new",
@@ -471,7 +477,7 @@ where
     }
 
     // f_hout, f_sout, f_abp == 1
-    if row.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1 {
+    if row.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW {
         // Trace is already in sponge order [RATE0, RATE1, CAP]
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);

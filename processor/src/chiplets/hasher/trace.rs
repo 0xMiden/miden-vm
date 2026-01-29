@@ -43,7 +43,7 @@ impl HasherTrace {
     // TRACE MUTATORS
     // --------------------------------------------------------------------------------------------
 
-    /// Appends 8 rows to the execution trace describing a single permutation of the hash function.
+    /// Appends 32 rows to the execution trace describing a single permutation of the hash function.
     ///
     /// The initial state of the hasher is provided via the `state` parameter. All subsequent
     /// states are derived by applying a single round of the hash function to the previous state.
@@ -65,7 +65,7 @@ impl HasherTrace {
         // append the first row of the permutation cycle
         self.append_row(init_selectors, state, init_index);
 
-        // append the next 6 rows of the permutation cycle. for these rows:
+        // append the next NUM_ROUNDS - 1 rows of the permutation cycle. for these rows:
         // - the last two selectors are carried over from row to row; the first selector is set to
         //   ZERO.
         // - hasher state is updated by applying a single round of the hash function for every row.
@@ -80,7 +80,7 @@ impl HasherTrace {
         self.append_row(final_selectors, state, rest_index);
     }
 
-    /// Appends 8 rows to the execution trace describing a single permutation of the hash function.
+    /// Appends 32 rows to the execution trace describing a single permutation of the hash function.
     ///
     /// This function is similar to the append_permutation_with_index() function above, but it sets
     /// init_index and rest_index parameters to ZEROs.

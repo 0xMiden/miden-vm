@@ -36,7 +36,7 @@ Miden VM is a fully-featured virtual machine. Despite being optimized for zero-k
 - **Execution contexts.** Miden VM program execution can span multiple isolated contexts, each with its own dedicated memory space. The contexts are separated into the _root context_ and _user contexts_. The root context can be accessed from user contexts via customizable kernel calls.
 - **Memory.** Miden VM supports read-write random-access memory. Procedures can reserve portions of global memory for easier management of local variables.
 - **u32 operations.** Miden VM supports native operations with 32-bit unsigned integers. This includes basic arithmetic, comparison, and bitwise operations.
-- **Cryptographic operations.** Miden assembly provides built-in instructions for computing hashes and verifying Merkle paths. These instructions use the Rescue Prime Optimized hash function (which is the native hash function of the VM).
+- **Cryptographic operations.** Miden assembly provides built-in instructions for computing hashes and verifying Merkle paths. These instructions use the Poseidon2 hash function (which is the native hash function of the VM).
 - **External libraries.** Miden VM supports compiling programs against pre-defined libraries. The VM ships with one such library: Miden `miden-core-lib` which adds support for such things as 64-bit unsigned integers. Developers can build other similar libraries to extend the VM's functionality in ways which fit their use cases.
 - **Nondeterminism**. Unlike traditional virtual machines, Miden VM supports nondeterministic programming. This means a prover may do additional work outside of the VM and then provide execution _hints_ to the VM. These hints can be used to dramatically speed up certain types of computations, as well as to supply secret inputs to the VM.
 - **Customizable hosts.** Miden VM can be instantiated with user-defined hosts. These hosts are used to supply external data to the VM during execution/proof generation (via nondeterministic inputs) and can connect the VM to arbitrary data sources (e.g., a database or RPC calls).
@@ -134,9 +134,9 @@ In the benchmarks below, the VM executes the same Fibonacci calculator program f
 
 ### Recursive proofs
 
-Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Rescue Prime Optimized (RPO), which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are considerably slower than regular hash functions.
+Proofs in the above benchmarks are generated using BLAKE3 hash function. While this hash function is very fast, it is not very efficient to execute in Miden VM. Thus, proofs generated using BLAKE3 are not well-suited for recursive proof verification. To support efficient recursive proofs, we need to use an arithmetization-friendly hash function. Miden VM natively supports Poseidon2, which is one such hash function. One of the downsides of arithmetization-friendly hash functions is that they are considerably slower than regular hash functions.
 
-In the benchmarks below we execute the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level using RPO hash function instead of BLAKE3:
+In the benchmarks below we execute the same Fibonacci calculator program for 2<sup>20</sup> cycles at 96-bit target security level using Poseidon2 hash function instead of BLAKE3:
 
 | Machine                        | Execution time | Proving time | Proving time (HW) |
 | ------------------------------ | :------------: | :----------: | :---------------: |
@@ -144,10 +144,6 @@ In the benchmarks below we execute the same Fibonacci calculator program for 2<s
 | Apple M2 Max (16 threads)      |     280 ms     |   75.1 sec   |     20.9 sec      |
 | AMD Ryzen 9 5950X (16 threads) |     270 ms     |   59.3 sec   |                   |
 | Amazon Graviton 3 (64 threads) |     330 ms     |   21.7 sec   |     14.9 sec      |
-
-In the above, proof generation on some platforms can be hardware-accelerated. Specifically:
-
-- On the Graviton platform, SVE vector extension is used to accelerate RPO computations.
 
 ### STARK Proving System
 

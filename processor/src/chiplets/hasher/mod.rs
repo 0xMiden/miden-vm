@@ -425,10 +425,11 @@ fn build_merge_state(a: &Digest, b: &Digest, index_bit: u64) -> HasherState {
 // HASHER STATE MUTATORS
 // ================================================================================================
 
-/// Initializes hasher state with the first 8 elements to be absorbed. In accordance with the RPO
-/// padding rule, the first capacity element is set with the provided padding flag, which is assumed
-/// to be ZERO or ONE, depending on whether the number of elements to be absorbed is a multiple of
-/// the rate or not. The remaining elements in the capacity portion of the state are set to ZERO.
+/// Initializes hasher state with the first 8 elements to be absorbed. In accordance with the
+/// Poseidon2 padding rule, the first capacity element is set with the provided padding flag, which
+/// is assumed to be ZERO or ONE, depending on whether the number of elements to be absorbed is a
+/// multiple of the rate or not. The remaining elements in the capacity portion of the state are set
+/// to ZERO.
 ///
 /// State layout: [R1, R2, CAP] where:
 /// - state[0..8] = init_values (rate)
@@ -457,7 +458,7 @@ pub fn init_state(init_values: &[Felt; RATE_LEN], padding_flag: Felt) -> [Felt; 
 
 /// Initializes hasher state with the elements from the provided words. Because the length of the
 /// input is a multiple of the rate, all capacity elements are initialized to zero, as specified by
-/// the Rescue Prime Optimized padding rule.
+/// the Poseidon2 padding rule.
 ///
 /// State layout: [RATE0, RATE1, CAP] where:
 /// - state[0..4] = w1 (first rate word, also digest location)

@@ -24,7 +24,7 @@ use super::{
             READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
             V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
         },
-        hasher::{DIGEST_LEN, HASH_CYCLE_LEN, STATE_WIDTH},
+        hasher::{DIGEST_LEN, HASH_CYCLE_LEN, LAST_CYCLE_ROW, STATE_WIDTH},
     },
     decoder::{
         GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX, IS_CALL_FLAG_COL_IDX,
@@ -651,7 +651,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
     /// a Merkle path to an old node during Merkle root update procedure (MRUPDATE).
     pub fn f_mva(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1)
+        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
@@ -671,7 +671,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
     /// a Merkle path to a new node during Merkle root update procedure (MRUPDATE).
     pub fn f_mua(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1)
+        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE

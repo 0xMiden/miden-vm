@@ -698,7 +698,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32split_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
         let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
@@ -741,10 +741,10 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
 
         // For u32add, check_element_validity is false
         [
@@ -758,10 +758,10 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32add3_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
-        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
 
         [
             Felt::from_u16(t0),
@@ -849,11 +849,13 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
     #[inline(always)]
     fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Store bus address (i.e., (clk + 1)) per hasher response message spec.
         [addr, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
 
     #[inline(always)]
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Store bus address (i.e., (clk + 1)) per hasher response message spec.
         [addr, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
 

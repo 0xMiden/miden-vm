@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::pcs::fri::helper
 
@@ -140,7 +140,7 @@ pub proc verify_query_layer
     swapw
     padw
     adv_pipe
-    exec.rpo256::permute
+    exec.poseidon2::permute
     # => [T2, T1, T0, ptr, V, f_pos, d_seg, poe, e1, e0, a1, a0, layer_ptr, rem_ptr, ..]
 
     # assert T1 == V (16 cycles)

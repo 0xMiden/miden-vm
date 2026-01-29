@@ -39,7 +39,7 @@
 //!   a tag (with event ID and metadata) and a commitment to the request's calldata.
 //! - [`PrecompileVerifier`]: Trait for implementing verification logic for specific precompiles
 //! - [`PrecompileVerifierRegistry`]: Registry mapping event IDs to their verifier implementations
-//! - [`PrecompileTranscript`]: A transcript (implemented via an RPO256 sponge) that creates a
+//! - [`PrecompileTranscript`]: A transcript (implemented via a Poseidon2 sponge) that creates a
 //!   sequential commitment to all precompile requests.
 //!
 //! # Example Implementation
@@ -57,7 +57,7 @@
 use alloc::{boxed::Box, collections::BTreeMap, sync::Arc, vec::Vec};
 use core::error::Error;
 
-use miden_crypto::{Felt, Word, ZERO, hash::rpo::Rpo256};
+use miden_crypto::{Felt, Word, ZERO, hash::poseidon2::Poseidon2};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -290,10 +290,10 @@ pub trait PrecompileVerifier: Send + Sync {
 // PRECOMPILE TRANSCRIPT
 // ================================================================================================
 
-/// Precompile transcript implemented with an RPO256 sponge.
+/// Precompile transcript implemented with a Poseidon2 sponge.
 ///
 /// # Structure
-/// Standard RPO256 sponge: 12 elements = capacity (4 elements) + rate (8 elements)
+/// Standard Poseidon2 sponge: 12 elements = rate (8 elements) + capacity (4 elements)
 ///
 /// # Operation
 /// - **Record**: Each precompile commitment is recorded by absorbing it into the rate, updating the
@@ -329,22 +329,22 @@ impl PrecompileTranscript {
 
     /// Records a precompile commitment into the transcript, updating the state.
     pub fn record(&mut self, commitment: PrecompileCommitment) {
-        // Internal RPO state layout is [RATE0, RATE1, CAPACITY].
+        // Internal Poseidon2 state layout is [RATE0, RATE1, CAPACITY].
         // For the transcript:
         // - RATE0 = COMM (commitment to calldata)
         // - RATE1 = TAG  (event metadata)
         // - CAPACITY = current transcript state.
-        let mut state = [ZERO; Rpo256::STATE_WIDTH];
+        let mut state = [ZERO; Poseidon2::STATE_WIDTH];
         let comm = commitment.comm_calldata();
         let tag = commitment.tag();
 
-        state[Rpo256::RATE0_RANGE].copy_from_slice(comm.as_elements());
-        state[Rpo256::RATE1_RANGE].copy_from_slice(tag.as_elements());
-        state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
+        state[Poseidon2::RATE0_RANGE].copy_from_slice(comm.as_elements());
+        state[Poseidon2::RATE1_RANGE].copy_from_slice(tag.as_elements());
+        state[Poseidon2::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
-        Rpo256::apply_permutation(&mut state);
+        Poseidon2::apply_permutation(&mut state);
         // After absorption, update the state.
-        self.state = Word::new(state[Rpo256::CAPACITY_RANGE].try_into().unwrap());
+        self.state = Word::new(state[Poseidon2::CAPACITY_RANGE].try_into().unwrap());
     }
 
     /// Finalizes the transcript to a digest (sequential commitment to all recorded requests).
@@ -357,11 +357,11 @@ impl PrecompileTranscript {
     ///   calling `record` or `finalize`.
     pub fn finalize(self) -> PrecompileTranscriptDigest {
         // Interpret state as [RATE0, RATE1, CAPACITY] with two empty rate words.
-        let mut state = [ZERO; Rpo256::STATE_WIDTH];
-        state[Rpo256::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
+        let mut state = [ZERO; Poseidon2::STATE_WIDTH];
+        state[Poseidon2::CAPACITY_RANGE].copy_from_slice(self.state.as_elements());
 
-        Rpo256::apply_permutation(&mut state);
-        PrecompileTranscriptDigest::new(state[Rpo256::DIGEST_RANGE].try_into().unwrap())
+        Poseidon2::apply_permutation(&mut state);
+        PrecompileTranscriptDigest::new(state[Poseidon2::DIGEST_RANGE].try_into().unwrap())
     }
 }
 

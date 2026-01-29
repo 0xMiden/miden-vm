@@ -268,6 +268,19 @@ begin
 end
 ```
 
+#### Word literal syntax
+
+In addition to word constants, you can push a word directly using the `push.[a,b,c,d]` syntax. This pushes 4 field elements onto the stack such that the first element `a` ends up on top of the stack:
+
+```
+begin
+    push.[1,2,3,4]   # Stack becomes: [1, 2, 3, 4, ...]
+                     # 1 is on top of the stack
+end
+```
+
+This syntax is particularly useful when you need to push a word inline without declaring a constant first. The element order in the literal matches the resulting stack order (first element on top).
+
 #### Constant slices
 
 It is possible to get just some part of a word constant using slice notation. This could be done by specifying a range in square brackets right after the constant's name. Attempt to get slices from constants which don't represent words will result in errors.
@@ -277,7 +290,7 @@ const SAMPLE_WORD = [5,6,7,8]
 const SAMPLE_VALUE = 9
 
 begin
-    push.SAMPLE_WORD[1..3]  # is equivalent to push.6.7
+    push.SAMPLE_WORD[1..3]  # is equivalent to push.7 push.6
     push.SAMPLE_WORD[0]     # is equivalent to push.5
 
     push.SAMPLE_VALUE[1..3] # returns an error: invalid slice constant

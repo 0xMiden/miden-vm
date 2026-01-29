@@ -15,7 +15,7 @@ edition.workspace = true
 
 [features]
 default = ["std"]
-concurrent = ["std", "miden-processor/concurrent"]
+concurrent = ["std", "miden-crypto/concurrent", "miden-processor/concurrent"]
 std = ["miden-air/std", "miden-debug-types/std", "miden-processor/std"]
 
 [dependencies]

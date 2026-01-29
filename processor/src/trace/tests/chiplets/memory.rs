@@ -17,8 +17,8 @@ use miden_core::{
 };
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, ONE, Operation,
-    Word, ZERO, build_trace_from_ops, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
+    LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
 use crate::PrimeField64;
 
@@ -59,7 +59,6 @@ fn b_chip_trace_mem() {
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
@@ -98,17 +97,8 @@ fn b_chip_trace_mem() {
     expected *= value.inverse();
     assert_eq!(expected, b_chip[7]);
 
-    // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
-    // from memory lookups, just set it explicitly and save the multiplied-in value for later.
-    assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inverse();
-    expected = b_chip[8];
-
-    // Memory responses will be provided during the memory segment of the Chiplets trace,
-    // which starts after the hash for the span block at row 8. There will be 6 rows, corresponding
-    // to the 5 memory operations (MStream requires 2 rows).
-
-    // At cycle 8 `MLoadW` is requested by the stack and `MStoreW` is provided by memory
+    // Nothing changes until the next memory request from the stack: `MLoadW` executed at cycle 8
+    // and included at row 9.
     let value = build_expected_bus_word_msg(
         &rand_elements,
         MEMORY_READ_WORD_LABEL,
@@ -118,19 +108,12 @@ fn b_chip_trace_mem() {
         word.into(),
     );
     expected *= value.inverse();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 8.into());
     assert_eq!(expected, b_chip[9]);
 
-    // At cycle 9, `MLoad` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 9.into());
+    // Nothing changes until the next memory request from the stack.
     assert_eq!(expected, b_chip[10]);
 
-    // At cycle 10,  `MLoadW` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 10.into());
-    assert_eq!(expected, b_chip[11]);
-
-    // At cycle 11, `MStore` is requested by the stack and the first read of `MStream` is provided
-    // by the memory.
+    // At cycle 11, `MStore` is requested by the stack and included at row 12.
     let value = build_expected_bus_element_msg(
         &rand_elements,
         MEMORY_WRITE_ELEMENT_LABEL,
@@ -140,15 +123,13 @@ fn b_chip_trace_mem() {
         ONE,
     );
     expected *= value.inverse();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 11.into());
     assert_eq!(expected, b_chip[12]);
 
-    // At cycle 12, `MStore` is provided by the memory
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 12.into());
+    // Nothing changes until the next memory request from the stack.
     assert_eq!(expected, b_chip[13]);
 
     // At cycle 13, `MStream` is requested by the stack, and the second read of `MStream` is
-    // provided by the memory.
+    // requested for inclusion at row 14.
     let value1 = build_expected_bus_word_msg(
         &rand_elements,
         MEMORY_READ_WORD_LABEL,
@@ -166,17 +147,60 @@ fn b_chip_trace_mem() {
         [ONE, ZERO, ZERO, ZERO].into(),
     );
     expected *= (value1 * value2).inverse();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 13.into());
     assert_eq!(expected, b_chip[14]);
 
-    // At cycle 14 the decoder requests the span hash. We set this as the inverse of the previously
-    // identified `span_result`, since this test is for consistency of the memory lookups.
+    // At cycle 14 the decoder requests the span hash. Capture the multiplicand; the hasher responds
+    // at the end of its cycle (row HASH_CYCLE_LEN).
     assert_ne!(expected, b_chip[15]);
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[15]);
+    let span_request_mult = b_chip[15] * expected.inverse();
+    expected = b_chip[15];
+
+    // Nothing changes until the hasher provides the span hash result at the end of the hash cycle.
+    for row in 16..HASH_CYCLE_LEN {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    let memory_start = HASH_CYCLE_LEN;
+    assert_ne!(expected, b_chip[memory_start]);
+    let span_response_mult = b_chip[memory_start] * b_chip[LAST_CYCLE_ROW].inverse();
+    assert_eq!(span_request_mult * span_response_mult, ONE);
+    expected *= span_response_mult;
+    assert_eq!(expected, b_chip[memory_start]);
+
+    // Memory responses are provided during the memory segment after the hash cycle. There will be 6
+    // rows, corresponding to the 5 memory operations (MStream requires 2 rows).
+
+    // At cycle 8 `MLoadW` was requested by the stack; `MStoreW` is provided by memory here.
+    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, memory_start.into());
+    assert_eq!(expected, b_chip[memory_start + 1]);
+
+    // At cycle 9, `MLoad` is provided by memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 1).into());
+    assert_eq!(expected, b_chip[memory_start + 2]);
+
+    // At cycle 10,  `MLoadW` is provided by memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 2).into());
+    assert_eq!(expected, b_chip[memory_start + 3]);
+
+    // At cycle 11, `MStore` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 3).into());
+    assert_eq!(expected, b_chip[memory_start + 4]);
+
+    // At cycle 12, the first read of `MStream` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 4).into());
+    assert_eq!(expected, b_chip[memory_start + 5]);
+
+    // At cycle 13, the second read of `MStream` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 5).into());
+    assert_eq!(expected, b_chip[memory_start + 6]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 15..trace.length() {
+    for row in (memory_start + 6)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }

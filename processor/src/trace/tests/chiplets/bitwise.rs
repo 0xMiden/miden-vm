@@ -9,7 +9,7 @@ use miden_core::field::{Field, PrimeCharacteristicRing};
 
 use super::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
-    ONE, Operation, build_trace_from_ops, rand_array, rand_value,
+    LAST_CYCLE_ROW, ONE, Operation, build_trace_from_ops, rand_array, rand_value,
 };
 
 /// Tests the generation of the `b_chip` bus column when only bitwise lookups are included. It
@@ -95,30 +95,12 @@ fn b_chip_trace_bitwise() {
     assert_eq!(expected, b_chip[5]);
 
     // Nothing changes during user operations with no requests to the Chiplets.
-    for row in 6..8 {
+    for row in 6..16 {
         assert_eq!(expected, b_chip[row]);
     }
 
-    // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
-    // from bitwise lookups, just set it explicitly and save the multiplied-in value for later.
-    assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inverse();
-    expected = b_chip[8];
-
-    // Nothing changes during user operations with no requests to the Chiplets.
-    for row in 9..16 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // Bitwise responses will be provided during the bitwise segment of the Chiplets trace,
-    // which starts after the hash for the span block. Responses are provided at the last row of the
-    // Bitwise chiplet's operation cycle.
-    let response_1_row = HASH_CYCLE_LEN + OP_CYCLE_LEN;
-    let response_2_row = response_1_row + OP_CYCLE_LEN;
-    let response_3_row = response_2_row + OP_CYCLE_LEN;
-
-    // At cycle 15, `U32xor` is requested by the stack and `U32and` is provided by the bitwise
-    // chiplet.
+    // The third bitwise request from the stack is sent when the `U32xor` operation is executed at
+    // cycle 15, so the request is included in the next row.
     // After Push(a) then Push(b), stack is [b, a, ...] so operands are (s0=b, s1=a).
     let value = build_expected_bitwise(
         &rand_elements,
@@ -128,34 +110,64 @@ fn b_chip_trace_bitwise() {
         Felt::from_u32(a ^ b),
     );
     expected *= value.inverse();
+    assert_eq!(expected, b_chip[16]);
+
+    // Nothing changes until the decoder requests the result of the `SPAN` hash at cycle 21.
+    for row in 17..22 {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // At cycle 21 the decoder requests the span hash. Since this test focuses on bitwise lookups,
+    // we treat the hasher bus messages as a black box and extract their multiplicands directly from
+    // the bus column.
+    assert_ne!(expected, b_chip[22]);
+    let span_request_mult = b_chip[22] * b_chip[21].inverse();
+    expected *= span_request_mult;
+    assert_eq!(expected, b_chip[22]);
+
+    // Nothing changes until the hasher provides the result of the `SPAN` hash at the end of the
+    // hasher cycle.
+    for row in 23..HASH_CYCLE_LEN {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // At the end of the hasher cycle, the hasher provides the `SPAN` hash. Its multiplicand should
+    // cancel out the earlier request.
+    assert_ne!(expected, b_chip[HASH_CYCLE_LEN]);
+    let span_response_mult = b_chip[HASH_CYCLE_LEN] * b_chip[LAST_CYCLE_ROW].inverse();
+    assert_eq!(span_request_mult * span_response_mult, ONE);
+    expected *= span_response_mult;
+    assert_eq!(expected, b_chip[HASH_CYCLE_LEN]);
+
+    // Bitwise responses will be provided during the bitwise segment of the Chiplets trace, which
+    // starts after the hash for the span block. Responses are provided at the last row of the
+    // Bitwise chiplet's operation cycle.
+    let response_1_row = HASH_CYCLE_LEN + OP_CYCLE_LEN;
+    let response_2_row = response_1_row + OP_CYCLE_LEN;
+    let response_3_row = response_2_row + OP_CYCLE_LEN;
+
+    // Nothing changes until the Bitwise chiplet responds.
+    for row in (HASH_CYCLE_LEN + 1)..response_1_row {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    // At the end of the first bitwise cycle, the response for `U32and` is provided by the Bitwise
+    // chiplet.
     expected *=
         build_expected_bitwise_from_trace(&trace, &rand_elements, (response_1_row - 1).into());
     assert_eq!(expected, b_chip[response_1_row]);
 
-    // Nothing changes until the decoder requests the result of the `SPAN` hash at cycle 21.
-    for row in response_1_row..21 {
-        assert_eq!(expected, b_chip[row]);
-    }
-
-    // At cycle 21 the decoder requests the span hash. We set this as the inverse of the previously
-    // identified `span_result`, since this test is for consistency of the bitwise lookups.
-    assert_ne!(expected, b_chip[22]);
-    expected *= span_result.inverse();
-    assert_eq!(expected, b_chip[22]);
-
-    // Nothing changes until the next time the Bitwise chiplet responds.
-    for row in 23..response_2_row {
-        assert_eq!(expected, b_chip[row]);
-    }
-
     // At the end of the next bitwise cycle, the response for `U32and` is provided by the Bitwise
     // chiplet.
+    for row in (response_1_row + 1)..response_2_row {
+        assert_eq!(expected, b_chip[row]);
+    }
     expected *=
         build_expected_bitwise_from_trace(&trace, &rand_elements, (response_2_row - 1).into());
     assert_eq!(expected, b_chip[response_2_row]);
 
     // Nothing changes until the next time the Bitwise chiplet responds.
-    for row in response_2_row..response_3_row {
+    for row in (response_2_row + 1)..response_3_row {
         assert_eq!(expected, b_chip[row]);
     }
 
@@ -174,8 +186,8 @@ fn b_chip_trace_bitwise() {
 // TEST HELPERS
 // ================================================================================================
 
-fn build_expected_bitwise(alphas: &[Felt], label: Felt, a: Felt, b: Felt, result: Felt) -> Felt {
-    alphas[0] + alphas[1] * label + alphas[2] * a + alphas[3] * b + alphas[4] * result
+fn build_expected_bitwise(alphas: &[Felt], label: Felt, s0: Felt, s1: Felt, result: Felt) -> Felt {
+    alphas[0] + alphas[1] * label + alphas[2] * s0 + alphas[3] * s1 + alphas[4] * result
 }
 
 fn build_expected_bitwise_from_trace(

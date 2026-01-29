@@ -2,7 +2,7 @@
 //!
 //! This module defines the structure of the hasher chiplet's execution trace, including:
 //! - Trace selectors that determine which hash operation is being performed
-//! - State layout for the RPO permutation (12 field elements: 4 capacity + 8 rate)
+//! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
 //! - Column ranges and indices for accessing trace data
 //!
 //! The hasher chiplet supports several operations:
@@ -13,7 +13,7 @@
 
 use core::ops::Range;
 
-pub use miden_core::{Word, crypto::hash::Rpo256 as Hasher};
+pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 
@@ -74,17 +74,22 @@ pub const DIGEST_LEN: usize = 4;
 /// The output portion of the hash state, located in the first rate word (RATE0).
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
-/// Number of needed to complete a single permutation.
+/// Number of round steps used to complete a single permutation.
 ///
-/// This value is set to 7 to target 128-bit security level with 40% security margin.
-pub const NUM_ROUNDS: usize = Hasher::NUM_ROUNDS;
+/// For Poseidon2, we model a permutation as 31 step transitions, resulting in a 32-row cycle.
+pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
+
+/// Index of the last row in a permutation cycle (0-based).
+pub const LAST_CYCLE_ROW: usize = NUM_ROUNDS;
+pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized. This is equal to 8.
+/// The number of rows in the execution trace required to compute a permutation of Poseidon2.
+/// This is equal to 32.
 pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
+pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
 
 /// Number of columns in Hasher execution trace. There is one additional column for the node index.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 1;

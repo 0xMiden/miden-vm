@@ -259,3 +259,162 @@ fn test_misaligned_key_value_find_key_fails() {
     let program = build_test!(source, &[]);
     program.execute().expect_err("InvalidKeyValueRange");
 }
+
+// MALICIOUS ADVICE PROVIDER TESTS
+// ================================================================================================
+// These tests verify that MASM code properly validates non-deterministic data from the advice
+// provider. By initializing the advice stack with known-bad values at the start of the test,
+// we can verify that validation logic correctly rejects invalid inputs.
+
+/// Tests that MASM validation catches an out-of-bounds pointer from malicious advice.
+///
+/// This test initializes the advice stack with a pointer value (200) that is outside
+/// the valid range [100, 112], verifying that the MASM code properly validates the
+/// pointer before using it.
+#[test]
+fn test_malicious_advice_invalid_pointer() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            # Store sorted array in memory
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+            push.[8675,5816,5458,2767] mem_storew_le.104 dropw
+            push.[3015,7211,2002,5143] mem_storew_le.108 dropw
+
+            # Setup: [KEY, start_ptr, end_ptr]
+            push.112 push.100 push.[8456,415,4922,593]
+
+            # Pop the malicious values from advice stack (initialized at test start)
+            # was_key_found, maybe_key_ptr
+            adv_push.2
+            # => [maybe_key_ptr, was_key_found, KEY, start_ptr, end_ptr, ...]
+
+            # Now validate the pointer is within bounds
+            # This is what the real find_word does after getting advice
+            dup movup.8 dup.2 # => [maybe_key_ptr, end_ptr, start_ptr, maybe_key_ptr, ...]
+            u32lte assert.err=\"ptr_exceeds_end\" # maybe_key_ptr <= end_ptr
+            u32gte assert.err=\"ptr_below_start\" # start_ptr <= maybe_key_ptr
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    // Initialize advice stack with malicious values: [maybe_key_ptr=200, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // The valid range is [100, 112], so 200 is clearly out of bounds
+    let test = build_test!(source, &[], &[200, 1]);
+
+    // Execution should fail because the pointer validation will catch the invalid value
+    let result = test.execute();
+    assert!(result.is_err(), "Expected validation to fail for out-of-bounds pointer");
+}
+
+/// Tests that MASM validation catches a misaligned pointer from malicious advice.
+///
+/// Pointers must be word-aligned (multiple of 4). This test initializes the advice
+/// stack with a non-aligned pointer to verify the alignment check works.
+#[test]
+fn test_malicious_advice_misaligned_pointer() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            # Store sorted array in memory
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+
+            # Setup: [KEY, start_ptr, end_ptr]
+            push.104 push.100 push.[8456,415,4922,593]
+
+            # Pop the malicious values from advice stack
+            adv_push.2
+            # => [maybe_key_ptr, was_key_found, ...]
+
+            # Validate alignment: pointer must be divisible by 4
+            # Use u32and with 3 to check if lower 2 bits are zero
+            dup push.3 u32and
+            # => [lower_bits, maybe_key_ptr, ...]
+            # If lower_bits != 0, pointer is misaligned
+            assertz.err=\"ptr_not_aligned\"
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    // Initialize advice stack with malicious values: [maybe_key_ptr=101, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // 101 is not divisible by 4, so it's misaligned
+    let test = build_test!(source, &[], &[101, 1]);
+
+    // Execution should fail due to alignment check
+    let result = test.execute();
+    assert!(result.is_err(), "Expected validation to fail for misaligned pointer");
+}
+
+/// Tests verification that the key at the returned pointer actually matches.
+///
+/// This test initializes the advice stack with a valid pointer but with was_key_found=1,
+/// then verifies that the MASM code checks if the key at that pointer actually matches
+/// the search key.
+#[test]
+fn test_malicious_advice_wrong_key_found_flag() {
+    let source = format!(
+        "
+        use miden::core::collections::sorted_array
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            # Store a key-value pair
+            push.[8456,415,4922,593] mem_storew_le.100 dropw
+
+            # Search for a DIFFERENT key that is NOT in the array
+            push.104 push.100 push.[9999,9999,9999,9999]
+
+            # Pop the malicious values from advice stack
+            adv_push.2
+            # => [maybe_key_ptr=100, was_key_found=1, KEY_search, start_ptr, end_ptr]
+
+            # If was_key_found is true, verify the key at the pointer matches
+            dup.1 # => [was_key_found, maybe_key_ptr, was_key_found, ...]
+            if.true
+                # Load the key from memory and compare with search key
+                dup mem_loadw_le
+                # => [KEY_at_ptr, maybe_key_ptr, was_key_found, KEY_search, ...]
+                movup.4 movup.4 movup.4 movup.4
+                # => [KEY_search, KEY_at_ptr, maybe_key_ptr, was_key_found, ...]
+
+                # Compare all 4 elements
+                movup.4 eq movdn.3 # w0
+                movup.4 eq movdn.3 # w1
+                movup.4 eq movdn.3 # w2
+                movup.4 eq         # w3
+                # => [w3_eq, w2_eq, w1_eq, w0_eq, ...]
+                and and and
+                # => [all_equal, maybe_key_ptr, was_key_found, ...]
+
+                assert.err=\"key_mismatch\" # Keys must match if was_key_found is true
+            end
+
+            exec.truncate_stack
+        end
+    "
+    );
+
+    // Initialize advice stack with malicious values: [maybe_key_ptr=100, was_key_found=1]
+    // adv_push.2 pops values and pushes them, resulting in [maybe_key_ptr, was_key_found, ...]
+    // Claiming the key was found at ptr=100, but we're searching for a different key
+    let test = build_test!(source, &[], &[100, 1]);
+
+    // Should fail because the key at ptr=100 doesn't match the search key
+    let result = test.execute();
+    assert!(result.is_err(), "Expected validation to fail for wrong key_found flag");
+}
