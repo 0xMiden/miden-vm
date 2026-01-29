@@ -192,38 +192,38 @@ proc columnar_mixing
     movup.9
     mem_loadw_be
     movup.8
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
     movup.8
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.8
     dup.6
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     dup.6
     movup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     dup.7
     movup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movup.9
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
@@ -250,7 +250,7 @@ proc columnar_mixing
     movdn.3
 
     movup.12
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
@@ -297,34 +297,34 @@ proc columnar_mixing
     movdn.3
 
     movupw.3
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     swapw
 
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.4
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movupw.3
@@ -432,38 +432,38 @@ proc diagonal_mixing
     movup.9
     mem_loadw_be
     movup.8
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
     movup.8
     dup.6
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.8
     dup.7
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.8
     dup.8
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.8
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movup.9
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
@@ -490,7 +490,7 @@ proc diagonal_mixing
     movdn.2
 
     movup.12
-    push.0.0.0.0
+    padw
     movup.4
     mem_loadw_be
 
@@ -537,34 +537,34 @@ proc diagonal_mixing
     u32rotr.12
 
     movupw.3
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     swapw
 
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
 
     swap
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
     swap
 
     movup.2
     movup.4
     dup.9
     u32overflowing_add3
-    drop
+    swap drop
     movdn.2
 
     movup.3
     movup.4
     dup.5
     u32overflowing_add3
-    drop
+    swap drop
     movdn.3
 
     movupw.3
@@ -682,7 +682,7 @@ proc round
 
     exec.diagonal_mixing
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     swapw
     movup.4
@@ -736,14 +736,14 @@ proc compress
             dupw.3
         end
 
-        push.0.0.0.0
+        padw
         loc_loadw_be.0
         exec.round
         exec.permute_msg_words
     end
 
     # round 7 ( last round, so no message word permutation required )
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.round
 end
@@ -781,13 +781,13 @@ pub proc merge
 
     exec.compress
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
-    push.0.0.0.0
+    padw
     loc_loadw_be.8
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
 
     exec.finalize
@@ -810,8 +810,7 @@ end
 pub proc hash
     # Pad 32 -bytes input message with zero bytes to make
     # 64 -bytes, which is processed same as 2-to-1 hashing
-    push.0.0.0.0.0.0.0.0
-    swapdw
+    padw padw swapdw
 
     locaddr.12
     locaddr.8
@@ -830,13 +829,13 @@ pub proc hash
 
     exec.compress
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
-    push.0.0.0.0
+    padw
     loc_loadw_be.8
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
 
     exec.finalize

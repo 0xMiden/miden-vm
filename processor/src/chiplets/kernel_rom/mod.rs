@@ -1,9 +1,10 @@
 use alloc::collections::BTreeMap;
 
-use miden_air::{RowIndex, trace::chiplets::kernel_rom::TRACE_WIDTH};
+use miden_air::trace::{RowIndex, chiplets::kernel_rom::TRACE_WIDTH};
+use miden_core::field::PrimeCharacteristicRing;
 
-use super::{ExecutionError, Felt, Kernel, TraceFragment, Word as Digest};
-use crate::ErrorContext;
+use super::{Felt, Kernel, TraceFragment, Word as Digest};
+use crate::errors::OperationError;
 
 #[cfg(test)]
 mod tests;
@@ -73,16 +74,12 @@ impl KernelRom {
     ///
     /// # Errors
     /// If the specified procedure does not exist in this kernel ROM, an error is returned.
-    pub fn access_proc(
-        &mut self,
-        proc_hash: Digest,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
-        let proc_hash_bytes: ProcHashBytes = proc_hash.into();
+    pub fn access_proc(&mut self, proc_root: Digest) -> Result<(), OperationError> {
+        let proc_hash_bytes: ProcHashBytes = proc_root.into();
         let access_info = self
             .access_map
             .get_mut(&proc_hash_bytes)
-            .ok_or(ExecutionError::syscall_target_not_in_kernel(proc_hash, err_ctx))?;
+            .ok_or(OperationError::SyscallTargetNotInKernel { proc_root })?;
 
         self.trace_len += 1;
         access_info.num_accesses += 1;
@@ -139,7 +136,7 @@ impl ProcAccessInfo {
 
     /// Writes a single row into the provided trace fragment for this procedure access entry.
     pub fn write_into_trace(&self, trace: &mut TraceFragment, row: RowIndex, is_first: bool) {
-        let s_first = Felt::from(is_first);
+        let s_first = Felt::from_bool(is_first);
         trace.set(row, 0, s_first);
         trace.set(row, 1, self.proc_hash[0]);
         trace.set(row, 2, self.proc_hash[1]);

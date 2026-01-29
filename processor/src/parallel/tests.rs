@@ -1,40 +1,68 @@
 use alloc::{string::String, sync::Arc};
-use std::string::ToString;
 
 use miden_core::{
-    Kernel, Operation, Program,
+    Felt, Kernel, Operation, Program,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
+    stack::StackInputs,
 };
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
-use winter_prover::Trace;
 
 use super::*;
-use crate::{DefaultHost, HostLibrary, fast::FastProcessor};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::FastProcessor};
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 
-/// The procedure that DYN and DYNCALL will call in the tests below. Its digest needs to be put on
-/// the stack before the call.
-const DYN_TARGET_PROC_HASH: &[Felt] = &[
-    Felt::new(10995436151082118190),
-    Felt::new(776663942277617877),
-    Felt::new(3177713792132750309),
-    Felt::new(10407898805173442467),
-];
+/// A sentinel value mainly used to catch when a ZERO is dropped from the stack but shouldn't have
+/// been. That is, if the stack is only ZEROs, we can't tell if a ZERO was dropped or not. Using a
+/// sentinel value makes it obvious when an unexpected ZERO is dropped.
+const SENTINEL_VALUE: Felt = Felt::new(9999);
 
-/// The digest of a procedure available to be called via an EXTERNAL node.
-const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
-    Felt::new(9552974201798903089),
-    Felt::new(993192251238261044),
-    Felt::new(1885027269046469428),
-    Felt::new(8558115384207742312),
-]);
+/// Returns the procedure hash that DYN and DYNCALL will call.
+/// The digest is computed dynamically from the target basic block (single SWAP operation).
+fn dyn_target_proc_hash() -> &'static [Felt] {
+    use std::sync::LazyLock;
+    static HASH: LazyLock<Vec<Felt>> = LazyLock::new(|| {
+        // Build the same target basic block as in dyn_program/dyncall_program
+        let mut forest = MastForest::new();
+        let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
+            .add_to_forest(&mut forest)
+            .unwrap();
+        // FastProcessor::new now expects first element to be top of stack
+        forest.get_node_by_id(target).unwrap().digest().iter().copied().collect()
+    });
+    HASH.as_slice()
+}
+
+/// Returns the digest of the external library procedure (double SWAP), computed dynamically.
+/// This matches the procedure created by `create_simple_library()`.
+fn external_lib_proc_digest() -> Word {
+    use std::sync::LazyLock;
+    static DIGEST: LazyLock<Word> = LazyLock::new(|| {
+        let mut forest = MastForest::new();
+        let swap_block =
+            BasicBlockNodeBuilder::new(vec![Operation::Swap, Operation::Swap], Vec::new())
+                .add_to_forest(&mut forest)
+                .unwrap();
+        forest.get_node_by_id(swap_block).unwrap().digest()
+    });
+    *DIGEST
+}
+
+/// Returns the external library procedure digest elements for stack inputs.
+/// FastProcessor::new now expects first element to be top of stack.
+fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
+    use std::sync::LazyLock;
+    static HASH: LazyLock<Vec<Felt>> =
+        LazyLock::new(|| external_lib_proc_digest().iter().copied().collect());
+    HASH.as_slice()
+}
 
 /// This test verifies that the trace generated when executing a program in multiple fragments (for
 /// all possible fragment boundaries) is identical to the trace generated when executing the same
@@ -75,7 +103,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 //  9:   END
 // 10: END
 // 11: HALT
-#[case(split_program(), 5, &[ZERO])]
+#[case(split_program(), 5, &[ZERO, SENTINEL_VALUE])]
 // Case 5: Tests the trace fragment generation for when a fragment starts in the finish phase of a
 // Join node. Same execution as case 3, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
@@ -83,21 +111,21 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // Case 6: Tests the trace fragment generation for when a fragment starts in the finish phase of a
 // Join node. Same execution as case 4, but we want the 2nd fragment to start at the END of the
 // SPLIT node.
-#[case(split_program(), 9, &[ZERO])]
+#[case(split_program(), 9, &[ZERO, SENTINEL_VALUE])]
 // Case 7: LOOP start
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP END
 //  7: END
 //  8: HALT
-#[case(loop_program(), 5, &[ZERO])]
+#[case(loop_program(), 5, &[ZERO, SENTINEL_VALUE])]
 // Case 8: LOOP END, when loop was not entered
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
 //  5:   LOOP END
 //  7: END
 //  8: HALT
-#[case(loop_program(), 6, &[ZERO])]
+#[case(loop_program(), 6, &[ZERO, SENTINEL_VALUE])]
 // Case 9: LOOP END, when loop was entered
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
@@ -106,7 +134,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 10:   END
 // 11: END
 // 12: HALT
-#[case(loop_program(), 10, &[ONE])]
+#[case(loop_program(), 10, &[ONE, ZERO, SENTINEL_VALUE])]
 // Case 10: LOOP REPEAT
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
@@ -117,7 +145,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 15:   END
 // 16: END
 // 17: HALT
-#[case(loop_program(), 10, &[ONE, ONE])]
+#[case(loop_program(), 10, &[ONE, ONE, ZERO, SENTINEL_VALUE])]
 // Case 11: CALL START
 //  0: JOIN
 //  1:   BLOCK SWAP SWAP END
@@ -221,7 +249,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyn_program(), 12, DYN_TARGET_PROC_HASH)]
+#[case(dyn_program(), 12, dyn_target_proc_hash())]
 // Case 23: DYN END
 //  0: JOIN
 //  1:   BLOCK
@@ -232,7 +260,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyn_program(), 16, DYN_TARGET_PROC_HASH)]
+#[case(dyn_program(), 16, dyn_target_proc_hash())]
 // Case 24: DYNCALL START
 //  0: JOIN
 //  1:   BLOCK
@@ -243,7 +271,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyncall_program(), 12, DYN_TARGET_PROC_HASH)]
+#[case(dyncall_program(), 12, dyn_target_proc_hash())]
 // Case 25: DYNCALL END
 //  0: JOIN
 //  1:   BLOCK
@@ -254,7 +282,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 16:   END
 // 17: END
 // 18: HALT
-#[case(dyncall_program(), 16, DYN_TARGET_PROC_HASH)]
+#[case(dyncall_program(), 16, dyn_target_proc_hash())]
 // Case 26: EXTERNAL NODE
 //  0: JOIN
 //  1:   BLOCK PAD DROP END
@@ -274,7 +302,7 @@ const EXTERNAL_LIB_PROC_DIGEST: Word = Word::new([
 // 17:   END
 // 18: END
 // 19: HALT
-#[case(dyn_program(), 12, EXTERNAL_LIB_PROC_DIGEST.as_elements())]
+#[case(dyn_program(), 12, external_lib_proc_hash_for_stack())]
 fn test_trace_generation_at_fragment_boundaries(
     testname: String,
     #[case] program: Program,
@@ -286,11 +314,17 @@ fn test_trace_generation_at_fragment_boundaries(
     const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
     let trace_from_fragments = {
-        let processor = FastProcessor::new(stack_inputs);
+        let processor = FastProcessor::new_with_options(
+            StackInputs::new(stack_inputs).unwrap(),
+            AdviceInputs::default(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(fragment_size)
+                .unwrap(),
+        );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host, fragment_size).unwrap();
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
         build_trace(
             execution_output,
@@ -301,12 +335,17 @@ fn test_trace_generation_at_fragment_boundaries(
     };
 
     let trace_from_single_fragment = {
-        let processor = FastProcessor::new(stack_inputs);
+        let processor = FastProcessor::new_with_options(
+            StackInputs::new(stack_inputs).unwrap(),
+            AdviceInputs::default(),
+            ExecutionOptions::default()
+                .with_core_trace_fragment_size(MAX_FRAGMENT_SIZE)
+                .unwrap(),
+        );
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
-        let (execution_output, trace_fragment_contexts) = processor
-            .execute_for_trace_sync(&program, &mut host, MAX_FRAGMENT_SIZE)
-            .unwrap();
+        let (execution_output, trace_fragment_contexts) =
+            processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
         build_trace(
@@ -320,9 +359,9 @@ fn test_trace_generation_at_fragment_boundaries(
     // Ensure that the trace generated from multiple fragments is identical to the one generated
     // from a single fragment.
     for (col_idx, (col_from_fragments, col_from_single_fragment)) in trace_from_fragments
-        .main_segment()
+        .main_trace()
         .columns()
-        .zip(trace_from_single_fragment.main_segment().columns())
+        .zip(trace_from_single_fragment.main_trace().columns())
         .enumerate()
     {
         if col_from_fragments != col_from_single_fragment {
@@ -343,7 +382,7 @@ fn test_trace_generation_at_fragment_boundaries(
             }
             // If we reach here, the columns have different lengths
             panic!(
-                "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}): different lengths (slow={}, parallel={})",
+                "Trace columns do not match between trace generated as multiple fragments vs a single fragment at column {} ({}): different lengths (fragments={}, single={})",
                 col_idx,
                 get_column_name(col_idx),
                 col_from_fragments.len(),
@@ -532,7 +571,7 @@ fn basic_block_program_small() -> Program {
 
     let root_join_node = {
         let target_basic_block = BasicBlockNodeBuilder::new(
-            vec![Operation::Swap, Operation::Push(42_u32.into())],
+            vec![Operation::Swap, Operation::Push(Felt::from_u32(42))],
             Vec::new(),
         )
         .add_to_forest(&mut program)
@@ -579,7 +618,7 @@ fn basic_block_program_multiple_batches() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_le drop drop drop drop push(40) noop noop)
 ///     (dyn)
 /// )
 fn dyn_program() -> Program {
@@ -611,8 +650,7 @@ fn dyn_program() -> Program {
     };
     program.make_root(root_join_node);
 
-    // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
-    // the program (stored in `DYN_TARGET_PROC_HASH`).
+    // Add the procedure that DYN will call. Its digest is computed by dyn_target_proc_hash().
     let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
         .add_to_forest(&mut program)
         .unwrap();
@@ -622,7 +660,7 @@ fn dyn_program() -> Program {
 }
 
 /// (join (
-///     (block push(40) mem_storew_be drop drop drop drop push(40) noop noop)
+///     (block push(40) mem_storew_le drop drop drop drop push(40) noop noop)
 ///     (dyncall)
 /// )
 fn dyncall_program() -> Program {
@@ -654,8 +692,7 @@ fn dyncall_program() -> Program {
     };
     program.make_root(root_join_node);
 
-    // Add the procedure that DYN will call. Its digest needs to be put on the stack at the start of
-    // the program (stored in `DYN_TARGET_PROC_HASH`).
+    // Add the procedure that DYNCALL will call. Its digest is computed by dyn_target_proc_hash().
     let target = BasicBlockNodeBuilder::new(vec![Operation::Swap], Vec::new())
         .add_to_forest(&mut program)
         .unwrap();
@@ -679,7 +716,7 @@ fn external_program() -> Program {
                 .add_to_forest(&mut program)
                 .unwrap();
 
-        let external_node = ExternalNodeBuilder::new(EXTERNAL_LIB_PROC_DIGEST)
+        let external_node = ExternalNodeBuilder::new(external_lib_proc_digest())
             .add_to_forest(&mut program)
             .unwrap();
 
@@ -696,5 +733,7 @@ fn external_program() -> Program {
 // See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
 #[fixture]
 fn testname() -> String {
-    std::thread::current().name().unwrap().to_string()
+    // Replace `::` with `__` to make snapshot file names Windows-compatible.
+    // Windows does not allow `:` in file names.
+    std::thread::current().name().unwrap().replace("::", "__")
 }

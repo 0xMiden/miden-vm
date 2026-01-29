@@ -6,14 +6,11 @@ use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{
-        DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
-        MastNodeId,
-    },
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
 };
 
 // LOOP NODE
@@ -44,23 +41,6 @@ impl LoopNode {
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
         self.body
-    }
-}
-
-impl MastNodeErrorContext for LoopNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -146,7 +126,7 @@ impl MastNodeExt for LoopNode {
     /// the domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
     /// # let body_digest = Word::default();
     /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
     /// ```
@@ -441,9 +421,6 @@ impl LoopNodeBuilder {
         };
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning

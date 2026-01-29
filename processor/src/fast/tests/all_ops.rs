@@ -1,3 +1,8 @@
+use alloc::string::String;
+
+use miden_core::field::PrimeCharacteristicRing;
+use rstest::fixture;
+
 use super::*;
 
 /// Test a number of combinations of stack inputs and operations to ensure that the fast processor
@@ -7,24 +12,26 @@ use super::*;
 /// operations.
 #[rstest]
 fn test_basic_block(
+    testname: String,
+    // Stack inputs start from 1 so that moved elements are distinguishable from padding zeros
     #[values(
         vec![],
-        vec![0_u32.into()],
-        vec![0_u32.into(), 1_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(), 14_u32.into()],
-        vec![0_u32.into(), 1_u32.into(), 2_u32.into(), 3_u32.into(), 4_u32.into(), 5_u32.into(), 6_u32.into(), 7_u32.into(), 8_u32.into(), 9_u32.into(), 10_u32.into(), 11_u32.into(), 12_u32.into(), 13_u32.into(), 14_u32.into(), 15_u32.into()],
+        vec![Felt::from_u32(1)],
+        vec![Felt::from_u32(1), Felt::from_u32(2)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14), Felt::from_u32(15)],
+        vec![Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4), Felt::from_u32(5), Felt::from_u32(6), Felt::from_u32(7), Felt::from_u32(8), Felt::from_u32(9), Felt::from_u32(10), Felt::from_u32(11), Felt::from_u32(12), Felt::from_u32(13), Felt::from_u32(14), Felt::from_u32(15), Felt::from_u32(16)],
     )]
     stack_inputs: Vec<Felt>,
     #[values(
@@ -54,7 +61,7 @@ fn test_basic_block(
         vec![Operation::U32and],
         vec![Operation::U32xor],
         vec![Operation::U32madd],
-        vec![Operation::U32assert2(Felt::from(5u32))],
+        vec![Operation::U32assert2(Felt::from_u32(5))],
         vec![Operation::Pad, Operation::MovUp8, Operation::Drop],
         // for the dups, we drop an element that was not duplicated, and hence we are still testing
         // that the `dup` works as expected
@@ -91,7 +98,7 @@ fn test_basic_block(
         vec![Operation::MovDn8],
         vec![Operation::CSwap],
         vec![Operation::CSwapW],
-        vec![Operation::Push(42_u32.into()), Operation::MovUp8, Operation::Drop],
+        vec![Operation::Push(Felt::from_u32(42)), Operation::MovUp8, Operation::Drop],
         // the memory operations here are more to ensure e.g. that unaligned word accesses are
         // reported correctly.
         vec![Operation::MLoadW],
@@ -112,35 +119,27 @@ fn test_basic_block(
     let program = simple_program_with_ops(operations);
 
     let mut host = DefaultHost::default();
-    let fast_processor = FastProcessor::new(&stack_inputs);
-    let fast_stack_outputs = fast_processor.execute_sync(&program, &mut host);
+    let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
+    let fast_stack_outputs =
+        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
 
-    let mut host = DefaultHost::default();
-    let mut slow_processor = Process::new(
-        Kernel::default(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut host);
-
-    match (&fast_stack_outputs, &slow_stack_outputs) {
-        (Ok(fast_stack_outputs), Ok(slow_stack_outputs)) => {
-            assert_eq!(fast_stack_outputs, slow_stack_outputs);
-        },
-        (Err(fast_error), Err(slow_error)) => {
-            assert_eq!(fast_error.to_string(), slow_error.to_string());
-
-            // Make sure that we're not getting an output stack overflow error, as it indicates that
-            // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
-            // us if the stack outputs are actually the same.
-            if matches!(fast_error, ExecutionError::OutputStackOverflow(_)) {
-                panic!("we don't want to be testing this output stack overflow error");
-            }
-        },
-        _ => panic!(
-            "Fast processor: {:?}. Slow processor: {:?}",
-            fast_stack_outputs, slow_stack_outputs
-        ),
+    // Make sure that we're not getting an output stack overflow error, as it indicates that
+    // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell
+    // us if the stack outputs are actually the same.
+    if let Some(err) = fast_stack_outputs.as_ref().err()
+        && matches!(err, ExecutionError::OutputStackOverflow(_))
+    {
+        panic!("we don't want to be testing this output stack overflow error");
     }
+
+    insta::assert_debug_snapshot!(testname, fast_stack_outputs);
+}
+
+// Workaround to make insta and rstest work together.
+// See: https://github.com/la10736/rstest/issues/183#issuecomment-1564088329
+#[fixture]
+fn testname() -> String {
+    // Replace `::` with `__` to make snapshot file names Windows-compatible.
+    // Windows does not allow `:` in file names.
+    std::thread::current().name().unwrap().replace("::", "__")
 }

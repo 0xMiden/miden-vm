@@ -9,11 +9,11 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
     Idx, OPCODE_CALL, OPCODE_SYSCALL,
     chiplets::hasher,
-    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // CALL NODE
@@ -64,23 +64,6 @@ impl CallNode {
         } else {
             Self::CALL_DOMAIN
         }
-    }
-}
-
-impl MastNodeErrorContext for CallNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -195,14 +178,14 @@ impl MastNodeExt for CallNode {
     /// whether the node represents a simple call or a syscall - i.e.,:
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
     /// # let callee_digest = Word::default();
     /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::CALL_DOMAIN);
     /// ```
     /// or
     /// ```
     /// # use miden_core::mast::CallNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
     /// # let callee_digest = Word::default();
     /// Hasher::merge_in_domain(&[callee_digest, Word::default()], CallNode::SYSCALL_DOMAIN);
     /// ```
@@ -538,10 +521,8 @@ impl CallNodeBuilder {
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
+        // Note: Decorators are already in forest.debug_info from deserialization
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes

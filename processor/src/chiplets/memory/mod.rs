@@ -1,22 +1,25 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 use core::fmt::Debug;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::memory::{
+    chiplets::memory::{
         CLK_COL_IDX, CTX_COL_IDX, D_INV_COL_IDX, D0_COL_IDX, D1_COL_IDX,
         FLAG_SAME_CONTEXT_AND_WORD, IDX0_COL_IDX, IDX1_COL_IDX, IS_READ_COL_IDX,
         IS_WORD_ACCESS_COL_IDX, MEMORY_ACCESS_ELEMENT, MEMORY_ACCESS_WORD, MEMORY_READ,
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{WORD_SIZE, ZERO};
+use miden_core::{
+    WORD_SIZE, ZERO,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
-    EMPTY_WORD, Felt, FieldElement, ONE, RangeChecker, TraceFragment, Word,
+    EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
-use crate::{MemoryAddress, errors::ErrorContext, system::ContextId};
+use crate::{MemoryAddress, PrimeField64, system::ContextId};
 
 mod errors;
 pub use errors::MemoryError;
@@ -131,7 +134,7 @@ impl Memory {
         match self.trace.get(&ctx) {
             Some(segment) => segment
                 .get_word(addr)
-                .map_err(|_| MemoryError::UnalignedWordAccessNoClk { addr, ctx }),
+                .map_err(|_| MemoryError::UnalignedWordAccess { addr, ctx }),
             None => Ok(None),
         }
     }
@@ -161,17 +164,11 @@ impl Memory {
     /// # Errors
     /// - Returns an error if the address is equal or greater than 2^32.
     /// - Returns an error if the same address is accessed more than once in the same clock cycle.
-    pub fn read(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError> {
+    pub fn read(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex) -> Result<Felt, MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().read(ctx, addr, Felt::from(clk))
     }
@@ -190,14 +187,13 @@ impl Memory {
         ctx: ContextId,
         addr: Felt,
         clk: RowIndex,
-        err_ctx: &impl ErrorContext,
     ) -> Result<Word, MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;
@@ -215,12 +211,11 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Felt,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         self.num_trace_rows += 1;
         self.trace.entry(ctx).or_default().write(ctx, addr, Felt::from(clk), value)
     }
@@ -237,14 +232,13 @@ impl Memory {
         addr: Felt,
         clk: RowIndex,
         value: Word,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError> {
         let addr: u32 = addr
-            .as_int()
+            .as_canonical_u64()
             .try_into()
-            .map_err(|_| MemoryError::address_out_of_bounds(addr.as_int(), err_ctx))?;
+            .map_err(|_| MemoryError::AddressOutOfBounds { addr: addr.as_canonical_u64() })?;
         if !addr.is_multiple_of(WORD_SIZE as u32) {
-            return Err(MemoryError::unaligned_word_access(addr, ctx, clk.into(), err_ctx));
+            return Err(MemoryError::UnalignedWordAccess { addr, ctx });
         }
 
         self.num_trace_rows += 1;
@@ -261,7 +255,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (ctx, addr, clk.as_int() - 1),
+            Some((ctx, addr, clk)) => (ctx, addr, clk.as_canonical_u64() - 1),
             None => return,
         };
 
@@ -273,7 +267,7 @@ impl Memory {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
                 for memory_access in addr_trace {
-                    let clk = memory_access.clk().as_int();
+                    let clk = memory_access.clk().as_canonical_u64();
 
                     // compute delta as difference between context IDs, addresses, or clock cycles
                     let delta = if prev_ctx != ctx {
@@ -305,7 +299,7 @@ impl Memory {
         // trace; we also adjust the clock cycle so that delta value for the first row would end
         // up being ZERO. if the trace is empty, return without any further processing.
         let (mut prev_ctx, mut prev_addr, mut prev_clk) = match self.get_first_row_info() {
-            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from(addr), clk - ONE),
+            Some((ctx, addr, clk)) => (Felt::from(ctx), Felt::from_u32(addr), clk - ONE),
             None => return,
         };
 
@@ -318,7 +312,7 @@ impl Memory {
             for (addr, addr_trace) in segment.into_inner() {
                 // when we start a new address, we set the previous value to all zeros. the effect
                 // of this is that memory is always initialized to zero.
-                let felt_addr = Felt::from(addr);
+                let felt_addr = Felt::from_u32(addr);
                 for memory_access in addr_trace {
                     let clk = memory_access.clk();
                     let value = memory_access.word();
@@ -366,7 +360,7 @@ impl Memory {
                     trace.set(row, D0_COL_IDX, delta_lo);
                     trace.set(row, D1_COL_IDX, delta_hi);
                     // TODO: switch to batch inversion to improve efficiency.
-                    trace.set(row, D_INV_COL_IDX, delta.inv());
+                    trace.set(row, D_INV_COL_IDX, delta.try_inverse().unwrap_or(ZERO));
 
                     if prev_ctx == ctx && prev_addr == felt_addr {
                         trace.set(row, FLAG_SAME_CONTEXT_AND_WORD, ONE);

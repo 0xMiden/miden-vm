@@ -1,14 +1,15 @@
 use core::ops::ControlFlow;
 
 use miden_air::{
-    Felt, FieldElement, RowIndex,
+    Felt,
     trace::{
-        STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
+        RowIndex, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH,
         decoder::{NUM_OP_BITS, NUM_USER_OP_HELPERS},
     },
 };
 use miden_core::{
-    ONE, OPCODE_PUSH, Operation, QuadFelt, StarkField, WORD_SIZE, Word, ZERO,
+    ONE, OPCODE_PUSH, Operation, WORD_SIZE, Word, ZERO,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
@@ -16,15 +17,16 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, ErrorContext, ExecutionError, ProcessState,
+    ContextId, ExecutionError,
     chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
+    errors::AceEvalError,
     fast::{
         NoopTracer, Tracer, eval_circuit_fast_,
         trace_state::{
             AdviceReplay, CoreTraceFragmentContext, ExecutionContextSystemInfo,
-            HasherResponseReplay, MemoryReadsReplay, NodeExecutionState,
+            HasherResponseReplay, MemoryReadsReplay,
         },
     },
     host::default::NoopHost,
@@ -35,6 +37,9 @@ use crate::{
 
 mod execution;
 mod trace_row;
+
+#[cfg(test)]
+mod tests;
 
 // CORE TRACE FRAGMENT
 // ================================================================================================
@@ -76,98 +81,17 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
     /// Fills the fragment and returns the final stack rows, system rows, and number of rows built.
     pub fn fill_fragment(mut self) -> ([Felt; STACK_TRACE_WIDTH], [Felt; SYS_TRACE_WIDTH], usize) {
-        let execution_state = self.context.initial_execution_state.clone();
-        // Execute fragment generation and always finalize at the end
-        let _ = self.fill_fragment_impl(execution_state);
+        // We extract final state from `self`, so the ControlFlow result doesn't matter.
+        let _ = self.fill_fragment_impl();
+
+        let num_rows_built = self.num_rows_built();
         let final_stack_rows = self.stack_rows.unwrap_or([ZERO; STACK_TRACE_WIDTH]);
         let final_system_rows = self.system_rows.unwrap_or([ZERO; SYS_TRACE_WIDTH]);
-        let num_rows_built = self.num_rows_built();
         (final_stack_rows, final_system_rows, num_rows_built)
     }
 
     /// Internal method that fills the fragment with automatic early returns
-    fn fill_fragment_impl(&mut self, execution_state: NodeExecutionState) -> ControlFlow<()> {
-        let initial_mast_forest = self.context.initial_mast_forest.clone();
-
-        // Finish the current node given its execution state
-        match execution_state {
-            NodeExecutionState::BasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let basic_block_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_basic_block();
-
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_op(basic_block_node, batch_index, op_idx_in_batch);
-                self.finish_basic_block_node_from_op(
-                    basic_block_node,
-                    &initial_mast_forest,
-                    batch_index,
-                    op_idx_in_batch,
-                    &mut basic_block_context,
-                )?;
-            },
-            NodeExecutionState::Start(node_id) => {
-                self.execute_mast_node(node_id, &initial_mast_forest)?;
-            },
-            NodeExecutionState::Respan { node_id, batch_index } => {
-                let basic_block_node = initial_mast_forest
-                    .get_node_by_id(node_id)
-                    .expect("node should exist")
-                    .unwrap_basic_block();
-
-                let mut basic_block_context =
-                    BasicBlockContext::new_at_batch_start(basic_block_node, batch_index);
-
-                self.add_respan_trace_row(
-                    &basic_block_node.op_batches()[batch_index],
-                    &mut basic_block_context,
-                )?;
-
-                self.finish_basic_block_node_from_op(
-                    basic_block_node,
-                    &initial_mast_forest,
-                    batch_index,
-                    0,
-                    &mut basic_block_context,
-                )?;
-            },
-            NodeExecutionState::LoopRepeat(node_id) => {
-                self.finish_loop_node(node_id, &initial_mast_forest, None)?;
-            },
-            NodeExecutionState::End(node_id) => {
-                let mast_node =
-                    initial_mast_forest.get_node_by_id(node_id).expect("node should exist");
-
-                match mast_node {
-                    MastNode::Join(join_node) => {
-                        self.add_end_trace_row(join_node.digest())?;
-                    },
-                    MastNode::Split(split_node) => {
-                        self.add_end_trace_row(split_node.digest())?;
-                    },
-                    MastNode::Loop(_loop_node) => {
-                        self.finish_loop_node(node_id, &initial_mast_forest, None)?;
-                    },
-                    MastNode::Call(call_node) => {
-                        self.finish_call_node(call_node)?;
-                    },
-                    MastNode::Dyn(dyn_node) => {
-                        self.finish_dyn_node(dyn_node)?;
-                    },
-                    MastNode::Block(basic_block_node) => {
-                        self.add_basic_block_end_trace_row(basic_block_node)?;
-                    },
-                    MastNode::External(_external_node) => {
-                        // External nodes don't generate trace rows directly, and hence will never
-                        // show up in the END execution state.
-                        panic!("Unexpected external node in END execution state")
-                    },
-                }
-            },
-        }
-
-        // Start of main execution loop.
+    fn fill_fragment_impl(&mut self) -> ControlFlow<()> {
         let mut current_forest = self.context.initial_mast_forest.clone();
 
         while let Some(continuation) = self.context.continuation.pop_continuation() {
@@ -185,8 +109,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                         current_forest.get_node_by_id(node_id).expect("node should exist");
                     self.add_end_trace_row(mast_node.digest())?;
                 },
-                Continuation::FinishLoop(node_id) => {
-                    self.finish_loop_node(node_id, &current_forest, None)?;
+                Continuation::FinishLoop { node_id, was_entered } => {
+                    self.finish_loop_node(node_id, &current_forest, was_entered)?;
                 },
                 Continuation::FinishCall(node_id) => {
                     let call_node = current_forest
@@ -209,9 +133,66 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                     // External nodes don't generate END trace rows in the parallel processor
                     // as they only execute after_exit decorators
                 },
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    let mut basic_block_context = BasicBlockContext::new_at_op(
+                        basic_block_node,
+                        batch_index,
+                        op_idx_in_batch,
+                    );
+                    self.finish_basic_block_node_from_op(
+                        basic_block_node,
+                        &current_forest,
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                        &mut basic_block_context,
+                    )?;
+                },
+                Continuation::Respan { node_id, batch_index } => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    let mut basic_block_context =
+                        BasicBlockContext::new_at_batch_start(basic_block_node, batch_index);
+
+                    self.add_respan_trace_row(
+                        &basic_block_node.op_batches()[batch_index],
+                        &mut basic_block_context,
+                    )?;
+
+                    self.finish_basic_block_node_from_op(
+                        basic_block_node,
+                        &current_forest,
+                        node_id,
+                        batch_index,
+                        0,
+                        &mut basic_block_context,
+                    )?;
+                },
+                Continuation::FinishBasicBlock(node_id) => {
+                    let basic_block_node = current_forest
+                        .get_node_by_id(node_id)
+                        .expect("node should exist")
+                        .unwrap_basic_block();
+
+                    self.add_basic_block_end_trace_row(basic_block_node)?;
+                },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
                     current_forest = previous_forest;
+                },
+                Continuation::AfterExitDecorators(_node_id) => {
+                    // do nothing - we don't execute decorators in this processor
+                },
+                Continuation::AfterExitDecoratorsBasicBlock(_node_id) => {
+                    // do nothing - we don't execute decorators in this processor
                 },
             }
         }
@@ -237,6 +218,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.finish_basic_block_node_from_op(
                     basic_block_node,
                     current_forest,
+                    node_id,
                     0,
                     0,
                     &mut basic_block_context,
@@ -276,7 +258,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
                 // Read condition from the stack and decrement stack size. This happens as part of
                 // the LOOP operation, and so is done before writing that trace row.
-                let mut condition = self.get(0);
+                let condition = self.get(0);
                 self.decrement_size(&mut NoopTracer);
 
                 // 1. Add "start LOOP" row
@@ -289,16 +271,17 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 if condition == ONE {
                     self.execute_mast_node(loop_node.body(), current_forest)?;
 
-                    condition = self.get(0);
-                    self.decrement_size(&mut NoopTracer);
+                    // Let finish_loop_node read the new condition from the stack
+                    self.finish_loop_node(node_id, current_forest, true)
+                } else {
+                    // Loop was never entered (condition was ZERO)
+                    self.finish_loop_node(node_id, current_forest, false)
                 }
-
-                self.finish_loop_node(node_id, current_forest, Some(condition))
             },
             MastNode::Call(call_node) => {
                 self.context.state.decoder.replay_node_start(&mut self.context.replay);
 
-                self.context.state.stack.start_context();
+                let _ = self.context.state.stack.start_context();
 
                 // Set up new context for the call
                 if call_node.is_syscall() {
@@ -407,6 +390,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         batch: &OpBatch,
         start_op_idx: Option<usize>,
         current_forest: &MastForest,
+        node_id: MastNodeId,
         basic_block_context: &mut BasicBlockContext,
     ) -> ControlFlow<()> {
         let start_op_idx = start_op_idx.unwrap_or(0);
@@ -419,18 +403,20 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             {
                 // `execute_sync_op` does not support executing `Emit`, so we only call it for all
                 // other operations.
+                // Note: we pass `NoopHost` since errors should never occur here - the program
+                // already ran successfully in FastProcessor.
                 let user_op_helpers = if let Operation::Emit = op {
                     None
                 } else {
-                    // Note that the `op_idx_in_block` is only used in case of error, so we set it
-                    // to 0.
                     self.execute_sync_op(
                         op,
-                        0,
                         current_forest,
+                        node_id,
                         &mut NoopHost,
-                        &(),
                         &mut NoopTracer,
+                        // Note: op_idx is only used for error context, which should never
+                        // happen here since the program already ran successfully in FastProcessor.
+                        op_idx_in_batch,
                     )
                     // The assumption here is that the computation was done by the FastProcessor,
                     // and so all operations in the program are valid and can be executed
@@ -492,10 +478,6 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         &self.context.state.stack.stack_top
     }
 
-    fn top_mut(&mut self) -> &mut [Felt] {
-        &mut self.context.state.stack.stack_top
-    }
-
     fn get(&self, idx: usize) -> Felt {
         debug_assert!(idx < MIN_STACK_DEPTH);
         self.context.state.stack.stack_top[MIN_STACK_DEPTH - idx - 1]
@@ -511,7 +493,11 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
 
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
-        self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap()
+        let mut result: [Felt; WORD_SIZE] =
+            self.top()[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        // Reverse so top of stack (idx 0) goes to word[0]
+        result.reverse();
+        result.into()
     }
 
     fn depth(&self) -> u32 {
@@ -526,9 +512,13 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
         debug_assert!(start_idx < MIN_STACK_DEPTH - 4);
         let word_start_idx = MIN_STACK_DEPTH - start_idx - 4;
 
+        // Reverse so word[0] ends up at the top of stack (highest internal index)
+        let mut source: [Felt; WORD_SIZE] = (*word).into();
+        source.reverse();
+
         let word_on_stack =
             &mut self.context.state.stack.stack_top[range(word_start_idx, WORD_SIZE)];
-        word_on_stack.copy_from_slice(word.as_slice());
+        word_on_stack.copy_from_slice(&source);
     }
 
     fn swap(&mut self, idx1: usize, idx2: usize) {
@@ -580,7 +570,7 @@ impl<'a> StackInterface for CoreTraceFragmentFiller<'a> {
     }
 
     fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
-        const SENTINEL_VALUE: Felt = Felt::new(Felt::MODULUS - 1);
+        const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
         {
@@ -637,10 +627,6 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         self
     }
 
-    fn state(&mut self) -> ProcessState<'_> {
-        ProcessState::Noop(())
-    }
-
     fn advice_provider(&mut self) -> &mut Self::AdviceProvider {
         &mut self.context.replay.advice
     }
@@ -661,11 +647,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         self.context.state.system.pc_transcript_state = state;
     }
 
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack().get(2);
         let num_read = self.stack().get(1);
         let ptr = self.stack().get(0);
@@ -678,7 +660,6 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
             num_read,
             num_eval,
             self,
-            err_ctx,
             tracer,
         )?;
 
@@ -710,26 +691,33 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         let h0 = if stack_second == stack_first {
             ZERO
         } else {
-            (stack_first - stack_second).inv()
+            (stack_first - stack_second).inverse()
         };
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
 
     #[inline(always)]
-    fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+    fn op_u32split_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // h0 is a helper variable provided by the prover. If the top element is zero, then, h0 can
         // be set to anything otherwise set it to the inverse of the top element in the stack.
-        let h0 = if top == ZERO { ZERO } else { top.inv() };
+        let h0 = top.try_inverse().unwrap_or(ZERO);
 
         [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
@@ -746,87 +734,128 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         x: Felt,
         x_inv: Felt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
-        let ev_arr = [ev];
-        let ev_felts = QuadFelt::slice_as_base_elements(&ev_arr);
-
-        let es_arr = [es];
-        let es_felts = QuadFelt::slice_as_base_elements(&es_arr);
+        let ev_felts = ev.as_basis_coefficients_slice();
+        let es_felts = es.as_basis_coefficients_slice();
 
         [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], x, x_inv]
     }
 
     #[inline(always)]
-    fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
 
         // For u32add, check_element_validity is false
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
-    fn op_u32add3_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks (only `second_new` needs range checking)
-        let (t1, t0) = split_u32_into_u16(second_new.as_int());
+        let (t1, t0) = split_u32_into_u16(second_new.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), ZERO, ZERO, ZERO, ZERO]
+        [Felt::from_u16(t0), Felt::from_u16(t1), ZERO, ZERO, ZERO, ZERO]
     }
 
     #[inline(always)]
     fn op_u32mul_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_u32madd_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
-        let m = (Felt::from(u32::MAX) - hi).inv();
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+        let m = (Felt::from_u32(u32::MAX) - hi).try_inverse().unwrap_or(ZERO);
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), m, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            m,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
-        let (t1, t0) = split_u32_into_u16(lo.as_int());
-        let (t3, t2) = split_u32_into_u16(hi.as_int());
+        let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_u32assert2_registers(first: Felt, second: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks for both operands
-        let (t1, t0) = split_u32_into_u16(second.as_int());
-        let (t3, t2) = split_u32_into_u16(first.as_int());
+        let (t1, t0) = split_u32_into_u16(second.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(first.as_canonical_u64());
 
-        [Felt::from(t0), Felt::from(t1), Felt::from(t2), Felt::from(t3), ZERO, ZERO]
+        [
+            Felt::from_u16(t0),
+            Felt::from_u16(t1),
+            Felt::from_u16(t2),
+            Felt::from_u16(t3),
+            ZERO,
+            ZERO,
+        ]
     }
 
     #[inline(always)]
     fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Store bus address (i.e., (clk + 1)) per hasher response message spec.
         [addr, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
 
     #[inline(always)]
     fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+        // Store bus address (i.e., (clk + 1)) per hasher response message spec.
         [addr, ZERO, ZERO, ZERO, ZERO, ZERO]
     }
 
@@ -837,12 +866,12 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         tmp1: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
         [
-            alpha.base_element(0),
-            alpha.base_element(1),
-            tmp1.to_base_elements()[0],
-            tmp1.to_base_elements()[1],
-            tmp0.to_base_elements()[0],
-            tmp0.to_base_elements()[1],
+            alpha.as_basis_coefficients_slice()[0],
+            alpha.as_basis_coefficients_slice()[1],
+            tmp1.as_basis_coefficients_slice()[0],
+            tmp1.as_basis_coefficients_slice()[1],
+            tmp0.as_basis_coefficients_slice()[0],
+            tmp0.as_basis_coefficients_slice()[1],
         ]
     }
 
@@ -853,12 +882,12 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
         acc_tmp: QuadFelt,
     ) -> [Felt; NUM_USER_OP_HELPERS] {
         [
-            alpha.base_element(0),
-            alpha.base_element(1),
+            alpha.as_basis_coefficients_slice()[0],
+            alpha.as_basis_coefficients_slice()[1],
             k0,
             k1,
-            acc_tmp.base_element(0),
-            acc_tmp.base_element(1),
+            acc_tmp.as_basis_coefficients_slice()[0],
+            acc_tmp.as_basis_coefficients_slice()[1],
         ]
     }
 
@@ -875,7 +904,6 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
-#[expect(clippy::too_many_arguments)]
 fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,
@@ -883,12 +911,11 @@ fn eval_circuit_parallel_(
     num_vars: Felt,
     num_eval: Felt,
     processor: &mut CoreTraceFragmentFiller,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
+) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), err_ctx, tracer)
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), tracer)
 }
 
 // BASIC BLOCK CONTEXT
@@ -959,7 +986,7 @@ impl BasicBlockContext {
             // the current one, and so we would expect to shift `NUM_OP_BITS` by
             // `op_idx_in_group + 1`. However, we will apply that shift right before
             // writing to the trace, so we only shift by `op_idx_in_group` here.
-            Felt::new(current_op_group.as_int() >> (NUM_OP_BITS * op_idx_in_group))
+            Felt::new(current_op_group.as_canonical_u64() >> (NUM_OP_BITS * op_idx_in_group))
         };
 
         let group_count_in_block = {
@@ -977,7 +1004,7 @@ impl BasicBlockContext {
                 // Note: This is a hacky way of doing this because `OpBatch` doesn't store the
                 // information of which operation belongs to which group.
                 let mut current_op_group =
-                    op_batches[batch_index].groups()[current_op_group_idx].as_int();
+                    op_batches[batch_index].groups()[current_op_group_idx].as_canonical_u64();
                 for _ in 0..op_idx_in_group {
                     let current_op = (current_op_group & 0b1111111) as u8;
                     if current_op == OPCODE_PUSH {
@@ -993,7 +1020,7 @@ impl BasicBlockContext {
             // *after* being done with the current group)
             groups_consumed += current_op_group_idx + 1;
 
-            Felt::from((total_groups - groups_consumed) as u32)
+            Felt::from_u32((total_groups - groups_consumed) as u32)
         };
 
         Self { current_op_group, group_count_in_block }
@@ -1001,10 +1028,13 @@ impl BasicBlockContext {
 
     /// Removes the operation that was just executed from the current operation group.
     fn remove_operation_from_current_op_group(&mut self) {
-        let prev_op_group = self.current_op_group.as_int();
+        let prev_op_group = self.current_op_group.as_canonical_u64();
         self.current_op_group = Felt::new(prev_op_group >> NUM_OP_BITS);
 
-        debug_assert!(prev_op_group >= self.current_op_group.as_int(), "op group underflow");
+        debug_assert!(
+            prev_op_group >= self.current_op_group.as_canonical_u64(),
+            "op group underflow"
+        );
     }
 
     /// Starts decoding a new operation group.

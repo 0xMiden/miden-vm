@@ -132,8 +132,8 @@ These registers have the following meanings:
 
 To compute hashes of program blocks, the decoder relies on the [hash chiplet](../chiplets/hasher.md). Specifically, the decoder needs to perform two types of hashing operations:
 
-1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements, and get back $4$ field elements representing the result. Computing such a hash requires $8$ rows in the hash chiplet.
-2. A sequential hash of $n$ elements. Computing such a hash requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. Thus, computing a sequential hash of $n$ elements requires $\lceil {n/8} \rceil$ rows in the hash chiplet. At the end, we also get $4$ field elements representing the result.
+1. A simple 2-to-1 hash, where we provide a sequence of $8$ field elements, and get back $4$ field elements representing the result. Computing such a hash requires $32$ rows in the hash chiplet.
+2. A sequential hash of $n$ elements. Computing such a hash requires multiple absorption steps, and at each step $8$ field elements are absorbed into the hasher. Thus, computing a sequential hash of $n$ elements requires $32 \cdot \lceil {n/8} \rceil$ rows in the hash chiplet. At the end, we also get $4$ field elements representing the result.
 
 To make hashing requests to the hash chiplet and to read the results from it, we will need to divide out relevant values from the [chiplets bus](../chiplets/index.md#chiplets-bus) column $b_{chip}$ as described below.
 
@@ -153,7 +153,7 @@ where:
 To read the $4$-element result ($u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 7) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
 $$
 
 where:
@@ -171,7 +171,7 @@ $$
 This also absorbs the first $8$ elements of the sequence into the hasher state. Then, to absorb the next sequence of $8$ elements (e.g., $v_8, ..., v_{15}$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 7) + \sum_{i=0}^7 (\alpha_{i+8} \cdot v_{i + 8})
+\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^7 (\alpha_{i+8} \cdot v_{i + 8})
 $$
 
 Where $m_{abp}$ is a label indicating absorption of more elements into the hasher state. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
@@ -179,10 +179,10 @@ Where $m_{abp}$ is a label indicating absorption of more elements into the hashe
 We can keep absorbing elements into the hasher in the similar manner until all elements have been absorbed. Then, to read the result (e.g., $u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + \lceil n / 8 \rceil \cdot 8  - 1) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + \lceil n / 8 \rceil \cdot 32  - 1) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
 $$
 
-Thus, for example, if $n = 14$, the result will of the hash will be available at hasher row $r + 15$.
+Thus, for example, if $n = 14$, the result of the hash will be available at hasher row $r + 63$.
 
 ### Control flow tables
 
@@ -393,7 +393,7 @@ When the VM executes an `END` operation, it does the following:
         - in the above, the `x_next` variables denote the column `x` in the next row
     - else, we remove a row `(blk, prnt, f1, 0, 0, 0, 0, 0)`
 2. Removes a tuple `(prnt, current_block_hash, nxt, f0)` from the block hash table, where $nxt=0$ if the next operation is either `END` or `REPEAT`, and $1$ otherwise.
-3. Reads the hash result from the hash chiplet (as described [here](#program-block-hashing)) using `blk + 7` as row address in the auxiliary hashing table.
+3. Reads the hash result from the hash chiplet (as described [here](#program-block-hashing)) using `blk + 31` as row address in the auxiliary hashing table.
 4. If $h_5 = 1$ (i.e., we are exiting a *loop* block), pops the value off the top of the stack and verifies that the value is $0$.
 5. Verifies that `group_count` register is set to $0$.
 
@@ -437,14 +437,14 @@ In the above diagram, `g0_op0` is the first operation of the new operation batch
 
 When the VM executes a `RESPAN` operation, it does the following:
 
-1. Increments block address by $8$.
+1. Increments block address by $32$.
 2. Removes the tuple `(blk, prnt, 0, 0...)` from the block stack table.
-3. Adds the tuple `(blk+8, prnt, 0, 0...)` to the block stack table.
+3. Adds the tuple `(blk+32, prnt, 0, 0...)` to the block stack table.
 4. Absorbs values in registers $h_0, ..., h_7$ into the hasher state of the hash chiplet (as described [here](#sequential-hash)).
 5. Sets the `in_span` register to $1$.
-6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+8` as batch ID.
+6. Adds groups of the operation batch, as specified by op batch flags (see [here](#operation-batch-flags)) to the op group table using `blk+32` as batch ID.
 
-The net result of the above is that we incremented the ID of the current block by $8$ and added the next set of operation groups to the op group table.
+The net result of the above is that we incremented the ID of the current block by $32$ and added the next set of operation groups to the op group table.
 
 #### CALL operation
 
@@ -649,9 +649,9 @@ First, after the `SPAN` operation is executed, the op group table will look as f
 
 Notice that while the same groups ($g_1, ..., g_7$) are added to the table, their positions now reflect the total number of groups in the *basic* block.
 
-Second, executing a `RESPAN` operation increments hasher address by $8$. This is done because absorbing additional $8$ elements into the hasher state requires $8$ more rows in the auxiliary hasher table.
+Second, executing a `RESPAN` operation increments hasher address by $32$. This is done because absorbing additional $8$ elements into the hasher state requires $32$ more rows in the auxiliary hasher table.
 
-Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 8, prnt, 0)`. To perform this operation, the prover sets the value of $h_1` in the next row to `prnt`.
+Incrementing value of `addr` register actually changes the ID of the *basic* block (though, for a *basic* block, it may be more appropriate to view values in this column as IDs of individual operation batches). This means that we also need to update the block stack table. Specifically, we need to remove row `(blk, prnt, 0)` from it, and replace it with row `(blk + 32, prnt, 0)`. To perform this operation, the prover sets the value of $h_1` in the next row to `prnt`.
 
 Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op group table, which now would look as follows:
 
@@ -659,7 +659,7 @@ Executing a `RESPAN` operation also adds groups $g_9, g_{10}, g_{11}$ to the op 
 
 Then, the execution of the second batch proceeds in a manner similar to the first batch: we remove operations from the current op group, execute them, and when the value of the op group reaches $0$, we start executing the next group in the batch. Thus, by the time we get to the `END` operation, the op group table should be empty.
 
-When executing the `END` operation, the hash of the *basic* block will be read from hasher row at address `addr + 7`, which, in our example, will be equal to `blk + 15`.
+When executing the `END` operation, the hash of the *basic* block will be read from hasher row at address `addr + 31`, which, in our example, will be equal to `blk + 63`.
 
 #### Handling immediate values
 

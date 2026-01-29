@@ -3,29 +3,40 @@ use alloc::rc::Rc;
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 #[cfg(test)]
 use core::cell::Cell;
-use core::cmp::min;
+use core::{cmp::min, ops::ControlFlow};
 
-use memory::Memory;
-use miden_air::{Felt, RowIndex};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
-    Decorator, EMPTY_WORD, Program, StackOutputs, WORD_SIZE, Word, ZERO,
+    Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     precompile::PrecompileTranscript,
-    stack::MIN_STACK_DEPTH,
+    stack::{MIN_STACK_DEPTH, StackInputs},
     utils::range,
 };
+use tracing::instrument;
 
 use crate::{
-    AdviceInputs, AdviceProvider, AsyncHost, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
+    ProcessorState,
     chiplets::Ace,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::execution_tracer::{ExecutionTracer, TraceGenerationContext},
+    errors::{MapExecErr, MapExecErrNoCtx, OperationError},
+    fast::{
+        execution_tracer::{ExecutionTracer, TraceGenerationContext},
+        step::{BreakReason, NeverStopper, StepStopper, Stopper},
+    },
 };
 
 pub mod execution_tracer;
 mod memory;
+pub use memory::Memory;
+
 mod operation;
 pub use operation::eval_circuit_fast_;
+
+pub(crate) mod step;
+pub use step::ResumeContext;
+
 pub mod trace_state;
 mod tracer;
 pub use tracer::{NoopTracer, Tracer};
@@ -122,11 +133,12 @@ pub struct FastProcessor {
     /// return. It is a stack since calls can be nested.
     call_stack: Vec<ExecutionContextInfo>,
 
-    /// Whether to enable debug statements and tracing.
-    in_debug_mode: bool,
+    /// Options for execution, including but not limited to whether debug or tracing is enabled,
+    /// the size of core trace fragments during execution, etc.
+    options: ExecutionOptions,
 
-    /// Transcript used to record commitments via `log_precompile` instruction (implemented via RPO
-    /// sponge).
+    /// Transcript used to record commitments via `log_precompile` instruction (implemented via
+    /// Poseidon2 sponge).
     pc_transcript: PrecompileTranscript,
 
     /// Tracks decorator retrieval calls for testing.
@@ -138,39 +150,34 @@ impl FastProcessor {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
-    /// Creates a new `FastProcessor` instance with the given stack inputs.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new(stack_inputs: &[Felt]) -> Self {
-        Self::initialize(stack_inputs, AdviceInputs::default(), false)
+    /// Creates a new `FastProcessor` instance with the given stack inputs, where debug and tracing
+    /// are disabled.
+    pub fn new(stack_inputs: StackInputs) -> Self {
+        Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new_with_advice_inputs(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
-        Self::initialize(stack_inputs, advice_inputs, false)
+    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where debug
+    /// and tracing are disabled.
+    pub fn new_with_advice_inputs(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
+        Self::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance, set to debug mode, with the given stack
-    /// and advice inputs.
-    ///
-    /// # Panics
-    /// - Panics if the length of `stack_inputs` is greater than `MIN_STACK_DEPTH`.
-    pub fn new_debug(stack_inputs: &[Felt], advice_inputs: AdviceInputs) -> Self {
-        Self::initialize(stack_inputs, advice_inputs, true)
+    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where
+    /// debugging and tracing are enabled.
+    pub fn new_debug(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
+        Self::new_with_options(
+            stack_inputs,
+            advice_inputs,
+            ExecutionOptions::default().with_debugging(true).with_tracing(true),
+        )
     }
 
-    /// Generic constructor unifying the above public ones.
-    ///
-    /// The stack inputs are expected to be stored in reverse order. For example, if `stack_inputs =
-    /// [1,2,3]`, then the stack will be initialized as `[3,2,1,0,0,...]`, with `3` being on
-    /// top.
-    fn initialize(stack_inputs: &[Felt], advice_inputs: AdviceInputs, in_debug_mode: bool) -> Self {
-        assert!(stack_inputs.len() <= MIN_STACK_DEPTH);
-
+    /// Most general constructor unifying all the other ones.
+    pub fn new_with_options(
+        stack_inputs: StackInputs,
+        advice_inputs: AdviceInputs,
+        options: ExecutionOptions,
+    ) -> Self {
         let stack_top_idx = INITIAL_STACK_TOP_IDX;
         let stack = {
             // Note: we use `Vec::into_boxed_slice()` here, since `Box::new([T; N])` first allocates
@@ -178,9 +185,11 @@ impl FastProcessor {
             // stack overflow on some systems.
             let mut stack: Box<[Felt; STACK_BUFFER_SIZE]> =
                 vec![ZERO; STACK_BUFFER_SIZE].into_boxed_slice().try_into().unwrap();
-            let bottom_idx = stack_top_idx - stack_inputs.len();
 
-            stack[bottom_idx..stack_top_idx].copy_from_slice(stack_inputs);
+            // Copy inputs in reverse order so first element ends up at top of stack
+            for (i, &input) in stack_inputs.iter().enumerate() {
+                stack[stack_top_idx - 1 - i] = input;
+            }
             stack
         };
 
@@ -195,15 +204,46 @@ impl FastProcessor {
             memory: Memory::new(),
             call_stack: Vec::new(),
             ace: Ace::default(),
-            in_debug_mode,
+            options,
             pc_transcript: PrecompileTranscript::new(),
             #[cfg(test)]
             decorator_retrieval_count: Rc::new(Cell::new(0)),
         }
     }
 
+    /// Returns the resume context to be used with the first call to `step()`.
+    pub fn get_initial_resume_context(
+        &mut self,
+        program: &Program,
+    ) -> Result<ResumeContext, ExecutionError> {
+        self.advice
+            .extend_map(program.mast_forest().advice_map())
+            .map_exec_err_no_ctx()?;
+
+        Ok(ResumeContext {
+            current_forest: program.mast_forest().clone(),
+            continuation_stack: ContinuationStack::new(program),
+            kernel: program.kernel().clone(),
+        })
+    }
+
     // ACCESSORS
     // -------------------------------------------------------------------------------------------
+
+    /// Returns whether the processor is executing in debug mode.
+    #[inline(always)]
+    pub fn in_debug_mode(&self) -> bool {
+        self.options.enable_debugging()
+    }
+
+    /// Returns true if decorators should be executed.
+    ///
+    /// This corresponds to either being in debug mode (for debug decorators) or having tracing
+    /// enabled (for trace decorators).
+    #[inline(always)]
+    fn should_execute_decorators(&self) -> bool {
+        self.in_debug_mode() || self.options.enable_tracing()
+    }
 
     #[cfg(test)]
     #[inline(always)]
@@ -247,8 +287,7 @@ impl FastProcessor {
 
     /// Returns the word on the stack starting at index `start_idx` in "stack order".
     ///
-    /// That is, for `start_idx=0` the top element of the stack will be at the last position in the
-    /// word.
+    /// For `start_idx=0` the top element of the stack will be at position 0 in the word.
     ///
     /// For example, if the stack looks like this:
     ///
@@ -257,8 +296,8 @@ impl FastProcessor {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
-    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
+    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
+    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
     #[inline(always)]
     pub fn stack_get_word(&self, start_idx: usize) -> Word {
@@ -269,8 +308,10 @@ impl FastProcessor {
         );
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let result: [Felt; WORD_SIZE] =
+        let mut result: [Felt; WORD_SIZE] =
             self.stack[range(word_start_idx, WORD_SIZE)].try_into().unwrap();
+        // Reverse so top of stack (idx 0) goes to word[0]
+        result.reverse();
         result.into()
     }
 
@@ -278,6 +319,11 @@ impl FastProcessor {
     #[inline(always)]
     pub fn stack_depth(&self) -> u32 {
         (self.stack_top_idx - self.stack_bot_idx) as u32
+    }
+
+    /// Returns a reference to the processor's memory.
+    pub fn memory(&self) -> &Memory {
+        &self.memory
     }
 
     // MUTATORS
@@ -291,14 +337,15 @@ impl FastProcessor {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// The index is the index of the first element of the word, and the word is written in reverse
-    /// order.
+    /// `word[0]` goes to stack position start_idx (top), `word[1]` to start_idx+1, etc.
     #[inline(always)]
     pub fn stack_write_word(&mut self, start_idx: usize, word: &Word) {
         debug_assert!(start_idx < MIN_STACK_DEPTH);
 
         let word_start_idx = self.stack_top_idx - start_idx - 4;
-        let source: [Felt; WORD_SIZE] = (*word).into();
+        let mut source: [Felt; WORD_SIZE] = (*word).into();
+        // Reverse so word[0] ends up at the top of stack (highest internal index)
+        source.reverse();
         self.stack[range(word_start_idx, WORD_SIZE)].copy_from_slice(&source)
     }
 
@@ -318,20 +365,20 @@ impl FastProcessor {
     pub async fn execute(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<ExecutionOutput, ExecutionError> {
         self.execute_with_tracer(program, host, &mut NoopTracer).await
     }
 
     /// Executes the given program and returns the stack outputs, the advice provider, and
     /// context necessary to build the trace.
+    #[instrument(name = "execute_for_trace", skip_all)]
     pub async fn execute_for_trace(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
-        fragment_size: usize,
+        host: &mut impl Host,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        let mut tracer = ExecutionTracer::new(fragment_size);
+        let mut tracer = ExecutionTracer::new(self.options.core_trace_fragment_size());
         let execution_output = self.execute_with_tracer(program, host, &mut tracer).await?;
 
         // Pass the final precompile transcript from execution output to the trace generation
@@ -346,17 +393,80 @@ impl FastProcessor {
     pub async fn execute_with_tracer(
         mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
     ) -> Result<ExecutionOutput, ExecutionError> {
-        let stack_outputs = self.execute_impl(program, host, tracer).await?;
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
 
-        Ok(ExecutionOutput {
-            stack: stack_outputs,
-            advice: self.advice,
-            memory: self.memory,
-            final_pc_transcript: self.pc_transcript,
-        })
+        // Merge the program's advice map into the advice provider
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        match self
+            .execute_impl(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                tracer,
+                &NeverStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(stack_outputs) => Ok(ExecutionOutput {
+                stack: stack_outputs,
+                advice: self.advice,
+                memory: self.memory,
+                final_pc_transcript: self.pc_transcript,
+            }),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
+    /// Executes a single clock cycle
+    pub async fn step(
+        &mut self,
+        host: &mut impl Host,
+        resume_ctx: ResumeContext,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        let ResumeContext {
+            mut current_forest,
+            mut continuation_stack,
+            kernel,
+        } = resume_ctx;
+
+        match self
+            .execute_impl(
+                &mut continuation_stack,
+                &mut current_forest,
+                &kernel,
+                host,
+                &mut NoopTracer,
+                &StepStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(_) => Ok(None),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(maybe_continuation) => {
+                    if let Some(continuation) = maybe_continuation {
+                        continuation_stack.push_continuation(continuation);
+                    }
+
+                    Ok(Some(ResumeContext {
+                        current_forest,
+                        continuation_stack,
+                        kernel,
+                    }))
+                },
+            },
+        }
     }
 
     /// Executes the given program with the provided tracer and returns the stack outputs.
@@ -366,18 +476,13 @@ impl FastProcessor {
     /// second program using the same processor. This is mainly meant to be used in tests.
     async fn execute_impl(
         &mut self,
-        program: &Program,
-        host: &mut impl AsyncHost,
+        continuation_stack: &mut ContinuationStack,
+        current_forest: &mut Arc<MastForest>,
+        kernel: &Kernel,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
-    ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-
-        // Merge the program's advice map into the advice provider
-        self.advice
-            .extend_map(current_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, &()))?;
-
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason, StackOutputs> {
         while let Some(continuation) = continuation_stack.pop_continuation() {
             match continuation {
                 Continuation::StartNode(node_id) => {
@@ -385,65 +490,70 @@ impl FastProcessor {
 
                     match node {
                         MastNode::Block(basic_block_node) => {
-                            self.execute_basic_block_node(
+                            self.execute_basic_block_node_from_start(
                                 basic_block_node,
                                 node_id,
-                                &current_forest,
                                 host,
-                                &mut continuation_stack,
-                                &current_forest,
+                                continuation_stack,
+                                current_forest,
                                 tracer,
+                                stopper,
                             )
                             .await?
                         },
                         MastNode::Join(join_node) => self.start_join_node(
                             join_node,
                             node_id,
-                            &current_forest,
-                            &mut continuation_stack,
+                            current_forest,
+                            continuation_stack,
                             host,
                             tracer,
+                            stopper,
                         )?,
                         MastNode::Split(split_node) => self.start_split_node(
                             split_node,
                             node_id,
-                            &current_forest,
-                            &mut continuation_stack,
+                            current_forest,
+                            continuation_stack,
                             host,
                             tracer,
+                            stopper,
                         )?,
                         MastNode::Loop(loop_node) => self.start_loop_node(
                             loop_node,
                             node_id,
-                            &current_forest,
-                            &mut continuation_stack,
+                            current_forest,
+                            continuation_stack,
                             host,
                             tracer,
+                            stopper,
                         )?,
                         MastNode::Call(call_node) => self.start_call_node(
                             call_node,
                             node_id,
-                            program,
-                            &current_forest,
-                            &mut continuation_stack,
+                            kernel,
+                            current_forest,
+                            continuation_stack,
                             host,
                             tracer,
+                            stopper,
                         )?,
                         MastNode::Dyn(_) => {
                             self.start_dyn_node(
                                 node_id,
-                                &mut current_forest,
-                                &mut continuation_stack,
+                                current_forest,
+                                continuation_stack,
                                 host,
                                 tracer,
+                                stopper,
                             )
                             .await?
                         },
                         MastNode::External(_external_node) => {
                             self.execute_external_node(
                                 node_id,
-                                &mut current_forest,
-                                &mut continuation_stack,
+                                current_forest,
+                                continuation_stack,
                                 host,
                                 tracer,
                             )
@@ -453,63 +563,130 @@ impl FastProcessor {
                 },
                 Continuation::FinishJoin(node_id) => self.finish_join_node(
                     node_id,
-                    &current_forest,
-                    &mut continuation_stack,
+                    current_forest,
+                    continuation_stack,
                     host,
                     tracer,
+                    stopper,
                 )?,
                 Continuation::FinishSplit(node_id) => self.finish_split_node(
                     node_id,
-                    &current_forest,
-                    &mut continuation_stack,
+                    current_forest,
+                    continuation_stack,
                     host,
                     tracer,
+                    stopper,
                 )?,
-                Continuation::FinishLoop(node_id) => self.finish_loop_node(
+                Continuation::FinishLoop { node_id, was_entered } => self.finish_loop_node(
+                    was_entered,
                     node_id,
-                    &current_forest,
-                    &mut continuation_stack,
+                    current_forest,
+                    continuation_stack,
                     host,
                     tracer,
+                    stopper,
                 )?,
                 Continuation::FinishCall(node_id) => self.finish_call_node(
                     node_id,
-                    &current_forest,
-                    &mut continuation_stack,
+                    current_forest,
+                    continuation_stack,
                     host,
                     tracer,
+                    stopper,
                 )?,
                 Continuation::FinishDyn(node_id) => self.finish_dyn_node(
                     node_id,
-                    &current_forest,
-                    &mut continuation_stack,
+                    current_forest,
+                    continuation_stack,
                     host,
                     tracer,
+                    stopper,
                 )?,
                 Continuation::FinishExternal(node_id) => {
                     // Execute after_exit decorators when returning from an external node
                     // Note: current_forest should already be restored by EnterForest continuation
-                    self.execute_after_exit_decorators(node_id, &current_forest, host)?;
+                    self.execute_after_exit_decorators(node_id, current_forest, host)?;
+                },
+                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                    let basic_block_node =
+                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+                    self.execute_basic_block_node_from_op_idx(
+                        basic_block_node,
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch,
+                        host,
+                        continuation_stack,
+                        current_forest,
+                        tracer,
+                        stopper,
+                    )
+                    .await?
+                },
+                Continuation::Respan { node_id, batch_index } => {
+                    let basic_block_node =
+                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                    self.execute_basic_block_node_from_batch(
+                        basic_block_node,
+                        node_id,
+                        batch_index,
+                        host,
+                        continuation_stack,
+                        current_forest,
+                        tracer,
+                        stopper,
+                    )
+                    .await?
+                },
+                Continuation::FinishBasicBlock(node_id) => {
+                    let basic_block_node =
+                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                    self.finish_basic_block(
+                        basic_block_node,
+                        node_id,
+                        current_forest,
+                        host,
+                        continuation_stack,
+                        tracer,
+                        stopper,
+                    )?
                 },
                 Continuation::EnterForest(previous_forest) => {
                     // Restore the previous forest
-                    current_forest = previous_forest;
+                    *current_forest = previous_forest;
+                },
+                Continuation::AfterExitDecorators(node_id) => {
+                    self.execute_after_exit_decorators(node_id, current_forest, host)?
+                },
+                Continuation::AfterExitDecoratorsBasicBlock(node_id) => {
+                    let basic_block_node =
+                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
+
+                    self.execute_end_of_block_decorators(
+                        basic_block_node,
+                        node_id,
+                        current_forest,
+                        host,
+                    )?;
+                    self.execute_after_exit_decorators(node_id, current_forest, host)?
                 },
             }
         }
 
-        StackOutputs::new(
-            self.stack[self.stack_bot_idx..self.stack_top_idx]
+        match StackOutputs::new(
+            &self.stack[self.stack_bot_idx..self.stack_top_idx]
                 .iter()
                 .rev()
                 .copied()
-                .collect(),
-        )
-        .map_err(|_| {
-            ExecutionError::OutputStackOverflow(
+                .collect::<Vec<_>>(),
+        ) {
+            Ok(stack_outputs) => ControlFlow::Continue(stack_outputs),
+            Err(_) => ControlFlow::Break(BreakReason::Err(ExecutionError::OutputStackOverflow(
                 self.stack_top_idx - self.stack_bot_idx - MIN_STACK_DEPTH,
-            )
-        })
+            ))),
+        }
     }
 
     // DECORATOR EXECUTORS
@@ -520,10 +697,10 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        if !self.in_debug_mode {
-            return Ok(());
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        if !self.should_execute_decorators() {
+            return ControlFlow::Continue(());
         }
 
         #[cfg(test)]
@@ -537,7 +714,7 @@ impl FastProcessor {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     /// Executes the decorators that should be executed after exiting a node.
@@ -545,10 +722,10 @@ impl FastProcessor {
         &mut self,
         node_id: MastNodeId,
         current_forest: &MastForest,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
-        if !self.in_debug_mode {
-            return Ok(());
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        if !self.in_debug_mode() {
+            return ControlFlow::Continue(());
         }
 
         #[cfg(test)]
@@ -562,80 +739,114 @@ impl FastProcessor {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     /// Executes the specified decorator
     fn execute_decorator(
         &mut self,
         decorator: &Decorator,
-        host: &mut impl AsyncHost,
-    ) -> Result<(), ExecutionError> {
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
-                if self.in_debug_mode {
-                    let clk = self.clk;
+                if self.in_debug_mode() {
                     let process = &mut self.state();
-                    host.on_debug(process, options)
-                        .map_err(|err| ExecutionError::DebugHandlerError { clk, err })?;
+                    if let Err(err) = host.on_debug(process, options) {
+                        return ControlFlow::Break(BreakReason::Err(
+                            ExecutionError::DebugHandlerError { err },
+                        ));
+                    }
                 }
             },
             Decorator::AsmOp(_assembly_op) => {
                 // do nothing
             },
             Decorator::Trace(id) => {
-                let clk = self.clk;
-                let process = &mut self.state();
-                host.on_trace(process, *id).map_err(|err| ExecutionError::TraceHandlerError {
-                    clk,
-                    trace_id: *id,
-                    err,
-                })?;
+                if self.options.enable_tracing() {
+                    let process = &mut self.state();
+                    if let Err(err) = host.on_trace(process, *id) {
+                        return ControlFlow::Break(BreakReason::Err(
+                            ExecutionError::TraceHandlerError { trace_id: *id, err },
+                        ));
+                    }
+                }
             },
         };
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     // HELPERS
     // ----------------------------------------------------------------------------------------------
 
     /// Increments the clock by 1.
+    ///
+    /// To provide a continuation in case the execution is stopped, use
+    /// [Self::increment_clk_with_continuation()].
     #[inline(always)]
-    fn increment_clk(&mut self, tracer: &mut impl Tracer) {
+    pub(crate) fn increment_clk(
+        &mut self,
+        tracer: &mut impl Tracer,
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
+        self.increment_clk_with_continuation(tracer, stopper, || None)
+    }
+
+    /// Increments the clock by 1, and provides a closure to compute a continuation in case the
+    /// execution is stopped.
+    pub(crate) fn increment_clk_with_continuation(
+        &mut self,
+        tracer: &mut impl Tracer,
+        stopper: &impl Stopper,
+        continuation: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason> {
         self.clk += 1_u32;
 
         tracer.increment_clk();
+
+        if self.clk >= self.options.max_cycles() as usize {
+            ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
+                self.options.max_cycles(),
+            )))
+        } else if stopper.should_stop(self) {
+            ControlFlow::Break(BreakReason::Stopped(continuation()))
+        } else {
+            ControlFlow::Continue(())
+        }
     }
 
-    async fn load_mast_forest<E>(
+    async fn load_mast_forest(
         &mut self,
         node_digest: Word,
-        host: &mut impl AsyncHost,
-        get_mast_forest_failed: impl Fn(Word, &E) -> ExecutionError,
-        err_ctx: &E,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError>
-    where
-        E: ErrorContext,
-    {
+        host: &mut impl Host,
+        get_mast_forest_failed: impl Fn(Word) -> OperationError,
+        current_forest: &MastForest,
+        node_id: MastNodeId,
+    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
         let mast_forest = host
             .get_mast_forest(&node_digest)
             .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest, err_ctx))?;
+            .ok_or_else(|| get_mast_forest_failed(node_digest))
+            .map_exec_err(current_forest, node_id, host)?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, err_ctx))?;
+        let root_id = mast_forest.find_procedure_root(node_digest).ok_or_else(|| {
+            Err::<(), _>(OperationError::MalformedMastForestInHost { root_digest: node_digest })
+                .map_exec_err(current_forest, node_id, host)
+                .unwrap_err()
+        })?;
 
         // Merge the advice map of this forest into the advice provider.
         // Note that the map may be merged multiple times if a different procedure from the same
         // forest is called.
         // For now, only compiled libraries contain non-empty advice maps, so for most cases,
         // this call will be cheap.
-        self.advice
-            .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.clk, err_ctx))?;
+        self.advice.extend_map(mast_forest.advice_map()).map_exec_err(
+            current_forest,
+            node_id,
+            host,
+        )?;
 
         Ok((root_id, mast_forest))
     }
@@ -694,49 +905,184 @@ impl FastProcessor {
         self.stack_top_idx = new_stack_top_idx;
     }
 
-    // TESTING
+    // SYNC WRAPPERS
     // ----------------------------------------------------------------------------------------------
 
-    /// Convenience sync wrapper to [Self::execute] for testing purposes.
-    #[cfg(any(test, feature = "testing"))]
+    /// Convenience sync wrapper to [Self::step].
+    pub fn step_sync(
+        &mut self,
+        host: &mut impl Host,
+        resume_ctx: ResumeContext,
+    ) -> Result<Option<ResumeContext>, ExecutionError> {
+        // Create a new Tokio runtime and block on the async execution
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+
+        let execution_output = rt.block_on(self.step(host, resume_ctx))?;
+
+        Ok(execution_output)
+    }
+
+    /// Executes the given program step by step (calling [`Self::step`] repeatedly) and returns the
+    /// stack outputs.
+    pub fn execute_by_step_sync(
+        mut self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        // Create a new Tokio runtime and block on the async execution
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
+
+        rt.block_on(async {
+            loop {
+                match self.step(host, current_resume_ctx).await {
+                    Ok(maybe_resume_ctx) => match maybe_resume_ctx {
+                        Some(next_resume_ctx) => {
+                            current_resume_ctx = next_resume_ctx;
+                        },
+                        None => {
+                            // End of program was reached
+                            break Ok(StackOutputs::new(
+                                &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                                    .iter()
+                                    .rev()
+                                    .copied()
+                                    .collect::<Vec<_>>(),
+                            )
+                            .unwrap());
+                        },
+                    },
+                    Err(err) => {
+                        break Err(err);
+                    },
+                }
+            }
+        })
+    }
+
+    /// Convenience sync wrapper to [Self::execute].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_sync(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        let execution_output = rt.block_on(self.execute(program, host))?;
-
-        Ok(execution_output.stack)
+        host: &mut impl Host,
+    ) -> Result<ExecutionOutput, ExecutionError> {
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync from within a Tokio runtime. \
+                     Use the async execute() method instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute(program, host))
+            },
+        }
     }
 
-    /// Convenience sync wrapper to [Self::execute_for_trace] for testing purposes.
-    #[cfg(any(test, feature = "testing"))]
+    /// Convenience sync wrapper to [Self::execute_for_trace].
+    ///
+    /// This method is only available on non-wasm32 targets. On wasm32, use the
+    /// async `execute_for_trace()` method directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
+    /// method instead in async contexts.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[instrument(name = "execute_for_trace_sync", skip_all)]
     pub fn execute_for_trace_sync(
         self,
         program: &Program,
-        host: &mut impl AsyncHost,
-        fragment_size: usize,
+        host: &mut impl Host,
     ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        rt.block_on(self.execute_for_trace(program, host, fragment_size))
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_for_trace_sync from within a Tokio runtime. \
+                     Use the async execute_for_trace() method instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(self.execute_for_trace(program, host))
+            },
+        }
     }
 
     /// Similar to [Self::execute_sync], but allows mutable access to the processor.
-    #[cfg(any(test, feature = "testing"))]
+    ///
+    /// This method is only available on non-wasm32 targets for testing. On wasm32, use
+    /// async execution methods directly since wasm32 runs in the browser's event loop.
+    ///
+    /// # Panics
+    /// Panics if called from within an existing Tokio runtime. Use async execution
+    /// methods instead in async contexts.
+    #[cfg(all(any(test, feature = "testing"), not(target_arch = "wasm32")))]
     pub fn execute_sync_mut(
         &mut self,
         program: &Program,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
 
-        rt.block_on(self.execute_impl(program, host, &mut NoopTracer))
+        // Merge the program's advice map into the advice provider
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        let execute_fut = async {
+            match self
+                .execute_impl(
+                    &mut continuation_stack,
+                    &mut current_forest,
+                    program.kernel(),
+                    host,
+                    &mut NoopTracer,
+                    &NeverStopper,
+                )
+                .await
+            {
+                ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
+                ControlFlow::Break(break_reason) => match break_reason {
+                    BreakReason::Err(err) => Err(err),
+                    BreakReason::Stopped(_) => {
+                        unreachable!("Execution never stops prematurely with NeverStopper")
+                    },
+                },
+            }
+        };
+
+        match tokio::runtime::Handle::try_current() {
+            Ok(_handle) => {
+                // We're already inside a Tokio runtime - this is not supported
+                // because we cannot safely create a nested runtime or move the
+                // non-Send host reference to another thread
+                panic!(
+                    "Cannot call execute_sync_mut from within a Tokio runtime. \
+                     Use async execution methods instead."
+                )
+            },
+            Err(_) => {
+                // No runtime exists - create one and use it
+                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                rt.block_on(execute_fut)
+            },
+        }
     }
 }
 
@@ -753,18 +1099,14 @@ pub struct ExecutionOutput {
     pub final_pc_transcript: PrecompileTranscript,
 }
 
-// FAST PROCESS STATE
+// PROCESSOR STATE
 // ===============================================================================================
 
-#[derive(Debug)]
-pub struct FastProcessState<'a> {
-    pub(super) processor: &'a mut FastProcessor,
-}
-
+/// Processor state accessor.
 impl FastProcessor {
     #[inline(always)]
-    pub fn state(&mut self) -> ProcessState<'_> {
-        ProcessState::Fast(FastProcessState { processor: self })
+    pub fn state(&mut self) -> ProcessorState<'_> {
+        ProcessorState { processor: self }
     }
 }
 

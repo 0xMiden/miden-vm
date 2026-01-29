@@ -1,23 +1,26 @@
 use alloc::vec::Vec;
 use core::ops::Range;
 
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::ace::{
+    chiplets::ace::{
         CLK_IDX, CTX_IDX, EVAL_OP_IDX, ID_0_IDX, ID_1_IDX, ID_2_IDX, M_0_IDX, M_1_IDX, PTR_IDX,
         READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX, V_1_0_IDX,
         V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
     },
 };
-use miden_core::{Felt, FieldElement, QuadFelt, Word};
+use miden_core::{
+    Felt, Word,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
+};
 
 use crate::{
-    ContextId, ExecutionError,
+    ContextId,
     chiplets::ace::{
         MAX_NUM_ACE_WIRES,
         instruction::{Op, decode_instruction},
     },
-    errors::{AceError, ErrorContext},
+    errors::AceError,
 };
 
 /// Number of LogUp fractions in the wiring bus for rows in the `READ` section.
@@ -96,47 +99,36 @@ impl CircuitEvaluation {
 
     /// Reads the word from memory at `ptr`, interpreting it as `[v_00, v_01, v_10, v_11]`, and
     /// adds wires with values `v_0 = QuadFelt(v_00, v_01)` and `v_1 = QuadFelt(v_10, v_11)`.
-    pub fn do_read(&mut self, ptr: Felt, word: Word) -> Result<(), ExecutionError> {
+    pub fn do_read(&mut self, ptr: Felt, word: Word) {
         // Add first variable as QuadFelt to wire bus
-        let v_0 = QuadFelt::new(word[0], word[1]);
+        let v_0 = QuadFelt::from_basis_coefficients_fn(|i: usize| [word[0], word[1]][i]);
         let id_0 = self.wire_bus.insert(v_0);
         self.col_wire_out.push(id_0, v_0);
 
         // Add second variable as QuadFelt to wire bus
-        let v_1 = QuadFelt::new(word[2], word[3]);
+        let v_1 = QuadFelt::from_basis_coefficients_fn(|i: usize| [word[2], word[3]][i]);
         let id_1 = self.wire_bus.insert(v_1);
         self.col_wire_left.push(id_1, v_1);
 
         // Add pointer to trace
         self.col_ptr.push(ptr);
-        Ok(())
     }
 
     /// Reads the next instruction at `ptr`, requests the inputs from the wire bus
     /// and inserts a new wire with the result.
-    pub fn do_eval(
-        &mut self,
-        ptr: Felt,
-        instruction: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<(), ExecutionError> {
+    pub fn do_eval(&mut self, ptr: Felt, instruction: Felt) -> Result<(), AceError> {
         // Decode instruction, ensuring it is valid
-        let (id_l, id_r, op) = decode_instruction(instruction).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedDecodeInstruction)
-        })?;
+        let (id_l, id_r, op) =
+            decode_instruction(instruction).ok_or(AceError::FailedDecodeInstruction)?;
 
         // Read value of id_l from wire bus, increasing its multiplicity
-        let v_l = self.wire_bus.read_value(id_l).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
-        })?;
-        let id_l = Felt::from(id_l);
+        let v_l = self.wire_bus.read_value(id_l).ok_or(AceError::FailedWireBusRead)?;
+        let id_l = Felt::from_u32(id_l);
         self.col_wire_left.push(id_l, v_l);
 
         // Read value of id_r from wire bus, increasing its multiplicity
-        let v_r = self.wire_bus.read_value(id_r).ok_or_else(|| {
-            ExecutionError::failed_arithmetic_evaluation(err_ctx, AceError::FailedWireBusRead)
-        })?;
-        let id_r = Felt::from(id_r);
+        let v_r = self.wire_bus.read_value(id_r).ok_or(AceError::FailedWireBusRead)?;
+        let id_r = Felt::from_u32(id_r);
         self.col_wire_right.push(id_r, v_r);
 
         // Compute v_out and insert it into the wire bus.
@@ -200,7 +192,7 @@ impl CircuitEvaluation {
         columns[CLK_IDX][offset..offset + num_rows].fill(clk_felt);
 
         // Fill n_eval which is constant across the read block
-        let eval_section_first_idx = Felt::from(self.num_eval_rows - 1);
+        let eval_section_first_idx = Felt::from_u32(self.num_eval_rows - 1);
         columns[READ_NUM_EVAL_IDX][read_range.clone()].fill(eval_section_first_idx);
 
         // Fill OP column for EVAL rows
@@ -222,7 +214,7 @@ impl CircuitEvaluation {
         columns[V_2_1_IDX][eval_range.clone()].copy_from_slice(&self.col_wire_right.v_1);
 
         // Fill multiplicity 0 column for all rows
-        let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from(*m));
+        let mut multiplicities_iter = self.wire_bus.wires.iter().map(|(_v, m)| Felt::from_u32(*m));
         // In the READ block, we inserted wires w_0 and w_1
         for row_index in read_range {
             let m_0 = multiplicities_iter
@@ -275,9 +267,9 @@ impl WireColumn {
     /// Pushes the wire `(id, v)` to the columns.
     fn push(&mut self, id: Felt, v: QuadFelt) {
         self.id.push(id);
-        let [v_0, v_1] = v.to_base_elements();
-        self.v_0.push(v_0);
-        self.v_1.push(v_1);
+        let v: &[Felt] = v.as_basis_coefficients_slice();
+        self.v_0.push(v[0]);
+        self.v_1.push(v[1]);
     }
 }
 
@@ -305,7 +297,7 @@ impl WireBus {
         Self {
             wires: Vec::with_capacity(num_wires as usize),
             num_wires,
-            id_next: Felt::from(num_wires - 1),
+            id_next: Felt::from_u32(num_wires - 1),
         }
     }
 

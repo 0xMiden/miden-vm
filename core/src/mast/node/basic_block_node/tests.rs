@@ -488,8 +488,9 @@ fn test_mast_node_error_context_decorators_iterates_all_decorators() {
         .add_to_forest(&mut forest)
         .unwrap();
 
-    let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
+    // decorators
+    let all_decorators = forest.all_decorators(node_id);
 
     // Should have 3 decorators total: 1 before_enter, 1 during, 1 after_exit
     assert_eq!(all_decorators.len(), 3);
@@ -580,8 +581,8 @@ fn test_decorator_positions() {
 
     let block = forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-    // Test that MastNodeErrorContext::decorators returns all decorators
-    let all_decorators: Vec<_> = block.decorators(&forest).collect();
+    // Test that MastForest::decorator_links_for_node returns all decorators using the helper method
+    let all_decorators = forest.all_decorators(node_id);
     assert_eq!(all_decorators.len(), 5);
 
     // Verify the order and positions:
@@ -798,4 +799,94 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
         fingerprint1, fingerprint2,
         "Fingerprints should be different when digests differ"
     );
+}
+
+/// Test that BasicBlockNode -> to_builder -> build preserves structure and decorators
+#[test]
+fn test_to_builder_identity() {
+    let ops = vec![
+        Operation::Push(Felt::new(1)),
+        Operation::Push(Felt::new(2)),
+        Operation::Add,
+        Operation::Mul,
+    ];
+
+    let mut forest = MastForest::new();
+    let deco1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
+    let deco2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
+    let decorators = vec![(0, deco1), (2, deco2)];
+
+    // Test Owned storage: node -> builder -> node
+    let owned = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .build()
+        .unwrap();
+    let owned_rt = owned.clone().to_builder(&forest).build().unwrap();
+    assert_eq!(owned.op_batches, owned_rt.op_batches);
+    assert_eq!(owned.digest, owned_rt.digest);
+
+    // Test Linked storage: node in forest -> builder -> node
+    let node_id = BasicBlockNodeBuilder::new(ops, decorators)
+        .with_before_enter(vec![deco1])
+        .with_after_exit(vec![deco2])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let linked = match &forest[node_id] {
+        MastNode::Block(block) => block.clone(),
+        _ => panic!("Expected BasicBlockNode"),
+    };
+    let linked_rt = linked.clone().to_builder(&forest).build().unwrap();
+    assert_eq!(linked.op_batches, linked_rt.op_batches);
+    assert_eq!(linked.digest, linked_rt.digest);
+}
+
+proptest! {
+    /// Proptest: verify to_builder identity for arbitrary BasicBlockNodes
+    #[test]
+    fn proptest_to_builder_identity(ops in op_non_control_sequence_strategy(20)) {
+        let mut forest = MastForest::new();
+
+        // Create some decorators
+        let num_decorators = (ops.len() / 3).max(1);
+        let decorator_ids: Vec<_> = (0..num_decorators)
+            .map(|i| forest.add_decorator(Decorator::Trace(i as u32)).unwrap())
+            .collect();
+
+        // Create decorator list with random positions
+        let decorators: Vec<_> = ops
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| i % 3 == 0)
+            .zip(decorator_ids.iter().cycle())
+            .map(|((idx, _), &dec_id)| (idx, dec_id))
+            .collect();
+
+        // Test with Owned storage
+        let original = BasicBlockNodeBuilder::new(ops.clone(), decorators.clone())
+            .build()
+            .unwrap();
+
+        let builder = original.clone().to_builder(&forest);
+        let roundtrip = builder.build().unwrap();
+
+        prop_assert_eq!(original.op_batches, roundtrip.op_batches);
+        prop_assert_eq!(original.digest, roundtrip.digest);
+
+        // Test with Linked storage
+        let node_id = BasicBlockNodeBuilder::new(ops, decorators)
+            .add_to_forest(&mut forest)
+            .unwrap();
+
+        let linked_node = match &forest[node_id] {
+            MastNode::Block(block) => block.clone(),
+            _ => panic!("Expected BasicBlockNode"),
+        };
+
+        let builder2 = linked_node.clone().to_builder(&forest);
+        let roundtrip2 = builder2.build().unwrap();
+
+        prop_assert_eq!(linked_node.op_batches, roundtrip2.op_batches);
+        prop_assert_eq!(linked_node.digest, roundtrip2.digest);
+    }
 }

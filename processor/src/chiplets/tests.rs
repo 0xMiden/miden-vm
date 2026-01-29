@@ -5,20 +5,19 @@ use miden_air::trace::{
     chiplets::{
         NUM_BITWISE_SELECTORS, NUM_KERNEL_ROM_SELECTORS, NUM_MEMORY_SELECTORS,
         bitwise::{BITWISE_XOR, OP_CYCLE_LEN, TRACE_WIDTH as BITWISE_TRACE_WIDTH},
-        hasher::{HASH_CYCLE_LEN, LINEAR_HASH, RETURN_STATE},
+        hasher::{HASH_CYCLE_LEN, LAST_CYCLE_ROW, LINEAR_HASH, RETURN_STATE},
         kernel_rom::TRACE_WIDTH as KERNEL_ROM_TRACE_WIDTH,
         memory::TRACE_WIDTH as MEMORY_TRACE_WIDTH,
     },
 };
 use miden_core::{
     Felt, ONE, Program, Word, ZERO,
+    field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    stack::StackInputs,
 };
 
-use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, Kernel, Operation, Process,
-    StackInputs,
-};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Kernel, Operation, fast::FastProcessor};
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 
@@ -55,7 +54,7 @@ fn bitwise_chiplet_trace() {
 #[test]
 fn memory_chiplet_trace() {
     // --- single memory operation with no stack manipulation -------------------------------------
-    let addr = Felt::from(4_u32);
+    let addr = Felt::from_u32(4);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
     let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());
@@ -119,10 +118,14 @@ fn build_trace(
     operations: Vec<Operation>,
     kernel: Kernel,
 ) -> (ChipletsTrace, usize) {
-    let stack_inputs = StackInputs::try_from_ints(stack_inputs.iter().copied()).unwrap();
+    let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|v| Felt::new(*v)).collect();
+    let processor = FastProcessor::new_with_options(
+        StackInputs::new(&stack_inputs).unwrap(),
+        AdviceInputs::default(),
+        ExecutionOptions::default().with_core_trace_fragment_size(1 << 10).unwrap(),
+    );
+
     let mut host = DefaultHost::default();
-    let mut process =
-        Process::new(kernel, stack_inputs, AdviceInputs::default(), ExecutionOptions::default());
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -133,10 +136,17 @@ fn build_trace(
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    process.execute(&program, &mut host).unwrap();
 
-    let (trace, ..) = ExecutionTrace::test_finalize_trace(process);
-    let trace_len = trace.num_rows() - ExecutionTrace::NUM_RAND_ROWS;
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+    let trace = crate::parallel::build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        kernel,
+    );
+
+    let trace_len = trace.get_trace_len();
 
     (
         trace
@@ -150,9 +160,9 @@ fn build_trace(
 /// Validate the hasher trace output by the hperm operation. The full hasher trace is tested in
 /// the Hasher module, so this just tests the ChipletsTrace selectors and the initial columns
 /// of the hasher trace.
+#[expect(clippy::needless_range_loop)]
 fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
     // The selectors should match the hasher selectors
-    #[expect(clippy::needless_range_loop)]
     for row in start..end {
         // The selectors should match the selectors for the hasher segment
         assert_eq!(ZERO, trace[0][row]);
@@ -163,7 +173,7 @@ fn validate_hasher_trace(trace: &ChipletsTrace, start: usize, end: usize) {
                 // selectors
                 assert_eq!(LINEAR_HASH, [trace[1][row], trace[2][row], trace[3][row]]);
             },
-            7 => {
+            r if r == LAST_CYCLE_ROW => {
                 // in the last row, the expected start of the trace should hold the final selectors
                 assert_eq!(RETURN_STATE, [trace[1][row], trace[2][row], trace[3][row]]);
             },

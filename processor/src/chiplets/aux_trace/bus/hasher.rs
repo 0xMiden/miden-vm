@@ -1,38 +1,38 @@
 use core::fmt::{Display, Formatter, Result as FmtResult};
 
-use miden_air::{
-    RowIndex,
-    trace::{
-        chiplets::{
-            hasher,
-            hasher::{
-                HASH_CYCLE_LEN, LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL,
-                MR_UPDATE_OLD_LABEL, NUM_ROUNDS, RETURN_HASH_LABEL, RETURN_STATE_LABEL,
-            },
+use miden_air::trace::{
+    MainTrace, RowIndex,
+    chiplets::{
+        hasher,
+        hasher::{
+            HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, LAST_CYCLE_ROW, LAST_CYCLE_ROW_FELT,
+            LINEAR_HASH_LABEL, MP_VERIFY_LABEL, MR_UPDATE_NEW_LABEL, MR_UPDATE_OLD_LABEL,
+            RETURN_HASH_LABEL, RETURN_STATE_LABEL,
         },
-        log_precompile::{
-            HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
-            STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
-        },
-        main_trace::MainTrace,
+    },
+    log_precompile::{
+        HELPER_ADDR_IDX, HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE, STACK_COMM_RANGE,
+        STACK_R0_RANGE, STACK_R1_RANGE, STACK_TAG_RANGE,
     },
 };
 use miden_core::{
-    Felt, FieldElement, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
+    Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
+    field::{ExtensionField, PrimeCharacteristicRing},
     utils::range,
 };
 
 use super::get_op_label;
 use crate::{
-    Word,
+    PrimeField64, Word,
     chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
 };
+
 // REQUESTS
 // ==============================================================================================
 
 /// Builds requests made to the hasher chiplet at the start of a control block.
-pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_control_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     decoder_hasher_state: [Felt; 8],
     op_code_felt: Felt,
@@ -41,7 +41,7 @@ pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let message = ControlBlockRequestMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         op_code: op_code_felt,
         decoder_hasher_state,
@@ -56,14 +56,14 @@ pub(super) fn build_control_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a span block.
-pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_span_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let span_block_message = SpanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -77,14 +77,14 @@ pub(super) fn build_span_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the start of a respan block.
-pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_respan_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let respan_block_message = RespanBlockMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 32),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 32),
         addr_next: main_trace.addr(row + 1),
         state: main_trace.decoder_hasher_state(row),
     };
@@ -98,15 +98,15 @@ pub(super) fn build_respan_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds requests made to the hasher chiplet at the end of a block.
-pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_end_block_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
     let end_block_message = EndBlockMessage {
-        addr: main_trace.addr(row) + Felt::from(NUM_ROUNDS as u8),
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
+        addr: main_trace.addr(row) + LAST_CYCLE_ROW_FELT,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
         digest: main_trace.decoder_hasher_state(row)[..4].try_into().unwrap(),
     };
 
@@ -119,7 +119,7 @@ pub(super) fn build_end_block_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `HPERM` requests made to the hash chiplet.
-pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_hperm_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -152,19 +152,21 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
     let s11_nxt = main_trace.stack_element(11, row + 1);
 
     let input_req = HasherMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: helper_0,
         node_index: ZERO,
-        hasher_state: [s11, s10, s9, s8, s7, s6, s5, s4, s3, s2, s1, s0],
+        // Internal Poseidon2 state for HPERM is taken directly from the top 12
+        // stack elements in order: [RATE0, RATE1, CAPACITY] = [s0..s11].
+        hasher_state: [s0, s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11],
         source: "hperm input",
     };
     let output_req = HasherMessage {
-        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
-        addr_next: helper_0 + Felt::new(7),
+        transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
+        addr_next: helper_0 + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: [
-            s11_nxt, s10_nxt, s9_nxt, s8_nxt, s7_nxt, s6_nxt, s5_nxt, s4_nxt, s3_nxt, s2_nxt,
-            s1_nxt, s0_nxt,
+            s0_nxt, s1_nxt, s2_nxt, s3_nxt, s4_nxt, s5_nxt, s6_nxt, s7_nxt, s8_nxt, s9_nxt,
+            s10_nxt, s11_nxt,
         ],
         source: "hperm output",
     };
@@ -182,22 +184,22 @@ pub(super) fn build_hperm_request<E: FieldElement<BaseField = Felt>>(
 
 /// Builds `LOG_PRECOMPILE` requests made to the hash chiplet.
 ///
-/// The operation absorbs `[TAG, COMM]` into the transcript via an RPO permutation with
-/// capacity `CAP_PREV`, producing output `[CAP_NEXT, R0, R1]`.
+/// The operation absorbs `[TAG, COMM]` into the transcript via a Poseidon2 permutation with
+/// capacity `CAP_PREV`, producing output `[R0, R1, CAP_NEXT]`.
 ///
-/// Stack layout (current row):
-/// - `s0..s3`: `COMM[3..0]`
-/// - `s4..s7`: `TAG[3..0]`
+/// Stack layout (current row), structural (LSB-first) per word:
+/// - `s0..s3`: `COMM[0..3]`
+/// - `s4..s7`: `TAG[0..3]`
 ///
 /// Helper registers (current row):
 /// - `h0`: hasher address
 /// - `h1..h4`: `CAP_PREV[0..3]`
 ///
 /// Stack layout (next row):
-/// - `s0..s3`: `R1[3..0]`
-/// - `s4..s7`: `R0[3..0]`
-/// - `s8..s11`: `CAP_NEXT[3..0]`
-pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
+/// - `s0..s3`: `R0[0..3]`
+/// - `s4..s7`: `R1[0..3]`
+/// - `s8..s11`: `CAP_NEXT[0..3]`
+pub(super) fn build_log_precompile_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
@@ -206,7 +208,7 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
     // Read helper registers
     let addr = main_trace.helper_register(HELPER_ADDR_IDX, row);
 
-    // Input state [CAP_PREV, TAG, COMM]
+    // Input state [COMM, TAG, CAP_PREV] in sponge order [RATE0, RATE1, CAP]
     // Helper registers store capacity in sequential order [e0, e1, e2, e3]
     let cap_prev = Word::from([
         main_trace.helper_register(HELPER_CAP_PREV_RANGE.start, row),
@@ -215,45 +217,21 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
         main_trace.helper_register(HELPER_CAP_PREV_RANGE.start + 3, row),
     ]);
 
-    // Stack stores words in big-endian order: stack[0..3] = [e3, e2, e1, e0]
-    // Therefore we read in reverse order to reconstruct the word correctly
-    let comm = Word::from([
-        main_trace.stack_element(STACK_COMM_RANGE.end - 1, row),
-        main_trace.stack_element(STACK_COMM_RANGE.end - 2, row),
-        main_trace.stack_element(STACK_COMM_RANGE.end - 3, row),
-        main_trace.stack_element(STACK_COMM_RANGE.end - 4, row),
-    ]);
-    let tag = Word::from([
-        main_trace.stack_element(STACK_TAG_RANGE.end - 1, row),
-        main_trace.stack_element(STACK_TAG_RANGE.end - 2, row),
-        main_trace.stack_element(STACK_TAG_RANGE.end - 3, row),
-        main_trace.stack_element(STACK_TAG_RANGE.end - 4, row),
-    ]);
-    let state_input = [cap_prev, tag, comm];
+    // Stack stores words for log_precompile in structural (LSB-first) layout,
+    // so we read them directly as [w0, w1, w2, w3].
+    let comm = main_trace.stack_word(STACK_COMM_RANGE.start, row);
+    let tag = main_trace.stack_word(STACK_TAG_RANGE.start, row);
+    // Internal Poseidon2 state is [RATE0, RATE1, CAPACITY] = [COMM, TAG, CAP_PREV]
+    let state_input = [comm, tag, cap_prev];
 
-    // Output state [CAP_NEXT, R0, R1]
-    let r1 = Word::from([
-        main_trace.stack_element(STACK_R1_RANGE.end - 1, row + 1),
-        main_trace.stack_element(STACK_R1_RANGE.end - 2, row + 1),
-        main_trace.stack_element(STACK_R1_RANGE.end - 3, row + 1),
-        main_trace.stack_element(STACK_R1_RANGE.end - 4, row + 1),
-    ]);
-    let r0 = Word::from([
-        main_trace.stack_element(STACK_R0_RANGE.end - 1, row + 1),
-        main_trace.stack_element(STACK_R0_RANGE.end - 2, row + 1),
-        main_trace.stack_element(STACK_R0_RANGE.end - 3, row + 1),
-        main_trace.stack_element(STACK_R0_RANGE.end - 4, row + 1),
-    ]);
-    let cap_next = Word::from([
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 1, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 2, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 3, row + 1),
-        main_trace.stack_element(STACK_CAP_NEXT_RANGE.end - 4, row + 1),
-    ]);
-    let state_output = [cap_next, r0, r1];
+    // Output state [R0, R1, CAP_NEXT] in sponge order
+    let r0 = main_trace.stack_word(STACK_R0_RANGE.start, row + 1);
+    let r1 = main_trace.stack_word(STACK_R1_RANGE.start, row + 1);
+    let cap_next = main_trace.stack_word(STACK_CAP_NEXT_RANGE.start, row + 1);
+    let state_output = [r0, r1, cap_next];
 
     let input_req = HasherMessage {
-        transition_label: Felt::from(LINEAR_HASH_LABEL + 16),
+        transition_label: Felt::from_u8(LINEAR_HASH_LABEL + 16),
         addr_next: addr,
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_input).try_into().unwrap(),
@@ -261,8 +239,8 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
     };
 
     let output_req = HasherMessage {
-        transition_label: Felt::from(RETURN_STATE_LABEL + 32),
-        addr_next: addr + Felt::new(7),
+        transition_label: Felt::from_u8(RETURN_STATE_LABEL + 32),
+        addr_next: addr + LAST_CYCLE_ROW_FELT,
         node_index: ZERO,
         hasher_state: Word::words_as_elements(&state_output).try_into().unwrap(),
         source: "log_precompile output",
@@ -280,69 +258,42 @@ pub(super) fn build_log_precompile_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MPVERIFY` requests made to the hash chiplet.
-pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
+    // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
 
-    let node_value = [
-        main_trace.stack_element(0, row),
-        main_trace.stack_element(1, row),
-        main_trace.stack_element(2, row),
-        main_trace.stack_element(3, row),
-    ];
+    let node_value = main_trace.stack_word(0, row);
     let node_depth = main_trace.stack_element(4, row);
     let node_index = main_trace.stack_element(5, row);
+    let merkle_tree_root = main_trace.stack_word(6, row);
 
-    let merkle_tree_root = [
-        main_trace.stack_element(6, row),
-        main_trace.stack_element(7, row),
-        main_trace.stack_element(8, row),
-        main_trace.stack_element(9, row),
-    ];
+    // Build input state with node at RATE1 (indices 4..8)
+    let mut node_state = [ZERO; hasher::STATE_WIDTH];
+    node_state[4..8].copy_from_slice(node_value.as_elements());
 
     let input = HasherMessage {
-        transition_label: Felt::from(MP_VERIFY_LABEL + 16),
+        transition_label: Felt::from_u8(MP_VERIFY_LABEL + 16),
         addr_next: helper_0,
         node_index,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            node_value[3],
-            node_value[2],
-            node_value[1],
-            node_value[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: node_state,
         source: "mpverify input",
     };
 
+    // Build output state with root at RATE1 (indices 4..8)
+    let mut root_state = [ZERO; hasher::STATE_WIDTH];
+    root_state[4..8].copy_from_slice(merkle_tree_root.as_elements());
+
     let output = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + node_depth.mul_small(8) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + node_depth * hash_cycle_len - ONE,
         node_index: ZERO,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            merkle_tree_root[3],
-            merkle_tree_root[2],
-            merkle_tree_root[1],
-            merkle_tree_root[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: root_state,
         source: "mpverify output",
     };
 
@@ -358,122 +309,69 @@ pub(super) fn build_mpverify_request<E: FieldElement<BaseField = Felt>>(
 }
 
 /// Builds `MRUPDATE` requests made to the hash chiplet.
-pub(super) fn build_mrupdate_request<E: FieldElement<BaseField = Felt>>(
+pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     main_trace: &MainTrace,
     alphas: &[E],
     row: RowIndex,
     _debugger: &mut BusDebugger<E>,
 ) -> E {
+    // helper register holds (clk + 1)
     let helper_0 = main_trace.helper_register(0, row);
+    let hash_cycle_len = HASH_CYCLE_LEN_FELT;
+    let two_hash_cycles_len = hash_cycle_len + hash_cycle_len;
 
-    let old_node_value = [
-        main_trace.stack_element(0, row),
-        main_trace.stack_element(1, row),
-        main_trace.stack_element(2, row),
-        main_trace.stack_element(3, row),
-    ];
+    let old_node_value = main_trace.stack_word(0, row);
     let merkle_path_depth = main_trace.stack_element(4, row);
     let node_index = main_trace.stack_element(5, row);
-    let old_root = [
-        main_trace.stack_element(6, row),
-        main_trace.stack_element(7, row),
-        main_trace.stack_element(8, row),
-        main_trace.stack_element(9, row),
-    ];
-    let new_node_value = [
-        main_trace.stack_element(10, row),
-        main_trace.stack_element(11, row),
-        main_trace.stack_element(12, row),
-        main_trace.stack_element(13, row),
-    ];
-    let new_root = [
-        main_trace.stack_element(0, row + 1),
-        main_trace.stack_element(1, row + 1),
-        main_trace.stack_element(2, row + 1),
-        main_trace.stack_element(3, row + 1),
-    ];
+    let old_root = main_trace.stack_word(6, row);
+    let new_node_value = main_trace.stack_word(10, row);
+    let new_root = main_trace.stack_word(0, row + 1);
+
+    // Build old node input state with value at RATE1 (indices 4..8)
+    let mut old_node_state = [ZERO; hasher::STATE_WIDTH];
+    old_node_state[4..8].copy_from_slice(old_node_value.as_elements());
 
     let input_old = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_OLD_LABEL + 16),
+        transition_label: Felt::from_u8(MR_UPDATE_OLD_LABEL + 16),
         addr_next: helper_0,
         node_index,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            old_node_value[3],
-            old_node_value[2],
-            old_node_value[1],
-            old_node_value[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: old_node_state,
         source: "mrupdate input_old",
     };
 
+    // Build old root output state with root at RATE1 (indices 4..8)
+    let mut old_root_state = [ZERO; hasher::STATE_WIDTH];
+    old_root_state[4..8].copy_from_slice(old_root.as_elements());
+
     let output_old = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + merkle_path_depth * hash_cycle_len - ONE,
         node_index: ZERO,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            old_root[3],
-            old_root[2],
-            old_root[1],
-            old_root[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: old_root_state,
         source: "mrupdate output_old",
     };
 
+    // Build new node input state with value at RATE1 (indices 4..8)
+    let mut new_node_state = [ZERO; hasher::STATE_WIDTH];
+    new_node_state[4..8].copy_from_slice(new_node_value.as_elements());
+
     let input_new = HasherMessage {
-        transition_label: Felt::from(MR_UPDATE_NEW_LABEL + 16),
-        addr_next: helper_0 + merkle_path_depth.mul_small(8),
+        transition_label: Felt::from_u8(MR_UPDATE_NEW_LABEL + 16),
+        addr_next: helper_0 + merkle_path_depth * hash_cycle_len,
         node_index,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            new_node_value[3],
-            new_node_value[2],
-            new_node_value[1],
-            new_node_value[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: new_node_state,
         source: "mrupdate input_new",
     };
 
+    // Build new root output state with root at RATE1 (indices 4..8)
+    let mut new_root_state = [ZERO; hasher::STATE_WIDTH];
+    new_root_state[4..8].copy_from_slice(new_root.as_elements());
+
     let output_new = HasherMessage {
-        transition_label: Felt::from(RETURN_HASH_LABEL + 32),
-        addr_next: helper_0 + merkle_path_depth.mul_small(16) - ONE,
+        transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
+        addr_next: helper_0 + merkle_path_depth * two_hash_cycles_len - ONE,
         node_index: ZERO,
-        hasher_state: [
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-            new_root[3],
-            new_root[2],
-            new_root[1],
-            new_root[0],
-            ZERO,
-            ZERO,
-            ZERO,
-            ZERO,
-        ],
+        hasher_state: new_root_state,
         source: "mrupdate output_new",
     };
 
@@ -504,7 +402,7 @@ pub(super) fn build_hasher_chiplet_responses<E>(
     _debugger: &mut BusDebugger<E>,
 ) -> E
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     let mut multiplicand = E::ONE;
     let selector0 = main_trace.chiplet_selector_0(row);
@@ -516,9 +414,10 @@ where
 
     // f_bp, f_mp, f_mv or f_mu == 1
     if row.as_usize().is_multiple_of(HASH_CYCLE_LEN) {
+        // Trace is already in sponge order [RATE0, RATE1, CAP]
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(16_u8);
+        let transition_label = op_label + Felt::from_u8(16);
 
         // f_bp == 1
         // v_all = v_h + v_a + v_b + v_c
@@ -538,15 +437,16 @@ where
 
         // f_mp or f_mv or f_mu == 1
         // v_leaf = v_h + (1 - b) * v_b + b * v_d
+        // In sponge order: RATE0 is at 0..4, RATE1 is at 4..8
         if selector1 == ONE && !(selector2 == ZERO && selector3 == ZERO) {
-            let bit = (node_index.as_int() & 1) as u8;
+            let bit = (node_index.as_canonical_u64() & 1) as u8;
             if bit == 0 {
                 let hasher_message = HasherMessage {
                     transition_label,
                     addr_next,
                     node_index,
                     hasher_state: [
-                        ZERO, ZERO, ZERO, ZERO, state[4], state[5], state[6], state[7], ZERO, ZERO,
+                        ZERO, ZERO, ZERO, ZERO, state[0], state[1], state[2], state[3], ZERO, ZERO,
                         ZERO, ZERO,
                     ],
                     source: "hasher",
@@ -562,8 +462,8 @@ where
                     addr_next,
                     node_index,
                     hasher_state: [
-                        ZERO, ZERO, ZERO, ZERO, state[8], state[9], state[10], state[11], ZERO,
-                        ZERO, ZERO, ZERO,
+                        ZERO, ZERO, ZERO, ZERO, state[4], state[5], state[6], state[7], ZERO, ZERO,
+                        ZERO, ZERO,
                     ],
                     source: "hasher",
                 };
@@ -577,20 +477,22 @@ where
     }
 
     // f_hout, f_sout, f_abp == 1
-    if row.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1 {
+    if row.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW {
+        // Trace is already in sponge order [RATE0, RATE1, CAP]
         let state = main_trace.chiplet_hasher_state(row);
         let node_index = main_trace.chiplet_node_index(row);
-        let transition_label = op_label + Felt::from(32_u8);
+        let transition_label = op_label + Felt::from_u8(32);
 
         // f_hout == 1
         // v_res = v_h + v_b;
+        // Digest is at sponge positions 0..4 (RATE0)
         if selector1 == ZERO && selector2 == ZERO && selector3 == ZERO {
             let hasher_message = HasherMessage {
                 transition_label,
                 addr_next,
                 node_index,
                 hasher_state: [
-                    ZERO, ZERO, ZERO, ZERO, state[4], state[5], state[6], state[7], ZERO, ZERO,
+                    ZERO, ZERO, ZERO, ZERO, state[0], state[1], state[2], state[3], ZERO, ZERO,
                     ZERO, ZERO,
                 ],
                 source: "hasher",
@@ -621,8 +523,9 @@ where
         // f_abp == 1
         // v_abp = v_h + v_b' + v_c' - v_b - v_c
         if selector1 == ONE && selector2 == ZERO && selector3 == ZERO {
-            // build the value from the hasher state's just right after the absorption of new
-            // elements.
+            // Build the value from the hasher state just after absorption of new elements.
+            // Trace is in sponge order: RATE0 at indices 0..4, RATE1 at indices 4..8.
+            // RespanBlockMessage uses alphas[8..16] for its 8-element state.
             let state_nxt = main_trace.chiplet_hasher_state(row + 1);
 
             let hasher_message = HasherMessage {
@@ -634,14 +537,16 @@ where
                     ZERO,
                     ZERO,
                     ZERO,
+                    // RATE0 from sponge indices 0..4
+                    state_nxt[0],
+                    state_nxt[1],
+                    state_nxt[2],
+                    state_nxt[3],
+                    // RATE1 from sponge indices 4..8
                     state_nxt[4],
                     state_nxt[5],
                     state_nxt[6],
                     state_nxt[7],
-                    state_nxt[8],
-                    state_nxt[9],
-                    state_nxt[10],
-                    state_nxt[11],
                 ],
                 source: "hasher",
             };
@@ -667,20 +572,28 @@ pub struct ControlBlockRequestMessage {
 
 impl<E> BusMessage<E> for ControlBlockRequestMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+        let header = alphas[0] + alphas[1] * self.transition_label + alphas[2] * self.addr_next;
 
-        header
-            + alphas[5].mul_base(self.op_code)
-            + build_value(&alphas[8..16], self.decoder_hasher_state)
+        // Reconstruct the full 12-lane sponge state for control-block hashing.
+        // The decoder hasher state encodes the 8 rate lanes; the opcode is used
+        // as the domain in the second capacity lane.
+        // With LE layout [RATE0, RATE1, CAP], capacity is at indices 8-11.
+        let mut full_state = [ZERO; hasher::STATE_WIDTH];
+        for (i, v) in self.decoder_hasher_state.iter().enumerate() {
+            full_state[i] = *v;
+        }
+        // CAPACITY = [0, domain, 0, 0] at positions 8-11
+        full_state[8] = ZERO;
+        full_state[9] = self.op_code; // domain at CAPACITY_DOMAIN_IDX = 9
+
+        header + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], full_state)
     }
 
     fn source(&self) -> &str {
-        let op_code = self.op_code.as_int() as u8;
+        let op_code = self.op_code.as_canonical_u64() as u8;
         match op_code {
             OPCODE_JOIN => "join",
             OPCODE_SPLIT => "split",
@@ -716,13 +629,13 @@ pub struct HasherMessage {
 
 impl<E> BusMessage<E> for HasherMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next)
-            + alphas[3].mul_base(self.node_index);
+            + alphas[1] * self.transition_label
+            + alphas[2] * self.addr_next
+            + alphas[3] * self.node_index;
 
         header
             + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], self.hasher_state)
@@ -754,14 +667,20 @@ pub struct SpanBlockMessage {
 
 impl<E> BusMessage<E> for SpanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next);
+        let header = alphas[0] + alphas[1] * self.transition_label + alphas[2] * self.addr_next;
 
-        header + build_value(&alphas[8..16], self.state)
+        // Treat the 8-lane decoder hasher state as the rate portion of the
+        // full 12-lane sponge state and reconstruct the capacity as zeros.
+        // With LE layout [R1, R2, CAP], state[0..8] = rate, state[8..12] = capacity.
+        let mut full_state = [ZERO; hasher::STATE_WIDTH];
+        for (i, v) in self.state.iter().enumerate() {
+            full_state[i] = *v;
+        }
+
+        header + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], full_state)
     }
 
     fn source(&self) -> &str {
@@ -790,13 +709,15 @@ pub struct RespanBlockMessage {
 
 impl<E> BusMessage<E> for RespanBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header = alphas[0]
-            + alphas[1].mul_base(self.transition_label)
-            + alphas[2].mul_base(self.addr_next - ONE);
+        let header =
+            alphas[0] + alphas[1] * self.transition_label + alphas[2] * (self.addr_next - ONE);
 
+        // Use alphas[8..16] for the 8-element rate state directly.
+        // The response (f_abp) places the absorbed rate at hasher_state[4..12],
+        // which maps to alphas[8..16], so the request must also use alphas[8..16].
         header + build_value(&alphas[8..16], self.state)
     }
 
@@ -826,11 +747,10 @@ pub struct EndBlockMessage {
 
 impl<E> BusMessage<E> for EndBlockMessage
 where
-    E: FieldElement<BaseField = Felt>,
+    E: ExtensionField<Felt>,
 {
     fn value(&self, alphas: &[E]) -> E {
-        let header =
-            alphas[0] + alphas[1].mul_base(self.transition_label) + alphas[2].mul_base(self.addr);
+        let header = alphas[0] + alphas[1] * self.transition_label + alphas[2] * self.addr;
 
         header + build_value(&alphas[8..12], self.digest)
     }

@@ -2,7 +2,7 @@
 
 This crate contains Miden assembler.
 
-The purpose of the assembler is to compile/assemble [Miden Assembly (MASM)](https://0xMiden.github.io/miden-vm/user_docs/assembly/main.html)
+The purpose of the assembler is to compile/assemble [Miden Assembly (MASM)](https://docs.miden.xyz/miden-vm/user_docs/assembly)
 source code into a Miden VM program (represented by `Program` struct). The program
 can then be executed on Miden VM [processor](../processor).
 
@@ -166,21 +166,6 @@ end
 > These options are also available to `syscall`, with the caveat that whatever
 > method is used, it _must_ resolve to a procedure in the kernel specified to
 > the assembler, or compilation will fail with an error.
-
-### Debug Mode
-
-The assembler can be instantiated in debug mode. Compiling a program with such an assembler retains source mappings between assembly instructions and VM operations. Thus, when such a program is executed using the `execute_iter()` function of the [processor](../processor), it is possible to correlate each
-instruction with the source code that it is derived from. You can do this as
-shown below:
-
-```rust
-# use miden_assembly::Assembler;
-# use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-# use std::sync::Arc;
-#
-// Instantiate the assembler in debug mode
-let assembler = Assembler::new(Arc::new(DefaultSourceManager::default()));
-```
 
 ## Putting it all together
 

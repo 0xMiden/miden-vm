@@ -1,6 +1,8 @@
 use alloc::vec::Vec;
 
-use miden_core::{FMP_ADDR, FMP_INIT_VALUE, Felt, Operation, WORD_SIZE};
+use miden_core::{
+    FMP_ADDR, FMP_INIT_VALUE, Felt, Operation, WORD_SIZE, field::PrimeCharacteristicRing,
+};
 
 use crate::push_value_ops;
 
@@ -24,7 +26,7 @@ pub(crate) fn fmp_initialization_sequence() -> Vec<Operation> {
 /// The number of locals is rounded up to the nearest multiple of the word size to ensure the frame
 /// pointer is always word-aligned for operations that require it.
 pub(crate) fn fmp_start_frame_sequence(num_locals: u16) -> Vec<Operation> {
-    let locals_frame = Felt::from(num_locals.next_multiple_of(WORD_SIZE as u16));
+    let locals_frame = Felt::from_u16(num_locals.next_multiple_of(WORD_SIZE as u16));
 
     [Operation::Push(locals_frame)]
         .into_iter()
@@ -40,7 +42,7 @@ pub(crate) fn fmp_start_frame_sequence(num_locals: u16) -> Vec<Operation> {
 /// The number of locals is rounded up to the nearest multiple of the word size to ensure the frame
 /// pointer is always word-aligned for operations that require it.
 pub(crate) fn fmp_end_frame_sequence(num_locals: u16) -> Vec<Operation> {
-    let locals_frame = Felt::from(num_locals.next_multiple_of(WORD_SIZE as u16));
+    let locals_frame = Felt::from_u16(num_locals.next_multiple_of(WORD_SIZE as u16));
 
     [Operation::Push(-locals_frame)]
         .into_iter()

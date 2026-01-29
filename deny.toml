@@ -16,6 +16,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
     "RUSTSEC-2024-0436", # paste is unmaintained but no alternative available
+    "RUSTSEC-2025-0141", # bincode is unmaintained, replace with wincode (#2550)
 ]
 
 # License configuration
@@ -48,25 +49,25 @@ deny = [
     #{ name = "ansi_term", version = "=0.11.0" },
 ]
 skip = [
-    #{ name = "ansi_term", version = "=0.11.0" },
+    # Allow duplicate spin versions - transitively pulled by p3-dft and flume
+    { name = "spin" },
+    # Allow duplicate itertools versions - different dependencies use different versions
+    { name = "itertools" },
 ]
 skip-tree = [
     # Allow getrandom v0.2.x for now - will be phased out with nanorand
-    { name = "getrandom", version = "=0.2.16" },
+    { name = "getrandom", version = "=0.2.17" },
     # Allow rand_core v0.6.x for now - legacy dependency
     { name = "rand_core", version = "=0.6.4" },
     # Allow rustc_version v0.2.x - build dependency
     { name = "rustc_version", version = "=0.2.3" },
-    # Allow windows-targets v0.48.x - older Windows target
-    { name = "windows-targets", version = "=0.48.5" },
     # Allow unicode-width v0.1.x - miden-miette vs miden-formatting conflict (complex to fix)
     { name = "unicode-width", version = "=0.1.14" },
-    # Allow windows-sys v0.48.x/v0.59.x - multiple Windows system libraries (hard to converge)
-    { name = "windows-sys", version = "=0.48.0" },
+    # Allow windows-sys v0.59.x - multiple Windows system libraries (hard to converge)
     { name = "windows-sys", version = "=0.59.0" },
     # Allow syn v1.x and v2.x - our derive macros need v1.x while ecosystem uses v2.x
     { name = "syn", version = "=1.0.109" },
-    { name = "syn", version = "=2.0.111" },
+    { name = "syn", version = "=2.0.114" },
 ]
 
 # Sources configuration
@@ -74,3 +75,4 @@ skip-tree = [
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

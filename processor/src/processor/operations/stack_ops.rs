@@ -1,10 +1,13 @@
-use miden_core::{Felt, ZERO};
+use miden_core::{Felt, ZERO, field::PrimeField64};
 
 use crate::{
-    ErrorContext, ExecutionError,
+    ExecutionError, OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Pushes a new element onto the stack.
 #[inline(always)]
@@ -64,17 +67,20 @@ pub(super) fn dup_nth<P: Processor>(
     Ok(())
 }
 
-/// Analogous to `Process::op_cswap`.
+/// Pops an element off the stack, and if the element is 1, swaps the top two elements on the
+/// stack. If the popped element is 0, the stack remains unchanged.
+///
+/// # Errors
+/// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
 pub(super) fn op_cswap<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
-    match condition.as_int() {
+    match condition.as_canonical_u64() {
         0 => {
             // do nothing, a and b are already in the right place
         },
@@ -82,24 +88,27 @@ pub(super) fn op_cswap<P: Processor>(
             processor.stack().swap(0, 1);
         },
         _ => {
-            return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+            return Err(OperationError::NotBinaryValue { value: condition });
         },
     }
 
     Ok(())
 }
 
-/// Analogous to `Process::op_cswapw`.
+/// Pops an element off the stack, and if the element is 1, swaps elements 0, 1, 2, and 3 with
+/// elements 4, 5, 6, and 7. If the popped element is 0, the stack remains unchanged.
+///
+/// # Errors
+/// Returns an error if the top element of the stack is neither 0 nor 1.
 #[inline(always)]
 pub(super) fn op_cswapw<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     let condition = processor.stack().get(0);
     processor.stack().decrement_size(tracer);
 
-    match condition.as_int() {
+    match condition.as_canonical_u64() {
         0 => {
             // do nothing, the words are already in the right place
         },
@@ -110,7 +119,7 @@ pub(super) fn op_cswapw<P: Processor>(
             processor.stack().swap(3, 7);
         },
         _ => {
-            return Err(ExecutionError::not_binary_value_op(condition, err_ctx));
+            return Err(OperationError::NotBinaryValue { value: condition });
         },
     }
 

@@ -5,6 +5,7 @@ use core::ops::ControlFlow;
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
     SYS_TRACE_WIDTH,
+    chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{
         ADDR_COL_IDX, GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX,
         NUM_OP_BATCH_FLAGS, NUM_OP_BITS, NUM_USER_OP_HELPERS, OP_BATCH_FLAGS_OFFSET,
@@ -14,6 +15,7 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, Operation, Word, ZERO,
+    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },
@@ -22,7 +24,7 @@ use miden_core::{
 use super::CoreTraceFragmentFiller;
 use crate::{
     decoder::block_stack::ExecutionContextInfo, parallel::core_trace_fragment::BasicBlockContext,
-    processor::StackInterface, utils::HASH_CYCLE_LEN_FELT,
+    processor::StackInterface,
 };
 
 // DECODER ROW
@@ -126,7 +128,7 @@ impl DecoderRow {
             addr: current_addr,
             in_basic_block: true,
             group_count: basic_block_ctx.group_count_in_block,
-            op_index: Felt::from(op_idx_in_group as u32),
+            op_index: Felt::from_u32(op_idx_in_group as u32),
             op_batch_flags: [ZERO; NUM_OP_BATCH_FLAGS],
         }
     }
@@ -144,7 +146,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         &mut self,
         basic_block_node: &BasicBlockNode,
     ) -> ControlFlow<()> {
-        let group_count_for_block = Felt::from(basic_block_node.num_op_groups() as u32);
+        let group_count_for_block = Felt::from_u32(basic_block_node.num_op_groups() as u32);
         let first_op_batch = basic_block_node
             .op_batches()
             .first()
@@ -308,7 +310,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         ctx_info: ExecutionContextInfo,
     ) -> ControlFlow<()> {
         let second_hasher_state: Word = [
-            Felt::from(ctx_info.parent_stack_depth),
+            Felt::from_u32(ctx_info.parent_stack_depth),
             ctx_info.parent_next_overflow_addr,
             ZERO,
             ZERO,
@@ -486,8 +488,8 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Now populate the buffer with current system state for the next row
         let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
 
-        new_system_rows[CLK_COL_IDX] = Felt::from(self.context.state.system.clk + 1);
-        new_system_rows[CTX_COL_IDX] = Felt::from(self.context.state.system.ctx);
+        new_system_rows[CLK_COL_IDX] = (self.context.state.system.clk + 1).into();
+        new_system_rows[CTX_COL_IDX] = self.context.state.system.ctx.into();
         new_system_rows[FN_HASH_OFFSET] = self.context.state.system.fn_hash[0];
         new_system_rows[FN_HASH_OFFSET + 1] = self.context.state.system.fn_hash[1];
         new_system_rows[FN_HASH_OFFSET + 2] = self.context.state.system.fn_hash[2];
@@ -505,7 +507,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Decompose operation into bits
         let opcode = row.opcode;
         for i in 0..NUM_OP_BITS {
-            let bit = Felt::from((opcode >> i) & 1);
+            let bit = Felt::from_u8((opcode >> i) & 1);
             self.fragment.columns[DECODER_TRACE_OFFSET + OP_BITS_OFFSET + i][row_idx] = bit;
         }
 
@@ -591,7 +593,7 @@ fn get_op_batch_flags(num_groups_left: Felt) -> [Felt; 3] {
     };
     use miden_core::mast::OP_BATCH_SIZE;
 
-    let num_groups = core::cmp::min(num_groups_left.as_int() as usize, OP_BATCH_SIZE);
+    let num_groups = core::cmp::min(num_groups_left.as_canonical_u64() as usize, OP_BATCH_SIZE);
     match num_groups {
         8 => OP_BATCH_8_GROUPS,
         4 => OP_BATCH_4_GROUPS,

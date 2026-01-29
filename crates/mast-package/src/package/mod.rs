@@ -131,4 +131,16 @@ impl Package {
             )))
         }
     }
+
+    /// Returns the procedure name for the given MAST root digest, if present.
+    ///
+    /// This allows debuggers to resolve human-readable procedure names during execution.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.mast.mast_forest().procedure_name(digest)
+    }
+
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
+        self.mast.mast_forest().procedure_names()
+    }
 }

@@ -41,7 +41,7 @@ pub enum SystemEvent {
     // ADVICE STACK SYSTEM EVENTS
     // --------------------------------------------------------------------------------------------
     /// Pushes a node of the Merkle tree specified by the values on the top of the operand stack
-    /// onto the advice stack.
+    /// onto the advice stack in structural order for consumption by `AdvPopW`.
     ///
     /// Inputs:
     ///   Operand stack: [depth, index, TREE_ROOT, ...]
@@ -280,7 +280,7 @@ pub enum SystemEvent {
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
-    /// under the key defined by applying an RPO permutation to all three words.
+    /// under the key defined by applying a Poseidon2 permutation to all three words.
     ///
     /// Inputs:
     ///   Operand stack: [B, A, C, ...]

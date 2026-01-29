@@ -6,7 +6,9 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
     parser::{IntValue, PushValue},
 };
-use miden_core::{Decorator, Felt, Operation, WORD_SIZE, ZERO, mast::MastNodeId};
+use miden_core::{
+    Decorator, Felt, Operation, WORD_SIZE, ZERO, field::PrimeCharacteristicRing, mast::MastNodeId,
+};
 
 use crate::{
     Assembler, ProcedureContext, ast::InvokeKind, basic_block_builder::BasicBlockBuilder,
@@ -164,7 +166,7 @@ impl Assembler {
             Instruction::Ext2Inv => ext2_ops::ext2_inv(block_builder)?,
 
             // ----- u32 manipulation -------------------------------------------------------------
-            Instruction::U32Test => block_builder.push_ops([Dup0, U32split, Swap, Drop, Eqz]),
+            Instruction::U32Test => block_builder.push_ops([Dup0, U32split, Drop, Eqz]),
             Instruction::U32TestW => u32_ops::u32testw(block_builder),
             Instruction::U32Assert => block_builder.push_ops([Pad, U32assert2(ZERO), Drop]),
             Instruction::U32AssertWithError(err_msg) => {
@@ -182,7 +184,7 @@ impl Assembler {
                 u32_ops::u32assertw(block_builder, error_code)
             },
 
-            Instruction::U32Cast => block_builder.push_ops([U32split, Drop]),
+            Instruction::U32Cast => block_builder.push_ops([U32split, Swap, Drop]),
             Instruction::U32Split => block_builder.push_op(U32split),
 
             Instruction::U32OverflowingAdd => u32_ops::u32add(block_builder, Overflowing, None),
@@ -194,7 +196,7 @@ impl Assembler {
                 u32_ops::u32add(block_builder, Wrapping, Some(v.expect_value()))
             },
             Instruction::U32OverflowingAdd3 => block_builder.push_op(U32add3),
-            Instruction::U32WrappingAdd3 => block_builder.push_ops([U32add3, Drop]),
+            Instruction::U32WrappingAdd3 => block_builder.push_ops([U32add3, Swap, Drop]),
 
             Instruction::U32OverflowingSub => u32_ops::u32sub(block_builder, Overflowing, None),
             Instruction::U32OverflowingSubImm(v) => {
@@ -205,16 +207,16 @@ impl Assembler {
                 u32_ops::u32sub(block_builder, Wrapping, Some(v.expect_value()))
             },
 
-            Instruction::U32OverflowingMul => u32_ops::u32mul(block_builder, Overflowing, None),
-            Instruction::U32OverflowingMulImm(v) => {
+            Instruction::U32WideningMul => u32_ops::u32mul(block_builder, Overflowing, None),
+            Instruction::U32WideningMulImm(v) => {
                 u32_ops::u32mul(block_builder, Overflowing, Some(v.expect_value()))
             },
             Instruction::U32WrappingMul => u32_ops::u32mul(block_builder, Wrapping, None),
             Instruction::U32WrappingMulImm(v) => {
                 u32_ops::u32mul(block_builder, Wrapping, Some(v.expect_value()))
             },
-            Instruction::U32OverflowingMadd => block_builder.push_op(U32madd),
-            Instruction::U32WrappingMadd => block_builder.push_ops([U32madd, Drop]),
+            Instruction::U32WideningMadd => block_builder.push_op(U32madd),
+            Instruction::U32WrappingMadd => block_builder.push_ops([U32madd, Swap, Drop]),
 
             Instruction::U32Div => u32_ops::u32div(block_builder, proc_ctx, None)?,
             Instruction::U32DivImm(v) => {
@@ -362,12 +364,12 @@ impl Assembler {
             // ----- input / output instructions --------------------------------------------------
             Instruction::Push(imm) => match (*imm).expect_value() {
                 PushValue::Int(value) => match value {
-                    IntValue::U8(v) => env_ops::push_one(v, block_builder),
-                    IntValue::U16(v) => env_ops::push_one(v, block_builder),
-                    IntValue::U32(v) => env_ops::push_one(v, block_builder),
+                    IntValue::U8(v) => env_ops::push_one(Felt::from_u8(v), block_builder),
+                    IntValue::U16(v) => env_ops::push_one(Felt::from_u16(v), block_builder),
+                    IntValue::U32(v) => env_ops::push_one(Felt::from_u32(v), block_builder),
                     IntValue::Felt(v) => env_ops::push_one(v, block_builder),
                 },
-                PushValue::Word(v) => env_ops::push_many(&v.0, block_builder),
+                PushValue::Word(v) => env_ops::push_word(&v.0, block_builder),
             },
             Instruction::PushSlice(imm, range) => {
                 env_ops::push_word_slice(imm, range, block_builder)?
@@ -398,21 +400,13 @@ impl Assembler {
                 span,
             )?,
             Instruction::MemLoadWBe => {
-                mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
-            },
-            Instruction::MemLoadWLe => {
                 mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?;
                 push_reversew(block_builder);
             },
-            Instruction::MemLoadWBeImm(v) => mem_ops::mem_read(
-                block_builder,
-                proc_ctx,
-                Some(v.expect_value()),
-                false,
-                false,
-                span,
-            )?,
-            Instruction::MemLoadWLeImm(v) => {
+            Instruction::MemLoadWLe => {
+                mem_ops::mem_read(block_builder, proc_ctx, None, false, false, span)?
+            },
+            Instruction::MemLoadWBeImm(v) => {
                 mem_ops::mem_read(
                     block_builder,
                     proc_ctx,
@@ -423,6 +417,14 @@ impl Assembler {
                 )?;
                 push_reversew(block_builder);
             },
+            Instruction::MemLoadWLeImm(v) => mem_ops::mem_read(
+                block_builder,
+                proc_ctx,
+                Some(v.expect_value()),
+                false,
+                false,
+                span,
+            )?,
             Instruction::LocLoad(v) => mem_ops::mem_read(
                 block_builder,
                 proc_ctx,
@@ -440,7 +442,8 @@ impl Assembler {
                     true,
                     false,
                     instruction.span(),
-                )?
+                )?;
+                push_reversew(block_builder);
             },
             Instruction::LocLoadWLe(v) => {
                 let local_addr = validate_local_word_alignment(v, proc_ctx)?;
@@ -451,8 +454,7 @@ impl Assembler {
                     true,
                     false,
                     instruction.span(),
-                )?;
-                push_reversew(block_builder)
+                )?
             },
             Instruction::MemStore => block_builder.push_ops([MStore, Drop]),
             Instruction::MemStoreImm(v) => mem_ops::mem_write_imm(
@@ -463,23 +465,15 @@ impl Assembler {
                 true,
                 span,
             )?,
-            Instruction::MemStoreWBe => block_builder.push_ops([MStoreW]),
-            Instruction::MemStoreWLe => {
+            Instruction::MemStoreWBe => {
                 block_builder.push_op(MovDn4);
                 push_reversew(block_builder);
                 block_builder.push_op(MovUp4);
                 block_builder.push_op(MStoreW);
                 push_reversew(block_builder);
             },
-            Instruction::MemStoreWBeImm(v) => mem_ops::mem_write_imm(
-                block_builder,
-                proc_ctx,
-                v.expect_value(),
-                false,
-                false,
-                span,
-            )?,
-            Instruction::MemStoreWLeImm(v) => {
+            Instruction::MemStoreWLe => block_builder.push_ops([MStoreW]),
+            Instruction::MemStoreWBeImm(v) => {
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(
                     block_builder,
@@ -491,6 +485,14 @@ impl Assembler {
                 )?;
                 push_reversew(block_builder);
             },
+            Instruction::MemStoreWLeImm(v) => mem_ops::mem_write_imm(
+                block_builder,
+                proc_ctx,
+                v.expect_value(),
+                false,
+                false,
+                span,
+            )?,
             Instruction::LocStore(v) => mem_ops::mem_write_imm(
                 block_builder,
                 proc_ctx,
@@ -501,13 +503,13 @@ impl Assembler {
             )?,
             Instruction::LocStoreWBe(v) => {
                 let local_addr = validate_local_word_alignment(v, proc_ctx)?;
-                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?
-            },
-            Instruction::LocStoreWLe(v) => {
-                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
                 push_reversew(block_builder);
                 mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?;
                 push_reversew(block_builder)
+            },
+            Instruction::LocStoreWLe(v) => {
+                let local_addr = validate_local_word_alignment(v, proc_ctx)?;
+                mem_ops::mem_write_imm(block_builder, proc_ctx, local_addr, true, false, span)?
             },
             Instruction::SysEvent(system_event) => {
                 block_builder.push_system_event(system_event.into())
@@ -629,7 +631,7 @@ fn push_u32_value(span_builder: &mut BasicBlockBuilder, value: u32) {
         span_builder.push_op(Pad);
         span_builder.push_op(Incr);
     } else {
-        span_builder.push_op(Push(Felt::from(value)));
+        span_builder.push_op(Push(Felt::from_u32(value)));
     }
 }
 

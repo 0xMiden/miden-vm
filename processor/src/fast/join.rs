@@ -1,11 +1,12 @@
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
 use miden_core::mast::{JoinNode, MastForest, MastNodeId};
 
 use crate::{
-    AsyncHost, ExecutionError,
-    continuation_stack::ContinuationStack,
-    fast::{FastProcessor, Tracer, trace_state::NodeExecutionState},
+    Host,
+    continuation_stack::{Continuation, ContinuationStack},
+    fast::{BreakReason, FastProcessor, Tracer, step::Stopper},
 };
 
 impl FastProcessor {
@@ -17,12 +18,13 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::Start(node_id),
+            Continuation::StartNode(node_id),
             continuation_stack,
             current_forest,
         );
@@ -36,9 +38,7 @@ impl FastProcessor {
 
         // Corresponds to the row inserted for the JOIN operation added
         // to the trace.
-        self.increment_clk(tracer);
-
-        Ok(())
+        self.increment_clk(tracer, stopper)
     }
 
     /// Executes the finish phase of a Join node.
@@ -48,19 +48,22 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         continuation_stack: &mut ContinuationStack,
-        host: &mut impl AsyncHost,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+        stopper: &impl Stopper,
+    ) -> ControlFlow<BreakReason> {
         tracer.start_clock_cycle(
             self,
-            NodeExecutionState::End(node_id),
+            Continuation::FinishJoin(node_id),
             continuation_stack,
             current_forest,
         );
 
         // Corresponds to the row inserted for the END operation added
         // to the trace.
-        self.increment_clk(tracer);
+        self.increment_clk_with_continuation(tracer, stopper, || {
+            Some(Continuation::AfterExitDecorators(node_id))
+        })?;
 
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }

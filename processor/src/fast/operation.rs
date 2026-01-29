@@ -1,17 +1,18 @@
 use miden_air::{
-    Felt, FieldElement, RowIndex,
-    trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
+    Felt,
+    trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
 };
 use miden_core::{
-    QuadFelt, WORD_SIZE, Word, ZERO,
-    crypto::{hash::Rpo256, merkle::MerklePath},
+    WORD_SIZE, Word, ZERO,
+    crypto::{hash::Poseidon2, merkle::MerklePath},
+    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
+    AdviceProvider, ContextId, ExecutionError,
     chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::AceError,
+    errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
@@ -30,11 +31,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn stack(&mut self) -> &mut Self::Stack {
         self
-    }
-
-    #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
-        self.state()
     }
 
     #[inline(always)]
@@ -89,25 +85,13 @@ impl Processor for FastProcessor {
     /// Note that we do not record any memory reads in this operation (through a
     /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
-    fn op_eval_circuit(
-        &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
-        let circuit_evaluation = eval_circuit_fast_(
-            ctx,
-            ptr,
-            self.clk,
-            num_read,
-            num_eval,
-            &mut self.memory,
-            err_ctx,
-            tracer,
-        )?;
+        let circuit_evaluation =
+            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)?;
         self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
@@ -118,7 +102,7 @@ impl Processor for FastProcessor {
 impl HasherInterface for FastProcessor {
     #[inline(always)]
     fn permute(&mut self, mut input_state: HasherState) -> (Felt, HasherState) {
-        Rpo256::apply_permutation(&mut input_state);
+        Poseidon2::apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         (ZERO, input_state)
@@ -131,10 +115,10 @@ impl HasherInterface for FastProcessor {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
-        match path.verify(index.as_int(), value, &claimed_root) {
+        match path.verify(index.as_canonical_u64(), value, &claimed_root) {
             // Return a default value for the address, as it is not needed in trace generation.
             Ok(_) => Ok(ZERO),
             Err(_) => Err(on_err()),
@@ -149,17 +133,18 @@ impl HasherInterface for FastProcessor {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
 
         // Verify the old value against the claimed old root.
-        if path.verify(index.as_int(), old_value, &claimed_old_root).is_err() {
+        if path.verify(index.as_canonical_u64(), old_value, &claimed_old_root).is_err() {
             return Err(on_err());
         };
 
         // Compute the new root.
-        let new_root = path.compute_root(index.as_int(), new_value).map_err(|_| on_err())?;
+        let new_root =
+            path.compute_root(index.as_canonical_u64(), new_value).map_err(|_| on_err())?;
 
         Ok((ZERO, new_root))
     }
@@ -186,11 +171,6 @@ impl StackInterface for FastProcessor {
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
-    }
-
-    #[inline(always)]
-    fn top_mut(&mut self) -> &mut [Felt] {
-        self.stack_top_mut()
     }
 
     #[inline(always)]
@@ -275,7 +255,7 @@ impl StackInterface for FastProcessor {
             self.increment_stack_size(tracer);
             Ok(())
         } else {
-            Err(ExecutionError::FailedToExecuteProgram("stack overflow"))
+            Err(ExecutionError::Internal("stack overflow"))
         }
     }
 
@@ -298,7 +278,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32split_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32split_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
@@ -323,12 +303,12 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(_carry: Felt, _sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
     #[inline(always)]
-    fn op_u32add3_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add3_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
@@ -396,7 +376,6 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-#[expect(clippy::too_many_arguments)]
 pub fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
@@ -404,34 +383,24 @@ pub fn eval_circuit_fast_(
     num_vars: Felt,
     num_eval: Felt,
     mem: &mut impl MemoryInterface,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
+) -> Result<CircuitEvaluation, AceEvalError> {
+    let num_vars = num_vars.as_canonical_u64();
+    let num_eval = num_eval.as_canonical_u64();
 
     let num_wires = num_vars + num_eval;
     if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
+        return Err(AceError::TooManyWires(num_wires).into());
     }
 
     // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
     // quadratic extension field elements while instructions are encoded as base field elements.
     // Hence we can pack 2 variables and 4 instructions per word.
     if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
+        return Err(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars).into());
     }
     if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
+        return Err(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval).into());
     }
 
     // Ensure instructions are word-aligned and non-empty
@@ -445,26 +414,22 @@ pub fn eval_circuit_fast_(
     // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
     // evaluation completely
     for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let word = mem.read_word(ctx, ptr, clk)?;
         tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word)?;
+        evaluation_context.do_read(ptr, word);
         ptr += PTR_OFFSET_WORD;
     }
     // perform EVAL operations
     for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
+        let instruction = mem.read_element(ctx, ptr)?;
         tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
+        evaluation_context.do_eval(ptr, instruction)?;
         ptr += PTR_OFFSET_ELEM;
     }
 
     // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
+    if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
+        return Err(AceError::CircuitNotEvaluateZero.into());
     }
 
     Ok(evaluation_context)

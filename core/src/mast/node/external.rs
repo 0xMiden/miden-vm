@@ -9,10 +9,8 @@ use miden_formatting::{
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
-use crate::mast::{
-    DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId,
-};
+use super::{MastForestContributor, MastNodeExt};
+use crate::mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId};
 
 // EXTERNAL NODE
 // ================================================================================================
@@ -31,23 +29,6 @@ use crate::mast::{
 pub struct ExternalNode {
     digest: Word,
     decorator_store: DecoratorStore,
-}
-
-impl MastNodeErrorContext for ExternalNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
-    }
 }
 
 // PRETTY PRINTING
@@ -379,17 +360,12 @@ impl ExternalNodeBuilder {
     ///
     /// Note: This is not part of the `MastForestContributor` trait because it's only
     /// intended for internal use during deserialization.
-    ///
-    /// For ExternalNode, this is equivalent to the normal `add_to_forest` since external nodes
-    /// don't have child nodes to validate.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
+        // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
-
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
 
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning

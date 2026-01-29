@@ -17,6 +17,7 @@ Miden assembly provides a set of instructions for moving data between the operan
 | Instruction                                                                     | Stack_input | Stack_output                                         | Notes                                                                                                                                                                                               |
 | ------------------------------------------------------------------------------- | ----------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | push._a_ <br /> - _(1-2 cycles)_ <br /> push._a_._b_ <br /> push._a_._b_._c_... | [ ... ]     | [a, ... ] <br /> [b, a, ... ] <br /> [c, b, a, ... ] | Pushes values $a$, $b$, $c$ etc. onto the stack. Up to $16$ values can be specified. All values must be valid field elements in decimal (e.g., $123$) or hexadecimal (e.g., $0x7b$) representation. |
+| push.[_a_,_b_,_c_,_d_] <br /> - _(4 cycles)_                                     | [ ... ]     | [a, b, c, d, ... ]                                   | Pushes a word (4 field elements) onto the stack. The first element $a$ ends up on top of the stack. All values must be valid field elements in decimal or hexadecimal representation. |
 
 The value can be specified in hexadecimal form without periods between individual values as long as it describes a full word ($4$ field elements or $32$ bytes). Note that hexadecimal values separated by periods (short hexadecimal strings) are assumed to be in big-endian order, while the strings specifying whole words (long hexadecimal strings) are assumed to be in little-endian order. That is, the following are semantically equivalent:
 
@@ -27,6 +28,27 @@ push.4660.22136.36882.43981
 ```
 
 In both case the values must still encode valid field elements.
+
+#### Word literal syntax
+
+The `push.[a,b,c,d]` syntax provides a convenient way to push a word (4 field elements) onto the stack. The elements are pushed such that the first element `a` ends up on top of the stack:
+
+```
+push.[1,2,3,4]   # Results in stack: [1, 2, 3, 4, ...]
+                 # where 1 is on top of the stack
+```
+
+This is equivalent to `push.4 push.3 push.2 push.1` but provides a more intuitive syntax when working with words, as the element order in the literal matches the resulting stack order (first element on top).
+
+You can also use slices with word constants to push only a portion of the word:
+
+```
+const WORD = [5,6,7,8]
+
+push.WORD[0]      # is equivalent to push.5
+push.WORD[1..3]   # is equivalent to `push.7 push.6`
+push.WORD[0..4]   # is equivalent to push.[5,6,7,8]
+```
 
 ### Environment inputs
 
@@ -46,7 +68,7 @@ As mentioned above, nondeterministic inputs are provided to the VM via the advic
 | ----------------------------------- | ------------------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | adv_push._n_ <br /> - _(n cycles)_ | [ ... ]            | [a, ... ]           | $a \leftarrow advstack.pop()$ <br /> Pops $n$ values from the advice stack and pushes them onto the operand stack. Valid for $n \in \{1, ..., 16\}$. <br /> Fails if the advice stack has fewer than $n$ values.                                                                                                               |
 | adv_loadw <br /> - _(1 cycle)_     | [0, 0, 0, 0, ... ] | [A, ... ]           | $A \leftarrow advstack.pop(4)$ <br /> Pop the next word (4 elements) from the advice stack and overwrites the first word of the operand stack (4 elements) with them. <br /> Fails if the advice stack has fewer than $4$ values.                                                                                              |
-| adv_pipe <br /> - _(1 cycle)_      | [C, B, A, a, ... ] | [E, D, A, a', ... ] | $[D, E] \leftarrow [adv\_stack.pop(4), adv\_stack.pop(4)]$ <br /> $a' \leftarrow a + 8$ <br /> Pops the next two words from the advice stack, overwrites the top of the operand stack with them and also writes these words into memory at address $a$ and $a + 4$.<br /> Fails if the advice stack has fewer than $8$ values. |
+| adv_pipe <br /> - _(1 cycle)_      | [A, B, C, a, ... ] | [D, E, C, a', ... ] | $[D, E] \leftarrow [adv\_stack.pop(4), adv\_stack.pop(4)]$ <br /> $a' \leftarrow a + 8$ <br /> Pops the next two words from the advice stack, overwrites R0 and R1 of the sponge state and also writes these words into memory at address $a$ and $a + 4$.<br /> Fails if the advice stack has fewer than $8$ values. |
 
 > **Note**: The opcodes above always push data onto the operand stack so that the first element is placed deepest in the stack. For example, if the data on the stack is `a,b,c,d` and you use the opcode `adv_push.4`, the data will be `d,c,b,a` on your stack. This is also the behavior of the other opcodes.
 
@@ -62,10 +84,10 @@ System events fall into two categories: (1) events which push new data onto the 
 | adv.has_mapkey                               | [K, ... ]          | [K, ... ]          | Pushes `1` on the advice stack if the key placed at the top of the operand stack exists in the advice map, or `0` otherwise.                                                                                                                                         |
 | adv.push_mtnode                              | [d, i, R, ... ]    | [d, i, R, ... ]    | Pushes a node of a Merkle tree with root $R$ at depth $d$ and index $i$ from Merkle store onto the advice stack.                                                                                                                                                     |
 | adv.insert_mem                               | [K, a, b, ... ]    | [K, a, b, ... ]    | Reads words $data \leftarrow mem[a] .. mem[b]$ from memory, and save the data into $advice\_map[K] \leftarrow data$.                                                                                                                                                 |
-| adv.insert_hdword                            | [B, A, ... ]       | [B, A, ... ]       | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=0)$, and saves the data into $advice\_map[K] \leftarrow [A, B]$.                                                                                                           |
-| adv.insert_hdword_d                          | [B, A, d, ... ]    | [B, A, d, ... ]    | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=d)$, and saves the data into $advice\_map[K] \leftarrow [A, B]$. $d$ is the domain value, where changing the domain changes the resulting hash given the same `A` and `B`. |
-| adv.insert_hqword                            | [D, C, B, A, ... ] | [D, C, B, A, ... ] | Reads top four words from the stack, computes a key as cumulative hash of these words $K \leftarrow hash(hash(hash(A \|\| B) \|\| C) \|\| D)$ in $domain=0$, and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$.                                       |
-| adv.insert_hperm                             | [B, A, C, ...]     | [B, A, C, ...]     | Reads top three words from the stack, computes a key as $K \leftarrow permute(C, A, B).digest$, and saves data into $advice\_map[K] \leftarrow [A, B]$.                                                                                                              |
+| adv.insert_hdword                            | [A, B, ... ]       | [A, B, ... ]       | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=0)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. Note: to compute the same key in MASM, use `hmerge`.                                       |
+| adv.insert_hdword_d                          | [A, B, d, ... ]    | [A, B, d, ... ]    | Reads top two words from the stack, computes a key as $K \leftarrow hash(A \|\| B, domain=d)$ (top word first), and saves the data into $advice\_map[K] \leftarrow [A, B]$. $d$ is the domain value.                                                                   |
+| adv.insert_hqword                            | [A, B, C, D, ... ] | [A, B, C, D, ... ] | Reads top four words from the stack, computes a key as $K \leftarrow hash\_elements([A, B, C, D])$ (sequential two-round absorption), and saves the data into $advice\_map[K] \leftarrow [A, B, C, D]$.                                                               |
+| adv.insert_hperm                             | [R0, R1, C, ...]   | [R0, R1, C, ...]   | Reads top three words from the stack, computes a key as $K \leftarrow permute(R0, R1, C).digest$, and saves data into $advice\_map[K] \leftarrow [R0, R1]$.                                                                                                              |
 
 ### Random access memory
 
@@ -83,7 +105,7 @@ Memory is guaranteed to be initialized to zeros. Thus, when reading from memory 
 | mem_storew <br /> - _(1 cycle)_ <br /> mem_storew._a_ <br /> - _(2-3 cycles)_        | [a, A, ... ]          | [A, ... ]           | $A \rightarrow mem[a..(a+4)]$ <br /> Stores the top four elements of the stack in reverse order in memory starting at address $a$, such that the first element of `A` is placed at `mem[a+3]`. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$, or if $a$ is not a multiple of 4                                                       |
 | mem_storew_be <br /> - _(1 cycles)_ <br /> mem_storew_be._a_ <br /> - _(2-3 cycles)_ | [a, A, ... ]          | [A, ... ]           | $A \rightarrow mem[a..(a+4)]$ <br /> Stores the top four elements of the stack in big-endian (reversed) order in memory starting at address $a$, such that the top of stack is placed at `mem[a+3]`. Equivalent to `mem_storew`. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$, or if $a$ is not a multiple of 4                     |
 | mem_storew_le <br /> - _(9 cycles)_ <br /> mem_storew_le._a_ <br /> - _(8-9 cycles)_ | [a, A, ... ]          | [A, ... ]           | $A \rightarrow mem[a..(a+4)]$ <br /> Stores the top four elements of the stack in little-endian (memory) order in memory starting at address $a$, such that the top of stack is placed at `mem[a]`. Equivalent to `reversew mem_storew_be reversew`. If $a$ is provided via the stack, it is removed from the stack first. <br /> Fails if $a \ge 2^{32}$, or if $a$ is not a multiple of 4 |
-| mem_stream <br /> - _(1 cycle)_                                                      | [C, B, A, a, ... ]    | [E, D, A, a', ... ] | $[E, D] \leftarrow [mem[a..(a+4)], mem[(a+4)..(a+8)]]$ <br /> $a' \leftarrow a + 8$ <br /> Read two sequential words from memory starting at address $a$ and overwrites the first two words in the operand stack.                                                                                                                                                                           |
+| mem_stream <br /> - _(1 cycle)_                                                      | [A, B, C, a, ... ]  | [D, E, C, a', ... ] | $[D, E] \leftarrow [mem[a..(a+4)], mem[(a+4)..(a+8)]]$ <br /> $a' \leftarrow a + 8$ <br /> Read two sequential words from memory starting at address $a$ and overwrites R0 and R1 of the sponge state.                                                                                                                                                                      |
 
 The second way to access memory is via procedure locals using the instructions listed below. These instructions are available only in procedure context. The number of locals available to a given procedure must be specified at [procedure declaration](./code_organization.md#procedures) time, and trying to access more locals than was declared will result in a compile-time error. A procedure can have at most $2^{16}$ locals, and the total number of locals available to all procedures at runtime is limited to $2^{31} - 1$. The assembler internally always rounds up the number of declared locals to the nearest multiple of 4.
 

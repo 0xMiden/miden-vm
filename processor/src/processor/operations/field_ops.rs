@@ -1,18 +1,24 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{Felt, FieldElement, ONE, ZERO};
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{Field, PrimeField64},
+};
 
 use crate::{
-    ErrorContext, ExecutionError,
+    OperationError,
     fast::Tracer,
     operations::utils::assert_binary,
-    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
+    processor::{OperationHelperRegisters, Processor, StackInterface},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]
 pub(super) fn op_add<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| Ok(a + b), tracer).unwrap()
+    pop2_applyfn_push(processor, |a, b| a + b, tracer)
 }
 
 /// Pops an element off the stack, computes its additive inverse, and pushes the result back
@@ -27,7 +33,7 @@ pub(super) fn op_neg<P: Processor>(processor: &mut P) {
 /// stack.
 #[inline(always)]
 pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| Ok(a * b), tracer).unwrap();
+    pop2_applyfn_push(processor, |a, b| a * b, tracer)
 }
 
 /// Pops an element off the stack, computes its multiplicative inverse, and pushes the result
@@ -36,15 +42,12 @@ pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// # Errors
 /// Returns an error if the value on the top of the stack is ZERO.
 #[inline(always)]
-pub(super) fn op_inv<P: Processor>(
-    processor: &mut P,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if (*top) == ZERO {
-        return Err(ExecutionError::divide_by_zero(processor.system().clk(), err_ctx));
+        return Err(OperationError::DivideByZero);
     }
-    *top = top.inv();
+    *top = top.inverse();
     Ok(())
 }
 
@@ -63,14 +66,13 @@ pub(super) fn op_incr<P: Processor>(processor: &mut P) {
 #[inline(always)]
 pub(super) fn op_and<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
-    pop2_applyfn_push(
+) -> Result<(), OperationError> {
+    pop2_applyfn_push_op(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            assert_binary(b)?;
+            assert_binary(a)?;
 
             if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -87,14 +89,13 @@ pub(super) fn op_and<P: Processor>(
 #[inline(always)]
 pub(super) fn op_or<P: Processor>(
     processor: &mut P,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
-    pop2_applyfn_push(
+) -> Result<(), OperationError> {
+    pop2_applyfn_push_op(
         processor,
         |a, b| {
-            assert_binary(b, err_ctx)?;
-            assert_binary(a, err_ctx)?;
+            assert_binary(b)?;
+            assert_binary(a)?;
 
             if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
@@ -108,17 +109,14 @@ pub(super) fn op_or<P: Processor>(
 /// # Errors
 /// Returns an error if the value on the top of the stack is not a binary value.
 #[inline(always)]
-pub(super) fn op_not<P: Processor>(
-    processor: &mut P,
-    err_ctx: &impl ErrorContext,
-) -> Result<(), ExecutionError> {
+pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
     let top = processor.stack().get_mut(0);
     if *top == ZERO {
         *top = ONE;
     } else if *top == ONE {
         *top = ZERO;
     } else {
-        return Err(ExecutionError::not_binary_value_op(*top, err_ctx));
+        return Err(OperationError::NotBinaryValue { value: *top });
     }
     Ok(())
 }
@@ -129,7 +127,7 @@ pub(super) fn op_not<P: Processor>(
 pub(super) fn op_eq<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
+) -> [Felt; NUM_USER_OP_HELPERS] {
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
@@ -139,7 +137,7 @@ pub(super) fn op_eq<P: Processor>(
     let result = if a == b { ONE } else { ZERO };
     processor.stack().set(0, result);
 
-    Ok(P::HelperRegisters::op_eq_registers(a, b))
+    P::HelperRegisters::op_eq_registers(a, b)
 }
 
 /// Pops an element off the stack and compares it to ZERO. If the element is ZERO, pushes ONE
@@ -187,7 +185,7 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
 pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
     let old_base = processor.stack().get(1);
     let old_acc = processor.stack().get(2);
-    let old_exp_int = processor.stack().get(3).as_int();
+    let old_exp_int = processor.stack().get(3).as_canonical_u64();
 
     // Compute new exponent.
     let new_exp = Felt::new(old_exp_int >> 1);
@@ -209,36 +207,59 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
     P::HelperRegisters::op_expacc_registers(acc_update_val)
 }
 
-/// Gets the top four values from the stack [b1, b0, a1, a0], where a = (a1, a0) and
-/// b = (b1, b0) are elements of the extension field, and outputs the product c = (c1, c0)
-/// where c0 = b0 * a0 - 2 * b1 * a1 and c1 = (b0 + b1) * (a1 + a0) - b0 * a0. It pushes 0 to
-/// the first and second positions on the stack, c1 and c2 to the third and fourth positions,
-/// and leaves the rest of the stack unchanged.
+/// Gets the top four values from the stack [b0, b1, a0, a1] (low coefficient at lower
+/// index/closer to top), where a = (a0, a1) and b = (b0, b1) are elements of the
+/// extension field, and outputs the product c = (c0, c1) where c0 = a0 * b0 + 7 * a1 * b1
+/// and c1 = a0 * b1 + a1 * b0. The extension field is defined by the irreducible polynomial
+/// x² - 7. It leaves b0, b1 in the first and second positions on the stack, sets c0 and c1
+/// to the third and fourth positions, and leaves the rest of the stack unchanged.
 #[inline(always)]
 pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
-    const TWO: Felt = Felt::new(2);
-    let [a0, a1, b0, b1] = processor.stack().get_word(0).into();
+    const SEVEN: Felt = Felt::new(7);
+    // get_word returns [s0, s1, s2, s3] where s0 is top of stack
+    // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
+    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 
     let b0_times_a0 = b0 * a0;
-    processor.stack().set(2, (b0 + b1) * (a1 + a0) - b0_times_a0);
-    processor.stack().set(3, b0_times_a0 - TWO * b1 * a1);
+    let b1_times_a1 = b1 * a1;
+    let c1 = (b0 + b1) * (a1 + a0) - b0_times_a0 - b1_times_a1;
+    let c0 = b0_times_a0 + SEVEN * b1_times_a1;
+    processor.stack().set(2, c0); // c0 (low) at position 2
+    processor.stack().set(3, c1); // c1 (high) at position 3
 }
 
 // HELPERS
 // ----------------------------------------------------------------------------------------------
 
-/// Pops the top two elements from the stack, applies the given function to them, and pushes the
-/// result back onto the stack.
+/// Pops the top two elements from the stack, applies the given infallible function to them,
+/// and pushes the result back onto the stack.
 ///
 /// The size of the stack is decremented by 1.
 #[inline(always)]
 fn pop2_applyfn_push<P: Processor>(
     processor: &mut P,
-    f: impl FnOnce(Felt, Felt) -> Result<Felt, ExecutionError>,
+    f: impl FnOnce(Felt, Felt) -> Felt,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) {
+    let b = processor.stack().get(0);
+    let a = processor.stack().get(1);
+
+    processor.stack().decrement_size(tracer);
+    processor.stack().set(0, f(a, b));
+}
+
+/// Pops the top two elements from the stack, applies the given function to them, and pushes the
+/// result back onto the stack. The function returns an `OperationError` on failure.
+///
+/// The size of the stack is decremented by 1.
+#[inline(always)]
+fn pop2_applyfn_push_op<P: Processor>(
+    processor: &mut P,
+    f: impl FnOnce(Felt, Felt) -> Result<Felt, OperationError>,
+    tracer: &mut impl Tracer,
+) -> Result<(), OperationError> {
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 

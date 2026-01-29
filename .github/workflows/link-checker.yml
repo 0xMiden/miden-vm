@@ -43,13 +43,14 @@ jobs:
             --exclude "127.0.0.1"
             --exclude "^file://"
             --exclude "github.com/0xMiden/.*"
+            --exclude "medium.com"
             docs/src/**/*.md
             **/*.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Open issue on failure (only if fail-fast is false)
-        if: steps.lychee.outcome == 'failure' && steps.flags.outputs.fail_fast != 'true'
+        if: steps.lychee.outputs.exit_code != 0 && steps.flags.outputs.fail_fast != 'true'
         uses: peter-evans/create-issue-from-file@v5
         with:
           title: Link Checker Report

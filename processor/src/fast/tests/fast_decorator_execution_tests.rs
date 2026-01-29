@@ -1,12 +1,14 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Decorator, Kernel, Operation,
+    Decorator, Felt, Operation,
+    field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
+    stack::StackInputs,
 };
 
 use crate::{
-    AdviceInputs, ExecutionOptions, Program, StackInputs, fast::FastProcessor,
+    AdviceInputs, Program, fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
 };
 
@@ -50,8 +52,7 @@ fn test_before_enter_decorator_executed_once_fast() {
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
     let mut host = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -78,8 +79,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
         create_test_program(&before_enter_decorators, &[after_exit_decorator], &operations);
 
     let mut host = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -122,8 +122,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
         create_test_program(&[before_enter_decorator], &after_exit_decorators, &operations);
 
     let mut host = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -172,8 +171,7 @@ fn test_decorator_execution_order_fast() {
         create_test_program(&before_enter_decorators, &after_exit_decorators, &operations);
 
     let mut host = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -211,7 +209,7 @@ fn test_decorator_execution_order_fast() {
 }
 
 #[test]
-fn test_fast_processor_decorator_execution_vs_standard() {
+fn test_processor_decorator_execution() {
     let before_enter_decorator = Decorator::Trace(1);
     let after_exit_decorator = Decorator::Trace(2);
     let operations = [Operation::Noop];
@@ -219,60 +217,20 @@ fn test_fast_processor_decorator_execution_vs_standard() {
     let program =
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
-    // Test standard processor
-    let mut host_standard = TestConsistencyHost::new();
-    let stack_inputs_standard = StackInputs::try_from_ints([1].iter().copied()).unwrap();
-    let mut process = crate::Process::new(
-        Kernel::default(),
-        stack_inputs_standard,
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(),
+    let mut host = TestConsistencyHost::new();
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+
+    let execution_result = processor.execute_sync(&program, &mut host);
+    assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
+
+    // Check decorator execution
+    insta::assert_debug_snapshot!(
+        "trace_count",
+        (host.get_trace_count(1), host.get_trace_count(2))
     );
 
-    // Test standard processor
-    let result_standard = process.execute(&program, &mut host_standard);
-    assert!(result_standard.is_ok(), "Standard execution failed: {:?}", result_standard);
-
-    // Test fast processor
-    let mut host_fast = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
-
-    let result_fast = processor.execute_sync(&program, &mut host_fast);
-    assert!(result_fast.is_ok(), "Fast execution failed: {:?}", result_fast);
-
-    // Compare decorator execution between processors
-    assert_eq!(
-        host_standard.get_trace_count(1),
-        host_fast.get_trace_count(1),
-        "Both processors should execute before_enter decorator (trace 1) the same number of times"
-    );
-    assert_eq!(
-        host_standard.get_trace_count(2),
-        host_fast.get_trace_count(2),
-        "Both processors should execute after_exit decorator (trace 2) the same number of times"
-    );
-
-    // Compare execution order
-    let standard_order = host_standard.get_execution_order();
-    let fast_order = host_fast.get_execution_order();
-    assert_eq!(
-        standard_order.len(),
-        fast_order.len(),
-        "Both processors should have the same number of trace events"
-    );
-
-    for (i, (standard_event, fast_event)) in
-        standard_order.iter().zip(fast_order.iter()).enumerate()
-    {
-        assert_eq!(
-            standard_event.0, fast_event.0,
-            "Trace event {} should have the same trace ID in both processors",
-            i
-        );
-        // Note: We don't compare clock cycles as they may differ between processors
-        // due to different internal execution strategies
-    }
+    // Check execution order
+    insta::assert_debug_snapshot!("execution_order", host.get_execution_order());
 }
 
 #[test]
@@ -286,10 +244,10 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
 
     // Use actual operations instead of just noop to have meaningful execution flow
     let operations = [
-        Operation::Push(1_u32.into()), // Operation 0
-        Operation::Push(2_u32.into()), // Operation 1
-        Operation::Add,                // Operation 2
-        Operation::Drop,               // Clean up stack to prevent overflow
+        Operation::Push(Felt::from_u32(1)), // Operation 0
+        Operation::Push(Felt::from_u32(2)), // Operation 1
+        Operation::Add,                     // Operation 2
+        Operation::Drop,                    // Clean up stack to prevent overflow
     ];
 
     let program = create_test_program_with_inner_decorators(
@@ -300,8 +258,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
     );
 
     let mut host = TestConsistencyHost::new();
-    let stack_slice = Vec::new();
-    let processor = FastProcessor::new_debug(&stack_slice, AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -366,7 +323,7 @@ fn create_test_program_with_inner_decorators(
 fn test_decorator_bypass_in_release_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
-    let processor = FastProcessor::new(&[]);
+    let processor = FastProcessor::new(StackInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestConsistencyHost::new();
 
@@ -378,7 +335,7 @@ fn test_decorator_bypass_in_release_mode() {
 fn test_decorator_bypass_in_debug_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
-    let processor = FastProcessor::new_debug(&[], AdviceInputs::default());
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestConsistencyHost::new();
 

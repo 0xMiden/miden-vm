@@ -1,10 +1,14 @@
-use miden_core::{Felt, ONE, mast::MastForest};
+use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 
 use crate::{
-    BaseHost, ErrorContext, ExecutionError,
+    ExecutionError,
+    errors::OperationError,
     fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
 };
+
+#[cfg(test)]
+mod tests;
 
 /// Pops a value off the stack and asserts that it is equal to ONE.
 ///
@@ -14,17 +18,12 @@ use crate::{
 pub(super) fn op_assert<P: Processor>(
     processor: &mut P,
     err_code: Felt,
-    host: &mut impl BaseHost,
     program: &MastForest,
-    err_ctx: &impl ErrorContext,
     tracer: &mut impl Tracer,
-) -> Result<(), ExecutionError> {
+) -> Result<(), OperationError> {
     if processor.stack().get(0) != ONE {
-        let process = &mut processor.state();
-        let clk = process.clk();
-        let err = host.on_assert_failed(process, err_code);
         let err_msg = program.resolve_error_message(err_code);
-        return Err(ExecutionError::failed_assertion(clk, err_code, err_msg, err, err_ctx));
+        return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
     processor.stack().decrement_size(tracer);
     Ok(())
@@ -38,7 +37,7 @@ pub(super) fn op_sdepth<P: Processor>(
 ) -> Result<(), ExecutionError> {
     let depth = processor.stack().depth();
     processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, depth.into());
+    processor.stack().set(0, Felt::from_u32(depth));
 
     Ok(())
 }

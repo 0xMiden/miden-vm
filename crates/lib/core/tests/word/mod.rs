@@ -1,7 +1,7 @@
 use core::cmp::Ordering;
 
-use miden_core::LexicographicWord;
-use miden_utils_testing::{prepend_word_to_vec as prepend_word, rand};
+use miden_core::{Felt, LexicographicWord, Word, field::PrimeField64};
+use miden_utils_testing::rand;
 use num::Integer;
 use rstest::rstest;
 
@@ -31,9 +31,9 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
         let expected_cmp = LexicographicWord::cmp(&lhs.into(), &rhs.into());
 
         let mut operand_stack: Vec<u64> = Default::default();
-        prepend_word(&mut operand_stack, rhs);
         prepend_word(&mut operand_stack, lhs);
-        // => [RHS, LHS]
+        prepend_word(&mut operand_stack, rhs);
+        // => [RHS, LHS] with rhs[0] on top
 
         let expected = u64::from(valid_ords.contains(&expected_cmp));
 
@@ -44,21 +44,20 @@ fn test_word_comparison(#[case] proc_name: &str, #[case] valid_ords: &[Ordering]
 #[test]
 fn test_reverse() {
     const SOURCE: &str = "
-        use miden::core::word
-
         begin
-            exec.word::reverse
+            reversew
         end
     ";
 
     let mut seed = 0xfacade;
     for _ in 0..1000 {
+        let word = rand::seeded_word(&mut seed);
         let mut operand_stack: Vec<u64> = Default::default();
-        prepend_word(&mut operand_stack, rand::seeded_word(&mut seed));
+        prepend_word(&mut operand_stack, word);
 
-        // This looks extremely weird, but `build_test!()` and `expect_stack()` take opposite
-        // stack orders, so this is actually correct.
-        build_test!(SOURCE, &operand_stack).expect_stack(&operand_stack);
+        // reversew reverses [w0, w1, w2, w3] → [w3, w2, w1, w0]
+        let expected: Vec<u64> = word.iter().rev().map(|f| f.as_canonical_u64()).collect();
+        build_test!(SOURCE, &operand_stack).expect_stack(&expected);
     }
 }
 
@@ -89,7 +88,7 @@ fn test_preserving_eqz() {
     ";
 
     build_test!(SOURCE, &[0, 0, 0, 0]).expect_stack(&[1, 0, 0, 0, 0]);
-    build_test!(SOURCE, &[0, 1, 2, 3]).expect_stack(&[0, 3, 2, 1, 0]);
+    build_test!(SOURCE, &[0, 1, 2, 3]).expect_stack(&[0, 0, 1, 2, 3]);
 }
 
 #[test]
@@ -111,12 +110,11 @@ fn test_preserving_eq() {
         let is_equal = lhs == rhs;
 
         let mut operand_stack: Vec<u64> = Default::default();
-        prepend_word(&mut operand_stack, rhs);
         prepend_word(&mut operand_stack, lhs);
+        prepend_word(&mut operand_stack, rhs);
 
-        let mut expected: Vec<u64> = operand_stack.clone();
-        expected.push(is_equal.into());
-        expected.reverse();
+        let mut expected: Vec<u64> = vec![is_equal.into()];
+        expected.extend(operand_stack.iter());
 
         build_test!(SOURCE, &operand_stack).expect_stack(&expected);
     }
@@ -145,10 +143,10 @@ fn store_word_u32s_le_stores_limbs() {
 
         begin
             push.{ptr}
-            push.{w0}
-            push.{w1}
-            push.{w2}
             push.{w3}
+            push.{w2}
+            push.{w1}
+            push.{w0}
             exec.word::store_word_u32s_le
         end
     ",
@@ -162,4 +160,10 @@ fn store_word_u32s_le_stores_limbs() {
     let expected_mem = [w0_lo, w0_hi, w1_lo, w1_hi, w2_lo, w2_hi, w3_lo, w3_hi];
 
     build_test!(&source).expect_stack_and_memory(&[], PTR, &expected_mem);
+}
+
+/// Add a Word to the top of the operand stack Vec in LE order.
+/// `word[0]` will be on top of the stack.
+fn prepend_word(target: &mut Vec<u64>, word: Word) {
+    let _iterator = target.splice(0..0, word.iter().map(Felt::as_canonical_u64));
 }

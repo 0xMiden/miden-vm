@@ -20,7 +20,7 @@ fn push_local() {
     let inputs = [1, 2, 3, 4];
     // In general, there is no guarantee that reading from uninitialized memory will result in ZEROs
     // but in this case since no other operations are executed, we do know it will push a ZERO.
-    let final_stack = [0, 4, 3, 2, 1];
+    let final_stack = [0, 1, 2, 3, 4];
 
     build_test!(source, &inputs).expect_stack(&final_stack);
 }
@@ -44,8 +44,9 @@ fn pop_local() {
             swapw dropw
         end";
 
-    let test = build_test!(source, &[1, 2, 3, 4]);
-    test.expect_stack(&[3, 4, 2, 1]);
+    // Stack [1, 2, 4, 3] - after stores and loads, result is [2, 1, 4, 3]
+    let test = build_test!(source, &[1, 2, 4, 3]);
+    test.expect_stack(&[2, 1, 4, 3]);
 
     // --- test existing memory is not affected ---------------------------------------------------
     let source = "
@@ -61,7 +62,7 @@ fn pop_local() {
     let mem_addr = 1;
 
     let test = build_test!(source, &[1, 2, 3, 4]);
-    test.expect_stack_and_memory(&[1], mem_addr, &[3, 0, 0, 0]);
+    test.expect_stack_and_memory(&[4], mem_addr, &[2, 0, 0, 0]);
 }
 
 // OVERWRITING VALUES ON THE STACK (LOAD)
@@ -82,7 +83,7 @@ fn loadw_local() {
     let inputs = [1, 2, 3, 4, 5, 6, 7, 8];
     // In general, there is no guarantee that reading from uninitialized memory will result in ZEROs
     // but in this case since no other operations are executed, we do know it will load ZEROs.
-    let final_stack = [0, 0, 0, 0, 4, 3, 2, 1];
+    let final_stack = [0, 0, 0, 0, 5, 6, 7, 8];
 
     build_test!(source, &inputs).expect_stack(&final_stack);
 }
@@ -103,9 +104,9 @@ fn storew_local() {
             swapw
             loc_storew_be.4
             swapw
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
-            push.0.0.0.0
+            padw
             loc_loadw_be.4
         end
         begin
@@ -115,7 +116,7 @@ fn storew_local() {
         end"
     );
 
-    let test = build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8]);
+    let test = build_test!(source, &[8, 7, 6, 5, 4, 3, 2, 1]);
     test.expect_stack(&[4, 3, 2, 1, 8, 7, 6, 5, 8, 7, 6, 5, 4, 3, 2, 1]);
 
     // --- test existing memory is not affected ---------------------------------------------------
@@ -134,7 +135,7 @@ fn storew_local() {
     let mem_addr = 4;
 
     let test = build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
-    test.expect_stack_and_memory(&[4, 3, 2, 1], mem_addr, &[5, 6, 7, 8]);
+    test.expect_stack_and_memory(&[9, 10, 11, 12], mem_addr, &[8, 7, 6, 5]);
 }
 
 // NESTED PROCEDURES & PAIRED OPERATIONS (push/pop, pushw/popw, loadw/storew)
@@ -155,8 +156,7 @@ fn inverse_operations() {
             movup.5 drop
         end";
     let inputs = [0, 1, 2, 3, 4];
-    let mut final_stack = inputs;
-    final_stack.reverse();
+    let final_stack = inputs;
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -167,7 +167,7 @@ fn inverse_operations() {
         proc foo
             loc_storew_be.0
             dropw
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
 
@@ -176,8 +176,7 @@ fn inverse_operations() {
             swapw dropw
         end";
     let inputs = [1, 2, 3, 4];
-    let mut final_stack = inputs;
-    final_stack.reverse();
+    let final_stack = inputs;
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -194,8 +193,7 @@ fn inverse_operations() {
             exec.foo
         end";
     let inputs = [0, 1, 2, 3, 4];
-    let mut final_stack = inputs;
-    final_stack.reverse();
+    let final_stack = inputs;
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&final_stack);
@@ -215,7 +213,7 @@ fn read_after_write() {
             movup.5 drop
         end";
 
-    let test = build_test!(source, &[1, 2, 3, 4]);
+    let test = build_test!(source, &[4, 3, 2, 1]);
     test.expect_stack(&[1, 4, 3, 2, 1]);
 
     // --- write to memory first, then test read with pushw --------------------------------------
@@ -223,7 +221,7 @@ fn read_after_write() {
         @locals(4)
         proc foo
             loc_storew_be.0
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
         begin
@@ -232,7 +230,7 @@ fn read_after_write() {
         end";
 
     let test = build_test!(source, &[1, 2, 3, 4]);
-    test.expect_stack(&[4, 3, 2, 1, 4, 3, 2, 1]);
+    test.expect_stack(&[1, 2, 3, 4, 1, 2, 3, 4]);
 
     // --- write to memory first, then test read with loadw --------------------------------------
     let source = "
@@ -247,7 +245,7 @@ fn read_after_write() {
         end";
 
     let test = build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8]);
-    test.expect_stack(&[8, 7, 6, 5]);
+    test.expect_stack(&[1, 2, 3, 4]);
 }
 
 #[test]
@@ -270,7 +268,7 @@ fn nested_procedures() {
             exec.bar
             movup.3 drop
         end";
-    let inputs = [0, 1, 2, 3];
+    let inputs = [3, 2, 1, 0];
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&[3, 1, 0]);
@@ -287,7 +285,7 @@ fn nested_procedures() {
             loc_storew_be.0
             dropw
             exec.foo
-            push.0.0.0.0
+            padw
             loc_loadw_be.0
         end
         begin
@@ -297,7 +295,7 @@ fn nested_procedures() {
     let inputs = [0, 1, 2, 3, 4, 5, 6, 7];
 
     let test = build_test!(source, &inputs);
-    test.expect_stack(&[7, 6, 5, 4]);
+    test.expect_stack(&[0, 1, 2, 3]);
 
     // --- test nested procedures - storew/loadw --------------------------------------------------
     let source = "
@@ -319,7 +317,7 @@ fn nested_procedures() {
     let inputs = [0, 1, 2, 3];
 
     let test = build_test!(source, &inputs);
-    test.expect_stack(&[3, 2, 1, 0, 1, 0]);
+    test.expect_stack(&[0, 1, 2, 3, 2, 3]);
 }
 
 #[test]
@@ -344,7 +342,7 @@ fn free_memory_pointer() {
 
             movupw.2 dropw
         end";
-    let inputs = [1, 2, 3, 4, 5, 6, 7];
+    let inputs = [7, 6, 5, 4, 3, 2, 1];
 
     let test = build_test!(source, &inputs);
     test.expect_stack(&[7, 6, 5, 4, 1]);

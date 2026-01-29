@@ -57,7 +57,8 @@ fn build_trace(c: &mut Criterion) {
                     let program = assembler
                         .assemble_program(&source)
                         .expect("Failed to compile test source.");
-                    let stack_inputs: Vec<_> = stack_inputs.iter().rev().copied().collect();
+                    let stack_inputs_vec: Vec<_> = stack_inputs.iter().rev().copied().collect();
+                    let stack_inputs = StackInputs::new(&stack_inputs_vec).unwrap();
 
                     bench.to_async(Runtime::new().unwrap()).iter_batched(
                         || {
@@ -65,18 +66,19 @@ fn build_trace(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new_with_advice_inputs(
-                                &stack_inputs,
+                            let processor = FastProcessor::new_with_options(
+                                stack_inputs,
                                 advice_inputs.clone(),
+                                ExecutionOptions::default()
+                                    .with_core_trace_fragment_size(TRACE_FRAGMENT_SIZE)
+                                    .unwrap(),
                             );
 
                             (host, program.clone(), processor)
                         },
                         |(mut host, program, processor)| async move {
-                            let (execution_output, trace_generation_context) = processor
-                                .execute_for_trace(&program, &mut host, TRACE_FRAGMENT_SIZE)
-                                .await
-                                .unwrap();
+                            let (execution_output, trace_generation_context) =
+                                processor.execute_for_trace(&program, &mut host).await.unwrap();
 
                             let trace = parallel::build_trace(
                                 execution_output,
@@ -107,7 +109,6 @@ fn build_trace(c: &mut Criterion) {
                             let host = DefaultHost::default()
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
-                            let stack_inputs = stack_inputs.clone();
                             let advice_inputs = advice_inputs.clone();
 
                             (host, stack_inputs, advice_inputs, program.clone())
@@ -120,6 +121,7 @@ fn build_trace(c: &mut Criterion) {
                                 &mut host,
                                 ExecutionOptions::default(),
                             )
+                            .await
                             .unwrap();
                             black_box(trace);
                         },

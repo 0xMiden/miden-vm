@@ -11,9 +11,8 @@ use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 /// Defines the initial state of the VM's operand stack.
 ///
-/// The values in the struct are stored in the "stack order" - i.e., the last input is at the top
-/// of the stack (in position 0).
-#[derive(Clone, Debug, Default)]
+/// The first element is at position 0 (top of stack).
+#[derive(Clone, Copy, Debug, Default)]
 pub struct StackInputs {
     elements: [Felt; MIN_STACK_DEPTH],
 }
@@ -22,19 +21,25 @@ impl StackInputs {
     // CONSTRUCTORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns [StackInputs] from a list of values, reversing them into a stack.
+    /// Returns [StackInputs] from a list of values.
+    ///
+    /// The first element will be at position 0 (top of stack).
     ///
     /// # Errors
     /// Returns an error if the number of input values exceeds the allowed maximum.
-    pub fn new(mut values: Vec<Felt>) -> Result<Self, InputError> {
+    pub fn new(values: &[Felt]) -> Result<Self, InputError> {
         if values.len() > MIN_STACK_DEPTH {
-            return Err(InputError::InputLengthExceeded(MIN_STACK_DEPTH, values.len()));
+            return Err(InputError::InputStackTooBig(MIN_STACK_DEPTH, values.len()));
         }
-        values.reverse();
-        values.resize(MIN_STACK_DEPTH, ZERO);
 
-        Ok(Self { elements: values.try_into().unwrap() })
+        let mut elements = [ZERO; MIN_STACK_DEPTH];
+        elements[..values.len()].copy_from_slice(values);
+
+        Ok(Self { elements })
     }
+
+    // TESTING
+    // --------------------------------------------------------------------------------------------
 
     /// Attempts to create stack inputs from an iterator of integers.
     ///
@@ -42,16 +47,19 @@ impl StackInputs {
     /// Returns an error if:
     /// - The values do not represent a valid field element.
     /// - Number of values in the iterator exceeds the allowed maximum number of input values.
+    #[cfg(any(test, feature = "testing"))]
     pub fn try_from_ints<I>(iter: I) -> Result<Self, InputError>
     where
         I: IntoIterator<Item = u64>,
     {
+        use crate::field::QuotientMap;
+
         let values = iter
             .into_iter()
-            .map(|v| Felt::try_from(v).map_err(|e| InputError::NotFieldElement(v, e)))
+            .map(|v| Felt::from_canonical_checked(v).ok_or(InputError::InvalidStackElement(v)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        Self::new(values)
+        Self::new(&values)
     }
 }
 
@@ -101,11 +109,10 @@ impl Serializable for StackInputs {
 impl Deserializable for StackInputs {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let num_elements = source.read_u8()?;
+        let elements: Vec<Felt> =
+            source.read_many_iter::<Felt>(num_elements.into())?.collect::<Result<_, _>>()?;
 
-        let mut elements = source.read_many::<Felt>(num_elements.into())?;
-        elements.reverse();
-
-        StackInputs::new(elements).map_err(|err| {
+        StackInputs::new(&elements).map_err(|err| {
             DeserializationError::InvalidValue(format!("failed to create stack inputs: {err}",))
         })
     }

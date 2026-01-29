@@ -2,7 +2,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Spanned},
     diagnostics::{RelatedLabel, Report},
 };
-use miden_core::{Felt, Operation::*, WORD_SIZE};
+use miden_core::{Felt, Operation::*, WORD_SIZE, field::PrimeCharacteristicRing};
 
 use super::{BasicBlockBuilder, push_u32_value};
 use crate::{ProcedureContext, fmp::push_offset_fmp_sequence};
@@ -188,7 +188,7 @@ pub fn local_to_absolute_addr(
     // word-aligned memory access. We need to use the same alignment when calculating the offset.
     // See fmp_start_frame_sequence() and fmp_end_frame_sequence() in fmp.rs.
     let aligned_num_locals = num_proc_locals.next_multiple_of(WORD_SIZE as u16);
-    let fmp_offset_of_local = -Felt::from(aligned_num_locals - index_of_local);
+    let fmp_offset_of_local = -Felt::from_u16(aligned_num_locals - index_of_local);
     block_builder.push_ops(push_offset_fmp_sequence(fmp_offset_of_local));
 
     Ok(())

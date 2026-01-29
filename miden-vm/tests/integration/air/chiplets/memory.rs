@@ -43,7 +43,7 @@ fn write_read() {
 fn update() {
     let source = "
     begin
-        push.0.0.0.0
+        padw
         mem_loadw_be.0
         mem_storew_be.0
         swapw dropw

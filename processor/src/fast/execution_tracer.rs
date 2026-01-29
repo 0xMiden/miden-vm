@@ -1,9 +1,13 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::{chiplets::hasher::STATE_WIDTH, rows::RowIndex};
+use miden_air::trace::{
+    RowIndex,
+    chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH},
+};
 use miden_core::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
+    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,
@@ -14,7 +18,7 @@ use miden_core::{
 
 use crate::{
     chiplets::CircuitEvaluation,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
         FastProcessor,
@@ -22,14 +26,14 @@ use crate::{
             AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
             CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
             HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, MemoryWritesReplay, NodeExecutionState, NodeFlags,
-            RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+            MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay,
+            StackOverflowReplay, StackState, SystemState,
         },
         tracer::Tracer,
     },
     stack::OverflowTable,
     system::ContextId,
-    utils::{HASH_CYCLE_LEN_FELT, split_u32_into_u16},
+    utils::split_u32_into_u16,
 };
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
@@ -37,7 +41,6 @@ use crate::{
 struct StateSnapshot {
     state: CoreTraceState,
     continuation_stack: ContinuationStack,
-    execution_state: NodeExecutionState,
     initial_mast_forest: Arc<MastForest>,
 }
 
@@ -175,8 +178,8 @@ impl ExecutionTracer {
         &mut self,
         system_state: SystemState,
         stack_top: [Felt; MIN_STACK_DEPTH],
-        continuation_stack: ContinuationStack,
-        execution_state: NodeExecutionState,
+        mut continuation_stack: ContinuationStack,
+        continuation: Continuation,
         current_forest: Arc<MastForest>,
     ) {
         // If there is an ongoing snapshot, finish it
@@ -203,6 +206,9 @@ impl ExecutionTracer {
                 StackState::new(stack_top, stack_depth, last_overflow_addr)
             };
 
+            // Push new continuation corresponding to the current execution state
+            continuation_stack.push_continuation(continuation);
+
             Some(StateSnapshot {
                 state: CoreTraceState {
                     system: system_state,
@@ -210,7 +216,6 @@ impl ExecutionTracer {
                     stack,
                 },
                 continuation_stack,
-                execution_state,
                 initial_mast_forest: current_forest,
             })
         };
@@ -410,7 +415,6 @@ impl ExecutionTracer {
                     block_stack: block_stack_replay,
                 },
                 continuation: snapshot.continuation_stack,
-                initial_execution_state: snapshot.execution_state,
                 initial_mast_forest: snapshot.initial_mast_forest,
             };
 
@@ -425,8 +429,8 @@ impl Tracer for ExecutionTracer {
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
-        execution_state: NodeExecutionState,
-        continuation_stack: &mut ContinuationStack,
+        continuation: Continuation,
+        continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state
@@ -438,24 +442,24 @@ impl Tracer for ExecutionTracer {
                     .try_into()
                     .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
                 continuation_stack.clone(),
-                execution_state.clone(),
+                continuation.clone(),
                 current_forest.clone(),
             );
         }
 
         // Update block stack
-        match &execution_state {
-            NodeExecutionState::BasicBlock { .. } => {
+        match continuation {
+            Continuation::ResumeBasicBlock { .. } => {
                 // do nothing, since operations in a basic block don't update the block stack
             },
-            NodeExecutionState::Start(mast_node_id) => match &current_forest[*mast_node_id] {
+            Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
                 MastNode::Join(_)
                 | MastNode::Split(_)
                 | MastNode::Loop(_)
                 | MastNode::Dyn(_)
                 | MastNode::Call(_) => {
                     self.record_control_node_start(
-                        &current_forest[*mast_node_id],
+                        &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
@@ -475,13 +479,21 @@ impl Tracer for ExecutionTracer {
                     "start_clock_cycle is guaranteed not to be called on external nodes"
                 ),
             },
-            NodeExecutionState::Respan { node_id: _, batch_index: _ } => {
+            Continuation::Respan { node_id: _, batch_index: _ } => {
                 self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
-            NodeExecutionState::LoopRepeat(_) => {
-                // do nothing, REPEAT doesn't affect the block stack
+            Continuation::FinishLoop { node_id: _, was_entered }
+                if was_entered && processor.stack_get(0) == ONE =>
+            {
+                // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
             },
-            NodeExecutionState::End(_) => {
+            Continuation::FinishJoin(_)
+            | Continuation::FinishSplit(_)
+            | Continuation::FinishCall(_)
+            | Continuation::FinishDyn(_)
+            | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
+            | Continuation::FinishBasicBlock(_) => {
+                // This is an END operation; pop the block stack and record the node end
                 let block_info = self.block_stack.pop();
                 self.record_node_end(&block_info);
 
@@ -491,6 +503,14 @@ impl Tracer for ExecutionTracer {
                         parent_fn_hash: ctx_info.parent_fn_hash,
                     });
                 }
+            },
+            Continuation::FinishExternal(_)
+            | Continuation::EnterForest(_)
+            | Continuation::AfterExitDecorators(_)
+            | Continuation::AfterExitDecoratorsBasicBlock(_) => {
+                panic!(
+                    "FinishExternal, EnterForest, AfterExitDecorators and AfterExitDecoratorsBasicBlock continuations are guaranteed not to be passed here"
+                )
             },
         }
     }
@@ -588,8 +608,8 @@ impl Tracer for ExecutionTracer {
     }
 
     fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
-        let (t1, t0) = split_u32_into_u16(u32_lo.as_int());
-        let (t3, t2) = split_u32_into_u16(u32_hi.as_int());
+        let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
+        let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
 
         self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
     }
@@ -603,12 +623,12 @@ impl Tracer for ExecutionTracer {
     }
 
     fn increment_clk(&mut self) {
-        self.overflow_table.advance_clock();
+        // do nothing
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
         let new_overflow_value = processor.stack_get(15);
-        self.overflow_table.push(new_overflow_value);
+        self.overflow_table.push(new_overflow_value, processor.clk);
     }
 
     fn decrement_stack_size(&mut self) {
@@ -637,7 +657,7 @@ impl Tracer for ExecutionTracer {
 
 /// The number of hasher rows per permutation operation. This is used to compute the address for
 /// the next operation in the hasher chiplet.
-const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = 8;
+const NUM_HASHER_ROWS_PER_PERMUTATION: u32 = HASH_CYCLE_LEN as u32;
 
 /// Implements a shim for the hasher chiplet, where the responses of the hasher chiplet are emulated
 /// and recorded for later replay.
@@ -666,7 +686,7 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_control_block()`.
     pub fn record_hash_control_block(&mut self) -> Felt {
-        let block_addr = self.addr.into();
+        let block_addr = Felt::from_u32(self.addr);
 
         self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
@@ -676,7 +696,7 @@ impl HasherChipletShim {
 
     /// Records the address returned from a call to `Hasher::hash_basic_block()`.
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
-        let block_addr = self.addr.into();
+        let block_addr = Felt::from_u32(self.addr);
 
         self.replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
@@ -685,19 +705,20 @@ impl HasherChipletShim {
     }
     /// Records the result of a call to `Hasher::permute()`.
     pub fn record_permute_output(&mut self, hashed_state: [Felt; 12]) {
-        self.replay.record_permute(self.addr.into(), hashed_state);
+        self.replay.record_permute(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
-        self.replay.record_build_merkle_root(self.addr.into(), computed_root);
+        self.replay.record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
-        self.replay.record_update_merkle_root(self.addr.into(), old_root, new_root);
+        self.replay
+            .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
         self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;

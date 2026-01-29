@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::utils
 
@@ -36,7 +36,7 @@ const ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION = "failed to load the circuit descr
 #! chiplet.
 #!
 #! The circuit description is hardcoded into the verifier using its commitment, which is computed as
-#! the sequential hash of its description using RPO hasher. The circuit description, containing both
+#! the sequential hash of its description using Poseidon2 hasher. The circuit description, containing both
 #! constants and evaluation gates description, is stored at the contiguous memory region starting
 #! at `ACE_CIRCUIT_PTR`. The variable part of the circuit input is stored at the contiguous memory
 #! region starting at `pi_ptr`. The (variable) inputs to the circuit are laid out such that the
@@ -85,9 +85,9 @@ proc load_ace_circuit_description
     padw padw padw
     repeat.14
         adv_pipe
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
-    exec.rpo256::squeeze_digest
+    exec.poseidon2::squeeze_digest
     movup.4 drop
     assert_eqw.err=ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION
     # => []

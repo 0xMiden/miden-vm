@@ -9,7 +9,7 @@ The Chiplets module contains specialized components dedicated to accelerating co
 
 Currently, Miden VM relies on 4 chiplets:
 
-- The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), used to compute Rescue Prime Optimized hashes both for sequential hashing and for Merkle tree hashing.
+- The [Hash Chiplet](./hasher.md) (also referred to as the Hasher), used to compute Poseidon2 hashes both for sequential hashing and for Merkle tree hashing.
 - The [Bitwise Chiplet](./bitwise.md), used to compute bitwise operations (e.g., `AND`, `XOR`) over 32-bit integers.
 - The [Memory Chiplet](./memory.md), used to support random-access memory in the VM.
 - The [Arithmetic Circuit Evaluation (ACE)](./ace.md), used to ensure that arithmetic circuits evaluate to zero.
@@ -43,7 +43,7 @@ The resulting order is as follows:
 
 | Chiplet         | Cycle Length | Internal Degree | Chiplet Selector Degree | Total Degree | Columns | Chiplet Selector Flag |
 | --------------- | :----------: | :-------------: | :---------------------: | :----------: | :-----: | --------------------- |
-| Hash chiplet    |      8       |        8        |            1            |      9       |   17    | $\{0\}$               |
+| Hash chiplet    |      32      |        8        |            1            |      9       |   17    | $\{0\}$               |
 | Bitwise chiplet |      8       |        3        |            2            |      5       |   13    | $\{1, 0\}$            |
 | Memory          |      -       |        6        |            3            |      9       |   12    | $\{1, 1, 0\}$         |
 | ACE             |      -       |        5        |            4            |      9       |   16    | $\{1, 1, 1, 0\}$      |

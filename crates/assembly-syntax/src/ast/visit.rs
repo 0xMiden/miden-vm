@@ -461,7 +461,7 @@ where
         | U32WrappingSubImm(imm)
         | U32OverflowingSubImm(imm)
         | U32WrappingMulImm(imm)
-        | U32OverflowingMulImm(imm)
+        | U32WideningMulImm(imm)
         | U32DivImm(imm)
         | U32ModImm(imm)
         | U32DivModImm(imm)
@@ -484,8 +484,8 @@ where
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
         | Ext2Inv | U32Test | U32TestW | U32Assert | U32Assert2 | U32AssertW | U32Split
         | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32OverflowingAdd3 | U32WrappingAdd3
-        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32OverflowingMul
-        | U32OverflowingMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
+        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32WideningMul
+        | U32WideningMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
         | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl | U32Popcnt | U32Clz | U32Ctz
         | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte | U32Min | U32Max | Drop | DropW
         | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5 | Dup6 | Dup7 | Dup8 | Dup9 | Dup10
@@ -1012,8 +1012,12 @@ where
             visitor.visit_mut_block(then_blk)?;
             visitor.visit_mut_block(else_blk)
         },
-        Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_mut_block(body),
+        Op::While { body, .. } => visitor.visit_mut_block(body),
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
+        Op::Repeat { count, body, .. } => {
+            visitor.visit_mut_immediate_u32(count)?;
+            visitor.visit_mut_block(body)
+        },
     }
 }
 
@@ -1046,7 +1050,7 @@ where
         | U32WrappingSubImm(imm)
         | U32OverflowingSubImm(imm)
         | U32WrappingMulImm(imm)
-        | U32OverflowingMulImm(imm)
+        | U32WideningMulImm(imm)
         | U32DivImm(imm)
         | U32ModImm(imm)
         | U32DivModImm(imm)
@@ -1069,8 +1073,8 @@ where
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
         | Ext2Inv | U32Test | U32TestW | U32Assert | U32Assert2 | U32AssertW | U32Split
         | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32OverflowingAdd3 | U32WrappingAdd3
-        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32OverflowingMul
-        | U32OverflowingMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
+        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32WideningMul
+        | U32WideningMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
         | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl | U32Popcnt | U32Clz | U32Ctz
         | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte | U32Min | U32Max | Drop | DropW
         | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5 | Dup6 | Dup7 | Dup8 | Dup9 | Dup10

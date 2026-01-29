@@ -32,15 +32,15 @@ WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,metal,testing,internal
+ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,testing,internal
 
 # Workspace-wide test features
-WORKSPACE_TEST_FEATURES  := concurrent,testing,metal,executable
-FAST_TEST_FEATURES       := concurrent,testing,metal,no_err_ctx
+WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
+FAST_TEST_FEATURES       := concurrent,testing
 
 # Feature sets for executable builds
 FEATURES_CONCURRENT_EXEC := --features concurrent,executable
-FEATURES_METAL_EXEC      := --features concurrent,executable,metal,tracing-forest
+FEATURES_METAL_EXEC      := --features concurrent,executable,tracing-forest
 FEATURES_LOG_TREE        := --features concurrent,executable,tracing-forest
 
 # Per-crate default features
@@ -48,9 +48,9 @@ FEATURES_air             := testing
 FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
-FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_miden-vm        := concurrent,executable,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
-FEATURES_prover          := concurrent,metal
+FEATURES_prover          := concurrent
 FEATURES_core-lib        :=FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
@@ -91,7 +91,7 @@ serve-docs: ## Serves the docs
 # -- core knobs (overridable from CLI or by caller targets) --------------------
 # Advanced usage (most users should use pattern rules like 'make test-air'):
 #   make core-test CRATE=miden-air FEATURES=testing
-#   make core-test CARGO_PROFILE=test-dev FEATURES="testing,no_err_ctx"
+#   make core-test CARGO_PROFILE=test-dev FEATURES=testing
 #   make core-test CRATE=miden-processor FEATURES=testing EXPR="-E 'not test(#*proptest)'"
 
 NEXTEST_PROFILE ?= default
@@ -199,10 +199,6 @@ exec: ## Builds an executable with optimized profile and features
 exec-single: ## Builds a single-threaded executable
 	cargo build --profile optimized --features executable
 
-.PHONY: exec-metal
-exec-metal: ## Builds an executable with Metal acceleration enabled
-	cargo build --profile optimized $(FEATURES_METAL_EXEC)
-
 .PHONY: exec-avx2
 exec-avx2: ## Builds an executable with AVX2 acceleration enabled
 	RUSTFLAGS="-C target-feature=+avx2" cargo build --profile optimized $(FEATURES_CONCURRENT_EXEC)
@@ -215,12 +211,32 @@ exec-sve: ## Builds an executable with SVE acceleration enabled
 exec-info: ## Builds an executable with log tree enabled
 	cargo build --profile optimized $(FEATURES_LOG_TREE)
 
+# --- examples ------------------------------------------------------------------------------------
+
+.PHONY: run-examples
+run-examples: exec ## Runs all masm examples to verify they execute correctly
+	@echo "Running masm examples..."
+	@failed=0; \
+	for masm in miden-vm/masm-examples/*/*.masm miden-vm/masm-examples/*/*/*.masm; do \
+		[ -f "$$masm" ] || continue; \
+		echo "  $$masm"; \
+		if ! ./target/optimized/miden-vm run "$$masm" > /dev/null 2>&1; then \
+			echo "    FAILED: $$masm"; \
+			failed=1; \
+		fi; \
+	done; \
+	if [ $$failed -eq 1 ]; then \
+		echo "Some examples failed!"; \
+		exit 1; \
+	fi; \
+	echo "All examples passed."
+
 # --- benchmarking --------------------------------------------------------------------------------
 
 .PHONY: check-bench
-check-bench: ## Builds all benchmarks (incl. those needing no_err_ctx)
-	cargo check --benches --features internal,no_err_ctx
+check-bench: ## Builds all benchmarks
+	cargo check --benches --features internal
 
 .PHONY: bench
 bench: ## Runs benchmarks
-	cargo bench --profile optimized --features internal,no_err_ctx
+	cargo bench --profile optimized --features internal

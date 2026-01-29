@@ -1,15 +1,17 @@
-use miden_air::{
-    RowIndex,
-    trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
-};
+use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
-    Felt, Operation, QuadFelt, Word, crypto::merkle::MerklePath, mast::MastForest,
+    Felt, Operation, Word,
+    crypto::merkle::MerklePath,
+    field::QuadFelt,
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
 };
 
 use crate::{
-    AdviceError, BaseHost, ContextId, ErrorContext, ExecutionError, MemoryError, ProcessState,
-    fast::Tracer, processor::operations::execute_sync_op,
+    AdviceError, ContextId, ExecutionError, Host, MemoryError,
+    errors::{AceEvalError, OperationError},
+    fast::Tracer,
+    processor::operations::execute_sync_op,
 };
 
 mod operations;
@@ -32,9 +34,6 @@ pub trait Processor: Sized {
 
     /// Returns a mutable reference to the internal system.
     fn system(&mut self) -> &mut Self::System;
-
-    /// Returns a [ProcessState] referring to the current process state.
-    fn state(&mut self) -> ProcessState<'_>;
 
     /// Returns a mutable reference to the internal advice provider.
     fn advice_provider(&mut self) -> &mut Self::AdviceProvider;
@@ -80,11 +79,7 @@ pub trait Processor: Sized {
     ///
     /// # Note
     /// All processors need to support this operation.
-    fn op_eval_circuit(
-        &mut self,
-        _err_ctx: &impl ErrorContext,
-        _tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError>;
+    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the provided synchronous operation.
     ///
@@ -97,13 +92,13 @@ pub trait Processor: Sized {
     fn execute_sync_op(
         &mut self,
         op: &Operation,
-        op_idx_in_block: usize,
         current_forest: &MastForest,
-        host: &mut impl BaseHost,
-        err_ctx: &impl ErrorContext,
+        node_id: MastNodeId,
+        host: &mut impl Host,
         tracer: &mut impl Tracer,
+        op_idx: usize,
     ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, op_idx_in_block, current_forest, host, err_ctx, tracer)
+        execute_sync_op(self, op, current_forest, node_id, host, tracer, op_idx)
     }
 }
 
@@ -131,10 +126,6 @@ pub trait StackInterface {
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
 
-    /// Returns a mutable reference to the top 16 elements of the stack, such that the top of the
-    /// stack is at the last index of the returned slice.
-    fn top_mut(&mut self) -> &mut [Felt];
-
     /// Returns the element on the stack at index `idx`.
     fn get(&self, idx: usize) -> Felt;
 
@@ -153,10 +144,28 @@ pub trait StackInterface {
     /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
     ///
     /// Then
-    /// - `stack_get_word(0)` returns `[d, c, b, a]`,
-    /// - `stack_get_word(1)` returns `[e, d, c ,b]`,
+    /// - `stack_get_word(0)` returns `[a, b, c, d]`,
+    /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
+    ///
+    /// Word[0] corresponds to the top of stack.
     fn get_word(&self, start_idx: usize) -> Word;
+
+    /// Returns two words (8 elements) from the stack starting at index `start_idx`.
+    ///
+    /// This is equivalent to reading 8 consecutive elements from the stack, or to reading the words
+    /// as `Self::get_word(0)` and `Self::get_word(4)`.
+    ///
+    /// For example, if the stack looks like this:
+    ///
+    /// top                                                       bottom
+    /// v                                                           v
+    /// a | b | c | d | e | f | g | h | i | j | k | l | m | n | o | p
+    ///
+    /// Then `get_double_word(0)` returns `[a, b, c, d, e, f, g, h]`.
+    fn get_double_word(&self, start_idx: usize) -> [Felt; 8] {
+        core::array::from_fn(|i| self.get(start_idx + i))
+    }
 
     /// Returns the number of elements on the stack in the current context.
     fn depth(&self) -> u32;
@@ -166,8 +175,7 @@ pub trait StackInterface {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// The index is the index of the first element of the word, and the word is written in reverse
-    /// order.
+    /// Word[0] goes to stack position start_idx (top), word[1] to start_idx+1, etc.
     fn set_word(&mut self, start_idx: usize, word: &Word);
 
     /// Swaps the elements at the given indices on the stack.
@@ -272,21 +280,11 @@ pub trait AdviceProviderInterface {
 /// Trait representing the memory subsystem of the processor.
 pub trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
-    fn read_element(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Felt, MemoryError>;
+    fn read_element(&mut self, ctx: ContextId, addr: Felt) -> Result<Felt, MemoryError>;
 
     /// Reads a word from memory starting at the provided address in the provided context.
-    fn read_word(
-        &mut self,
-        ctx: ContextId,
-        addr: Felt,
-        clk: RowIndex,
-        err_ctx: &impl ErrorContext,
-    ) -> Result<Word, MemoryError>;
+    fn read_word(&mut self, ctx: ContextId, addr: Felt, clk: RowIndex)
+    -> Result<Word, MemoryError>;
 
     /// Writes an element to memory at the provided address in the provided context.
     fn write_element(
@@ -294,7 +292,6 @@ pub trait MemoryInterface {
         ctx: ContextId,
         addr: Felt,
         element: Felt,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 
     /// Writes a word to memory starting at the provided address in the provided context.
@@ -304,7 +301,6 @@ pub trait MemoryInterface {
         addr: Felt,
         clk: RowIndex,
         word: Word,
-        err_ctx: &impl ErrorContext,
     ) -> Result<(), MemoryError>;
 }
 
@@ -338,8 +334,8 @@ pub trait HasherInterface {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError>;
 
     /// Verifies that the `claimed_old_root` is indeed the root of a Merkle tree containing
     /// `old_value` at the specified `index`, and computes a new Merkle root after updating the node
@@ -361,8 +357,8 @@ pub trait HasherInterface {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError>;
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError>;
 }
 
 /// Trait for computing helper registers for operations.
@@ -375,7 +371,7 @@ pub trait OperationHelperRegisters {
     fn op_eq_registers(a: Felt, b: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32split operation.
-    fn op_u32split_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32split_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the Eqz operation.
     fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS];
@@ -392,10 +388,10 @@ pub trait OperationHelperRegisters {
     ) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add operation.
-    fn op_u32add_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add3 operation.
-    fn op_u32add3_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32sub operation.
     fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS];

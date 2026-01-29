@@ -3,7 +3,9 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DefaultHost, ExecutionOptions, ExecutionTrace};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, ExecutionTrace, fast::FastProcessor, parallel::build_trace,
+};
 use miden_vm::internal::InputFile;
 use tracing::instrument;
 
@@ -50,6 +52,10 @@ pub struct RunCmd {
     /// Disable debug instructions (release mode)
     #[arg(short = 'r', long = "release")]
     release: bool,
+
+    /// Path to a file (.masm or .masp) containing the kernel to be loaded with the program
+    #[arg(long = "kernel", value_parser)]
+    kernel_file: Option<PathBuf>,
 }
 
 impl RunCmd {
@@ -86,7 +92,7 @@ impl RunCmd {
             OutputFile::write(trace.stack_outputs(), output_path).map_err(Report::msg)?;
         } else {
             // write the stack outputs to the terminal
-            println!("Output: {:?}", trace.stack_outputs().stack_truncated(self.num_outputs));
+            println!("Output: {:?}", trace.stack_outputs().get_num_elements(self.num_outputs));
         }
 
         // calculate the percentage of padded rows
@@ -134,25 +140,24 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     let advice_inputs = input_data.parse_advice_inputs().map_err(Report::msg)?;
     let mut host = DefaultHost::default().with_library(&CoreLibrary::default())?;
 
-    let execution_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        params.trace,
-        !params.release,
-    )
-    .into_diagnostic()?;
-
     let program_hash: [u8; 32] = program.hash().into();
 
-    // execute program and generate outputs
-    let trace = miden_processor::execute(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        execution_options,
-    )
-    .wrap_err("Failed to generate execution trace")?;
+    let processor = if params.release {
+        FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs)
+    } else {
+        FastProcessor::new_debug(stack_inputs, advice_inputs)
+    };
+
+    let (execution_output, trace_generation_context) = processor
+        .execute_for_trace_sync(&program, &mut host)
+        .wrap_err("Failed to execute program")?;
+
+    let trace = build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        program.kernel().clone(),
+    );
 
     Ok((trace, program_hash))
 }
@@ -169,17 +174,24 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
     // load libraries from files
     let libraries = Libraries::new(&params.library_paths)?;
 
-    // load program from file and compile
-    let (program, source_manager) = get_masm_program(&params.program_file, &libraries)?;
-    let input_data = InputFile::read(&params.input_file, &params.program_file)?;
+    // validate kernel file if provided
+    if let Some(ref kernel_path) = params.kernel_file
+        && !kernel_path.is_file()
+    {
+        return Err(Report::msg(format!(
+            "Kernel file `{}` must be a file.",
+            kernel_path.display()
+        )));
+    }
 
-    let execution_options = ExecutionOptions::new(
-        Some(params.max_cycles),
-        params.expected_cycles,
-        params.trace,
+    // load program from file and compile
+    let (program, source_manager) = get_masm_program(
+        &params.program_file,
+        &libraries,
         !params.release,
-    )
-    .into_diagnostic()?;
+        params.kernel_file.as_deref(),
+    )?;
+    let input_data = InputFile::read(&params.input_file, &params.program_file)?;
 
     // fetch the stack and program inputs from the arguments
     let stack_inputs = input_data.parse_stack_inputs().map_err(Report::msg)?;
@@ -196,14 +208,22 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let trace = miden_processor::execute(
-        &program,
-        stack_inputs,
-        advice_inputs,
-        &mut host,
-        execution_options,
-    )
-    .wrap_err("Failed to generate execution trace")?;
+    let processor = if params.release {
+        FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs)
+    } else {
+        FastProcessor::new_debug(stack_inputs, advice_inputs)
+    };
+
+    let (execution_output, trace_generation_context) = processor
+        .execute_for_trace_sync(&program, &mut host)
+        .wrap_err("Failed to execute program")?;
+
+    let trace = build_trace(
+        execution_output,
+        trace_generation_context,
+        program.hash(),
+        program.kernel().clone(),
+    );
 
     Ok((trace, program_hash))
 }

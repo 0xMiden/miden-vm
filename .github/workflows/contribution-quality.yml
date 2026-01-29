@@ -1,7 +1,10 @@
 name: Contribution Quality
 
+# Use pull_request_target to get write permissions for fork PRs.
+# IMPORTANT: This workflow runs in the context of the BASE branch, not the PR branch.
+# Do NOT checkout or run code from the PR itself, only inspect PR metadata via the API.
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, edited, synchronize, ready_for_review]
   workflow_dispatch:
     inputs:
@@ -37,6 +40,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
+            // pull_request_target has the same payload shape as pull_request
             const isPREvent = !!context.payload.pull_request;
             const fromDispatch = context.payload?.inputs?.pr_number || process.env.DISPATCH_PR_NUMBER || '';
             const prNumber = isPREvent ? String(context.payload.pull_request.number) : String(fromDispatch || '');

@@ -1,4 +1,4 @@
-use miden::core::crypto::hashes::rpo256
+use miden::core::crypto::hashes::poseidon2
 use miden::core::stark::constants
 use miden::core::stark::deep_queries
 
@@ -147,7 +147,7 @@ proc load_main_segment_execution_trace
     repeat.10
         adv_pipe
         horner_eval_base
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
 end
 
@@ -197,7 +197,7 @@ proc load_aux_segment_execution_trace
     repeat.2
         adv_pipe
         horner_eval_ext
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
 end
 
@@ -248,6 +248,6 @@ proc load_constraints_composition_polys_trace
     repeat.2
         adv_pipe
         horner_eval_ext
-        exec.rpo256::permute
+        exec.poseidon2::permute
     end
 end

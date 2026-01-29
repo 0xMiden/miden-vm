@@ -1,8 +1,19 @@
-//! TODO: add docs
+//! Hasher chiplet trace constants and types.
+//!
+//! This module defines the structure of the hasher chiplet's execution trace, including:
+//! - Trace selectors that determine which hash operation is being performed
+//! - State layout for the Poseidon2 permutation (12 field elements: 8 rate + 4 capacity)
+//! - Column ranges and indices for accessing trace data
+//!
+//! The hasher chiplet supports several operations:
+//! - Linear hashing (absorbing arbitrary-length inputs)
+//! - 2-to-1 hashing (Merkle tree node computation)
+//! - Merkle path verification
+//! - Merkle root updates (for authenticated data structure modifications)
 
 use core::ops::Range;
 
-pub use miden_core::{Word, crypto::hash::Rpo256 as Hasher};
+pub use miden_core::{Word, crypto::hash::Poseidon2 as Hasher};
 
 use super::{Felt, HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET, ONE, ZERO, create_range};
 
@@ -24,6 +35,7 @@ pub type HasherState = [Felt; STATE_WIDTH];
 /// This value is set to 12: 8 elements are reserved for rate and the remaining 4 elements are
 /// reserved for capacity. This configuration enables computation of 2-to-1 hash in a single
 /// permutation.
+/// The sponge state is `[RATE0(4), RATE1(4), CAPACITY(4)]`.
 pub const STATE_WIDTH: usize = Hasher::STATE_WIDTH;
 
 /// The hasher state portion of the execution trace, located in columns 3..15.
@@ -32,41 +44,52 @@ pub const STATE_COL_RANGE: Range<usize> = create_range(NUM_SELECTORS, STATE_WIDT
 /// Number of field elements in the capacity portion of the hasher's state.
 pub const CAPACITY_LEN: usize = STATE_WIDTH - RATE_LEN;
 
-/// The index of the capacity register where the domain is set when initializing the hasher.
-pub const CAPACITY_DOMAIN_IDX: usize = 1;
-
-/// The capacity portion of the hasher state in the execution trace, located in columns 3..7.
-pub const CAPACITY_COL_RANGE: Range<usize> = Range {
-    start: STATE_COL_RANGE.start,
-    end: STATE_COL_RANGE.start + CAPACITY_LEN,
-};
+/// The index in the hasher state where the domain is set when initializing the hasher.
+///
+/// The domain is stored in the second element of the capacity word.
+/// With LE sponge state layout [RATE0, RATE1, CAP], this is at index 9 (= CAPACITY_RANGE.start +
+/// 1).
+pub const CAPACITY_DOMAIN_IDX: usize = 9;
 
 /// Number of field elements in the rate portion of the hasher's state.
 pub const RATE_LEN: usize = 8;
 
-/// The rate portion of the hasher state in the execution trace, located in columns 7..15.
+/// The rate portion of the hasher state in the execution trace, located in columns 3..11.
+/// With LE sponge state layout [RATE0, RATE1, CAP], rate comes first.
 pub const RATE_COL_RANGE: Range<usize> = Range {
-    start: CAPACITY_COL_RANGE.end,
-    end: CAPACITY_COL_RANGE.end + RATE_LEN,
+    start: STATE_COL_RANGE.start,
+    end: STATE_COL_RANGE.start + RATE_LEN,
+};
+
+/// The capacity portion of the hasher state in the execution trace, located in columns 11..15.
+/// With LE sponge state layout [RATE0, RATE1, CAP], capacity comes last.
+pub const CAPACITY_COL_RANGE: Range<usize> = Range {
+    start: RATE_COL_RANGE.end,
+    end: RATE_COL_RANGE.end + CAPACITY_LEN,
 };
 
 // The length of the output portion of the hash state.
 pub const DIGEST_LEN: usize = 4;
 
-/// The output portion of the hash state, located in state elements 3, 4, 5, and 6.
+/// The output portion of the hash state, located in the first rate word (RATE0).
 pub const DIGEST_RANGE: Range<usize> = Hasher::DIGEST_RANGE;
 
-/// Number of needed to complete a single permutation.
+/// Number of round steps used to complete a single permutation.
 ///
-/// This value is set to 7 to target 128-bit security level with 40% security margin.
-pub const NUM_ROUNDS: usize = Hasher::NUM_ROUNDS;
+/// For Poseidon2, we model a permutation as 31 step transitions, resulting in a 32-row cycle.
+pub const NUM_ROUNDS: usize = miden_core::chiplets::hasher::NUM_ROUNDS;
+
+/// Index of the last row in a permutation cycle (0-based).
+pub const LAST_CYCLE_ROW: usize = NUM_ROUNDS;
+pub const LAST_CYCLE_ROW_FELT: Felt = Felt::new(LAST_CYCLE_ROW as u64);
 
 /// Number of selector columns in the trace.
 pub const NUM_SELECTORS: usize = 3;
 
-/// The number of rows in the execution trace required to compute a permutation of Rescue Prime
-/// Optimized. This is equal to 8.
+/// The number of rows in the execution trace required to compute a permutation of Poseidon2.
+/// This is equal to 32.
 pub const HASH_CYCLE_LEN: usize = NUM_ROUNDS.next_power_of_two();
+pub const HASH_CYCLE_LEN_FELT: Felt = Felt::new(HASH_CYCLE_LEN as u64);
 
 /// Number of columns in Hasher execution trace. There is one additional column for the node index.
 pub const TRACE_WIDTH: usize = NUM_SELECTORS + STATE_WIDTH + 1;

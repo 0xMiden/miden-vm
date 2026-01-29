@@ -1,13 +1,20 @@
 #[cfg(any(test, feature = "testing"))]
 use alloc::vec::Vec;
-use core::ops::{Deref, Range};
+use core::{
+    borrow::{Borrow, BorrowMut},
+    ops::{Deref, Range},
+};
 
-use miden_core::{Felt, ONE, Word, ZERO, utils::range};
+use miden_core::{
+    Felt, ONE, WORD_SIZE, Word, ZERO,
+    field::PrimeCharacteristicRing,
+    utils::{ColMatrix, range},
+};
 
 use super::{
-    super::ColMatrix,
-    CHIPLETS_OFFSET, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET,
-    STACK_TRACE_OFFSET,
+    CHIPLETS_OFFSET, CHIPLETS_WIDTH, CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET,
+    DECODER_TRACE_WIDTH, FN_HASH_OFFSET, RANGE_CHECK_TRACE_WIDTH, RowIndex, STACK_TRACE_OFFSET,
+    STACK_TRACE_WIDTH,
     chiplets::{
         BITWISE_A_COL_IDX, BITWISE_B_COL_IDX, BITWISE_OUTPUT_COL_IDX, HASHER_NODE_INDEX_COL_IDX,
         HASHER_STATE_COL_RANGE, MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX,
@@ -17,7 +24,7 @@ use super::{
             READ_NUM_EVAL_IDX, SELECTOR_BLOCK_IDX, SELECTOR_START_IDX, V_0_0_IDX, V_0_1_IDX,
             V_1_0_IDX, V_1_1_IDX, V_2_0_IDX, V_2_1_IDX,
         },
-        hasher::{DIGEST_LEN, HASH_CYCLE_LEN, STATE_WIDTH},
+        hasher::{DIGEST_LEN, HASH_CYCLE_LEN, LAST_CYCLE_ROW, STATE_WIDTH},
     },
     decoder::{
         GROUP_COUNT_COL_IDX, HASHER_STATE_OFFSET, IN_SPAN_COL_IDX, IS_CALL_FLAG_COL_IDX,
@@ -27,7 +34,6 @@ use super::{
     },
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX},
 };
-use crate::RowIndex;
 
 // CONSTANTS
 // ================================================================================================
@@ -35,7 +41,54 @@ use crate::RowIndex;
 const DECODER_HASHER_RANGE: Range<usize> =
     range(DECODER_TRACE_OFFSET + HASHER_STATE_OFFSET, NUM_HASHER_COLUMNS);
 
-// HELPER STRUCT AND METHODS
+// MAIN TRACE ROW
+// ================================================================================================
+
+/// Column layout of the main trace row.
+#[derive(Debug)]
+#[repr(C)]
+pub struct MainTraceRow<T> {
+    // System
+    pub clk: T,
+    pub ctx: T,
+    pub fn_hash: [T; WORD_SIZE],
+
+    // Decoder
+    pub decoder: [T; DECODER_TRACE_WIDTH],
+
+    // Stack
+    pub stack: [T; STACK_TRACE_WIDTH],
+
+    // Range checker
+    pub range: [T; RANGE_CHECK_TRACE_WIDTH],
+
+    // Chiplets
+    pub chiplets: [T; CHIPLETS_WIDTH],
+}
+
+impl<T> Borrow<MainTraceRow<T>> for [T] {
+    fn borrow(&self) -> &MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &shorts[0]
+    }
+}
+
+impl<T> BorrowMut<MainTraceRow<T>> for [T] {
+    fn borrow_mut(&mut self) -> &mut MainTraceRow<T> {
+        debug_assert_eq!(self.len(), crate::TRACE_WIDTH);
+        let (prefix, shorts, suffix) = unsafe { self.align_to_mut::<MainTraceRow<T>>() };
+        debug_assert!(prefix.is_empty(), "Alignment should match");
+        debug_assert!(suffix.is_empty(), "Alignment should match");
+        debug_assert_eq!(shorts.len(), 1);
+        &mut shorts[0]
+    }
+}
+
+// MAIN TRACE MATRIX
 // ================================================================================================
 
 #[derive(Debug)]
@@ -207,12 +260,12 @@ impl MainTrace {
         let col_b6 = self.columns.get_column(DECODER_TRACE_OFFSET + 7);
         let [b0, b1, b2, b3, b4, b5, b6] =
             [col_b0[i], col_b1[i], col_b2[i], col_b3[i], col_b4[i], col_b5[i], col_b6[i]];
-        b0 + b1.mul_small(2)
-            + b2.mul_small(4)
-            + b3.mul_small(8)
-            + b4.mul_small(16)
-            + b5.mul_small(32)
-            + b6.mul_small(64)
+        b0 + b1 * Felt::from_u64(2)
+            + b2 * Felt::from_u64(4)
+            + b3 * Felt::from_u64(8)
+            + b4 * Felt::from_u64(16)
+            + b5 * Felt::from_u64(32)
+            + b6 * Felt::from_u64(64)
     }
 
     /// Returns an iterator of [`RowIndex`] values over the row indices of this trace.
@@ -279,6 +332,19 @@ impl MainTrace {
         self.columns.get_column(STACK_TRACE_OFFSET + column)[i]
     }
 
+    /// Returns a word from the stack starting at `start` index at row i, in LE order.
+    ///
+    /// The word is read such that `word[0]` comes from stack position `start` (top),
+    /// `word[1]` from `start + 1`, etc.
+    pub fn stack_word(&self, start: usize, i: RowIndex) -> Word {
+        Word::from([
+            self.stack_element(start, i),
+            self.stack_element(start + 1, i),
+            self.stack_element(start + 2, i),
+            self.stack_element(start + 3, i),
+        ])
+    }
+
     /// Returns the address of the top element in the stack overflow table at row i.
     pub fn parent_overflow_address(&self, i: RowIndex) -> Felt {
         self.columns.get_column(STACK_TRACE_OFFSET + B1_COL_IDX)[i]
@@ -288,7 +354,7 @@ impl MainTrace {
     pub fn is_non_empty_overflow(&self, i: RowIndex) -> bool {
         let b0 = self.columns.get_column(STACK_TRACE_OFFSET + B0_COL_IDX)[i];
         let h0 = self.columns.get_column(STACK_TRACE_OFFSET + H0_COL_IDX)[i];
-        (b0 - Felt::new(16)) * h0 == ONE
+        (b0 - Felt::from_u64(16)) * h0 == ONE
     }
 
     // CHIPLETS COLUMNS
@@ -585,7 +651,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
     /// a Merkle path to an old node during Merkle root update procedure (MRUPDATE).
     pub fn f_mva(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1)
+        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE
@@ -605,7 +671,7 @@ impl MainTrace {
     /// Returns `true` if the hasher chiplet flags indicate the continuation of verifying
     /// a Merkle path to a new node during Merkle root update procedure (MRUPDATE).
     pub fn f_mua(&self, i: RowIndex) -> bool {
-        (i.as_usize() % HASH_CYCLE_LEN == HASH_CYCLE_LEN - 1)
+        (i.as_usize() % HASH_CYCLE_LEN == LAST_CYCLE_ROW)
             && self.chiplet_selector_0(i) == ZERO
             && self.chiplet_selector_1(i) == ONE
             && self.chiplet_selector_2(i) == ONE

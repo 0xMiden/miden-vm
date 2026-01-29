@@ -1,5 +1,59 @@
 # Changelog
 
+## 0.21.0 (TBD)
+
+#### Enhancements
+
+- Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
+- Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
+- Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
+
+#### Fixes
+
+- `FastProcessor` now correctly returns an error if the maximum number of cycles was exceeded during execution ([#2537](https://github.com/0xMiden/miden-vm/pull/2537)).
+- `FastProcessor` now correctly only executes `trace` decorators when tracing is enabled (with `ExecutionOptions`) ([#2539](https://github.com/0xMiden/miden-vm/pull/2539)).
+- Removed the intentional HALT-insertion bug from the parallel trace generation ([#2484](https://github.com/0xMiden/miden-vm/pull/2484)).
+- Added missing `as_canonical_u64()` method to `IntValue` in `miden-assembly-syntax`, fixing compilation errors in the generated grammar code ([#2589](https://github.com/0xMiden/miden-vm/pull/2589)).
+- Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
+- Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
+
+#### Changes
+
+- Changed `assert_u32` helper function to return `u32` instead of `Felt` ([#2575](https://github.com/0xMiden/miden-vm/issues/2575)).
+- Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
+- [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).
+- Run batch inversion concurrently per fragment in parallel trace generation ([#2405](https://github.com/0xMiden/miden-vm/issues/2405)).
+- Adds a cached commitment to the `MastForest` ([#2447](https://github.com/0xMiden/miden-vm/pull/2447))
+- Add MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).
+- Fixed memory chiplet constraint documentation: corrected `f_i` variable definitions, first row flag, and `f_mem_nl` constraint expression ([#2423](https://github.com/0xMiden/miden-vm/pull/2423)).
+- Removed undocumented `err_code` field from `ExecutionError::NotU32Values` ([#2419](https://github.com/0xMiden/miden-vm/pull/2419)).
+- Moved `bytes_to_packed_u32_elements` to `miden-core::utils` and added `packed_u32_elements_to_bytes` inverse function ([#2458](https://github.com/0xMiden/miden-vm/pull/2458)).
+- [BREAKING] Removed `Process`, `VmStateIterator` and `miden_processor::execute_iter()` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
+- [BREAKING] Removed `miden debug`, `miden analyze` and `miden repl` ([#2483](https://github.com/0xMiden/miden-vm/pull/2483)).
+- [BREAKING] Change backend from winterfell to Plonky3 ([#2472](https://github.com/0xMiden/miden-vm/pull/2472)).
+- Added validation of `core_trace_fragment_size` in `ExecutionOptions` ([#2528](https://github.com/0xMiden/miden-vm/pull/2528)).
+- [BREAKING] Standardizes operand-stack ordering around a unified little-endian (LE) convention (low limb/coeff closest to the top). This includes updating multi-limb integer ops, extension field elements, and streaming memory operations. Also remaps the sponge state and adjusts hperm/digest extraction plus advice hash-insert instructions for consistent LE semantics. ([#2547](https://github.com/0xMiden/miden-vm/pull/2547)).
+- [BREAKING] Change serialization of `BasicBlockNode`s to use padded indices ([#2466](https://github.com/0xMiden/miden-vm/pull/2466/)).
+- Change padded serialization of `BasicBlockNode`s to use delta-encoded metadata ([#2469](https://github.com/0xMiden/miden-vm/pull/2469/)).
+- Change (de)serialization of `MastForest` to directly (de)serialize DebugInfo ([#2470](https://github.com/0xMiden/miden-vm/pull/2470/)).
+- Add `MastForest::write_stripped()` to serialize without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
+- [BREAKING] Rename `MastForest::strip_decorators()` to `MastForest::clear_debug_info()` ([#2554](https://github.com/0xMiden/miden-vm/pull/2554)).
+- Updated documentation URLs from mdBook to docs.miden.xyz ([#2560](https://github.com/0xMiden/miden-vm/pull/2560)).
+- Add API to serialize the `MastForest` without `DebugInfo` ([#2549](https://github.com/0xMiden/miden-vm/pull/2549)).
+- Removed `ErrorContext` trait and `err_ctx!` macro; error context is now computed lazily by passing raw parameters to error extension traits ([#2544](https://github.com/0xMiden/miden-vm/pull/2544)).
+- Use `IndexVec::try_from` instead of pushing elements one by one in `DebugInfo::empty_for_nodes` ([#2559](https://github.com/0xMiden/miden-vm/pull/2559)).
+- [BREAKING] Remove `NodeExecutionState` in favor of `Continuation` ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
+- Made `StackInputs` and `StackOutputs` implement `Copy` trait ([#2581](https://github.com/0xMiden/miden-vm/pull/2581)).
+- [BREAKING] Renamed `u32overflowing_mul` to `u32widening_mul`, `u32overflowing_madd` to `u32widening_madd`, and `math::u64::overflowing_mul` to `math::u64::widening_mul` ([#2584](https://github.com/0xMiden/miden-vm/pull/2584)).
+- [BREAKING] Removed `SyncHost` and `BaseHost`, and renamed `AsyncHost` to `Host` ([#2595](https://github.com/0xMiden/miden-vm/pull/2595)).
+- [BREAKING] Moved `ExecutionOptions` to `miden-processor`, `ProvingOptions` to `miden-prove`, and `ExecutionProof` to `miden-core` (all out of `miden-air`) ([#2597](https://github.com/0xMiden/miden-vm/pull/2597)).
+- Documented `push.[a,b,c,d]` word literal syntax ([#2556](https://github.com/0xMiden/miden-vm/issues/2556)).
+- [BREAKING] Removed `on_assert_failed` method from `Host` trait ([#2600](https://github.com/0xMiden/miden-vm/pull/2600)).
+- Added malicious advice provider tests for MASM validation using advice stack initialization ([#2583](https://github.com/0xMiden/miden-vm/pull/2583)).
+- [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
+- [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
+- [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+
 ## 0.20.3 (2026-01-27)
 
 - Fixed issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
@@ -25,6 +79,7 @@
 - Added new `peek` procedure for the `std::collections::smt` module ([#2387](https://github.com/0xMiden/miden-vm/pull/2387)).
 - Added new `pad_and_hash_elements` procedure to the `std::crypto::hashes::rpo` module ([#2395](https://github.com/0xMiden/miden-vm/pull/2395)).
 - Added padding option for the `adv.push_mapvaln` instruction ([#2398](https://github.com/0xMiden/miden-vm/pull/2398)).
+- Added new `FastProcessor::step()` method that executes a single clock cycle ([#2440](https://github.com/0xMiden/miden-vm/pull/2440))
 
 #### Changes
 

@@ -10,7 +10,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | ------- | ----------- |
 | `PrecompileRequest` | Minimal calldata for a precompile, recorded by the host when the event handler runs. It contains exactly the information needed to deterministically recompute the result and the commitment. Requests are included in the proof artifact. |
 | `PrecompileCommitment` | A word pair `(TAG, COMM)` computed by the MASM wrapper, and deterministically recomputable from the corresponding `PrecompileRequest`. `COMM` typically commits to inputs, and may also include outputs for long results; the three free elements in `TAG` carry metadata and/or simple results. Together `(TAG, COMM)` represent the full request (inputs + outputs). |
-| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with an RPO256 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re‑evaluating requests and their commitments. Finalizing yields a transcript digest. |
+| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with an Poseidon2 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re‑evaluating requests and their commitments. Finalizing yields a transcript digest. |
 
 ## Lifecycle overview
 
@@ -19,7 +19,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 3. **Wrapper constructs commitment** – The wrapper pops result(s) from advice, computes `(TAG, COMM)` per the precompile’s convention, and prepares to log the operation.
 4. **`log_precompile` records the commitment** – The wrapper invokes `log_precompile` with `[COMM, TAG, PAD, ...]`. The instruction:
    - Reads the previous transcript capacity `CAP_PREV` (non‑deterministically via helper registers).
-   - Applies the RPO permutation to `[CAP_PREV, TAG, COMM]`, producing `[CAP_NEXT, R0, R1]`.
+   - Applies the Poseidon2 permutation to `[CAP_PREV, TAG, COMM]`, producing `[CAP_NEXT, R0, R1]`.
    - Writes `[R1, R0, CAP_NEXT]` back onto the stack; programs typically drop these words immediately.
 5. **Capacity tracking via vtable** – Capacity is tracked inside the VM via the chiplets’ virtual table; the host never tracks capacity. The table always stores the current capacity (the transcript state). On each `log_precompile`:
    - The previous capacity is removed from the table.
@@ -51,7 +51,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - May also include outputs when results are long, so that `(TAG, COMM)` together represent the full request (inputs + outputs).
   - The exact composition is precompile‑specific and defined by its verifier specification.
 - `log_precompile` stack effect: `[COMM, TAG, PAD, ...] -> [R1, R0, CAP_NEXT, ...]` where
-  `RPO([CAP_PREV, TAG, COMM]) = [CAP_NEXT, R0, R1]`.
+  `Poseidon2([CAP_PREV, TAG, COMM]) = [CAP_NEXT, R0, R1]`.
 
 - Input encoding:
   - By convention, inputs are encoded as packed u32 values in field elements (4 bytes per element, little‑endian). If the input length is not a multiple of 4, the final u32 is zero‑padded. Because of this packing, wrappers commonly include the byte length in `TAG` to distinguish data bytes from padding.
@@ -62,14 +62,14 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - Inputs: byte sequence at a given memory location; Output: digest (long).
   - Wrapper emits the event; handler reads memory and returns digest via advice; wrapper computes:
     - `TAG = [event_id, len_bytes, 0, 0]`
-    - `COMM = Rpo256( Rpo256(input_words) || Rpo256(digest_words) )` (bind input and digest)
+    - `COMM = Poseidon2( Poseidon2(input_words) || Poseidon2(digest_words) )` (bind input and digest)
   - Wrapper calls `log_precompile` with `[COMM, TAG, PAD, ...]` and drops the outputs.
 
 - Signature scheme
   - Inputs: public key, message (or prehash), signature; may include flag bits indicating special operation options. Output: `is_valid` (boolean).
   - Wrapper emits the event; handler verifies and may push auxiliary results; wrapper computes:
     - `TAG = [event_id, is_valid, flags, 0]` (encode simple result and flags)
-    - `COMM = Rpo256( prepared_inputs[..] )` (inputs‑only is typical when outputs are simple)
+    - `COMM = Poseidon2( prepared_inputs[..] )` (inputs‑only is typical when outputs are simple)
   - Wrapper calls `log_precompile` to record the request commitment and result tag.
 
 ## Related reading

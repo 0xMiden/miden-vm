@@ -1,5 +1,8 @@
-use miden_core::{Felt, WORD_SIZE};
-use miden_processor::ProcessState;
+use miden_core::{
+    Felt, WORD_SIZE,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
+use miden_processor::ProcessorState;
 
 pub mod aead_decrypt;
 use alloc::vec::Vec;
@@ -24,8 +27,8 @@ pub mod u64_div;
 
 /// Converts a u64 value into two u32 elements (high and low parts).
 fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
-    let hi = Felt::from((value >> 32) as u32);
-    let lo = Felt::from(value as u32);
+    let hi = Felt::from_u32((value >> 32) as u32);
+    let lo = Felt::from_u32(value as u32);
     (hi, lo)
 }
 
@@ -52,7 +55,7 @@ fn u64_to_u32_elements(value: u64) -> (Felt, Felt) {
 ///     .ok_or(MyError::MemoryReadFailed)?;
 /// ```
 pub(crate) fn read_memory_region(
-    process: &ProcessState,
+    process: &ProcessorState,
     start_ptr: u64,
     len: u64,
 ) -> Option<alloc::vec::Vec<Felt>> {
@@ -109,7 +112,7 @@ pub(crate) fn read_memory_region(
 /// // Returns: [0x01, 0x02, 0x03, 0x04, 0x05]
 /// ```
 pub(crate) fn read_memory_packed_u32(
-    process: &ProcessState,
+    process: &ProcessorState,
     start: u64,
     len_bytes: usize,
 ) -> Result<Vec<u8>, MemoryReadError> {
@@ -146,7 +149,7 @@ pub(crate) fn read_memory_packed_u32(
             .get_mem_value(ctx, address)
             .ok_or(MemoryReadError::MemoryAccessFailed { address })?;
 
-        let value = felt.as_int();
+        let value = felt.as_canonical_u64();
         // Unpack field elements to bytes (little-endian)
         let packed: u32 =
             value.try_into().map_err(|_| MemoryReadError::InvalidValue { value, address })?;
@@ -166,38 +169,6 @@ pub(crate) fn read_memory_packed_u32(
 
     out.truncate(len_bytes);
     Ok(out)
-}
-
-/// Converts bytes to field elements using u32 packing in little-endian format.
-///
-/// Each field element contains a u32 value representing up to 4 bytes. If the byte length
-/// is not a multiple of 4, the final field element is zero-padded.
-///
-/// This is commonly used by precompile handlers (Keccak256, ECDSA) to convert byte data
-/// into field element commitments.
-///
-/// # Arguments
-/// - `bytes`: The byte slice to convert
-///
-/// # Returns
-/// A vector of field elements, each containing 4 bytes packed in little-endian order.
-///
-/// # Examples
-/// ```ignore
-/// let bytes = vec![0x01, 0x02, 0x03, 0x04, 0x05];
-/// let felts = bytes_to_felts(&bytes);
-/// // Returns: [Felt(0x04030201), Felt(0x00000005)]
-/// ```
-pub fn bytes_to_packed_u32_felts(bytes: &[u8]) -> Vec<Felt> {
-    bytes
-        .chunks(BYTES_PER_U32)
-        .map(|chunk| {
-            // Pack up to 4 bytes into a u32 in little-endian format
-            let mut packed = [0u8; BYTES_PER_U32];
-            packed[..chunk.len()].copy_from_slice(chunk);
-            Felt::from(u32::from_le_bytes(packed))
-        })
-        .collect()
 }
 
 // ERROR TYPES

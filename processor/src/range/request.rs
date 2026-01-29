@@ -1,4 +1,4 @@
-use super::{ColMatrix, Felt, FieldElement, LookupTableRow};
+use super::{ColMatrix, Felt, LookupTableRow};
 
 // PROCESSOR RANGE CHECKS
 // ================================================================================================
@@ -52,7 +52,7 @@ impl CycleRangeChecks {
 
     /// Reduces all range checks requested at this cycle by the Stack processor to a single field
     /// element in the field specified by E.
-    pub fn to_stack_value<E: FieldElement<BaseField = Felt>>(
+    pub fn to_stack_value<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         alphas: &[E],
@@ -68,7 +68,7 @@ impl CycleRangeChecks {
 
     /// Reduces all range checks requested at this cycle by the Memory processor to a single field
     /// element in the field specified by E.
-    fn to_mem_value<E: FieldElement<BaseField = Felt>>(
+    fn to_mem_value<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         alphas: &[E],
@@ -86,7 +86,7 @@ impl CycleRangeChecks {
 impl LookupTableRow for CycleRangeChecks {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 1 alpha value. Includes all values included at this cycle from all processors.
-    fn to_value<E: FieldElement<BaseField = Felt>>(
+    fn to_value<E: ExtensionField<Felt>>(
         &self,
         main_trace: &MainTrace,
         alphas: &[E],
@@ -113,7 +113,7 @@ enum RangeCheckRequest {
 impl LookupTableRow for RangeCheckRequest {
     /// Reduces this row to a single field element in the field specified by E. This requires
     /// at least 1 alpha value.
-    fn to_value<E: FieldElement<BaseField = Felt>>(
+    fn to_value<E: ExtensionField<Felt>>(
         &self,
         _main_trace: &MainTrace,
         alphas: &[E],
