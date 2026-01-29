@@ -87,6 +87,11 @@
 
 ## 0.20.3 (2026-01-27)
 
+- [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
+
+## 0.20.3 (2026-01-27)
+
 - Fixed issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
 
 ## 0.20.2 (2026-01-05)
