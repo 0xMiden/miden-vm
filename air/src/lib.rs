@@ -12,7 +12,6 @@ use miden_core::{
     ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
     precompile::PrecompileTranscriptState,
 };
-use p3_field::PrimeCharacteristicRing;
 use p3_miden_air::BusType;
 
 pub mod config;
@@ -29,10 +28,7 @@ pub mod trace;
 #[cfg(feature = "constraint_eval")]
 use trace::{MainTraceRow, NUM_PERIODIC_VALUES};
 
-use crate::trace::{
-    AUX_TRACE_WIDTH, AuxTraceBuilder, CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7,
-    RPO256_ARK1, RPO256_ARK2, TRACE_WIDTH,
-};
+use crate::trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, TRACE_WIDTH};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -217,32 +213,10 @@ where
             .as_ref()
             .map(<MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table)
             .unwrap_or_else(|| {
-                let mut periodic_table = vec![
-                    CYCLE_ROW_0.to_vec(),
-                    INV_CYCLE_ROW_7.to_vec(),
-                    CYCLE_ROW_0.to_vec(),
-                    CYCLE_ROW_6.to_vec(),
-                    CYCLE_ROW_7.to_vec(),
-                ];
-
-                let ark1 = RPO256_ARK1
-                    .iter()
-                    .map(|&v| {
-                        let mut v = v.to_vec();
-                        v.push(Felt::ZERO);
-                        v
-                    })
-                    .collect::<Vec<_>>();
-                let ark2 = RPO256_ARK2
-                    .iter()
-                    .map(|&v| {
-                        let mut v = v.to_vec();
-                        v.push(Felt::ZERO);
-                        v
-                    })
-                    .collect::<Vec<_>>();
-                periodic_table.extend_from_slice(&ark1);
-                periodic_table.extend_from_slice(&ark2);
+                let mut periodic_table =
+                    crate::trace::chiplets::bitwise::bitwise_periodic_columns();
+                periodic_table
+                    .extend_from_slice(&crate::trace::chiplets::hasher::hasher_periodic_columns());
                 periodic_table
             })
     }

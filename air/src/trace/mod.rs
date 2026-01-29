@@ -18,10 +18,7 @@ mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
 mod periodic_columns;
-pub use periodic_columns::{
-    CYCLE_ROW_0, CYCLE_ROW_6, CYCLE_ROW_7, INV_CYCLE_ROW_7, NUM_PERIODIC_VALUES, PERIOD,
-    RPO256_ARK1, RPO256_ARK2,
-};
+pub use periodic_columns::{NUM_PERIODIC_VALUES, PERIOD};
 
 // CONSTANTS
 // ================================================================================================
