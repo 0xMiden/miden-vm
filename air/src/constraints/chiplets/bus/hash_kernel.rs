@@ -24,7 +24,6 @@
 //! requests = sum(flag_i * v_i) + (1 - sum(flag_i))
 //! responses = sum(flag_j * v_j) + (1 - sum(flag_j))
 //! ```
-//!
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;

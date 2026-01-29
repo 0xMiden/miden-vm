@@ -55,6 +55,7 @@ pub use memory::{build_ace_memory_read_element_request, build_ace_memory_read_wo
 
 /// Describes how to construct the execution trace of the chiplets bus auxiliary trace column.
 pub struct BusColumnBuilder<'a> {
+    #[allow(dead_code)]
     kernel: &'a Kernel,
 }
 

@@ -133,6 +133,7 @@ pub struct ProcessorAir<B = ()> {
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
     /// Public inputs needed for aux finals verification.
+    #[allow(dead_code)]
     public_inputs: PublicInputs,
 }
 
