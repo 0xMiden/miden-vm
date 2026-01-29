@@ -132,7 +132,7 @@ fn enforce_stack_depth_constraints<AB>(
     //   b0' - b0 + f_shl * f_ov - f_shr = 0
     //
     // We encode this as (b0' - b0) multiplied by a "normal ops" mask,
-    // plus the shift terms outside the mask to keep constraint degree low.
+    // plus the shift terms outside the mask.
     let normal_flag =
         AB::Expr::ONE - call_or_dyncall_or_syscall.clone() - call_or_dyncall_or_syscall_end;
     let no_shift_part = (depth_next.clone() - depth.clone()) * normal_flag;

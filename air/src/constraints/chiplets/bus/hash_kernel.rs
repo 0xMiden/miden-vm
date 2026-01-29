@@ -14,18 +14,17 @@
 //!
 //! ## Running Product Protocol
 //!
-//! The constraint follows a running product with additive structure for combining components:
+//! The constraint follows a running product with combined request/response terms:
 //! ```text
 //! p' * requests = p * responses
 //! ```
 //!
-//! Where requests and responses use additive combination:
+//! Where requests and responses are combined via flag-weighted sums:
 //! ```text
 //! requests = sum(flag_i * v_i) + (1 - sum(flag_i))
 //! responses = sum(flag_j * v_j) + (1 - sum(flag_j))
 //! ```
 //!
-//! This keeps constraint degree manageable compared to multiplicative combination.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;

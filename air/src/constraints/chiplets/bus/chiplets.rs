@@ -144,7 +144,7 @@ pub fn enforce_chiplets_bus_constraint<AB>(
     ];
 
     // =========================================================================
-    // COMPUTE REQUEST MULTIPLIER (additive structure)
+    // COMPUTE REQUEST MULTIPLIER
     // =========================================================================
 
     // --- Hasher request flags ---
@@ -1067,7 +1067,7 @@ fn compute_hasher_response<AB: MidenAirBuilder<F = Felt>>(
         + f_sout.clone()
         + f_abp.clone();
 
-    // Response multiplier using additive structure
+    // Response multiplier from flagged values
     v_bp * f_bp
         + v_mp * f_mp
         + v_mv * f_mv

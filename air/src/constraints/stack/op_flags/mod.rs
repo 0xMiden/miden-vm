@@ -251,7 +251,7 @@ where
         let not_6 = binary_not(bit_6.clone());
 
         // --- Low-degree prefix selectors for composite flags ---
-        // These are used to keep left_shift and right_shift at degree 5 max
+        // These produce degree-5 left_shift and right_shift composite flags.
         // per spec: https://0xmiden.github.io/miden-vm/design/stack/op_constraints.html#shift-left-flag
 
         // Prefix `010` selector: (1-b6)*b5*(1-b4) - degree 3

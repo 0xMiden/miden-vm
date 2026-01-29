@@ -148,9 +148,8 @@ pub fn enforce_bus<AB>(
         + alphas[3].into() * hasher_state_5.clone();
 
     // -------------------------------------------------------------------------
-    // Compute response and request terms using additive structure
+    // Compute response and request terms
     // -------------------------------------------------------------------------
-    // Using additive combination: sum(flag * value) + (1 - sum(flags))
 
     // Response: right_shift * response_row + (1 - right_shift)
     let response: AB::ExprEF = response_row * right_shift.clone() + (one_ef.clone() - right_shift);

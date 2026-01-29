@@ -17,9 +17,9 @@
 //! Messages are encoded as linear combinations: `sum(alpha[i] * element[i])`
 //! where elements[0] is always 1 (the constant term).
 //!
-//! ## Constraint Degree Management
+//! ## Constraint Degree Notes
 //!
-//! Each operation type gets its own constraint with a `when` clause to keep degree manageable:
+//! Each operation type gets its own constraint with a `when` clause:
 //! - Operation flags are degree 7 (product of opcode bits)
 //! - Message expressions are degree 1 (linear combinations)
 //! - Per-operation constraint: `flag * (p1' - p1 * message) = 0` has degree ~8
@@ -493,7 +493,7 @@ pub fn enforce_block_hash_table_constraint<AB>(
     // We compute op flags from the next row and check these three opcodes.
     //
     // Note: END (112), REPEAT (116), HALT (124) are all degree-4 operations,
-    // so is_first_child has degree 4, keeping total constraint degree under max.
+    // so is_first_child has degree 4.
     let accessor_next =
         crate::constraints::stack::op_flags::ExprDecoderAccess::<AB::Var, AB::Expr>::new(next);
     let op_flags_next = crate::constraints::stack::op_flags::OpFlags::new(accessor_next);
