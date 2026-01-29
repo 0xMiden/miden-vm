@@ -3411,7 +3411,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-chrome"
-version = "0.7.0"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf0a738ed5d6450a9fb96e86a23ad808de2b727fd1394585da5cdd6788ffe724"
 dependencies = [
  "serde_json",
  "tracing-core",
@@ -3455,6 +3457,8 @@ dependencies = [
 [[package]]
 name = "tracing-profile"
 version = "0.10.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c509ff1014226f573c309a63a856b6d4515c993880ba57d20ae56f402698da88"
 dependencies = [
  "cfg-if",
  "chrono",
@@ -3471,6 +3475,8 @@ dependencies = [
 [[package]]
 name = "tracing-profile-perfetto-sys"
 version = "0.10.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f93dfc9bad59ecafa7b2679b52c725a2c22639c064be45a3cb4069201d4cd1fe"
 dependencies = [
  "cc",
  "libc",

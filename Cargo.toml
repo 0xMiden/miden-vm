@@ -129,6 +129,3 @@ p3-miden-air = { git = "https://github.com/0xMiden/p3-miden", branch = "al-updat
 p3-miden-prover = { git = "https://github.com/0xMiden/p3-miden", branch = "al-updates" }
 p3-miden-fri = { git = "https://github.com/0xMiden/p3-miden", branch = "al-updates" }
 p3-miden-uni-stark = { git = "https://github.com/0xMiden/p3-miden", branch = "al-updates" }
-tracing-profile = { path = "/Users/al/Code/tracing-profile" }
-tracing-profile-perfetto-sys = { path = "/Users/al/Code/tracing-profile/perfetto-sys" }
-tracing-chrome = { path = "/Users/al/Code/tracing-chrome" }
