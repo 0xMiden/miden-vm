@@ -27,6 +27,16 @@ pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
     movdn.2             # => [overflow, sum_lo, sum_hi]
 end
 
+#! Performs addition of two unsigned 64 bit integers preserving the overflow with sum on top.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, overflow, ...], where c = (a + b) % 2^64
+#! This takes 6 cycles.
+pub proc widening_add(b: u64, a: u64) -> (u64, i1)
+    exec.overflowing_add
+    movdn.2
+end
+
 #! Performs addition of two unsigned 64 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:

@@ -16,11 +16,11 @@ fn mul_unsafe() {
             swapdw dropw dropw
         end";
 
-    // Stack layout: [b_hi..b_lo, a_hi..a_lo] with b's high limb on top (BE format)
-    let operands = [u256_to_be_limbs(&b), u256_to_be_limbs(&a)].concat();
+    // Stack layout: [b_lo..b_hi, a_lo..a_hi] with b's low limb on top (LE format)
+    let operands = [u256_to_le_limbs(&b), u256_to_le_limbs(&a)].concat();
 
-    // Result in BE format (high limb on top)
-    let result = u256_to_be_limbs(&((a * b) & max_u256()));
+    // Result in LE format (low limb on top)
+    let result = u256_to_le_limbs(&((a * b) & max_u256()));
 
     build_test!(source, &operands).expect_stack(&result);
 }
@@ -33,10 +33,9 @@ fn rand_u256() -> BigUint {
     BigUint::new(limbs)
 }
 
-fn u256_to_be_limbs(n: &BigUint) -> Vec<u64> {
+fn u256_to_le_limbs(n: &BigUint) -> Vec<u64> {
     let mut limbs: Vec<u64> = n.to_u32_digits().iter().map(|&v| v as u64).collect();
     limbs.resize(8, 0);
-    limbs.reverse();
     limbs
 }
 

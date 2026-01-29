@@ -1,6 +1,29 @@
-pub type u256 = struct { hi: u128, lo: u128 }
+pub type u256 = struct { lo: u128, hi: u128 }
 
-pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
+# ===== LIMB ORDER HELPERS ========================================================================
+
+#! Reorders the top u256 value between LE and BE limb order. This is an involution.
+#! Input/Output (LE <-> BE):
+#! [x0, x1, x2, x3, x4, x5, x6, x7, ...] <-> [x7, x6, x5, x4, x3, x2, x1, x0, ...]
+proc u256_le_to_be
+    swapw
+    reversew
+    swapw
+    reversew
+    swapw
+end
+
+#! Reorders two u256 values between LE and BE limb order.
+proc u256_le_to_be_pair
+    exec.u256_le_to_be
+    swapdw
+    exec.u256_le_to_be
+    swapdw
+end
+
+# ===== ADDITION ==================================================================================
+
+proc add_with_carry_be(rhs: u256, lhs: u256) -> (i1, u256)
     swapw.3
     movup.3
     movup.7
@@ -28,10 +51,42 @@ pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
     u32overflowing_add3
     movup.4
     movup.5
-    u32wrapping_add3
+    u32overflowing_add3
 end
 
-pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
+pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
+    drop
+    exec.u256_le_to_be
+end
+
+#! Performs addition of two unsigned 256 bit integers preserving the overflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
+pub proc overflowing_add(rhs: u256, lhs: u256) -> (i1, u256)
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
+    movdn.8
+    exec.u256_le_to_be
+    movup.8
+end
+
+#! Performs addition of two unsigned 256 bit integers preserving the overflow with sum on top.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, overflow, ...], where c = (a + b) % 2^256.
+pub proc widening_add(rhs: u256, lhs: u256) -> (u256, i1)
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
+    movdn.8
+    exec.u256_le_to_be
+end
+
+# ===== SUBTRACTION ===============================================================================
+
+proc sub_with_borrow_be(rhs: u256, lhs: u256) -> (i1, u256)
     swapw.3
     movup.7
     movup.4
@@ -81,10 +136,29 @@ pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
     u32widening_add
     drop
     swap u32overflowing_sub
+end
+
+pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
+    exec.sub_with_borrow_be
     drop
+    exec.u256_le_to_be
+end
+
+#! Performs subtraction of two unsigned 256 bit integers preserving the underflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [underflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
+pub proc overflowing_sub(rhs: u256, lhs: u256) -> (i1, u256)
+    exec.u256_le_to_be_pair
+    exec.sub_with_borrow_be
+    movdn.8
+    exec.u256_le_to_be
+    movup.8
 end
 
 pub proc and(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
     swapw.3
     movup.3
     movup.7
@@ -111,9 +185,11 @@ pub proc and(rhs: u256, lhs: u256) -> u256
     movup.3
     movup.4
     u32and
+    exec.u256_le_to_be
 end
 
 pub proc or(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
     swapw.3
     movup.3
     movup.7
@@ -140,9 +216,11 @@ pub proc or(rhs: u256, lhs: u256) -> u256
     movup.3
     movup.4
     u32or
+    exec.u256_le_to_be
 end
 
 pub proc xor(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
     swapw.3
     movup.3
     movup.7
@@ -169,9 +247,11 @@ pub proc xor(rhs: u256, lhs: u256) -> u256
     movup.3
     movup.4
     u32xor
+    exec.u256_le_to_be
 end
 
 pub proc eqz(rhs: u256, lhs: u256) -> i1
+    exec.u256_le_to_be
     eq.0
     repeat.7
         swap
@@ -181,6 +261,7 @@ pub proc eqz(rhs: u256, lhs: u256) -> i1
 end
 
 pub proc eq(rhs: u256, lhs: u256) -> i1
+    exec.u256_le_to_be_pair
     swapw.3
     eqw
     movdn.8
@@ -246,10 +327,11 @@ end
 #! Performs multiplication of two unsigned 256 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...] -> [c7, c6, c5, c4, c3, c2, c1, c0, ...]
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c0, c1, c2, c3, c4, c5, c6, c7, ...]
 #! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
 @locals(24)
 pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
     # Memory storing setup
     loc_storew_be.0
     dropw
@@ -581,4 +663,5 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     padw
     loc_loadw_be.16
     swapw
+    exec.u256_le_to_be
 end
