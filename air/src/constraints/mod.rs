@@ -11,24 +11,21 @@
 
 use core::borrow::Borrow;
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
+use p3_matrix::Matrix;
 
 use crate::{MainTraceRow, NUM_PERIODIC_VALUES};
 
 #[rustfmt::skip]
 pub mod chiplets;
 pub mod range;
+pub mod system;
 
 /// Enforces all MidenVM constraints
 pub fn enforce_constraints<AB>(builder: &mut AB)
 where
     AB: MidenAirBuilder,
 {
-    use p3_matrix::Matrix;
-
-    use crate::constraints;
-
     let main = builder.main();
 
     // Access the two rows: current (local) and next
@@ -43,44 +40,16 @@ where
         builder.periodic_evals().try_into().expect("Wrong number of periodic values");
 
     // SYSTEM CONSTRAINTS
-    constraints::enforce_clock_constraint(builder, local, next);
+    system::enforce_system_constraints(builder, local, next);
 
     // STACK CONSTRAINTS
-    //constraints::stack::enforce_stack_boundary_constraints(builder, local);
-    //constraints::stack::enforce_stack_transition_constraint(builder, local, next);
-    //constraints::stack::enforce_stack_bus_constraint(builder, local);
+    // For now, decoder and stack constraints are not included in the generated constraints
+    // They will be added in the future.
+    //stack::enforce_stack_constraints(builder, local, next);
 
     // RANGE CHECKER CONSTRAINTS
-    constraints::range::enforce_range_boundary_constraints(builder, local);
-    constraints::range::enforce_range_transition_constraint(builder, local, next);
-    constraints::range::enforce_range_bus_constraint(builder, local);
+    range::enforce_range_constraints(builder, local, next);
 
     // CHIPLETS CONSTRAINTS
-    constraints::chiplets::enforce_chiplets_transition_constraint(
-        builder,
-        local,
-        next,
-        &periodic_values,
-    );
-    constraints::chiplets::enforce_chiplets_bus_constraint(builder, local);
-}
-
-/// Enforces the clock constraint: clk' = clk + 1
-///
-/// The clock must increment by 1 at each step, ensuring proper sequencing of operations.
-pub fn enforce_clock_constraint<AB>(
-    builder: &mut AB,
-    local: &MainTraceRow<AB::Var>,
-    next: &MainTraceRow<AB::Var>,
-) where
-    AB: MidenAirBuilder,
-{
-    // Clock boundary constraint: clk[0] = 0
-    builder.when_first_row().assert_zero(local.clk.clone());
-
-    // Clock transition constraint: clk' = clk + 1
-    let one_expr: AB::Expr = AB::F::ONE.into();
-    builder
-        .when_transition()
-        .assert_eq(next.clk.clone(), local.clk.clone() + one_expr);
+    chiplets::enforce_chiplets_constraints(builder, local, next, &periodic_values);
 }

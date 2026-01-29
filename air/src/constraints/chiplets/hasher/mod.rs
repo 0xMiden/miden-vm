@@ -18,7 +18,7 @@ pub fn enforce_hasher_chiplet_constraints<AB>(
     enforce_hasher_chiplet_hasher_state(builder, local, next, periodic_values);
 }
 
-pub fn enforce_hasher_chiplet_selector_columns<AB>(
+fn enforce_hasher_chiplet_selector_columns<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -35,7 +35,7 @@ pub fn enforce_hasher_chiplet_selector_columns<AB>(
     builder.assert_zero_ext((AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[0].clone().into())) * AB::ExprEF::from(periodic_values[1].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[1].clone().into())) * AB::ExprEF::from(local.chiplets[2].clone().into()));
 }
 
-pub fn enforce_hasher_chiplet_node_index<AB>(
+fn enforce_hasher_chiplet_node_index<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -48,7 +48,7 @@ pub fn enforce_hasher_chiplet_node_index<AB>(
     builder.when_transition().assert_zero_ext((AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[0].clone().into())) * (AB::ExprEF::ONE - (AB::ExprEF::from(periodic_values[0].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[2].clone().into())) * AB::ExprEF::from(local.chiplets[3].clone().into()) + AB::ExprEF::from(periodic_values[0].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * AB::ExprEF::from(local.chiplets[2].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[3].clone().into())) + AB::ExprEF::from(periodic_values[0].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * AB::ExprEF::from(local.chiplets[2].clone().into()) * AB::ExprEF::from(local.chiplets[3].clone().into()) + AB::ExprEF::from(periodic_values[1].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[2].clone().into())) * AB::ExprEF::from(local.chiplets[3].clone().into()) + AB::ExprEF::from(periodic_values[1].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * AB::ExprEF::from(local.chiplets[2].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[3].clone().into())) + AB::ExprEF::from(periodic_values[1].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * AB::ExprEF::from(local.chiplets[2].clone().into()) * AB::ExprEF::from(local.chiplets[3].clone().into()) + AB::ExprEF::from(periodic_values[1].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[1].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[2].clone().into())))) * (AB::ExprEF::from(next.chiplets[16].clone().into()) - AB::ExprEF::from(local.chiplets[16].clone().into())));
 }
 
-pub fn enforce_hasher_chiplet_hasher_state<AB>(
+fn enforce_hasher_chiplet_hasher_state<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -56,7 +56,6 @@ pub fn enforce_hasher_chiplet_hasher_state<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-
     enforce_rpo_round(builder, local, next, periodic_values);
 
     builder.when_transition().assert_zero_ext((AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[0].clone().into())) * AB::ExprEF::from(periodic_values[1].clone().into()) * AB::ExprEF::from(local.chiplets[1].clone().into()) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[2].clone().into())) * (AB::ExprEF::ONE - AB::ExprEF::from(local.chiplets[3].clone().into())) * (AB::ExprEF::from(next.chiplets[4].clone().into()) - AB::ExprEF::from(local.chiplets[4].clone().into())));
@@ -111,7 +110,7 @@ where
     result
 }
 
-pub fn enforce_rpo_round<AB>(
+fn enforce_rpo_round<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
