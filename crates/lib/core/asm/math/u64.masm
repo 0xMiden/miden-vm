@@ -21,9 +21,9 @@ end
 #! This takes 5 cycles.
 pub proc overflowing_add(b: u64, a: u64) -> (i1, u64)
     movup.2             # => [a_lo, b_lo, b_hi, a_hi]
-    u32overflowing_add  # => [sum_lo, carry, b_hi, a_hi]
+    u32widening_add     # => [sum_lo, carry, b_hi, a_hi]
     movdn.3             # => [carry, b_hi, a_hi, sum_lo]
-    u32overflowing_add3 # => [sum_hi, overflow, sum_lo]
+    u32widening_add3    # => [sum_hi, overflow, sum_lo]
     movdn.2             # => [overflow, sum_lo, sum_hi]
 end
 
@@ -145,7 +145,7 @@ pub proc widening_mul(b: u64, a: u64) -> u128
     movup.3
     movup.2
     # => [t3_lo, t1_hi, t3_hi, t2_lo, p0_lo, ...]
-    u32overflowing_add
+    u32widening_add
     # => [sum, carry, t3_hi, t2_lo, p0_lo, ...] where sum = (t3_lo + t1_hi) mod 2^32
     swap
     # => [carry, sum, t3_hi, t2_lo, p0_lo, ...]
@@ -448,12 +448,12 @@ pub proc div(b: u64, a: u64) -> u64
 
     movup.3
     # => [prod_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    u32overflowing_add
+    u32widening_add
     # outputs [sum, carry]: computes prod_lo + r_lo
     # => [sum_lo, carry_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
     # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
-    # Rearrange to get [carry_lo, prod_hi, r_hi] for u32overflowing_add3
+    # Rearrange to get [carry_lo, prod_hi, r_hi] for u32widening_add3
     movup.3
     # => [prod_hi, sum_lo, carry_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     movup.3
@@ -462,7 +462,7 @@ pub proc div(b: u64, a: u64) -> u64
     # => [prod_hi, r_hi, sum_lo, carry_lo, q_lo, q_hi, a_lo, a_hi, ...]
     movup.3
     # => [carry_lo, prod_hi, r_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    u32overflowing_add3
+    u32widening_add3
     # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
     # => [sum_hi, carry_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
     swap
@@ -596,7 +596,7 @@ pub proc mod(b: u64, a: u64) -> u64
     # => [r_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
     movup.4
     # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
-    u32overflowing_add
+    u32widening_add
     # outputs [sum, carry]: computes prod_lo + r_lo
     # => [sum_lo, carry_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
 
@@ -610,7 +610,7 @@ pub proc mod(b: u64, a: u64) -> u64
     # => [prod_hi, r_hi, carry_lo, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     movup.2
     # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-    u32overflowing_add3
+    u32widening_add3
     # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
     # => [sum_hi, carry_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
     swap
@@ -743,7 +743,7 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     # => [r_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
     movup.4
     # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    u32overflowing_add
+    u32widening_add
     # outputs [sum, carry]: computes prod_lo + r_lo
     # => [sum_lo, carry_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
@@ -757,7 +757,7 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     # => [prod_hi, r_hi, carry_lo, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     movup.2
     # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    u32overflowing_add3
+    u32widening_add3
     # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
     # => [sum_hi, carry_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     swap

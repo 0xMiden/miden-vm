@@ -172,8 +172,7 @@ proc compute_message_schedule_word
     movup.2
     exec.small_sigma_0
 
-    u32overflowing_add3
-    swap drop
+    u32wrapping_add3
     u32wrapping_add
 end
 
@@ -195,15 +194,13 @@ proc consume_message_word
     movup.9
     movup.10
 
-    u32overflowing_add3
-    swap drop
+    u32wrapping_add3
 
     dup.5
     exec.cap_sigma_1
 
     movup.9
-    u32overflowing_add3
-    swap drop
+    u32wrapping_add3
 
     dup.3
     dup.3
@@ -1574,7 +1571,7 @@ pub proc hash_bytes
 
     # loc.2 (padded length): input_length + (55 - input_length) % 64 + 9
     push.55 loc_load.4 u32wrapping_sub push.63 u32and
-    loc_load.4 u32assert2 u32overflowing_add swap assertz u32assert u32overflowing_add.9 swap assertz loc_store.8
+    loc_load.4 u32assert2 u32overflowing_add assertz u32assert u32overflowing_add.9 assertz loc_store.8
 
     # loc.3 (last word address in padding): input_address + (padded_length / 4) - 4
     loc_load.8 u32assert u32div.4 loc_load.0 u32wrapping_add u32wrapping_sub.4 loc_store.12
@@ -1589,7 +1586,7 @@ pub proc hash_bytes
 
     # loc.6 (memory address of first padding byte): input_address + (len / 16) * 4
     # Note: (len /16) * 4 is *not* the same as (len / 4), due to the division being a division + floor operation
-    loc_load.0 loc_load.4 u32assert u32div.16 u32assert2 mul.4 u32overflowing_add swap assertz loc_store.24
+    loc_load.0 loc_load.4 u32assert u32div.16 u32assert2 mul.4 u32overflowing_add assertz loc_store.24
 
 
     # loc.7 (number of remaining 512-bit blocks to consume): padded_length / 64
@@ -1614,13 +1611,13 @@ pub proc hash_bytes
     # Consume sha256 blocks
     loc_load.28 u32assert neq.0
     while.true
-        padw loc_load.0 u32assert u32overflowing_add.12 swap assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.8 swap assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.4 swap assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.0 swap assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.12 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.8 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.4 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.0 assertz mem_loadw_be movdnw.2
         exec.prepare_message_schedule_and_consume
 
-        loc_load.0 u32assert u32overflowing_add.16 swap assertz loc_store.0
+        loc_load.0 u32assert u32overflowing_add.16 assertz loc_store.0
         loc_load.28 u32assert u32overflowing_sub.1 assertz dup loc_store.28
         u32assert neq.0
     end
