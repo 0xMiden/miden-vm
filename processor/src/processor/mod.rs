@@ -388,7 +388,7 @@ pub trait OperationHelperRegisters {
     ) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add operation.
-    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32add_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32add3 operation.
     fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
@@ -397,13 +397,13 @@ pub trait OperationHelperRegisters {
     fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32mul operation.
-    fn op_u32mul_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32mul_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32madd operation.
-    fn op_u32madd_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32madd_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32div operation.
-    fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS];
+    fn op_u32div_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
 
     /// The helper registers for the U32assert2 operation.
     fn op_u32assert2_registers(first: Felt, second: Felt) -> [Felt; NUM_USER_OP_HELPERS];
