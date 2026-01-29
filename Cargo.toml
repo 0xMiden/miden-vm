@@ -45,7 +45,7 @@ overflow-checks = true
 
 [workspace.dependencies]
 # Workspace crates
-miden-air = { path = "./air", version = "0.21", default-features = false }
+miden-air = { path = "./air", version = "0.21", default-features = false, features = ["human_readable"] }
 miden-assembly = { path = "./crates/assembly", version = "0.21", default-features = false }
 miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.21", default-features = false }
 miden-core = { path = "./core", version = "0.21", default-features = false }

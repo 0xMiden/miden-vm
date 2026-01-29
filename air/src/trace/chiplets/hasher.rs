@@ -11,7 +11,6 @@
 //! - Merkle path verification
 //! - Merkle root updates (for authenticated data structure modifications)
 
-use alloc::vec::Vec;
 use core::ops::Range;
 
 pub use miden_core::{Word, crypto::hash::Rpo256 as Hasher};
@@ -140,47 +139,3 @@ pub const RETURN_STATE_LABEL: u8 = 0b1000 + 1;
 
 /// Index of the auxiliary trace column tracking the state of the sibling table.
 pub const P1_COL_IDX: usize = HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET;
-
-// --- Periodic columns ---------------------------------------------------------------------------
-
-/// Flag for the first row of each cycle in the periodic column.
-pub const CYCLE_ROW_0: [Felt; 8] = [ONE, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
-
-/// Flag for the second to last row of each cycle in the periodic column.
-pub const CYCLE_ROW_6: [Felt; 8] = [ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ONE, ZERO];
-/// Flag for the last row of each cycle in the periodic column.
-pub const CYCLE_ROW_7: [Felt; 8] = [ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ONE];
-
-/// Constants for the first half of the RPO round. The length is not padded to the period.
-pub const RPO256_ARK1: [[Felt; 12]; 7] = Hasher::ARK1;
-
-/// Constants for the second half of the RPO round. The length is not padded to the period.
-pub const RPO256_ARK2: [[Felt; 12]; 7] = Hasher::ARK2;
-
-/// The number of periodic columns used in the Bitwise chiplet AIR.
-pub const NUM_HASHER_PERIODIC_VALUES: usize = 27;
-
-/// Returns the periodic columns used in the Hasher chiplet AIR.
-pub fn hasher_periodic_columns() -> Vec<Vec<Felt>> {
-    let mut periodic_table = vec![CYCLE_ROW_0.to_vec(), CYCLE_ROW_6.to_vec(), CYCLE_ROW_7.to_vec()];
-
-    let ark1 = RPO256_ARK1
-        .iter()
-        .map(|&v| {
-            let mut v = v.to_vec();
-            v.push(ZERO);
-            v
-        })
-        .collect::<Vec<_>>();
-    let ark2 = RPO256_ARK2
-        .iter()
-        .map(|&v| {
-            let mut v = v.to_vec();
-            v.push(ZERO);
-            v
-        })
-        .collect::<Vec<_>>();
-    periodic_table.extend_from_slice(&ark1);
-    periodic_table.extend_from_slice(&ark2);
-    periodic_table
-}

@@ -5,7 +5,7 @@
 //! - Transition constraint: V column changes by powers of 3 or stays constant (for padding)
 //! - Bus constraint: LogUp multiset check for range check requests
 
-mod bus;
+pub mod bus;
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
@@ -16,7 +16,7 @@ use crate::MainTraceRow;
 ///
 /// - First row: V[0] = 0 (range checker starts at 0)
 /// - Last row: V[last] = 65535 (range checker ends at 2^16 - 1)
-pub fn enforce_range_constraints<AB>(
+pub fn enforce_main_range_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -25,7 +25,6 @@ pub fn enforce_range_constraints<AB>(
 {
     enforce_range_boundary_constraints(builder, local);
     enforce_range_transition_constraint(builder, local, next);
-    bus::enforce_range_bus_constraint(builder, local);
 }
 
 /// Enforces boundary constraints for the range checker.

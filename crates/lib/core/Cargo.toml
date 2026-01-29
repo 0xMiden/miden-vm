@@ -28,7 +28,6 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
-constraint_eval = ["miden-air/constraint_eval"]
 with-debug-info = []
 legacy-stark-tests = []
 

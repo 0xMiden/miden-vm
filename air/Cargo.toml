@@ -22,7 +22,26 @@ default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
 concurrent = ["std"]
 testing = []
-constraint_eval = []
+
+# Enable constraint evaluation
+human_readable = []
+all_constraints = [
+    "all_main_constraints",
+    "bus_active",
+]
+all_main_constraints = [
+    "system_constraints",
+    "chiplets_constraints",
+    "range_constraints",
+    "stack_constraints",
+    "decoder_constraints",
+]
+bus_active = []
+system_constraints = []
+chiplets_constraints = []
+range_constraints = []
+stack_constraints = []
+decoder_constraints = []
 
 [dependencies]
 # Miden dependencies

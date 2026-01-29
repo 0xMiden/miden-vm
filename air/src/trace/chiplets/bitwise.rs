@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use super::{Felt, ONE, Range, ZERO, create_range};
 
 // CONSTANTS
@@ -56,22 +54,6 @@ pub const PREV_OUTPUT_COL_IDX: usize = B_COL_IDX + 1 + 2 * NUM_DECOMP_BITS;
 /// The index of the column containing the aggregated output value within the bitwise chiplet
 /// execution trace.
 pub const OUTPUT_COL_IDX: usize = PREV_OUTPUT_COL_IDX + 1;
-
-// --- Periodic columns ---------------------------------------------------------------------------
-
-/// Flag for the first row of each cycle in the periodic column.
-pub const CYCLE_ROW_0: [Felt; 8] = [ONE, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO, ZERO];
-
-/// Negative flag for the last row of each cycle in the periodic column.
-pub const INV_CYCLE_ROW_7: [Felt; 8] = [ONE, ONE, ONE, ONE, ONE, ONE, ONE, ZERO];
-
-/// The number of periodic columns used in the Bitwise chiplet AIR.
-pub const NUM_BITWISE_PERIODIC_VALUES: usize = 2;
-
-/// Returns the periodic columns used in the Bitwise chiplet AIR.
-pub fn bitwise_periodic_columns() -> Vec<Vec<Felt>> {
-    vec![CYCLE_ROW_0.to_vec(), INV_CYCLE_ROW_7.to_vec()]
-}
 
 // TYPE ALIASES
 // ================================================================================================

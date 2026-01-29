@@ -3,7 +3,7 @@ use p3_field::PrimeCharacteristicRing;
 
 use crate::MainTraceRow;
 
-pub fn enforce_system_constraints<AB>(
+pub fn enforce_main_system_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,

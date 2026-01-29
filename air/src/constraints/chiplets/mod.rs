@@ -1,15 +1,16 @@
 mod ace;
-mod bitwise;
-mod hasher;
+pub mod bitwise;
+pub mod hasher;
 mod kernel_rom;
 mod memory;
-mod bus;
+pub mod bus;
+pub mod periodic_columns;
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
-pub fn enforce_chiplets_constraints<AB>(
+pub fn enforce_main_chiplets_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -23,7 +24,6 @@ pub fn enforce_chiplets_constraints<AB>(
         next,
         periodic_values,
     );
-    bus::enforce_chiplets_bus_constraint(builder, local);
 }
 
 fn enforce_chiplets_transition_constraint<AB>(

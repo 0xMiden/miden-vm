@@ -13,7 +13,7 @@ use crate::MainTraceRow;
 /// and transitions according to the LogUp update rule.
 ///
 /// This is a degree-9 constraint.
-pub fn enforce_range_bus_constraint<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
+pub fn enforce_range_bus_constraints<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: MidenAirBuilder,
 {

@@ -50,7 +50,6 @@ path = "tests/integration/main.rs"
 
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
-constraint_eval = ["miden-air/constraint_eval"]
 default = ["std"]
 executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
