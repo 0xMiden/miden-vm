@@ -37,6 +37,15 @@ pub proc overflowing_add(b: u128, a: u128) -> (i1, u128)
     movdn.4         # [overflow, c_ll, c_ml, c_mh, c_hh]
 end
 
+#! Performs addition of two unsigned 128 bit integers preserving the overflow with sum on top.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [c_ll, c_ml, c_mh, c_hh, overflow, ...], where c = (a + b) % 2^128
+pub proc widening_add(b: u128, a: u128) -> (u128, i1)
+    exec.overflowing_add
+    movdn.4
+end
+
 #! Performs addition of two unsigned 128 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition is as follows:
@@ -291,6 +300,15 @@ pub proc overflowing_mul(b: u128, a: u128) -> (i1, u128)
     # Rearrange: [overflow, c_hh, c_ll, c_ml, c_mh] -> [overflow, c_ll, c_ml, c_mh, c_hh]
     swap                        # [c_hh, overflow, c_ll, c_ml, c_mh]
     movdn.4                     # [overflow, c_ll, c_ml, c_mh, c_hh]
+end
+
+#! Performs multiplication of two unsigned 128 bit integers preserving the overflow with sum on top.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition is as follows:
+#! [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...] -> [c_ll, c_ml, c_mh, c_hh, overflow, ...], where c = (a * b) % 2^128
+pub proc widening_mul(b: u128, a: u128) -> (u128, i1)
+    exec.overflowing_mul
+    movdn.4
 end
 
 #! Performs multiplication of two unsigned 128 bit integers discarding the overflow.
