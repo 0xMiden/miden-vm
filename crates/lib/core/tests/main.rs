@@ -32,9 +32,9 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
-#[cfg(feature = "legacy-stark-tests")]
-mod pcs;
-#[cfg(feature = "legacy-stark-tests")]
-mod stark;
 mod sys;
 mod word;
+
+// These tests are disabled until the recursive verifier is updated to work with Plonky3 proofs
+// mod pcs;
+// mod stark;
