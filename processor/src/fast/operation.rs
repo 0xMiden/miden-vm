@@ -303,7 +303,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(_carry: Felt, _sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
@@ -318,17 +318,17 @@ impl OperationHelperRegisters for NoopHelperRegisters {
     }
 
     #[inline(always)]
-    fn op_u32mul_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32mul_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
     #[inline(always)]
-    fn op_u32madd_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32madd_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 
     #[inline(always)]
-    fn op_u32div_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32div_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         DEFAULT_HELPERS
     }
 

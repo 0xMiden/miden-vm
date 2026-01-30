@@ -539,6 +539,8 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
 
         u32wrapping_add.5
         u32overflowing_add.5
+        u32widening_add.5
+        u32widening_add3
 
         u32wrapping_sub.1
         u32overflowing_sub.1
@@ -552,6 +554,8 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
         inst!(Push(Immediate::Value(Span::unknown(3u8.into())))),
         inst!(U32WrappingAddImm(5u32.into())),
         inst!(U32OverflowingAddImm(5u32.into())),
+        inst!(U32WideningAddImm(5u32.into())),
+        inst!(U32WideningAdd3),
         inst!(U32WrappingSubImm(1u32.into())),
         inst!(U32OverflowingSubImm(1u32.into())),
         inst!(U32WrappingMulImm(2u32.into())),

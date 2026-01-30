@@ -2733,11 +2733,11 @@ fn module_alias() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;
@@ -2803,11 +2803,11 @@ fn module_alias_unused_import() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;

@@ -86,6 +86,42 @@ fn overflowing_add() {
     test.expect_stack(&[1, c0, c1]);
 }
 
+#[test]
+fn widening_add() {
+    let source = "
+        use miden::core::math::u64
+        begin
+            exec.u64::widening_add
+        end";
+
+    let a = rand_value::<u64>() as u32 as u64;
+    let b = rand_value::<u64>() as u32 as u64;
+    let (c, overflow) = a.overflowing_add(b);
+    let carry = if overflow { 1 } else { 0 };
+
+    let (a1, a0) = split_u64(a);
+    let (b1, b0) = split_u64(b);
+    let (c1, c0) = split_u64(c);
+
+    // [a_lo, a_hi, b_lo, b_hi] -> [c_lo, c_hi, carry]
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1, carry]);
+
+    let a = u64::MAX;
+    let b = rand_value::<u64>();
+    let (c, overflow) = a.overflowing_add(b);
+    let carry = if overflow { 1 } else { 0 };
+
+    let (a1, a0) = split_u64(a);
+    let (b1, b0) = split_u64(b);
+    let (c1, c0) = split_u64(c);
+
+    let input_stack = stack![a0, a1, b0, b1];
+    let test = build_test!(source, &input_stack);
+    test.expect_stack(&[c0, c1, carry]);
+}
+
 // SUBTRACTION
 // ------------------------------------------------------------------------------------------------
 
@@ -740,11 +776,11 @@ fn unchecked_divmod() {
     let (q1, q0) = split_u64(q);
     let (r1, r0) = split_u64(r);
 
-    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
-    // r_lo, r_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [r_lo, r_hi,
+    // q_lo, q_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
-    test.expect_stack(&[q0, q1, r0, r1]);
+    test.expect_stack(&[r0, r1, q0, q1]);
 }
 
 // BITWISE OPERATIONS
