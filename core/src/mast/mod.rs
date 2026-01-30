@@ -211,14 +211,6 @@ impl MastForest {
         self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
-    /// Returns a mutable reference to the debug info.
-    ///
-    /// This is primarily used for registering debug variables and other debug metadata
-    /// during assembly.
-    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
-        &mut self.debug_info
-    }
-
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.

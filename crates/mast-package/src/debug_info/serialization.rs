@@ -8,16 +8,16 @@ use miden_core::utils::{
 use miden_debug_types::{ColumnNumber, LineNumber};
 
 use super::{
-    DEBUG_INFO_VERSION, DebugFieldInfo, DebugFileInfo, DebugFunctionInfo, DebugInfoSection,
-    DebugInlinedCallInfo, DebugPrimitiveType, DebugTypeInfo, DebugVariableInfo,
+    DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo,
+    DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugInlinedCallInfo,
+    DebugPrimitiveType, DebugSourcesSection, DebugTypeInfo, DebugTypesSection, DebugVariableInfo,
 };
 
-// DEBUG INFO SECTION SERIALIZATION
+// DEBUG TYPES SECTION SERIALIZATION
 // ================================================================================================
 
-impl Serializable for DebugInfoSection {
+impl Serializable for DebugTypesSection {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Write version
         target.write_u8(self.version);
 
         // Write string table
@@ -31,11 +31,91 @@ impl Serializable for DebugInfoSection {
         for ty in &self.types {
             ty.write_into(target);
         }
+    }
+}
+
+impl Deserializable for DebugTypesSection {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = source.read_u8()?;
+        if version != DEBUG_TYPES_VERSION {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "unsupported debug_types version: {version}, expected {DEBUG_TYPES_VERSION}"
+            )));
+        }
+
+        let strings_len = source.read_usize()?;
+        let mut strings = alloc::vec::Vec::with_capacity(strings_len);
+        for _ in 0..strings_len {
+            strings.push(read_string(source)?);
+        }
+
+        let types_len = source.read_usize()?;
+        let mut types = alloc::vec::Vec::with_capacity(types_len);
+        for _ in 0..types_len {
+            types.push(DebugTypeInfo::read_from(source)?);
+        }
+
+        Ok(Self { version, strings, types })
+    }
+}
+
+// DEBUG SOURCES SECTION SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugSourcesSection {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.version);
+
+        // Write string table
+        target.write_usize(self.strings.len());
+        for s in &self.strings {
+            write_string(target, s);
+        }
 
         // Write file table
         target.write_usize(self.files.len());
         for file in &self.files {
             file.write_into(target);
+        }
+    }
+}
+
+impl Deserializable for DebugSourcesSection {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let version = source.read_u8()?;
+        if version != DEBUG_SOURCES_VERSION {
+            return Err(DeserializationError::InvalidValue(alloc::format!(
+                "unsupported debug_sources version: {version}, expected {DEBUG_SOURCES_VERSION}"
+            )));
+        }
+
+        let strings_len = source.read_usize()?;
+        let mut strings = alloc::vec::Vec::with_capacity(strings_len);
+        for _ in 0..strings_len {
+            strings.push(read_string(source)?);
+        }
+
+        let files_len = source.read_usize()?;
+        let mut files = alloc::vec::Vec::with_capacity(files_len);
+        for _ in 0..files_len {
+            files.push(DebugFileInfo::read_from(source)?);
+        }
+
+        Ok(Self { version, strings, files })
+    }
+}
+
+// DEBUG FUNCTIONS SECTION SERIALIZATION
+// ================================================================================================
+
+impl Serializable for DebugFunctionsSection {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u8(self.version);
+
+        // Write string table
+        target.write_usize(self.strings.len());
+        for s in &self.strings {
+            write_string(target, s);
         }
 
         // Write function table
@@ -46,50 +126,28 @@ impl Serializable for DebugInfoSection {
     }
 }
 
-impl Deserializable for DebugInfoSection {
+impl Deserializable for DebugFunctionsSection {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let version = source.read_u8()?;
-        if version != DEBUG_INFO_VERSION {
+        if version != DEBUG_FUNCTIONS_VERSION {
             return Err(DeserializationError::InvalidValue(alloc::format!(
-                "unsupported debug_info version: {version}, expected {DEBUG_INFO_VERSION}"
+                "unsupported debug_functions version: {version}, expected {DEBUG_FUNCTIONS_VERSION}"
             )));
         }
 
-        // Read string table
         let strings_len = source.read_usize()?;
         let mut strings = alloc::vec::Vec::with_capacity(strings_len);
         for _ in 0..strings_len {
             strings.push(read_string(source)?);
         }
 
-        // Read type table
-        let types_len = source.read_usize()?;
-        let mut types = alloc::vec::Vec::with_capacity(types_len);
-        for _ in 0..types_len {
-            types.push(DebugTypeInfo::read_from(source)?);
-        }
-
-        // Read file table
-        let files_len = source.read_usize()?;
-        let mut files = alloc::vec::Vec::with_capacity(files_len);
-        for _ in 0..files_len {
-            files.push(DebugFileInfo::read_from(source)?);
-        }
-
-        // Read function table
         let functions_len = source.read_usize()?;
         let mut functions = alloc::vec::Vec::with_capacity(functions_len);
         for _ in 0..functions_len {
             functions.push(DebugFunctionInfo::read_from(source)?);
         }
 
-        Ok(Self {
-            version,
-            strings,
-            types,
-            files,
-            functions,
-        })
+        Ok(Self { version, strings, functions })
     }
 }
 
@@ -437,12 +495,8 @@ mod tests {
     }
 
     #[test]
-    fn test_debug_info_section_roundtrip() {
-        let mut section = DebugInfoSection::new();
-
-        // Add some strings
-        let name_idx = section.add_string("test_function");
-        let file_idx_str = section.add_string("test.rs");
+    fn test_debug_types_section_roundtrip() {
+        let mut section = DebugTypesSection::new();
 
         // Add primitive types
         let i32_type_idx = section.add_type(DebugTypeInfo::Primitive(DebugPrimitiveType::I32));
@@ -478,17 +532,36 @@ mod tests {
             ],
         });
 
-        // Add a file
-        let file_idx = section.add_file(DebugFileInfo::new(file_idx_str));
+        roundtrip(&section);
+    }
 
-        // Add a function
+    #[test]
+    fn test_debug_sources_section_roundtrip() {
+        let mut section = DebugSourcesSection::new();
+
+        let path_idx = section.add_string("test.rs");
+        section.add_file(DebugFileInfo::new(path_idx));
+
+        let path2_idx = section.add_string("main.rs");
+        section.add_file(DebugFileInfo::new(path2_idx).with_checksum([42u8; 32]));
+
+        roundtrip(&section);
+    }
+
+    #[test]
+    fn test_debug_functions_section_roundtrip() {
+        let mut section = DebugFunctionsSection::new();
+
+        let name_idx = section.add_string("test_function");
+
         let line = LineNumber::new(10).unwrap();
         let column = ColumnNumber::new(1).unwrap();
-        let mut func = DebugFunctionInfo::new(name_idx, file_idx, line, column);
+        let mut func = DebugFunctionInfo::new(name_idx, 0, line, column);
+        let var_name_idx = section.add_string("x");
         let var_line = LineNumber::new(10).unwrap();
         let var_column = ColumnNumber::new(5).unwrap();
         func.add_variable(
-            DebugVariableInfo::new(x_idx, i32_type_idx, var_line, var_column).with_arg_index(1),
+            DebugVariableInfo::new(var_name_idx, 0, var_line, var_column).with_arg_index(1),
         );
         section.add_function(func);
 
@@ -496,14 +569,15 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_section_roundtrip() {
-        let section = DebugInfoSection::new();
-        roundtrip(&section);
+    fn test_empty_sections_roundtrip() {
+        roundtrip(&DebugTypesSection::new());
+        roundtrip(&DebugSourcesSection::new());
+        roundtrip(&DebugFunctionsSection::new());
     }
 
     #[test]
     fn test_all_primitive_types_roundtrip() {
-        let mut section = DebugInfoSection::new();
+        let mut section = DebugTypesSection::new();
 
         for prim in [
             DebugPrimitiveType::Void,

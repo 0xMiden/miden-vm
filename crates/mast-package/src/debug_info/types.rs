@@ -21,51 +21,43 @@ use miden_debug_types::{ColumnNumber, LineNumber};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-// DEBUG INFO SECTION
+// DEBUG TYPES SECTION
 // ================================================================================================
 
-/// The version of the debug_info section format.
-pub const DEBUG_INFO_VERSION: u8 = 1;
+/// The version of the debug_types section format.
+pub const DEBUG_TYPES_VERSION: u8 = 1;
 
-/// Debug information section containing all debug metadata for a MASP package.
+/// Debug types section containing type definitions for a MASP package.
 ///
-/// This section provides a structured way to store debug information that augments
-/// the `DebugVar` decorators embedded in the MAST. It includes:
-/// - Type definitions (primitives, structs, arrays, etc.)
-/// - Source file paths (deduplicated)
-/// - Function debug metadata
-/// - Global variable information
+/// This section stores type information (primitives, structs, arrays, pointers,
+/// function types) that enables debuggers to properly display values.
+///
+/// String indices in sub-types (e.g., `name_idx` in `DebugFieldInfo`) are relative
+/// to this section's own string table.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub struct DebugInfoSection {
-    /// Version of the debug info format
+pub struct DebugTypesSection {
+    /// Version of the debug types format
     pub version: u8,
-    /// String table containing all strings (file paths, type names, variable names)
+    /// String table containing type names, field names
     pub strings: Vec<String>,
     /// Type table containing all type definitions
     pub types: Vec<DebugTypeInfo>,
-    /// Source file table (indices into string table)
-    pub files: Vec<DebugFileInfo>,
-    /// Function debug information
-    pub functions: Vec<DebugFunctionInfo>,
 }
 
-impl DebugInfoSection {
-    /// Creates a new empty debug info section.
+impl DebugTypesSection {
+    /// Creates a new empty debug types section.
     pub fn new() -> Self {
         Self {
-            version: DEBUG_INFO_VERSION,
+            version: DEBUG_TYPES_VERSION,
             strings: Vec::new(),
             types: Vec::new(),
-            files: Vec::new(),
-            functions: Vec::new(),
         }
     }
 
     /// Adds a string to the string table and returns its index.
     pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
         let s = s.into();
-        // Check for existing string
         if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
             return idx as u32;
         }
@@ -91,9 +83,64 @@ impl DebugInfoSection {
         self.types.get(idx as usize)
     }
 
+    /// Returns true if the section is empty (no types).
+    pub fn is_empty(&self) -> bool {
+        self.types.is_empty()
+    }
+}
+
+// DEBUG SOURCES SECTION
+// ================================================================================================
+
+/// The version of the debug_sources section format.
+pub const DEBUG_SOURCES_VERSION: u8 = 1;
+
+/// Debug sources section containing source file paths and checksums.
+///
+/// This section stores deduplicated source file information that is referenced
+/// by the debug functions section.
+///
+/// String indices in sub-types (e.g., `path_idx` in `DebugFileInfo`) are relative
+/// to this section's own string table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugSourcesSection {
+    /// Version of the debug sources format
+    pub version: u8,
+    /// String table containing file paths
+    pub strings: Vec<String>,
+    /// Source file table
+    pub files: Vec<DebugFileInfo>,
+}
+
+impl DebugSourcesSection {
+    /// Creates a new empty debug sources section.
+    pub fn new() -> Self {
+        Self {
+            version: DEBUG_SOURCES_VERSION,
+            strings: Vec::new(),
+            files: Vec::new(),
+        }
+    }
+
+    /// Adds a string to the string table and returns its index.
+    pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
+        let s = s.into();
+        if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
+            return idx as u32;
+        }
+        let idx = self.strings.len() as u32;
+        self.strings.push(s);
+        idx
+    }
+
+    /// Gets a string by index.
+    pub fn get_string(&self, idx: u32) -> Option<&str> {
+        self.strings.get(idx as usize).map(String::as_str)
+    }
+
     /// Adds a file to the file table and returns its index.
     pub fn add_file(&mut self, file: DebugFileInfo) -> u32 {
-        // Check for existing file with same path
         if let Some(idx) = self.files.iter().position(|existing| existing.path_idx == file.path_idx)
         {
             return idx as u32;
@@ -108,14 +155,70 @@ impl DebugInfoSection {
         self.files.get(idx as usize)
     }
 
+    /// Returns true if the section is empty (no files).
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+}
+
+// DEBUG FUNCTIONS SECTION
+// ================================================================================================
+
+/// The version of the debug_functions section format.
+pub const DEBUG_FUNCTIONS_VERSION: u8 = 1;
+
+/// Debug functions section containing function metadata, variables, and inlined calls.
+///
+/// This section stores function debug information including local variables and
+/// inlined call sites.
+///
+/// String indices in sub-types (e.g., `name_idx` in `DebugFunctionInfo`) are relative
+/// to this section's own string table.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct DebugFunctionsSection {
+    /// Version of the debug functions format
+    pub version: u8,
+    /// String table containing function names, variable names, linkage names
+    pub strings: Vec<String>,
+    /// Function debug information
+    pub functions: Vec<DebugFunctionInfo>,
+}
+
+impl DebugFunctionsSection {
+    /// Creates a new empty debug functions section.
+    pub fn new() -> Self {
+        Self {
+            version: DEBUG_FUNCTIONS_VERSION,
+            strings: Vec::new(),
+            functions: Vec::new(),
+        }
+    }
+
+    /// Adds a string to the string table and returns its index.
+    pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
+        let s = s.into();
+        if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
+            return idx as u32;
+        }
+        let idx = self.strings.len() as u32;
+        self.strings.push(s);
+        idx
+    }
+
+    /// Gets a string by index.
+    pub fn get_string(&self, idx: u32) -> Option<&str> {
+        self.strings.get(idx as usize).map(String::as_str)
+    }
+
     /// Adds a function to the function table.
     pub fn add_function(&mut self, func: DebugFunctionInfo) {
         self.functions.push(func);
     }
 
-    /// Returns true if the section is empty (no debug info).
+    /// Returns true if the section is empty (no functions).
     pub fn is_empty(&self) -> bool {
-        self.types.is_empty() && self.files.is_empty() && self.functions.is_empty()
+        self.functions.is_empty()
     }
 }
 
@@ -489,12 +592,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_debug_info_section_string_dedup() {
-        let mut section = DebugInfoSection::new();
+    fn test_debug_types_section_string_dedup() {
+        let mut section = DebugTypesSection::new();
 
         let idx1 = section.add_string("test.rs");
         let idx2 = section.add_string("main.rs");
         let idx3 = section.add_string("test.rs"); // Duplicate
+
+        assert_eq!(idx1, 0);
+        assert_eq!(idx2, 1);
+        assert_eq!(idx3, 0); // Should return same index
+        assert_eq!(section.strings.len(), 2);
+    }
+
+    #[test]
+    fn test_debug_sources_section_string_dedup() {
+        let mut section = DebugSourcesSection::new();
+
+        let idx1 = section.add_string("test.rs");
+        let idx2 = section.add_string("main.rs");
+        let idx3 = section.add_string("test.rs"); // Duplicate
+
+        assert_eq!(idx1, 0);
+        assert_eq!(idx2, 1);
+        assert_eq!(idx3, 0); // Should return same index
+        assert_eq!(section.strings.len(), 2);
+    }
+
+    #[test]
+    fn test_debug_functions_section_string_dedup() {
+        let mut section = DebugFunctionsSection::new();
+
+        let idx1 = section.add_string("foo");
+        let idx2 = section.add_string("bar");
+        let idx3 = section.add_string("foo"); // Duplicate
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
