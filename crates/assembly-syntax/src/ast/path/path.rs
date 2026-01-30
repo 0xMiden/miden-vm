@@ -142,7 +142,7 @@ impl Path {
     /// Verify that `path` meets all the requirements for a valid [Path]
     pub fn validate(path: &str) -> Result<&Path, PathError> {
         match path {
-            "" => return Err(PathError::Empty),
+            "" | "\"\"" => return Err(PathError::Empty),
             "::" => return Err(PathError::EmptyComponent),
             _ => (),
         }
@@ -202,7 +202,7 @@ impl Path {
 impl Path {
     /// Returns true if this path is empty (i.e. has no components)
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty() || &self.inner == "::"
+        matches!(&self.inner, "" | "::" | "\"\"")
     }
 
     /// Returns the number of components in the path

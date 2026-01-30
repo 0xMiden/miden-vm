@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.4 (Unreleased)
+
+- Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)
+
 ## 0.20.3 (2026-01-27)
 
 - Fixed issue where exports of a Library did not have attributes serialized [#2608](https://github.com/0xMiden/miden-vm/issues/2608)
