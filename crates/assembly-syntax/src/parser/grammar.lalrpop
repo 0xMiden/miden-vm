@@ -216,6 +216,8 @@ extern {
         "u32or" => Token::U32Or,
         "u32overflowing_add" => Token::U32OverflowingAdd,
         "u32overflowing_add3" => Token::U32OverflowingAdd3,
+        "u32widening_add" => Token::U32WideningAdd,
+        "u32widening_add3" => Token::U32WideningAdd3,
         "u32widening_madd" => Token::U32WideningMadd,
         "u32widening_mul" => Token::U32WideningMul,
         "u32overflowing_sub" => Token::U32OverflowingSub,
@@ -1032,6 +1034,7 @@ Inst: Instruction = {
     "swapdw" => Instruction::SwapDw,
     "u32cast" => Instruction::U32Cast,
     "u32overflowing_add3" => Instruction::U32OverflowingAdd3,
+    "u32widening_add3" => Instruction::U32WideningAdd3,
     "u32widening_madd" => Instruction::U32WideningMadd,
     "u32popcnt" => Instruction::U32Popcnt,
     "u32clz" => Instruction::U32Clz,
@@ -1365,6 +1368,13 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
         match imm {
             Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAddImm(imm)))],
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAdd))],
+        }
+    },
+    <l:@L> "u32widening_add" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningAddImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningAdd))],
         }
     },
     <l:@L> "u32overflowing_sub" <imm:MaybeImm<U32>> <r:@R> => {
@@ -2256,6 +2266,8 @@ Opcode: &'static str = {
     "u32or" => "u32or",
     "u32overflowing_add" => "u32overflowing_add",
     "u32overflowing_add3" => "u32overflowing_add3",
+    "u32widening_add" => "u32widening_add",
+    "u32widening_add3" => "u32widening_add3",
     "u32widening_madd" => "u32widening_madd",
     "u32widening_mul" => "u32widening_mul",
     "u32overflowing_sub" => "u32overflowing_sub",

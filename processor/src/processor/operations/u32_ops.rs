@@ -80,7 +80,7 @@ pub(super) fn op_u32add<P: Processor>(
     processor.stack().set(0, sum);
     processor.stack().set(1, carry);
 
-    Ok(P::HelperRegisters::op_u32add_registers(carry, sum))
+    Ok(P::HelperRegisters::op_u32add_registers(sum, carry))
 }
 
 /// Pops three elements off the stack, adds them, splits the result into low and high 32-bit
@@ -155,7 +155,7 @@ pub(super) fn op_u32mul<P: Processor>(
     processor.stack().set(0, lo);
     processor.stack().set(1, hi);
 
-    Ok(P::HelperRegisters::op_u32mul_registers(hi, lo))
+    Ok(P::HelperRegisters::op_u32mul_registers(lo, hi))
 }
 
 /// Pops three elements off the stack, multiplies the first two and adds the third element to
@@ -180,7 +180,7 @@ pub(super) fn op_u32madd<P: Processor>(
     processor.stack().set(0, lo);
     processor.stack().set(1, hi);
 
-    Ok(P::HelperRegisters::op_u32madd_registers(hi, lo))
+    Ok(P::HelperRegisters::op_u32madd_registers(lo, hi))
 }
 
 /// Pops two elements off the stack, divides the second element by the top element, and pushes
@@ -221,7 +221,7 @@ pub(super) fn op_u32div<P: Processor>(
     let hi = Felt::new(denominator - remainder - 1);
 
     tracer.record_u32_range_checks(processor.system().clk(), lo, hi);
-    Ok(P::HelperRegisters::op_u32div_registers(hi, lo))
+    Ok(P::HelperRegisters::op_u32div_registers(lo, hi))
 }
 
 /// Pops two elements off the stack, computes their bitwise AND, and pushes the result back

@@ -28,8 +28,6 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
-with-debug-info = []
-legacy-stark-tests = []
 
 [dependencies]
 # Miden dependencies

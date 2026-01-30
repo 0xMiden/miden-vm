@@ -741,7 +741,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32add_registers(carry: Felt, sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32add_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
@@ -782,7 +782,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32mul_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32mul_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
@@ -799,7 +799,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32madd_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32madd_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
@@ -816,7 +816,7 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
     }
 
     #[inline(always)]
-    fn op_u32div_registers(hi: Felt, lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
+    fn op_u32div_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
         // Compute helpers for range checks
         let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());

@@ -4,10 +4,11 @@
 
 #### Enhancements
 
+- Added initial `math::u128` functions for lib/core/math runtime. ([#2438](https://github.com/0xMiden/miden-vm/pull/2438)).
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
-- Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
 - Add deserialization of the `MastForest` from untrusted sources. Add fuzzing for MastForest deserialization. ([#2590](https://github.com/0xMiden/miden-vm/pull/2590)).
+- Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
 
 #### Fixes
 
@@ -54,6 +55,7 @@
 - [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
 - [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
 - [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Added widening `u32` add variants and aligned `math::u64/math::u256` APIs and docs with little‑endian stack conventions ([#2614](https://github.com/0xMiden/miden-vm/pull/2614)).
 
 ## 0.20.3 (2026-01-27)
 

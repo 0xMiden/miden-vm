@@ -32,7 +32,7 @@ WARNINGS                 := RUSTDOCFLAGS="-D warnings"
 BUILDDOCS                := MIDEN_BUILD_LIB_DOCS=1
 
 # -- feature configuration ------------------------------------------------------------------------
-ALL_FEATURES_BUT_ASYNC   := --features concurrent,executable,testing,internal
+ALL_FEATURES             := --all-features
 
 # Workspace-wide test features
 WORKSPACE_TEST_FEATURES  := concurrent,testing,executable
@@ -57,12 +57,12 @@ FEATURES_core-lib        :=FEATURES_verifier        :=
 
 .PHONY: clippy
 clippy: ## Runs Clippy with configs
-	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES_BUT_ASYNC} -- -D warnings
+	cargo +nightly clippy --workspace --all-targets ${ALL_FEATURES} -- -D warnings
 
 
 .PHONY: fix
 fix: ## Runs Fix with configs
-	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES_BUT_ASYNC}
+	cargo +nightly fix --allow-staged --allow-dirty --all-targets ${ALL_FEATURES}
 
 
 .PHONY: format
@@ -82,7 +82,7 @@ lint: format fix clippy ## Runs all linting tasks at once (Clippy, fixing, forma
 
 .PHONY: doc
 doc: ## Generates & checks documentation
-	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES_BUT_ASYNC} --keep-going --release
+	$(WARNINGS) $(BUILDDOCS) cargo doc ${ALL_FEATURES} --keep-going --release
 
 .PHONY: serve-docs
 serve-docs: ## Serves the docs
@@ -146,7 +146,7 @@ test: ## Run all tests for the workspace
 
 .PHONY: test-docs
 test-docs: ## Run documentation tests (cargo test - nextest doesn't support doctests)
-	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES_BUT_ASYNC)
+	$(BUILDDOCS) cargo test --doc $(ALL_FEATURES)
 
 # -- filtered test runs ---------------------------------------------------------------------------
 
@@ -173,7 +173,7 @@ test-loom: ## Runs all loom-based tests
 
 .PHONY: check
 check: ## Checks all targets and features for errors without code generation
-	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES_BUT_ASYNC}
+	$(BUILDDOCS) cargo check --all-targets ${ALL_FEATURES}
 
 .PHONY: check-features
 check-features: ## Checks all feature combinations compile without warnings using cargo-hack

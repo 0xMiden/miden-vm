@@ -59,7 +59,7 @@ $$
 Thus, for a 64-bit value to encode a valid field element, either the lower 32 bits must be all zeros, or the upper 32 bits must not be all ones (which is $2^{32} - 1$).
 
 ## U32SPLIT
-Assume $a$ is the element at the top of the stack. The `U32SPLIT` operation computes $(b,c) \leftarrow a$, where $b$ contains the lower 32 bits of $a$, and $c$ contains the upper 32 bits of $a$. The diagram below illustrates this graphically.
+Assume $a$ is the element at the top of the stack. The `U32SPLIT` operation computes $(b,c) \leftarrow a$, where $b$ contains the lower 32 bits of $a$, and $c$ contains the upper 32 bits of $a$. The output stack is `[b, c, ...]` with $b$ (low limb) on top. The diagram below illustrates this graphically.
 
 ![u32split](../../img/design/stack/u32_operations/U32SPLIT.png)
 
@@ -70,11 +70,11 @@ s_{0} = 2^{48} \cdot h_3 + 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | de
 $$
 
 $$
-s_{1}' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_{0}' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_{0}' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
+s_{1}' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks). Also, we need to make sure that values in $h_0, ..., h_3$, when combined, form a valid field element, which we can do by putting a nondeterministic value $m$ into helper register $h_4$ and using the technique described [here](#checking-element-validity).
@@ -103,7 +103,7 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$ - i.e., the state of the stack does not change.
 
 ## U32ADD
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD` operation computes $(c,d) \leftarrow a + b$, where $c$ contains the low 32-bits of the result, and $d$ is the carry bit. The diagram below illustrates this graphically.
+Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD` operation computes $(c,d) \leftarrow a + b$, where $c$ contains the low 32-bits of the result, and $d$ is the carry bit. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
 
 ![u32add](../../img/design/stack/u32_operations/U32ADD.png)
 
@@ -114,11 +114,11 @@ s_0 + s_1 = 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0' = h_2 \text{ | degree} = 1
+s_0' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_1' = h_2 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks).
@@ -127,7 +127,7 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32ADD3
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD3` operation computes $(d, e) \leftarrow a + b + c$, where $c$ and $d$ contains the low and the high 32-bits of the result respectively. The diagram below illustrates this graphically.
+Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD3` operation computes $(d, e) \leftarrow a + b + c$, where $d$ contains the low 32-bits of the result and $e$ contains the carry. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
 
 ![u32add3](../../img/design/stack/u32_operations/U32ADD3.png)
 
@@ -138,11 +138,11 @@ s_0 + s_1 + s_2 = 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0' = h_2 \text{ | degree} = 1
+s_0' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_1' = h_2 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks).
@@ -175,7 +175,7 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32MUL
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MUL` operation computes $(c, d) \leftarrow a \cdot b$, where $c$ and $d$ contain the low and the high 32-bits of the result respectively. The diagram below illustrates this graphically.
+Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MUL` operation computes $(c, d) \leftarrow a \cdot b$, where $c$ and $d$ contain the low and the high 32-bits of the result respectively. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
 
 ![u32mul](../../img/design/stack/u32_operations/U32MUL.png)
 
@@ -186,11 +186,11 @@ s_0 \cdot s_1 = 2^{48} \cdot h_3 + 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \te
 $$
 
 $$
-s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_0' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
+s_1' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks). Also, we need to make sure that values in $h_0, ..., h_3$, when combined, form a valid field element, which we can do by putting a nondeterministic value $m$ into helper register $h_4$ and using the technique described [here](#checking-element-validity).
@@ -199,7 +199,7 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32MADD
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MADD` operation computes $(d, e) \leftarrow a +b \cdot c$, where $c$ and $d$ contains the low and the high 32-bits of $a + b \cdot c$. The diagram below illustrates this graphically.
+Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MADD` operation computes $(d, e) \leftarrow a + b \cdot c$, where $d$ and $e$ contain the low and the high 32-bits of $a + b \cdot c$ respectively. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
 
 ![u32madd](../../img/design/stack/u32_operations/U32MADD.png)
 
@@ -210,11 +210,11 @@ s_0 \cdot s_1 + s_2 = 2^{48} \cdot h_3 + 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h
 $$
 
 $$
-s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
+s_0' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
+s_1' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks). Also, we need to make sure that values in $h_0, ..., h_3$, when combined, form a valid field element, which we can do by putting a nondeterministic value $m$ into helper register $h_4$ and using the technique described [here](#checking-element-validity).
@@ -225,7 +225,7 @@ The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $3$.
 
 ## U32DIV
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32DIV` operation computes $(c, d) \leftarrow a / b$, where $c$ contains the quotient and $d$ contains the remainder. The diagram below illustrates this graphically.
+Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32DIV` operation computes $(d, c) \leftarrow a / b$, where $d$ contains the remainder and $c$ contains the quotient. The output stack is `[d, c, ...]` with remainder on top. The diagram below illustrates this graphically.
 
 ![u32div](../../img/design/stack/u32_operations/U32DIV.png)
 
@@ -240,7 +240,7 @@ s_1 - s_1' = 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
 $$
 
 $$
-s_0 - s_0' - 1= 2^{16} \cdot h_2 + h_3 \text{ | degree} = 1
+s_0 - s_0' - 1= 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
 The second constraint enforces that $s_1' \leq s_1$, while the third constraint enforces that $s_0' < s_0$.
