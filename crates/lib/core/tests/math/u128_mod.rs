@@ -7,8 +7,8 @@ use miden_utils_testing::proptest::prelude::*;
 
 /// Helper to run a u128 operation and check the result
 fn test_u128_op(op: &str, a: u128, b: u128, expected: &[u64]) {
-    let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-    let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+    let (a3, a2, a1, a0) = split_u128(a);
+    let (b3, b2, b1, b0) = split_u128(b);
 
     let source = format!(
         "
@@ -19,13 +19,13 @@ fn test_u128_op(op: &str, a: u128, b: u128, expected: &[u64]) {
         "
     );
 
-    build_test!(&source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh]).expect_stack(expected);
+    build_test!(&source, &[b0, b1, b2, b3, a0, a1, a2, a3]).expect_stack(expected);
 }
 
 /// Helper to run a u128 operation and verify stack preservation
 fn test_u128_op_stack_preservation(op: &str, a: u128, b: u128, expected_len: usize) {
-    let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-    let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+    let (a3, a2, a1, a0) = split_u128(a);
+    let (b3, b2, b1, b0) = split_u128(b);
     let sentinel: u64 = 0xdeadbeef;
 
     let source = format!(
@@ -38,7 +38,7 @@ fn test_u128_op_stack_preservation(op: &str, a: u128, b: u128, expected_len: usi
     );
 
     // Add sentinel value after the operands
-    let test = build_test!(&source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, sentinel]);
+    let test = build_test!(&source, &[b0, b1, b2, b3, a0, a1, a2, a3, sentinel]);
 
     // Verify sentinel is preserved at the expected position
     let output = test.execute().unwrap();
@@ -53,10 +53,10 @@ fn test_u128_op_stack_preservation(op: &str, a: u128, b: u128, expected_len: usi
 #[test]
 fn edge_case_add_zeros() {
     // 0 + 0 = 0, no overflow
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(0);
-    test_u128_op("overflowing_add", 0, 0, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("widening_add", 0, 0, &[c_ll, c_ml, c_mh, c_hh, 0]);
-    test_u128_op("wrapping_add", 0, 0, &[c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(0);
+    test_u128_op("overflowing_add", 0, 0, &[0, c0, c1, c2, c3]);
+    test_u128_op("widening_add", 0, 0, &[c0, c1, c2, c3, 0]);
+    test_u128_op("wrapping_add", 0, 0, &[c0, c1, c2, c3]);
 }
 
 #[test]
@@ -65,10 +65,10 @@ fn edge_case_add_max_values() {
     let a = u128::MAX;
     let b = u128::MAX;
     let (c, ov) = a.overflowing_add(b);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_add", a, b, &[ov as u64, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_add", a, b, &[ov as u64, c0, c1, c2, c3]);
     // wrapping_add returns the same c value, reuse the split
-    test_u128_op("wrapping_add", a, b, &[c_ll, c_ml, c_mh, c_hh]);
+    test_u128_op("wrapping_add", a, b, &[c0, c1, c2, c3]);
 }
 
 #[test]
@@ -79,8 +79,8 @@ fn edge_case_add_max_plus_one() {
     let (c, ov) = a.overflowing_add(b);
     assert!(ov);
     assert_eq!(c, 0);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_add", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_add", a, b, &[1, c0, c1, c2, c3]);
 }
 
 #[test]
@@ -93,16 +93,16 @@ fn edge_case_add_carry_propagation() {
     let (c, ov) = a.overflowing_add(b);
     assert!(!ov);
     assert_eq!(c, 1u128 << 96);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_add", a, b, &[0, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_add", a, b, &[0, c0, c1, c2, c3]);
 }
 
 #[test]
 fn edge_case_sub_zeros() {
     // 0 - 0 = 0, no underflow
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(0);
-    test_u128_op("overflowing_sub", 0, 0, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("wrapping_sub", 0, 0, &[c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(0);
+    test_u128_op("overflowing_sub", 0, 0, &[0, c0, c1, c2, c3]);
+    test_u128_op("wrapping_sub", 0, 0, &[c0, c1, c2, c3]);
 }
 
 #[test]
@@ -113,8 +113,8 @@ fn edge_case_sub_underflow() {
     let (c, un) = a.overflowing_sub(b);
     assert!(un);
     assert_eq!(c, u128::MAX);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_sub", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_sub", a, b, &[1, c0, c1, c2, c3]);
 }
 
 #[test]
@@ -126,29 +126,29 @@ fn edge_case_sub_borrow_propagation() {
     let (c, un) = a.overflowing_sub(b);
     assert!(!un);
     assert_eq!(c, (1u128 << 96) - 1);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_sub", a, b, &[0, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_sub", a, b, &[0, c0, c1, c2, c3]);
 }
 
 #[test]
 fn edge_case_mul_zeros() {
     // 0 * anything = 0
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(0);
-    test_u128_op("overflowing_mul", 0, 0, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("overflowing_mul", 0, u128::MAX, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("overflowing_mul", u128::MAX, 0, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("wrapping_mul", 0, 12345, &[c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(0);
+    test_u128_op("overflowing_mul", 0, 0, &[0, c0, c1, c2, c3]);
+    test_u128_op("overflowing_mul", 0, u128::MAX, &[0, c0, c1, c2, c3]);
+    test_u128_op("overflowing_mul", u128::MAX, 0, &[0, c0, c1, c2, c3]);
+    test_u128_op("wrapping_mul", 0, 12345, &[c0, c1, c2, c3]);
 }
 
 #[test]
 fn edge_case_mul_one() {
     // 1 * x = x
     let x = 0x12345678_9abcdef0_12345678_9abcdef0u128;
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(x);
-    test_u128_op("overflowing_mul", 1, x, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("overflowing_mul", x, 1, &[0, c_ll, c_ml, c_mh, c_hh]);
-    test_u128_op("widening_mul", 1, x, &[c_ll, c_ml, c_mh, c_hh, 0]);
-    test_u128_op("wrapping_mul", 1, x, &[c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(x);
+    test_u128_op("overflowing_mul", 1, x, &[0, c0, c1, c2, c3]);
+    test_u128_op("overflowing_mul", x, 1, &[0, c0, c1, c2, c3]);
+    test_u128_op("widening_mul", 1, x, &[c0, c1, c2, c3, 0]);
+    test_u128_op("wrapping_mul", 1, x, &[c0, c1, c2, c3]);
 }
 
 #[test]
@@ -158,8 +158,8 @@ fn edge_case_mul_max_times_two() {
     let b = 2u128;
     let (c, ov) = a.overflowing_mul(b);
     assert!(ov);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_mul", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_mul", a, b, &[1, c0, c1, c2, c3]);
 }
 
 #[test]
@@ -170,8 +170,8 @@ fn edge_case_mul_powers_of_two() {
     let (c, ov) = a.overflowing_mul(b);
     assert!(!ov);
     assert_eq!(c, 1u128 << 127);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_mul", a, b, &[0, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_mul", a, b, &[0, c0, c1, c2, c3]);
 
     // 2^64 * 2^64 = 2^128 overflows
     let a = 1u128 << 64;
@@ -179,8 +179,8 @@ fn edge_case_mul_powers_of_two() {
     let (c, ov) = a.overflowing_mul(b);
     assert!(ov);
     assert_eq!(c, 0); // 2^128 mod 2^128 = 0
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("overflowing_mul", a, b, &[1, c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("overflowing_mul", a, b, &[1, c0, c1, c2, c3]);
 }
 
 #[test]
@@ -190,8 +190,8 @@ fn edge_case_mul_single_limb() {
     let a = 0xffffffffu128;
     let b = 0xffffffffu128;
     let c = a.wrapping_mul(b);
-    let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
-    test_u128_op("wrapping_mul", a, b, &[c_ll, c_ml, c_mh, c_hh]);
+    let (c3, c2, c1, c0) = split_u128(c);
+    test_u128_op("wrapping_mul", a, b, &[c0, c1, c2, c3]);
 }
 
 #[test]
@@ -215,10 +215,10 @@ fn edge_case_stack_preservation() {
 proptest! {
     #[test]
     fn overflowing_add(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
         let (c, ov) = a.overflowing_add(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+        let (c3, c2, c1, c0) = split_u128(c);
 
         let source = "
             use miden::core::math::u128
@@ -229,17 +229,17 @@ proptest! {
 
         // LE convention: low limb at position 0 (top of stack)
         // StackInputs::try_from_ints puts first array element at position 0
-        // Stack: [b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh, ...]
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[ov as u64, c_ll, c_ml, c_mh, c_hh]);
+        // Stack: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[ov as u64, c0, c1, c2, c3]);
     }
 
     #[test]
     fn widening_add(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
         let (c, ov) = a.overflowing_add(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+        let (c3, c2, c1, c0) = split_u128(c);
 
         let source = "
             use miden::core::math::u128
@@ -248,15 +248,15 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[c_ll, c_ml, c_mh, c_hh, ov as u64]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3, ov as u64]);
     }
 
     #[test]
     fn wrapping_add(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(a.wrapping_add(b));
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (c3, c2, c1, c0) = split_u128(a.wrapping_add(b));
 
         let source = "
             use miden::core::math::u128
@@ -265,16 +265,16 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[c_ll, c_ml, c_mh, c_hh]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
     }
 
     #[test]
     fn overflowing_sub(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
         let (c, un) = a.overflowing_sub(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+        let (c3, c2, c1, c0) = split_u128(c);
 
         let source = "
             use miden::core::math::u128
@@ -283,15 +283,15 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[un as u64, c_ll, c_ml, c_mh, c_hh]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[un as u64, c0, c1, c2, c3]);
     }
 
     #[test]
     fn wrapping_sub(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(a.wrapping_sub(b));
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (c3, c2, c1, c0) = split_u128(a.wrapping_sub(b));
 
         let source = "
             use miden::core::math::u128
@@ -300,16 +300,16 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[c_ll, c_ml, c_mh, c_hh]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
     }
 
     #[test]
     fn overflowing_mul(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
         let (c, ov) = a.overflowing_mul(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+        let (c3, c2, c1, c0) = split_u128(c);
 
         let source = "
             use miden::core::math::u128
@@ -318,16 +318,16 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[ov as u64, c_ll, c_ml, c_mh, c_hh]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[ov as u64, c0, c1, c2, c3]);
     }
 
     #[test]
     fn widening_mul(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
         let (c, ov) = a.overflowing_mul(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(c);
+        let (c3, c2, c1, c0) = split_u128(c);
 
         let source = "
             use miden::core::math::u128
@@ -336,15 +336,15 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[c_ll, c_ml, c_mh, c_hh, ov as u64]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3, ov as u64]);
     }
 
     #[test]
     fn wrapping_mul(a in any::<u128>(), b in any::<u128>()) {
-        let (a_hh, a_mh, a_ml, a_ll) = split_u128(a);
-        let (b_hh, b_mh, b_ml, b_ll) = split_u128(b);
-        let (c_hh, c_mh, c_ml, c_ll) = split_u128(a.wrapping_mul(b));
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let (c3, c2, c1, c0) = split_u128(a.wrapping_mul(b));
 
         let source = "
             use miden::core::math::u128
@@ -353,8 +353,8 @@ proptest! {
             end
         ";
 
-        build_test!(source, &[b_ll, b_ml, b_mh, b_hh, a_ll, a_ml, a_mh, a_hh])
-            .expect_stack(&[c_ll, c_ml, c_mh, c_hh]);
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
     }
 }
 
