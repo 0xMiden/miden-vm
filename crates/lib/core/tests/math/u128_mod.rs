@@ -42,7 +42,7 @@ fn test_u128_op_stack_preservation(op: &str, a: u128, b: u128, expected_len: usi
 
     // Verify sentinel is preserved at the expected position
     let output = test.execute().unwrap();
-    let stack_value = output.stack_outputs().get_stack_item(expected_len).unwrap();
+    let stack_value = output.stack_outputs().get_element(expected_len).unwrap();
     assert_eq!(
         stack_value,
         Felt::new(sentinel),
