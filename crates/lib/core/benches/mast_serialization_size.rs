@@ -16,16 +16,31 @@ fn mast_serialization_size(c: &mut Criterion) {
     let library = assembler.assemble_library_from_dir(asm_dir, namespace).unwrap();
     let mast_forest = library.mast_forest();
 
-    // Measure the serialized size once for reporting/throughput configuration.
-    let initial_bytes = mast_forest.to_bytes();
-    let initial_size = initial_bytes.len() as u64;
-    group.throughput(Throughput::Bytes(initial_size));
+    // Measure serialized size once for reporting/throughput configuration.
+    let full_bytes = mast_forest.to_bytes();
+    let full_size = full_bytes.len() as u64;
+    let mut stripped_bytes = Vec::new();
+    mast_forest.write_stripped(&mut stripped_bytes);
+    let stripped_size = stripped_bytes.len() as u64;
 
-    eprintln!("core-lib MastForest serialized size (bytes): {}", initial_size);
+    eprintln!(
+        "core-lib MastForest serialized size (bytes): full={}, stripped={}",
+        full_size, stripped_size
+    );
 
+    group.throughput(Throughput::Bytes(full_size));
     group.bench_function("full", |bench| {
         bench.iter(|| {
             let bytes = mast_forest.to_bytes();
+            black_box(bytes.len());
+        });
+    });
+
+    group.throughput(Throughput::Bytes(stripped_size));
+    group.bench_function("stripped", |bench| {
+        bench.iter(|| {
+            let mut bytes = Vec::new();
+            mast_forest.write_stripped(&mut bytes);
             black_box(bytes.len());
         });
     });

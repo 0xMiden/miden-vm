@@ -7,10 +7,12 @@ use miden_formatting::prettier::PrettyPrint;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Idx, OPCODE_LOOP,
     chiplets::hasher,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeId},
+    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
 };
 
 // LOOP NODE
