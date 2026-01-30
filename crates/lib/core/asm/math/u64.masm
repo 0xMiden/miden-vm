@@ -343,156 +343,10 @@ const U64_DIV_EVENT = event("miden::core::math::u64::u64_div")
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a // b
-#! This takes 54 cycles.
+#! This takes 56 cycles.
 pub proc div(b: u64, a: u64) -> u64
-    # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
-    # We verify: a = q * b + r, where q is quotient, r is remainder
-    # Output: [q_lo, q_hi, ...]
-
-    emit.U64_DIV_EVENT
-    # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
-    # => [b_lo, b_hi, a_lo, a_hi, ...]
-
-    adv_push.2
-    # Pops from advice: first q_hi, then q_lo, pushes them
-    # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32assert2
-
-    #==========================================================================
-    # MULTIPLICATION BLOCK: Compute prod = q * b (must fit in 64 bits)
-    #==========================================================================
-    # q * b = (q_hi * 2^32 + q_lo) * (b_hi * 2^32 + b_lo)
-    #       = q_hi * b_hi * 2^64 + q_hi * b_lo * 2^32 + q_lo * b_hi * 2^32 + q_lo * b_lo
-    # For this to fit in 64 bits, q_hi * b_hi must be 0.
-
-    # Step 1: Compute q_lo * b_lo
-    dup.2
-    # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.1
-    # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_mul
-    # outputs [lo, hi]: prod1 = q_lo * b_lo
-    # => [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-
-    # Step 2: Compute q_lo * b_hi + p1_hi (must have hi=0)
-    dup.5
-    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.3
-    # => [q_lo, b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_madd
-    # outputs [lo, hi]: p2 = q_lo * b_hi + p1_hi
-    # => [p2_lo, p2_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # p2_hi must be 0; Stack: [p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-
-    # Step 3: Compute q_hi * b_lo + p2_lo (must have hi=0)
-    dup.4
-    # => [b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.4
-    # => [q_hi, b_lo, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_madd
-    # outputs [lo, hi]: p3 = q_hi * b_lo + p2_lo
-    # => [p3_lo, p3_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # p3_hi must be 0; Stack: [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-
-    # Step 4: Check q_hi * b_hi = 0
-    dup.5
-    # => [b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.4
-    # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    mul
-    eq.0
-    assert
-    # => [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    # Now: prod_hi = p3_lo, prod_lo = p1_lo
-    # So: prod = prod_hi * 2^32 + prod_lo = q * b
-
-    #==========================================================================
-    # REMAINDER BLOCK: Get remainder and verify b > r
-    #==========================================================================
-    adv_push.2
-    # Pops from advice: first r_hi, then r_lo
-    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32assert2
-
-    movup.6
-    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, b_hi, a_lo, a_hi, ...]
-    movup.7
-    # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    swap
-    # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    dup.3
-    # => [r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    dup.3
-    # => [r_lo, r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [b_hi, r_lo, r_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [b_lo, b_hi, r_lo, r_hi, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    exec.lt
-    # Computes (r_lo, r_hi) < (b_lo, b_hi), i.e., r < b, consumes both pairs
-    # => [1, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    assert
-    # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-
-    #==========================================================================
-    # VERIFICATION BLOCK: Check prod + r = a
-    #==========================================================================
-    # We need to verify: prod_hi * 2^32 + prod_lo + r_hi * 2^32 + r_lo = a_hi * 2^32 + a_lo
-    # Which means:
-    #   sum_lo = (prod_lo + r_lo) mod 2^32
-    #   carry_lo = (prod_lo + r_lo) >> 32
-    #   sum_hi = prod_hi + r_hi + carry_lo
-    # And we check: sum_lo == a_lo, sum_hi == a_hi
-
-    # Current stack: [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-
-    movup.3
-    # => [prod_lo, r_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    u32widening_add
-    # outputs [sum, carry]: computes prod_lo + r_lo
-    # => [sum_lo, carry_lo, r_hi, prod_hi, q_lo, q_hi, a_lo, a_hi, ...]
-
-    # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
-    # Rearrange to get [carry_lo, prod_hi, r_hi] for u32widening_add3
-    movup.3
-    # => [prod_hi, sum_lo, carry_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [r_hi, prod_hi, sum_lo, carry_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    swap
-    # => [prod_hi, r_hi, sum_lo, carry_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [carry_lo, prod_hi, r_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    u32widening_add3
-    # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
-    # => [sum_hi, carry_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    swap
-    # => [carry_hi, sum_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # carry_hi must be 0 for result to fit in 64 bits
-    # => [sum_hi, sum_lo, q_lo, q_hi, a_lo, a_hi, ...]
-
-    # Verify sum_hi == a_hi
-    movup.5
-    # => [a_hi, sum_hi, sum_lo, q_lo, q_hi, a_lo, ...]
-    assert_eq
-    # => [sum_lo, q_lo, q_hi, a_lo, ...]
-
-    # Verify sum_lo == a_lo
-    movup.3
-    # => [a_lo, sum_lo, q_lo, q_hi, ...]
-    assert_eq
-    # => [q_lo, q_hi, ...]
+    exec.divmod
+    drop drop
 end
 
 # ===== MODULO OPERATION ==========================================================================
@@ -501,145 +355,11 @@ end
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
 #! [b_lo, b_hi, a_lo, a_hi, ...] -> [c_lo, c_hi, ...], where c = a % b
-#! This takes 56 cycles.
+#! This takes 58 cycles.
 pub proc mod(b: u64, a: u64) -> u64
-    # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
-    # We verify: a = q * b + r, where q is quotient, r is remainder
-    # Output: [r_lo, r_hi, ...] (remainder only)
-
-    emit.U64_DIV_EVENT
-    # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
-    # => [b_lo, b_hi, a_lo, a_hi, ...]
-
-    adv_push.2
-    # Pops from advice: first q_hi, then q_lo, pushes them
-    # => [q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32assert2
-
-    #==========================================================================
-    # MULTIPLICATION BLOCK: Compute prod = q * b (must fit in 64 bits)
-    #==========================================================================
-    # Same structure as div but q is consumed (not needed in output)
-
-    dup.2
-    # => [b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.1
-    # => [q_lo, b_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_mul
-    # outputs [lo, hi]: Stack: [p1_lo, p1_hi, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-
-    dup.5
-    # => [b_hi, p1_hi, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [q_lo, b_hi, p1_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_madd
-    # outputs [lo, hi]: Stack: [p2_lo, p2_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p2_hi, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # => [p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-
-    dup.3
-    # => [b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    dup.3
-    # => [q_hi, b_lo, p2_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    u32widening_madd
-    # outputs [lo, hi]: Stack: [p3_lo, p3_hi, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    swap
-    # => [p3_hi, p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # => [p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    # prod_hi = p3_lo, prod_lo = p1_lo
-
-    dup.4
-    # => [b_hi, p3_lo, p1_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
-    movup.3
-    # => [q_hi, b_hi, p3_lo, p1_lo, b_lo, b_hi, a_lo, a_hi, ...]
-    mul
-    eq.0
-    assert
-    # => [prod_hi, prod_lo, b_lo, b_hi, a_lo, a_hi, ...]
-
-    #==========================================================================
-    # REMAINDER BLOCK: Get remainder and verify b > r
-    #==========================================================================
-    adv_push.2
-    # Pops from advice: first r_hi, then r_lo
-    # => [r_lo, r_hi, prod_hi, prod_lo, b_lo, b_hi, a_lo, a_hi, ...]
-    u32assert2
-
-    movup.4
-    # => [b_lo, r_lo, r_hi, prod_hi, prod_lo, b_hi, a_lo, a_hi, ...]
-    movup.5
-    # => [b_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    swap
-    # => [b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    dup.3
-    # => [r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    dup.3
-    # => [r_lo, r_hi, b_lo, b_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    movup.3
-    # => [b_hi, r_lo, r_hi, b_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    movup.3
-    # => [b_lo, b_hi, r_lo, r_hi, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    exec.lt
-    # Computes r < b, consumes both pairs
-    # => [1, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    assert
-    # => [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-
-    #==========================================================================
-    # VERIFICATION BLOCK: Check prod + r = a
-    #==========================================================================
-    # We need: sum_lo = (prod_lo + r_lo) mod 2^32, sum_hi = prod_hi + r_hi + carry_lo
-    # And verify: sum_lo == a_lo, sum_hi == a_hi
-    # We also need to keep r_lo, r_hi on the stack for output
-
-    # Current stack: [r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-
-    # Duplicate r_lo for the add (we'll need it in output)
-    dup.0
-    # => [r_lo, r_lo, r_hi, prod_hi, prod_lo, a_lo, a_hi, ...]
-    movup.4
-    # => [prod_lo, r_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
-    u32widening_add
-    # outputs [sum, carry]: computes prod_lo + r_lo
-    # => [sum_lo, carry_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
-
-    # Now we need to compute: sum_hi = prod_hi + r_hi + carry_lo
-    # Duplicate r_hi for the add (we'll need it in output)
-    swap
-    # => [carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
-    dup.3
-    # => [r_hi, carry_lo, sum_lo, r_lo, r_hi, prod_hi, a_lo, a_hi, ...]
-    movup.5
-    # => [prod_hi, r_hi, carry_lo, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-    movup.2
-    # => [carry_lo, prod_hi, r_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-    u32widening_add3
-    # outputs [sum, carry]: computes carry_lo + prod_hi + r_hi
-    # => [sum_hi, carry_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-    swap
-    # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-    eq.0
-    assert
-    # => [sum_hi, sum_lo, r_lo, r_hi, a_lo, a_hi, ...]
-
-    # Verify sum_hi == a_hi
-    movup.5
-    # => [a_hi, sum_hi, sum_lo, r_lo, r_hi, a_lo, ...]
-    assert_eq
-    # => [sum_lo, r_lo, r_hi, a_lo, ...]
-
-    # Verify sum_lo == a_lo
-    movup.3
-    # => [a_lo, sum_lo, r_lo, r_hi, ...]
-    assert_eq
-    # => [r_lo, r_hi, ...]
+    exec.divmod
+    movup.2 drop
+    movup.2 drop
 end
 
 # ===== DIVMOD OPERATION ==========================================================================
@@ -647,12 +367,12 @@ end
 #! Performs divmod operation of two unsigned 64 bit integers.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b_lo, b_hi, a_lo, a_hi, ...] -> [q_lo, q_hi, r_lo, r_hi, ...], where q = a / b, r = a % b.
-#! This takes 56 cycles.
-pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
+#! [b_lo, b_hi, a_lo, a_hi, ...] -> [r_lo, r_hi, q_lo, q_hi, ...], where q = a / b, r = a % b.
+#! This takes 54 cycles.
+pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     # Input stack: [b_lo, b_hi, a_lo, a_hi, ...]
     # We verify: a = q * b + r, where q is quotient, r is remainder
-    # Output: [q_lo, q_hi, r_lo, r_hi, ...]
+    # Output: [r_lo, r_hi, q_lo, q_hi, ...]
 
     emit.U64_DIV_EVENT
     # Advice stack now has [q_hi, q_lo, r_hi, r_lo]
@@ -788,11 +508,6 @@ pub proc divmod(b: u64, a: u64) -> (quotient: u64, remainder: u64)
     assert_eq
     # => [r_lo, r_hi, q_lo, q_hi, ...]
 
-    # Reorder to [q_lo, q_hi, r_lo, r_hi]
-    movup.3
-    # => [q_hi, r_lo, r_hi, q_lo, ...]
-    movup.3
-    # => [q_lo, q_hi, r_lo, r_hi, ...]
 end
 
 # ===== BITWISE OPERATIONS ========================================================================

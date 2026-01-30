@@ -776,11 +776,11 @@ fn unchecked_divmod() {
     let (q1, q0) = split_u64(q);
     let (r1, r0) = split_u64(r);
 
-    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [q_lo, q_hi,
-    // r_lo, r_hi]
+    // [b_lo, b_hi, a_lo, a_hi] (b on top) computes a divmod b -> [r_lo, r_hi,
+    // q_lo, q_hi]
     let input_stack = stack![b0, b1, a0, a1];
     let test = build_test!(source, &input_stack);
-    test.expect_stack(&[q0, q1, r0, r1]);
+    test.expect_stack(&[r0, r1, q0, q1]);
 }
 
 // BITWISE OPERATIONS
