@@ -12,11 +12,10 @@ export RUSTFLAGS="-D warnings"
 export MIDEN_BUILD_LIB_DOCS=1
 
 # Run cargo-hack with comprehensive feature checking
-# Note: legacy-stark-tests is excluded because it contains Winterfell-era tests that need updating
 cargo hack check \
     --workspace \
     --each-feature \
-    --exclude-features default,legacy-stark-tests \
+    --exclude-features default \
     --all-targets
 
 echo "All feature combinations compiled successfully!"
