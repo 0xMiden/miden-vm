@@ -11,7 +11,7 @@ use miden_assembly_syntax::{
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
-    AssemblyOp, Decorator, Kernel, Operation, Program, Word,
+    AssemblyOp, Kernel, Operation, Program, Word,
     mast::{
         DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
         SplitNodeBuilder,
@@ -948,15 +948,14 @@ impl Assembler {
                         split_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the if node.
-                    let op = self.create_asmop_decorator(span, "if.true", proc_ctx);
-                    let decorator_id = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_decorator(Decorator::AsmOp(op))?;
-                    split_builder.append_before_enter([decorator_id]);
-
                     let split_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(split_builder)?;
+
+                    // Add an assembly operation to the if node.
+                    let asm_op = self.create_asmop_decorator(span, "if.true", proc_ctx);
+                    block_builder
+                        .mast_forest_builder_mut()
+                        .register_node_asm_op(split_node_id, asm_op)?;
 
                     body_node_ids.push(split_node_id);
                 },
@@ -1013,15 +1012,14 @@ impl Assembler {
                         loop_builder.append_before_enter(decorator_ids);
                     }
 
-                    // Add an assembly operation decorator to the loop node.
-                    let op = self.create_asmop_decorator(span, "while.true", proc_ctx);
-                    let decorator_id = block_builder
-                        .mast_forest_builder_mut()
-                        .ensure_decorator(Decorator::AsmOp(op))?;
-                    loop_builder.append_before_enter([decorator_id]);
-
                     let loop_node_id =
                         block_builder.mast_forest_builder_mut().ensure_node(loop_builder)?;
+
+                    // Add an assembly operation to the loop node.
+                    let asm_op = self.create_asmop_decorator(span, "while.true", proc_ctx);
+                    block_builder
+                        .mast_forest_builder_mut()
+                        .register_node_asm_op(loop_node_id, asm_op)?;
 
                     body_node_ids.push(loop_node_id);
                 },
@@ -1058,7 +1056,13 @@ impl Assembler {
                 ));
             }
 
-            mast_forest_builder.ensure_block(vec![Operation::Noop], Vec::new(), vec![], vec![])?
+            mast_forest_builder.ensure_block(
+                vec![Operation::Noop],
+                Vec::new(),
+                vec![],
+                vec![],
+                vec![],
+            )?
         } else {
             mast_forest_builder.join_nodes(body_node_ids)?
         };
