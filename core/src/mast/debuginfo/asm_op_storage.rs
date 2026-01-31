@@ -1,13 +1,13 @@
 //! CSR storage for mapping (NodeId, OpIdx) -> AsmOpId.
 //!
-//! This module stores AssemblyOp mappings using a sparse CSR format. Unlike the previous
-//! design that stored `Option<AsmOpId>` per operation slot, this stores only the operations
-//! that actually have an AssemblyOp, along with their operation index.
+//! This module stores AssemblyOp mappings using a sparse CSR format. Unlike the previous design
+//! that stored `Option<AsmOpId>` per operation slot, this stores only the operations that actually
+//! have an AssemblyOp, along with their operation index.
 //!
 //! # Data Layout
 //!
-//! For each node, we store a list of `(op_idx, asm_op_id)` pairs representing which
-//! operations have an AssemblyOp. The pairs are sorted by `op_idx` within each node.
+//! For each node, we store a list of `(op_idx, asm_op_id)` pairs representing which operations
+//! have an AssemblyOp. The pairs are sorted by `op_idx` within each node.
 //!
 //! # Example
 //!
@@ -22,38 +22,27 @@
 //! indptr: [0, 1, 3]  // Node 0: [0,1), Node 1: [1,3)
 //! ```
 
-use alloc::{string::String, vec::Vec};
+use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 
 use miden_utils_indexing::{CsrMatrix, CsrValidationError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{AsmOpId, MastNodeId};
+use crate::{
+    mast::{AsmOpId, MastNodeId},
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
-/// Error type for AsmOp index mapping operations.
-#[derive(Debug, PartialEq, Eq, thiserror::Error)]
-pub enum AsmOpIndexError {
-    /// Node index is invalid (either out of sequence or already added).
-    #[error("Invalid node index {0:?}")]
-    NodeIndex(MastNodeId),
-    /// Operation indices must be strictly increasing within the input.
-    #[error("Operation indices must be strictly increasing")]
-    NonIncreasingOpIndices,
-    /// Operation index is out of bounds for the node's operation count.
-    #[error("Operation index {0} exceeds node's operation count {1}")]
-    OpIndexOutOfBounds(usize, usize),
-    /// Internal CSR structure is corrupted.
-    #[error("Internal CSR structure error")]
-    InternalStructure,
-}
+// OP TO ASMOP ID
+// ================================================================================================
 
 /// CSR storage mapping (NodeId, OpIdx) -> AsmOpId.
 ///
 /// Unlike [`OpToDecoratorIds`](super::OpToDecoratorIds), each operation has at most one
 /// AssemblyOp. We store only the operations that have an AssemblyOp, using sparse storage.
 ///
-/// This structure provides efficient lookup of AssemblyOps by node and operation index,
-/// which is needed for error context reporting and debugging tools.
+/// This structure provides efficient lookup of AssemblyOps by node and operation index, which is
+/// needed for error context reporting and debugging tools.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct OpToAsmOpId {
@@ -93,19 +82,19 @@ impl OpToAsmOpId {
 
     /// Returns the total number of (op_idx, asm_op_id) entries across all nodes.
     ///
-    /// Note: This is the number of operations that have an AssemblyOp, not the total
-    /// number of operations.
+    /// Note: This is the number of operations that have an AssemblyOp, not the total number of
+    /// operations.
     pub fn num_operations(&self) -> usize {
         self.inner.num_elements()
     }
 
     /// Registers AssemblyOps for a node's operations.
     ///
-    /// `asm_ops` is a list of `(op_idx, asm_op_id)` pairs. The `op_idx` values must be
-    /// strictly increasing. Operations not listed will have no AsmOpId (sparse storage).
+    /// `asm_ops` is a list of `(op_idx, asm_op_id)` pairs. The `op_idx` values must be strictly
+    /// increasing. Operations not listed will have no AsmOpId (sparse storage).
     ///
-    /// Nodes must be added in sequential order starting from 0. If a node is skipped,
-    /// empty placeholder nodes are automatically created.
+    /// Nodes must be added in sequential order starting from 0. If a node is skipped, empty
+    /// placeholder nodes are automatically created.
     ///
     /// # Arguments
     ///
@@ -119,7 +108,7 @@ impl OpToAsmOpId {
     /// - `node_id` is less than the current node count (already added)
     /// - Operation indices are not strictly increasing
     /// - An operation index exceeds `num_operations`
-    pub fn add_asm_op_for_node(
+    pub fn add_asm_ops_for_node(
         &mut self,
         node_id: MastNodeId,
         num_operations: usize,
@@ -159,9 +148,9 @@ impl OpToAsmOpId {
 
     /// Returns the AsmOpId for a specific operation within a node, if any.
     ///
-    /// If the operation doesn't have a direct AssemblyOp, this performs a backward search
-    /// to find the most recent AssemblyOp (needed for multi-cycle instructions like `assertz`
-    /// where only the first operation has an AssemblyOp).
+    /// If the operation doesn't have a direct AssemblyOp, this performs a backward search to find
+    /// the most recent AssemblyOp (needed for multi-cycle instructions like `assertz` where only
+    /// the first operation has an AssemblyOp).
     ///
     /// # Arguments
     ///
@@ -211,17 +200,12 @@ impl OpToAsmOpId {
 
     /// Creates a new [`OpToAsmOpId`] with remapped node IDs.
     ///
-    /// This is used when nodes are removed from a MastForest and the remaining nodes
-    /// are renumbered. The remapping maps old node IDs to new node IDs.
+    /// This is used when nodes are removed from a MastForest and the remaining nodes are
+    /// renumbered. The remapping maps old node IDs to new node IDs.
     ///
-    /// Nodes that are not in the remapping are considered removed and their asm_op data
-    /// is discarded.
-    pub fn remap_nodes(
-        &self,
-        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
-    ) -> Self {
-        use alloc::{collections::BTreeMap, vec::Vec};
-
+    /// Nodes that are not in the remapping are considered removed and their asm_op data is
+    /// discarded.
+    pub fn remap_nodes(&self, remapping: &BTreeMap<MastNodeId, MastNodeId>) -> Self {
         if self.is_empty() {
             return Self::new();
         }
@@ -262,37 +246,49 @@ impl OpToAsmOpId {
     }
 
     /// Serializes this [`OpToAsmOpId`] into the target writer.
-    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
-        use crate::utils::Serializable;
-
+    pub(super) fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.inner.write_into(target);
     }
 
     /// Deserializes an [`OpToAsmOpId`] from the source reader.
-    pub(super) fn read_from<R: crate::utils::ByteReader>(
+    pub(super) fn read_from<R: ByteReader>(
         source: &mut R,
         asm_op_count: usize,
-    ) -> Result<Self, crate::utils::DeserializationError> {
-        use crate::utils::{Deserializable, DeserializationError};
-
+    ) -> Result<Self, DeserializationError> {
         let inner: CsrMatrix<MastNodeId, (usize, AsmOpId)> = Deserializable::read_from(source)?;
 
         let result = Self { inner };
 
         result.validate_csr(asm_op_count).map_err(|e| {
-            DeserializationError::InvalidValue(alloc::format!(
-                "OpToAsmOpId validation failed: {}",
-                e
-            ))
+            DeserializationError::InvalidValue(format!("OpToAsmOpId validation failed: {}", e))
         })?;
 
         Ok(result)
     }
 }
 
+// ASMOP INDEX ERROR
+// ================================================================================================
+
+/// Error type for AsmOp index mapping operations.
+#[derive(Debug, PartialEq, Eq, thiserror::Error)]
+pub enum AsmOpIndexError {
+    /// Node index is invalid (either out of sequence or already added).
+    #[error("Invalid node index {0:?}")]
+    NodeIndex(MastNodeId),
+    /// Operation indices must be strictly increasing within the input.
+    #[error("Operation indices must be strictly increasing")]
+    NonIncreasingOpIndices,
+    /// Operation index is out of bounds for the node's operation count.
+    #[error("Operation index {0} exceeds node's operation count {1}")]
+    OpIndexOutOfBounds(usize, usize),
+    /// Internal CSR structure is corrupted.
+    #[error("Internal CSR structure error")]
+    InternalStructure,
+}
+
 /// Format a CsrValidationError into a human-readable string.
 fn format_validation_error(error: CsrValidationError, asm_op_count: usize) -> String {
-    use alloc::format;
     match error {
         CsrValidationError::IndptrStartNotZero(val) => format!("indptr must start at 0, got {val}"),
         CsrValidationError::IndptrNotMonotonic { index, prev, curr } => {
@@ -306,6 +302,9 @@ fn format_validation_error(error: CsrValidationError, asm_op_count: usize) -> St
         ),
     }
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {
@@ -321,9 +320,9 @@ mod tests {
         MastNodeId::new_unchecked(value)
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Basic Construction Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_op_to_asm_op_id_empty() {
@@ -357,7 +356,7 @@ mod tests {
         let asm_op_id = test_asm_op_id(0);
 
         // Register: op 2 has asm_op_id 0 (3 ops total: 0, 1, 2)
-        storage.add_asm_op_for_node(node_id, 3, vec![(2, asm_op_id)]).unwrap();
+        storage.add_asm_ops_for_node(node_id, 3, vec![(2, asm_op_id)]).unwrap();
 
         assert!(!storage.is_empty());
         assert_eq!(storage.num_nodes(), 1);
@@ -377,7 +376,7 @@ mod tests {
 
         // Multiple operations with asm_ops (6 ops total: 0-5)
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 node_id,
                 6,
                 vec![(0, test_asm_op_id(10)), (2, test_asm_op_id(20)), (5, test_asm_op_id(30))],
@@ -401,7 +400,7 @@ mod tests {
         let node_id = test_node_id(0);
 
         // Empty node (0 operations)
-        storage.add_asm_op_for_node(node_id, 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(node_id, 0, vec![]).unwrap();
 
         assert!(!storage.is_empty());
         assert_eq!(storage.num_nodes(), 1);
@@ -411,9 +410,9 @@ mod tests {
         assert_eq!(storage.asm_op_id_for_operation(node_id, 0), None);
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Multi-Node Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_op_to_asm_op_id_multiple_nodes() {
@@ -421,12 +420,12 @@ mod tests {
 
         // Node 0: op 1 has asm_op 0 (2 ops total)
         storage
-            .add_asm_op_for_node(test_node_id(0), 2, vec![(1, test_asm_op_id(0))])
+            .add_asm_ops_for_node(test_node_id(0), 2, vec![(1, test_asm_op_id(0))])
             .unwrap();
 
         // Node 1: op 0 has asm_op 1, op 2 has asm_op 2 (3 ops total)
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 test_node_id(1),
                 3,
                 vec![(0, test_asm_op_id(1)), (2, test_asm_op_id(2))],
@@ -452,15 +451,15 @@ mod tests {
 
         // Node 0: has ops (1 op)
         storage
-            .add_asm_op_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
             .unwrap();
 
         // Node 1: empty (0 ops)
-        storage.add_asm_op_for_node(test_node_id(1), 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(test_node_id(1), 0, vec![]).unwrap();
 
         // Node 2: has ops (2 ops)
         storage
-            .add_asm_op_for_node(test_node_id(2), 2, vec![(1, test_asm_op_id(1))])
+            .add_asm_ops_for_node(test_node_id(2), 2, vec![(1, test_asm_op_id(1))])
             .unwrap();
 
         assert_eq!(storage.num_nodes(), 3);
@@ -477,12 +476,12 @@ mod tests {
 
         // Add node 0 (1 op)
         storage
-            .add_asm_op_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(0))])
             .unwrap();
 
         // Skip node 1, add node 2 directly (should auto-create empty node 1) (1 op)
         storage
-            .add_asm_op_for_node(test_node_id(2), 1, vec![(0, test_asm_op_id(1))])
+            .add_asm_ops_for_node(test_node_id(2), 1, vec![(0, test_asm_op_id(1))])
             .unwrap();
 
         assert_eq!(storage.num_nodes(), 3);
@@ -495,9 +494,9 @@ mod tests {
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(2), 0), Some(test_asm_op_id(1)));
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // first_asm_op_for_node Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_first_asm_op_for_node() {
@@ -505,7 +504,7 @@ mod tests {
 
         // Node with asm_op at op 2 (not op 0), 3 ops total
         storage
-            .add_asm_op_for_node(test_node_id(0), 3, vec![(2, test_asm_op_id(42))])
+            .add_asm_ops_for_node(test_node_id(0), 3, vec![(2, test_asm_op_id(42))])
             .unwrap();
 
         assert_eq!(storage.first_asm_op_for_node(test_node_id(0)), Some(test_asm_op_id(42)));
@@ -515,7 +514,7 @@ mod tests {
     fn test_first_asm_op_for_node_empty() {
         let mut storage = OpToAsmOpId::new();
 
-        storage.add_asm_op_for_node(test_node_id(0), 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(test_node_id(0), 0, vec![]).unwrap();
 
         assert_eq!(storage.first_asm_op_for_node(test_node_id(0)), None);
     }
@@ -533,7 +532,7 @@ mod tests {
 
         // Multiple ops, first one at index 1 (4 ops total)
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 test_node_id(0),
                 4,
                 vec![(1, test_asm_op_id(10)), (3, test_asm_op_id(30))],
@@ -544,16 +543,16 @@ mod tests {
         assert_eq!(storage.first_asm_op_for_node(test_node_id(0)), Some(test_asm_op_id(10)));
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Error Cases
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_op_to_asm_op_id_non_increasing_ops() {
         let mut storage = OpToAsmOpId::new();
 
         // Non-increasing operation indices should fail (3 ops)
-        let result = storage.add_asm_op_for_node(
+        let result = storage.add_asm_ops_for_node(
             test_node_id(0),
             3,
             vec![(2, test_asm_op_id(0)), (1, test_asm_op_id(1))],
@@ -567,7 +566,7 @@ mod tests {
         let mut storage = OpToAsmOpId::new();
 
         // Duplicate operation indices should fail (2 ops)
-        let result = storage.add_asm_op_for_node(
+        let result = storage.add_asm_ops_for_node(
             test_node_id(0),
             2,
             vec![(1, test_asm_op_id(0)), (1, test_asm_op_id(1))],
@@ -580,18 +579,18 @@ mod tests {
     fn test_op_to_asm_op_id_node_already_added() {
         let mut storage = OpToAsmOpId::new();
 
-        storage.add_asm_op_for_node(test_node_id(0), 0, vec![]).unwrap();
-        storage.add_asm_op_for_node(test_node_id(1), 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(test_node_id(0), 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(test_node_id(1), 0, vec![]).unwrap();
 
         // Try to add node 0 again
-        let result = storage.add_asm_op_for_node(test_node_id(0), 0, vec![]);
+        let result = storage.add_asm_ops_for_node(test_node_id(0), 0, vec![]);
 
         assert_eq!(result, Err(AsmOpIndexError::NodeIndex(test_node_id(0))));
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Query Edge Cases
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_op_to_asm_op_id_query_nonexistent_node() {
@@ -607,7 +606,7 @@ mod tests {
 
         // 2 ops total (ops 0, 1)
         storage
-            .add_asm_op_for_node(test_node_id(0), 2, vec![(1, test_asm_op_id(0))])
+            .add_asm_ops_for_node(test_node_id(0), 2, vec![(1, test_asm_op_id(0))])
             .unwrap();
 
         // Op 2 is out of bounds but backward search still finds op 1's asm_op
@@ -615,9 +614,9 @@ mod tests {
         assert_eq!(storage.asm_op_id_for_operation(test_node_id(0), 100), Some(test_asm_op_id(0)));
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // CSR Validation Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_validate_csr_empty() {
@@ -630,7 +629,7 @@ mod tests {
         let mut storage = OpToAsmOpId::new();
         // 2 ops with asm_ops at indices 0 and 1
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 test_node_id(0),
                 2,
                 vec![(0, test_asm_op_id(0)), (1, test_asm_op_id(1))],
@@ -645,7 +644,7 @@ mod tests {
         let mut storage = OpToAsmOpId::new();
         // 2 ops with asm_ops at indices 0 and 1
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 test_node_id(0),
                 2,
                 vec![(0, test_asm_op_id(0)), (1, test_asm_op_id(5))],
@@ -658,9 +657,9 @@ mod tests {
         assert!(result.unwrap_err().contains("Invalid AsmOpId"));
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Serialization Round-Trip Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_serialization_roundtrip_empty() {
@@ -684,17 +683,17 @@ mod tests {
         let mut storage = OpToAsmOpId::new();
         // Node 0: 3 ops, asm_ops at indices 0 and 2
         storage
-            .add_asm_op_for_node(
+            .add_asm_ops_for_node(
                 test_node_id(0),
                 3,
                 vec![(0, test_asm_op_id(0)), (2, test_asm_op_id(1))],
             )
             .unwrap();
         // Node 1: 0 ops
-        storage.add_asm_op_for_node(test_node_id(1), 0, vec![]).unwrap();
+        storage.add_asm_ops_for_node(test_node_id(1), 0, vec![]).unwrap();
         // Node 2: 2 ops, asm_op at index 1
         storage
-            .add_asm_op_for_node(test_node_id(2), 2, vec![(1, test_asm_op_id(2))])
+            .add_asm_ops_for_node(test_node_id(2), 2, vec![(1, test_asm_op_id(2))])
             .unwrap();
 
         let mut bytes = alloc::vec::Vec::new();
@@ -706,15 +705,15 @@ mod tests {
         assert_eq!(storage, deserialized);
     }
 
-    // =============================================================================================
+    // ============================================================================================
     // Clone and Debug Tests
-    // =============================================================================================
+    // ============================================================================================
 
     #[test]
     fn test_clone_and_equality() {
         let mut storage1 = OpToAsmOpId::new();
         storage1
-            .add_asm_op_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(42))])
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(42))])
             .unwrap();
 
         let storage2 = storage1.clone();
@@ -722,7 +721,7 @@ mod tests {
 
         let mut storage3 = OpToAsmOpId::new();
         storage3
-            .add_asm_op_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(99))])
+            .add_asm_ops_for_node(test_node_id(0), 1, vec![(0, test_asm_op_id(99))])
             .unwrap();
 
         assert_ne!(storage1, storage3);

@@ -1,18 +1,17 @@
 //! Debug information management for MAST forests.
 //!
-//! This module provides the [`DebugInfo`] struct which consolidates all debug-related
-//! information for a MAST forest in a single location. This includes:
+//! This module provides the [`DebugInfo`] struct which consolidates all debug-related information
+//! for a MAST forest in a single location. This includes:
 //!
 //! - All decorators (debug, trace, and assembly operation metadata)
 //! - Operation-indexed decorator mappings for efficient lookup
 //! - Node-level decorator storage (before_enter/after_exit)
 //! - Error code mappings for descriptive error messages
 //!
-//! The debug info is always available at the `MastForest` level (as per issue #1821),
-//! but may be conditionally included during assembly to maintain backward compatibility.
-//! Decorators are only executed when the processor is running in debug mode, allowing
-//! debug information to be available for debugging and error reporting without
-//! impacting performance in production execution.
+//! The debug info is always available at the `MastForest` level (as per issue 1821), but may be
+//! conditionally included during assembly to maintain backward compatibility. Decorators are only
+//! executed when the processor is running in debug mode, allowing debug information to be available
+//! for debugging and error reporting without impacting performance in production execution.
 //!
 //! # Debug Mode Semantics
 //!
@@ -36,9 +35,9 @@
 //!
 //! # Production Builds
 //!
-//! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear)
-//! method, which removes decorators while preserving critical information. This allows
-//! backward compatibility while enabling size optimization for deployment.
+//! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear) method,
+//! which removes decorators while preserving critical information. This allows backward
+//! compatibility while enabling size optimization for deployment.
 
 use alloc::{
     collections::BTreeMap,
@@ -47,13 +46,17 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
-    AssemblyOp, LexicographicWord, Word,
+    AssemblyOp, Idx, IndexVec, LexicographicWord, Word,
+    mast::serialization::{
+        StringTable,
+        asm_op::{AsmOpDataBuilder, AsmOpInfo},
+        decorator::{DecoratorDataBuilder, DecoratorInfo},
+    },
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
@@ -320,26 +323,23 @@ impl DebugInfo {
 
     /// Registers operation-indexed AssemblyOps for a node.
     ///
-    /// The `num_operations` parameter must be the total number of operations in the node.
-    /// This is needed to allocate enough space for all operations, even those without
-    /// AssemblyOps, so that lookups at any valid operation index will work correctly.
+    /// The `num_operations` parameter must be the total number of operations in the node. This is
+    /// needed to allocate enough space for all operations, even those without AssemblyOps, so that
+    /// lookups at any valid operation index will work correctly.
     pub fn register_asm_ops(
         &mut self,
         node_id: MastNodeId,
         num_operations: usize,
         asm_ops: Vec<(usize, AsmOpId)>,
     ) -> Result<(), AsmOpIndexError> {
-        self.asm_op_storage.add_asm_op_for_node(node_id, num_operations, asm_ops)
+        self.asm_op_storage.add_asm_ops_for_node(node_id, num_operations, asm_ops)
     }
 
     /// Remaps the asm_op_storage to use new node IDs after nodes have been removed/reordered.
     ///
-    /// This should be called after nodes are removed from the MastForest to ensure
-    /// the asm_op storage still references valid node IDs.
-    pub(super) fn remap_asm_op_storage(
-        &mut self,
-        remapping: &alloc::collections::BTreeMap<MastNodeId, MastNodeId>,
-    ) {
+    /// This should be called after nodes are removed from the MastForest to ensure the asm_op
+    /// storage still references valid node IDs.
+    pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
         self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
     }
 
@@ -454,10 +454,6 @@ impl DebugInfo {
 
 impl Serializable for DebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        use crate::mast::serialization::{
-            asm_op::AsmOpDataBuilder, decorator::DecoratorDataBuilder,
-        };
-
         // 1. Serialize decorators (data, string table, infos)
         let mut decorator_data_builder = DecoratorDataBuilder::new();
         for decorator in self.decorators.iter() {
@@ -470,7 +466,7 @@ impl Serializable for DebugInfo {
         decorator_infos.write_into(target);
 
         // 2. Serialize error codes
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> =
+        let error_codes: BTreeMap<u64, String> =
             self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
@@ -506,12 +502,9 @@ impl Serializable for DebugInfo {
 
 impl Deserializable for DebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use crate::mast::serialization::{asm_op::AsmOpInfo, decorator::DecoratorInfo};
-
         // 1. Read decorator data and string table
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
-        let string_table: crate::mast::serialization::StringTable =
-            Deserializable::read_from(source)?;
+        let string_table: StringTable = Deserializable::read_from(source)?;
         let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
 
         // 2. Reconstruct decorators
@@ -526,12 +519,9 @@ impl Deserializable for DebugInfo {
         }
 
         // 3. Read error codes
-        let error_codes_raw: alloc::collections::BTreeMap<u64, alloc::string::String> =
-            Deserializable::read_from(source)?;
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> = error_codes_raw
-            .into_iter()
-            .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
-            .collect();
+        let error_codes_raw: BTreeMap<u64, String> = Deserializable::read_from(source)?;
+        let error_codes: BTreeMap<u64, Arc<str>> =
+            error_codes_raw.into_iter().map(|(k, v)| (k, Arc::from(v.as_str()))).collect();
 
         // 4. Read OpToDecoratorIds CSR (dense representation)
         let op_decorator_storage = OpToDecoratorIds::read_from(source, decorators.len())?;
@@ -550,8 +540,7 @@ impl Deserializable for DebugInfo {
 
         // 7. Read AssemblyOps (data, string table, infos)
         let asm_op_data: Vec<u8> = Deserializable::read_from(source)?;
-        let asm_op_string_table: crate::mast::serialization::StringTable =
-            Deserializable::read_from(source)?;
+        let asm_op_string_table: StringTable = Deserializable::read_from(source)?;
         let asm_op_infos: Vec<AsmOpInfo> = Deserializable::read_from(source)?;
 
         // 8. Reconstruct AssemblyOps
