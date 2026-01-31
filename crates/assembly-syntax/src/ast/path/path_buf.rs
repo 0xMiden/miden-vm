@@ -198,6 +198,59 @@ impl PathBuf {
         }
     }
 
+    /// Extends `self` with `component`.
+    ///
+    /// Unlike [`Self::push`], which appends another `Path` to the buffer - this method appends the
+    /// given string as a single path component, ensuring that the content is quoted properly if
+    /// needed.
+    pub fn push_component<S>(&mut self, component: &S)
+    where
+        S: AsRef<str> + ?Sized,
+    {
+        let component = component.as_ref();
+        match component {
+            "" | "\"\"" => (),
+            "::" if self.inner.is_empty() => {
+                self.inner.push_str("::");
+            },
+            component => {
+                if !self.is_empty() {
+                    self.inner.push_str("::");
+                }
+
+                if component.starts_with('"') && component.ends_with('"') {
+                    self.inner.push_str(component);
+                } else {
+                    match Ident::validate(component) {
+                        // If the component is a valid MASM identifier, and does not contain `::`,
+                        // it does not need quoting
+                        Ok(_) if !component.contains("::") => {
+                            self.inner.push_str(component);
+                        },
+                        // If either of these validation occurs, the component requires quoting
+                        Ok(_)
+                        | Err(
+                            crate::ast::IdentError::Casing(_)
+                            | crate::ast::IdentError::InvalidChars { .. },
+                        ) => {
+                            self.inner.push('"');
+                            self.inner.push_str(component);
+                            self.inner.push('"');
+                        },
+                        // These two variants are unreachable because:
+                        //
+                        // 1. Length is not checked by Ident::validate
+                        // 2. We've already checked that the component is non-empty
+                        Err(
+                            crate::ast::IdentError::InvalidLength { .. }
+                            | crate::ast::IdentError::Empty,
+                        ) => unreachable!(),
+                    }
+                }
+            },
+        }
+    }
+
     /// Truncates `self` to [`Path::parent`].
     ///
     /// Returns `false` if `self.parent()` is `None`, otherwise `true`.
@@ -348,7 +401,7 @@ mod tests {
     use miden_core::assert_matches;
 
     use super::{PathBuf, PathError};
-    use crate::{Path, ast::IdentError};
+    use crate::{Path, PathComponent, ast::IdentError};
 
     #[test]
     fn single_component_path() {
@@ -383,8 +436,8 @@ mod tests {
         let path = PathBuf::new("\"miden:base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 1);
-        assert_eq!(path.last(), Some("miden:base/account@0.1.0"));
-        assert_eq!(path.first(), Some("miden:base/account@0.1.0"));
+        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
+        assert_eq!(path.first(), Some("\"miden:base/account@0.1.0\""));
     }
 
     #[test]
@@ -392,7 +445,7 @@ mod tests {
         let path = PathBuf::new("foo::\"miden:base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 2);
-        assert_eq!(path.last(), Some("miden:base/account@0.1.0"));
+        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
         assert_eq!(path.first(), Some("foo"));
     }
 
@@ -407,6 +460,95 @@ mod tests {
     }
 
     #[test]
+    fn mixed_quoted_components_regression() {
+        let component = "::root_ns:root@1.0.0";
+        let module = "abi_transform_tx_kernel_get_inputs_4";
+        let function = "miden::protocol::active_note::get_inputs";
+        let quoted_function = "\"miden::protocol::active_note::get_inputs\"";
+
+        let p1 = PathBuf::new(&format!("{component}::{module}::\"{function}\"")).unwrap();
+        let mut p2 = PathBuf::new(component).unwrap();
+        p2.push_component(module);
+        p2.push_component(function);
+
+        assert_eq!(p1, p2);
+
+        // Forward iteration of path components
+
+        let mut p1components = p1.components();
+        let mut p2components = p2.components();
+
+        let p1root = p1components.next().unwrap().unwrap();
+        let p2root = p2components.next().unwrap().unwrap();
+
+        assert_eq!(p1root, PathComponent::Root);
+        assert_eq!(p1root, p2root);
+
+        let p1component = p1components.next().unwrap().unwrap();
+        let p2component = p2components.next().unwrap().unwrap();
+
+        assert_eq!(p1component, PathComponent::Normal("root_ns:root@1.0.0"));
+        assert_eq!(p1component, p2component);
+
+        let p1module = p1components.next().unwrap().unwrap();
+        let p2module = p2components.next().unwrap().unwrap();
+
+        assert_eq!(p1module, PathComponent::Normal(module));
+        assert_eq!(p1module, p2module);
+
+        let p1function = p1components.next().unwrap().unwrap();
+        let p2function = p2components.next().unwrap().unwrap();
+
+        assert_eq!(p1function, PathComponent::Normal(quoted_function));
+        assert_eq!(p1function, p2function);
+
+        // Backward iteration of path components
+
+        let mut p1components = p1.components();
+        let mut p2components = p2.components();
+
+        let p1function = p1components.next_back().unwrap().unwrap();
+        let p2function = p2components.next_back().unwrap().unwrap();
+
+        assert_eq!(p1function, PathComponent::Normal(quoted_function));
+        assert_eq!(p1function, p2function);
+
+        let p1module = p1components.next_back().unwrap().unwrap();
+        let p2module = p2components.next_back().unwrap().unwrap();
+
+        assert_eq!(p1module, PathComponent::Normal(module));
+        assert_eq!(p1module, p2module);
+
+        let p1component = p1components.next_back().unwrap().unwrap();
+        let p2component = p2components.next_back().unwrap().unwrap();
+
+        assert_eq!(p1component, PathComponent::Normal("root_ns:root@1.0.0"));
+        assert_eq!(p1component, p2component);
+
+        let p1root = p1components.next_back().unwrap().unwrap();
+        let p2root = p2components.next_back().unwrap().unwrap();
+
+        assert_eq!(p1root, PathComponent::Root);
+        assert_eq!(p1root, p2root);
+
+        assert!(p1.is_absolute());
+        assert_eq!(p1.components().count(), 4);
+        assert_eq!(p1.last(), Some(quoted_function));
+        assert_eq!(p1.first(), Some("root_ns:root@1.0.0"));
+        let parent = p1.parent().unwrap();
+        assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
+        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::root_ns:root@1.0.0"));
+
+        assert!(p2.is_absolute());
+        assert_eq!(p2.components().count(), 4);
+        assert_eq!(p2.last(), Some(quoted_function));
+        assert_eq!(p2.first(), Some("root_ns:root@1.0.0"));
+        let parent = p2.parent().unwrap();
+        assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
+        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::root_ns:root@1.0.0"));
+    }
+
+    #[test]
     fn exec_path() {
         let path = PathBuf::new("$exec::bar::baz").unwrap();
         assert!(path.is_absolute());
@@ -418,7 +560,6 @@ mod tests {
     #[test]
     fn kernel_path() {
         let path = PathBuf::new("$kernel::bar::baz").unwrap();
-        std::dbg!(&path);
         assert!(path.is_absolute());
         assert_eq!(path.components().count(), 4);
         assert_eq!(path.last(), Some("baz"));
