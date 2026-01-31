@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.20.4 (Unreleased)
+## 0.20.4 (2026-01-30)
 
 - Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)
 
