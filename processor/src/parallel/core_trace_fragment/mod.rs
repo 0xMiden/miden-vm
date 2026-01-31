@@ -674,9 +674,9 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
     }
 
     fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
-        let num_eval = self.stack_mut().get(2);
-        let num_read = self.stack_mut().get(1);
-        let ptr = self.stack_mut().get(0);
+        let num_eval = self.stack().get(2);
+        let num_read = self.stack().get(1);
+        let ptr = self.stack().get(0);
         let ctx = self.system().ctx();
 
         let _circuit_evaluation = eval_circuit_parallel_(

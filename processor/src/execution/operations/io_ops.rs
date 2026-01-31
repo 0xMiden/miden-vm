@@ -67,7 +67,7 @@ pub(super) fn op_mloadw<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack_mut().get(0);
+    let addr = processor.stack().get(0);
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
 
@@ -103,13 +103,13 @@ pub(super) fn op_mstorew<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack_mut().get(0);
+    let addr = processor.stack().get(0);
     // Address is at position 0, so word starts at position 1
     let word = [
-        processor.stack_mut().get(1),
-        processor.stack_mut().get(2),
-        processor.stack_mut().get(3),
-        processor.stack_mut().get(4),
+        processor.stack().get(1),
+        processor.stack().get(2),
+        processor.stack().get(3),
+        processor.stack().get(4),
     ]
     .into();
     let ctx = processor.system().ctx();
@@ -142,7 +142,7 @@ pub(super) fn op_mload<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
     let ctx = processor.system().ctx();
-    let addr = processor.stack_mut().get(0);
+    let addr = processor.stack().get(0);
 
     let element = processor.memory().read_element(ctx, addr)?;
     tracer.record_memory_read_element(
@@ -170,8 +170,8 @@ pub(super) fn op_mstore<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), IoError> {
-    let addr = processor.stack_mut().get(0);
-    let value = processor.stack_mut().get(1);
+    let addr = processor.stack().get(0);
+    let value = processor.stack().get(1);
     let ctx = processor.system().ctx();
 
     processor.stack_mut().decrement_size(tracer);
@@ -212,7 +212,7 @@ pub(super) fn op_mstream<P: Processor>(
     let clk = processor.system().clock();
 
     // load two words from memory
-    let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
+    let addr_first_word = processor.stack().get(MEM_ADDR_STACK_IDX);
     let words = {
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
@@ -276,7 +276,7 @@ pub(super) fn op_pipe<P: Processor>(
 
     let clk = processor.system().clock();
     let ctx = processor.system().ctx();
-    let addr_first_word = processor.stack_mut().get(MEM_ADDR_STACK_IDX);
+    let addr_first_word = processor.stack().get(MEM_ADDR_STACK_IDX);
     let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
     // pop two words from the advice stack

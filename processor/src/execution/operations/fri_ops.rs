@@ -48,28 +48,28 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
-    let folded_pos = processor.stack_mut().get(8);
+    let folded_pos = processor.stack().get(8);
     // the segment identifier of the position in the source domain
-    let domain_segment = processor.stack_mut().get(9).as_canonical_u64();
+    let domain_segment = processor.stack().get(9).as_canonical_u64();
     // the power of the domain generator which can be used to determine current domain value x
-    let poe = processor.stack_mut().get(10);
+    let poe = processor.stack().get(10);
     if poe.is_zero() {
         return Err(OperationError::InvalidFriDomainGenerator);
     }
     // the result of the previous layer folding
     let prev_value = {
-        let pe1 = processor.stack_mut().get(11);
-        let pe0 = processor.stack_mut().get(12);
+        let pe1 = processor.stack().get(11);
+        let pe0 = processor.stack().get(12);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [pe0, pe1][i])
     };
     // the verifier challenge for the current layer
     let alpha = {
-        let a1 = processor.stack_mut().get(13);
-        let a0 = processor.stack_mut().get(14);
+        let a1 = processor.stack().get(13);
+        let a0 = processor.stack().get(14);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [a0, a1][i])
     };
     // the memory address of the current layer
-    let layer_ptr = processor.stack_mut().get(15);
+    let layer_ptr = processor.stack().get(15);
 
     // --- make sure the previous folding was done correctly --------------
     if domain_segment > 3 {
@@ -128,8 +128,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 /// - query_values[2] = (v4, v5), query_values[3] = (v6, v7)
 #[inline(always)]
 fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
-    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack_mut().get_word(0).into();
-    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack_mut().get_word(4).into();
+    let [v0, v1, v2, v3]: [Felt; 4] = processor.stack().get_word(0).into();
+    let [v4, v5, v6, v7]: [Felt; 4] = processor.stack().get_word(4).into();
 
     [
         QuadFelt::from_basis_coefficients_fn(|i: usize| [v0, v1][i]),

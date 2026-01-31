@@ -10,6 +10,9 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+// OPERATION HANDLERS
+// ================================================================================================
+
 /// Pops a value off the stack and asserts that it is equal to ONE.
 ///
 /// # Errors
@@ -21,7 +24,7 @@ pub(super) fn op_assert<P: Processor>(
     program: &MastForest,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    if processor.stack_mut().get(0) != ONE {
+    if processor.stack().get(0) != ONE {
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
@@ -35,14 +38,18 @@ pub(super) fn op_sdepth<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let depth = processor.stack_mut().depth();
+    let depth = processor.stack().depth();
     processor.stack_mut().increment_size(tracer)?;
     processor.stack_mut().set(0, Felt::from_u32(depth));
 
     Ok(())
 }
 
-/// Analogous to `Process::op_caller`.
+/// Overwrites the top four stack items with the hash of a function which initiated the current
+/// SYSCALL.
+///
+/// # Errors
+/// Returns an error if the VM is not currently executing a SYSCALL block.
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(processor: &mut P) -> Result<(), ExecutionError> {
     let caller_hash = processor.system().caller_hash();

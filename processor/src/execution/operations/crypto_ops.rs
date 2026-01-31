@@ -107,10 +107,10 @@ pub(super) fn op_mpverify<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], CryptoError> {
     // read node value, depth, index and root value from the stack
-    let node = processor.stack_mut().get_word(0);
-    let depth = processor.stack_mut().get(4);
-    let index = processor.stack_mut().get(5);
-    let root = processor.stack_mut().get_word(6);
+    let node = processor.stack().get_word(0);
+    let depth = processor.stack().get(4);
+    let index = processor.stack().get(5);
+    let root = processor.stack().get_word(6);
 
     // get a Merkle path from the advice provider for the specified root and node index
     let path = processor.advice_provider().get_merkle_path(root, depth, index)?;
@@ -172,11 +172,11 @@ pub(super) fn op_mrupdate<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], CryptoError> {
     // read old node value, depth, index, tree root and new node values from the stack
-    let old_value = processor.stack_mut().get_word(0);
-    let depth = processor.stack_mut().get(4);
-    let index = processor.stack_mut().get(5);
-    let claimed_old_root = processor.stack_mut().get_word(6);
-    let new_value = processor.stack_mut().get_word(10);
+    let old_value = processor.stack().get_word(0);
+    let depth = processor.stack().get(4);
+    let index = processor.stack().get(5);
+    let claimed_old_root = processor.stack().get_word(6);
+    let new_value = processor.stack().get_word(10);
 
     // update the node at the specified index in the Merkle tree specified by the old root, and
     // get a Merkle path to it. The length of the returned path is expected to match the
@@ -293,7 +293,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Read the evaluation point alpha from memory
     let alpha = {
-        let addr = processor.stack_mut().get(ALPHA_ADDR_INDEX);
+        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
         let eval_point_0 = processor.memory().read_element(ctx, addr)?;
         let eval_point_1 = processor.memory().read_element(ctx, addr + ONE)?;
 
@@ -317,8 +317,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     let c7 = QuadFelt::from(coef[7]);
 
     // Read the current accumulator (LE: low at lower index)
-    let acc_low = processor.stack_mut().get(ACC_LOW_INDEX);
-    let acc_high = processor.stack_mut().get(ACC_HIGH_INDEX);
+    let acc_low = processor.stack().get(ACC_LOW_INDEX);
+    let acc_high = processor.stack().get(ACC_HIGH_INDEX);
     let acc = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
     // Level 1: tmp0 = (acc * α + c₀) * α + c₁
@@ -400,14 +400,14 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Stack layout: [s0_lo, s0_hi, s1_lo, s1_hi, s2_lo, s2_hi, s3_lo, s3_hi, ...]
     // s[0] at stack[0,1] is highest degree (X^3), s[3] at stack[6,7] is constant (X^0)
     let coef: [QuadFelt; 4] = core::array::from_fn(|j| {
-        let lo = processor.stack_mut().get(2 * j);
-        let hi = processor.stack_mut().get(2 * j + 1);
+        let lo = processor.stack().get(2 * j);
+        let hi = processor.stack().get(2 * j + 1);
         QuadFelt::from_basis_coefficients_fn(|i: usize| [lo, hi][i])
     });
 
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
-        let addr = processor.stack_mut().get(ALPHA_ADDR_INDEX);
+        let addr = processor.stack().get(ALPHA_ADDR_INDEX);
         let word = processor.memory().read_word(ctx, addr, clk)?;
         tracer.record_memory_read_word(
             word,
@@ -424,8 +424,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     };
 
     // Read the current accumulator (LE: low at lower index)
-    let acc_low = processor.stack_mut().get(ACC_LOW_INDEX);
-    let acc_high = processor.stack_mut().get(ACC_HIGH_INDEX);
+    let acc_low = processor.stack().get(ACC_LOW_INDEX);
+    let acc_high = processor.stack().get(ACC_HIGH_INDEX);
     let acc_old = QuadFelt::from_basis_coefficients_fn(|i: usize| [acc_low, acc_high][i]);
 
     // Compute the temporary accumulator (first 2 coefficients from stack)
@@ -465,8 +465,8 @@ pub(super) fn op_log_precompile<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
     // Read COMM and TAG from the stack
-    let comm: Word = processor.stack_mut().get_word(0);
-    let tag: Word = processor.stack_mut().get_word(4);
+    let comm: Word = processor.stack().get_word(0);
+    let tag: Word = processor.stack().get_word(4);
 
     // Get the current precompile sponge capacity
     let cap_prev = processor.precompile_transcript_state();
@@ -536,8 +536,8 @@ pub(super) fn op_crypto_stream<P: Processor>(
     let clk = processor.system().clock();
 
     // Get source and destination pointers
-    let src_addr = processor.stack_mut().get(SRC_PTR_IDX);
-    let dst_addr = processor.stack_mut().get(DST_PTR_IDX);
+    let src_addr = processor.stack().get(SRC_PTR_IDX);
+    let dst_addr = processor.stack().get(DST_PTR_IDX);
 
     // Validate address ranges and check for overlap using half-open intervals.
     validate_dual_word_stream_addrs(src_addr, dst_addr, ctx, clk)?;

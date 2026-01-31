@@ -48,7 +48,7 @@ pub(super) fn op_u32split<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<[Felt; NUM_USER_OP_HELPERS], ExecutionError> {
     let (top_hi, top_lo) = {
-        let top = processor.stack_mut().get(0);
+        let top = processor.stack().get(0);
         split_element(top)
     };
     tracer.record_u32_range_checks(processor.system().clock(), top_lo, top_hi);

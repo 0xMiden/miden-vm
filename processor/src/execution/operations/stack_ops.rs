@@ -60,7 +60,7 @@ pub(super) fn dup_nth<P: Processor>(
     n: usize,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let to_dup = processor.stack_mut().get(n);
+    let to_dup = processor.stack().get(n);
     processor.stack_mut().increment_size(tracer)?;
     processor.stack_mut().set(0, to_dup);
 
@@ -77,7 +77,7 @@ pub(super) fn op_cswap<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    let condition = processor.stack_mut().get(0);
+    let condition = processor.stack().get(0);
     processor.stack_mut().decrement_size(tracer);
 
     match condition.as_canonical_u64() {
@@ -105,7 +105,7 @@ pub(super) fn op_cswapw<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    let condition = processor.stack_mut().get(0);
+    let condition = processor.stack().get(0);
     processor.stack_mut().decrement_size(tracer);
 
     match condition.as_canonical_u64() {

@@ -14,6 +14,9 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+// OPERATION HANDLERS
+// ================================================================================================
+
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]
@@ -25,7 +28,7 @@ pub(super) fn op_add<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// onto the stack.
 #[inline(always)]
 pub(super) fn op_neg<P: Processor>(processor: &mut P) {
-    let element = processor.stack_mut().get(0);
+    let element = processor.stack().get(0);
     processor.stack_mut().set(0, -element);
 }
 
@@ -128,8 +131,8 @@ pub(super) fn op_eq<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> [Felt; NUM_USER_OP_HELPERS] {
-    let b = processor.stack_mut().get(0);
-    let a = processor.stack_mut().get(1);
+    let b = processor.stack().get(0);
+    let a = processor.stack().get(1);
 
     // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
     // to return user op helpers, which makes the abstraction less suitable here.
@@ -183,9 +186,9 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
 /// of 5).
 #[inline(always)]
 pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
-    let old_base = processor.stack_mut().get(1);
-    let old_acc = processor.stack_mut().get(2);
-    let old_exp_int = processor.stack_mut().get(3).as_canonical_u64();
+    let old_base = processor.stack().get(1);
+    let old_acc = processor.stack().get(2);
+    let old_exp_int = processor.stack().get(3).as_canonical_u64();
 
     // Compute new exponent.
     let new_exp = Felt::new(old_exp_int >> 1);
@@ -218,7 +221,7 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     const SEVEN: Felt = Felt::new(7);
     // get_word returns [s0, s1, s2, s3] where s0 is top of stack
     // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
-    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack_mut().get_word(0).into();
+    let [b0, b1, a0, a1]: [Felt; 4] = processor.stack().get_word(0).into();
 
     /* top 2 elements remain unchanged */
 
@@ -243,8 +246,8 @@ fn pop2_applyfn_push<P: Processor>(
     f: impl FnOnce(Felt, Felt) -> Felt,
     tracer: &mut impl Tracer,
 ) {
-    let b = processor.stack_mut().get(0);
-    let a = processor.stack_mut().get(1);
+    let b = processor.stack().get(0);
+    let a = processor.stack().get(1);
 
     processor.stack_mut().decrement_size(tracer);
     processor.stack_mut().set(0, f(a, b));
@@ -260,8 +263,8 @@ fn pop2_applyfn_push_op<P: Processor>(
     f: impl FnOnce(Felt, Felt) -> Result<Felt, OperationError>,
     tracer: &mut impl Tracer,
 ) -> Result<(), OperationError> {
-    let b = processor.stack_mut().get(0);
-    let a = processor.stack_mut().get(1);
+    let b = processor.stack().get(0);
+    let a = processor.stack().get(1);
 
     processor.stack_mut().decrement_size(tracer);
     processor.stack_mut().set(0, f(a, b)?);
