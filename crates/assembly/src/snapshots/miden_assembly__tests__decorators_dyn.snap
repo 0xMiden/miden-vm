@@ -1,6 +1,5 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 1566
 expression: program
 ---
 begin
@@ -13,7 +12,7 @@ begin
             noop
             trace(0)
         end
-        asmOp(dynexec, 1) dyn
+        dyn
     end
     trace(1)
 end

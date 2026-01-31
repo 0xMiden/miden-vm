@@ -8,7 +8,6 @@ begin
         push(4294967294)
         mstore
         drop
-        asmOp(push.[2,3,4,5], 4)
         push(5)
         push(4)
         push(3)

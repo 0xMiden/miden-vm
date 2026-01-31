@@ -347,16 +347,16 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // With debug mode always enabled (issue #1821), identical procedures get unique debug
-    // decorators, so they are no longer deduplicated. This is expected behavior.
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // The debug info (AssemblyOps) is stored separately and doesn't affect deduplication.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // With debug mode always enabled, we expect more nodes due to unique debug decorators
-    // NOTE: The MAST forest now has more nodes than before because identical procedures
-    // get unique debug decorators and cannot be deduplicated
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
+    // With deduplication restored, we expect fewer nodes than before when debug decorators
+    // prevented deduplication. The identical procedures now share the same node.
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -3635,11 +3635,10 @@ fn vendoring() -> TestResult {
 
     // Rigorous testing of vendoring functionality
 
-    // 1. Verify the vendored library has the expected structure with debug decorators
-    assert!(
-        !lib.mast_forest().decorators().is_empty(),
-        "Vendored library should have debug decorators"
-    );
+    // 1. The vendored library (lib) has `exec.::test::mod1::bar` which is a 0-cycle instruction.
+    // 0-cycle instructions like `exec` don't generate AssemblyOps because they don't execute
+    // any VM operations. The debug info may still have procedure names, error codes, etc.
+    // The vendor_lib (mod1) has actual instructions (push.1, push.2) which do have AssemblyOps.
 
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
@@ -3648,11 +3647,10 @@ fn vendoring() -> TestResult {
         Assembler::default().assemble_library([mod2]).unwrap()
     };
 
-    // 3. Verify that both libraries have the expected structure with debug decorators
-    //    (always-enabled mode)
+    // 3. Verify that the expected library (which has push.1) has AssemblyOps
     assert!(
-        !expected_lib.mast_forest().decorators().is_empty(),
-        "Expected library should have debug decorators"
+        expected_lib.mast_forest().debug_info().num_asm_ops() > 0,
+        "Expected library should have AssemblyOps for instruction tracking"
     );
 
     // 4. Verify we can create an assembler that successfully links the vendored library
@@ -3675,10 +3673,10 @@ fn vendoring() -> TestResult {
     );
     let assembled_program = assemble_result.unwrap();
 
-    // Verify the assembled program has debug decorators
+    // Verify the assembled program has debug info (AssemblyOps)
     assert!(
-        !assembled_program.mast_forest().decorators().is_empty(),
-        "Assembled program with library should have debug decorators"
+        assembled_program.mast_forest().debug_info().num_asm_ops() > 0,
+        "Assembled program with library should have AssemblyOps for instruction tracking"
     );
 
     // 6. Verify the vendored library contains the expected structure
@@ -3688,21 +3686,6 @@ fn vendoring() -> TestResult {
     // Verify there are root procedures (the first node is usually a root for libraries)
     let nodes = mast_forest.nodes();
     assert!(!nodes.is_empty(), "Vendored library should have root procedures");
-
-    // 7. Verify debug decorators are present and proper for tracking
-    let vendored_decorator_count = mast_forest.decorators().len();
-    assert!(vendored_decorator_count > 0, "Vendored library should have decorators");
-
-    // 8. Check that the library has expected procedures by examining MAST structure
-    // The vendored library should contain procedures from the vendor module
-    let has_debug_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_debug_decorators,
-        "Vendored library should have AsmOp decorators for instruction tracking"
-    );
 
     Ok(())
 }
@@ -3935,7 +3918,7 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![])
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
@@ -3983,32 +3966,32 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
         .ensure_split(r#true1, r#false1, vec![], vec![])
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
         .ensure_split(r#true3, r#false3, vec![], vec![])
@@ -4025,13 +4008,14 @@ fn nested_blocks() -> Result<(), Report> {
                 Vec::new(),
                 vec![],
                 vec![],
+                vec![],
             )
             .unwrap();
 
         expected_mast_forest_builder.ensure_loop(body_node_id, vec![], vec![]).unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
@@ -4176,9 +4160,11 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // With debug mode always enabled, each procedure gets unique debug decorators
-    // so they are no longer deduplicated. This is expected behavior per issue #1821.
-    assert_eq!(program.num_procedures(), 3);
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // foo and bar have identical code, so they share the same MAST node. The entrypoint
+    // is a separate procedure, so we have 2 procedures total.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
@@ -4231,18 +4217,15 @@ fn duplicate_nodes_with_debug_decorators() {
     let program = context.assemble(program_source).unwrap();
     let mast_forest = program.mast_forest();
 
-    // With debug mode always enabled, we should have debug decorators
+    // With debug mode always enabled, we should have AssemblyOps in debug_info.
+    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
     assert!(
-        !mast_forest.decorators().is_empty(),
-        "Should have debug decorators with always-enabled debug mode"
+        mast_forest.debug_info().num_asm_ops() > 0,
+        "Should have AssemblyOps with always-enabled debug mode"
     );
 
-    // Count nodes - should be more than before due to unique debug decorators
-    // The exact number depends on implementation, but should be greater than the minimum expected
-    assert!(
-        mast_forest.num_nodes() > 3,
-        "Should have more nodes with debug decorators enabled"
-    );
+    // Count nodes - should have the expected structure
+    assert!(mast_forest.num_nodes() > 3, "Should have expected number of nodes");
 
     // Verify the program can be executed (functional test)
     let mut host = DefaultHost::default();
@@ -4556,21 +4539,10 @@ fn test_assembler_debug_info_present() {
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 
-    // Debug info should be present since debug mode is always enabled
-    assert!(
-        !mast_forest.decorators().is_empty(),
-        "Debug info should be present with always-enabled debug mode"
-    );
-
-    // Specifically check for AsmOp decorators that track instruction execution
-    let has_asmop_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_asmop_decorators,
-        "AsmOp decorators should be present for tracking instructions"
-    );
+    // Debug info should be present since debug mode is always enabled.
+    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
+    assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }
 
 #[test]

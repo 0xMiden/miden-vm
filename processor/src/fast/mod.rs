@@ -659,9 +659,6 @@ impl FastProcessor {
                     }
                 }
             },
-            Decorator::AsmOp(_assembly_op) => {
-                // do nothing
-            },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
                     let process = &mut self.state();

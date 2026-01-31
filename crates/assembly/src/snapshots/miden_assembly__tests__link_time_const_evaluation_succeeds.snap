@@ -10,13 +10,12 @@ begin
                 push(4294967294)
                 mstore
                 drop
-                asmOp(push.1, 2)
                 pad
                 incr
                 noop
             end
             external.0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328
         end
-        basic_block asmOp(add, 1) add asmOp(add, 1) add end
+        basic_block add add end
     end
 end

@@ -1,11 +1,11 @@
-use alloc::string::ToString;
+use std::string::ToString;
 
 use miden_crypto::{Felt, ONE, Word, field::PrimeCharacteristicRing};
 use miden_utils_indexing::Idx;
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator,
+    DebugOptions, Decorator,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
@@ -116,8 +116,8 @@ fn confirm_operation_and_decorator_structure() {
         Operation::LogPrecompile => (),
     };
 
+    // Decorator variants - exhaustiveness check to ensure serialization coverage.
     match Decorator::Trace(0) {
-        Decorator::AsmOp(_) => (),
         Decorator::Debug(debug_options) => match debug_options {
             DebugOptions::StackAll => (),
             DebugOptions::StackTop(_) => (),
@@ -229,21 +229,9 @@ fn serialize_deserialize_all_nodes() {
 
         let num_operations = operations.len();
 
+        // Note: AssemblyOps are now stored separately in DebugInfo's asm_op storage,
+        // not as decorators. See the asm_op module tests for AssemblyOp serialization.
         let decorators = vec![
-            (
-                0,
-                Decorator::AsmOp(AssemblyOp::new(
-                    Some(miden_debug_types::Location {
-                        uri: "test".into(),
-                        start: 42.into(),
-                        end: 43.into(),
-                    }),
-                    "context".to_string(),
-                    15,
-                    "op".to_string(),
-                    false,
-                )),
-            ),
             (0, Decorator::Debug(DebugOptions::StackAll)),
             (15, Decorator::Debug(DebugOptions::StackTop(255))),
             (15, Decorator::Debug(DebugOptions::MemAll)),
@@ -878,7 +866,7 @@ fn test_batched_construction_preserves_structure() {
 // PROPTEST-BASED ROUND-TRIP SERIALIZATION TESTS
 // ================================================================================================
 
-/// Test that the new header format is backward compatible (flags=0x00).
+/// Test that the new header format uses flags=0x00 for full serialization.
 #[test]
 fn test_header_backward_compatible() {
     let mut forest = MastForest::new();
@@ -892,7 +880,8 @@ fn test_header_backward_compatible() {
     // Check header structure: MAST (4 bytes) + flags (1 byte) + version (3 bytes)
     assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
-    assert_eq!(&bytes[5..8], &[0, 0, 1], "Version should be [0, 0, 1]");
+    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
+    assert_eq!(&bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
 }
 
 /// Test that stripped serialization produces smaller output than full serialization.
@@ -980,7 +969,8 @@ fn test_stripped_header_flags() {
     // Check header structure
     assert_eq!(&stripped_bytes[0..4], b"MAST", "Magic should be MAST");
     assert_eq!(stripped_bytes[4], 0x01, "Flags should be 0x01 for stripped serialization");
-    assert_eq!(&stripped_bytes[5..8], &[0, 0, 1], "Version should be [0, 0, 1]");
+    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
+    assert_eq!(&stripped_bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
 }
 
 /// Test that node digests are preserved in stripped serialization.
