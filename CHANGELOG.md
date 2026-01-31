@@ -33,6 +33,8 @@
 - Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
 - Added error messages to asserts in the standard library ([#2650](https://github.com/0xMiden/miden-vm/pull/2650))
 - Optimized `ExecutionTracer` to avoid cloning `Vec<OpBatch>` on every basic block entry. ([#2664](https://github.com/0xMiden/miden-vm/pull/2664))
+- Adds error messages to asserts in the standard library ([#2650](https://github.com/0xMiden/miden-vm/pull/2650))
+- Improved serialized size of the MastForest ([#2623](https://github.com/0xMiden/miden-vm/pull/2623))
 
 #### Fixes
 
