@@ -41,8 +41,6 @@ use miden_processor::{
     event::EventHandler,
     trace::{build_trace, execution_tracer::TraceGenerationContext},
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use miden_prover::prove_sync;
 use miden_prover::utils::range;
 pub use miden_prover::{ProvingOptions, prove};
 pub use miden_verifier::verify;
@@ -281,7 +279,8 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .with_debugging(self.in_debug_mode)
             .with_tracing(self.in_debug_mode);
-        let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let execution_output = rt.block_on(processor.execute(&program, &mut host)).unwrap();
 
         // validate the memory state
         for (addr, mem_value) in
@@ -383,6 +382,8 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+
         let fast_stack_result = {
             let fast_processor = FastProcessor::new_with_options(
                 self.stack_inputs,
@@ -392,11 +393,45 @@ impl Test {
                     .with_core_trace_fragment_size(FRAGMENT_SIZE)
                     .unwrap(),
             );
-            fast_processor.execute_for_trace_sync(&program, &mut host)
+            rt.block_on(fast_processor.execute_for_trace(&program, &mut host))
         };
 
         // compare fast and slow processors' stack outputs
         self.assert_result_with_step_execution(&fast_stack_result);
+
+        fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
+            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info());
+
+            assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
+            trace
+        })
+    }
+
+    /// Async version of [`Self::execute`]. Use this when already inside a tokio runtime.
+    ///
+    /// Note: Unlike the sync version, this does not run the step-by-step comparison check
+    /// since that would require spawning a nested runtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn execute_async(&self) -> Result<ExecutionTrace, ExecutionError> {
+        // Note: we fix a large fragment size here, as we're not testing the fragment boundaries
+        // with these tests (which are tested separately), but rather only the per-fragment trace
+        // generation logic - though not too big so as to over-allocate memory.
+        const FRAGMENT_SIZE: usize = 1 << 16;
+
+        let (program, host) = self.get_program_and_host();
+        let mut host = host.with_source_manager(self.source_manager.clone());
+
+        let fast_stack_result = {
+            let fast_processor = FastProcessor::new_with_options(
+                self.stack_inputs,
+                self.advice_inputs.clone(),
+                miden_processor::ExecutionOptions::default()
+                    .with_debugging(self.in_debug_mode)
+                    .with_core_trace_fragment_size(FRAGMENT_SIZE)
+                    .unwrap(),
+            );
+            fast_processor.execute_for_trace(&program, &mut host).await
+        };
 
         fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
             let trace = build_trace(execution_output, trace_generation_ctx, program.to_info());
@@ -411,6 +446,15 @@ impl Test {
     /// Returns the [`ExecutionOutput`] once execution is finished.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(self.execute_for_output_async())
+    }
+
+    /// Async version of [`Self::execute_for_output`]. Use this when already inside a tokio runtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn execute_for_output_async(
+        &self,
+    ) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
@@ -419,7 +463,7 @@ impl Test {
             .with_debugging(true)
             .with_tracing(true);
 
-        processor.execute_sync(&program, &mut host).map(|output| (output, host))
+        processor.execute(&program, &mut host).await.map(|output| (output, host))
     }
 
     /// Compiles the test's source to a Program and executes it with the tests inputs. Returns
@@ -428,6 +472,16 @@ impl Test {
     /// If the execution fails, the output is printed `stderr`.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(self.execute_with_debug_buffer_async())
+    }
+
+    /// Async version of [`Self::execute_with_debug_buffer`]. Use this when already inside a tokio
+    /// runtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn execute_with_debug_buffer_async(
+        &self,
+    ) -> Result<(StackOutputs, String), ExecutionError> {
         let debug_handler = DefaultDebugHandler::new(BufferWriter::default());
 
         let (program, host) = self.get_program_and_host();
@@ -440,7 +494,7 @@ impl Test {
             .with_debugging(true)
             .with_tracing(true);
 
-        let stack_result = processor.execute_sync(&program, &mut host);
+        let stack_result = processor.execute(&program, &mut host).await;
 
         let debug_output = host.debug_handler().writer().buffer.clone();
 
@@ -460,15 +514,23 @@ impl Test {
     /// is true, this function will force a failure by modifying the first output.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(self.prove_and_verify_async(pub_inputs, test_fail))
+    }
+
+    /// Async version of [`Self::prove_and_verify`]. Use this when already inside a tokio runtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn prove_and_verify_async(&self, pub_inputs: Vec<u64>, test_fail: bool) {
         let (program, mut host) = self.get_program_and_host();
         let stack_inputs = StackInputs::try_from_ints(pub_inputs).unwrap();
-        let (mut stack_outputs, proof) = miden_prover::prove_sync(
+        let (mut stack_outputs, proof) = miden_prover::prove(
             &program,
             stack_inputs,
             self.advice_inputs.clone(),
             &mut host,
             ProvingOptions::default(),
         )
+        .await
         .unwrap();
 
         let program_info = ProgramInfo::from(program);
@@ -489,6 +551,22 @@ impl Test {
     pub fn get_last_stack_state(&self) -> StackOutputs {
         let trace = self
             .execute()
+            .inspect_err(|_err| {
+                #[cfg(feature = "std")]
+                std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
+            })
+            .expect("failed to execute");
+
+        trace.last_stack_state()
+    }
+
+    /// Async version of [`Self::get_last_stack_state`]. Use this when already inside a tokio
+    /// runtime.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub async fn get_last_stack_state_async(&self) -> StackOutputs {
+        let trace = self
+            .execute_async()
+            .await
             .inspect_err(|_err| {
                 #[cfg(feature = "std")]
                 std::eprintln!("{}", PrintDiagnostic::new_without_color(_err))
@@ -521,6 +599,7 @@ impl Test {
         (program, host)
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn assert_result_with_step_execution(
         &self,
         fast_result: &Result<(ExecutionOutput, TraceGenerationContext), ExecutionError>,
@@ -574,7 +653,8 @@ impl Test {
                 .with_advice(self.advice_inputs.clone())
                 .with_debugging(self.in_debug_mode)
                 .with_tracing(self.in_debug_mode);
-            fast_process.execute_by_step_sync(&program, &mut host)
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(fast_process.execute_by_step(&program, &mut host))
         };
 
         compare_results(

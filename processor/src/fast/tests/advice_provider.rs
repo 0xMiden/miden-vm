@@ -1,8 +1,8 @@
 use super::*;
 use crate::test_utils::TestHost;
 
-#[test]
-fn test_advice_provider() {
+#[tokio::test]
+async fn test_advice_provider() {
     let kernel_source = "
         pub proc foo
             push.2323 mem_store.100 trace.11
@@ -150,7 +150,7 @@ fn test_advice_provider() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
+    let fast_stack_outputs = processor.execute(&program, &mut fast_host).await.unwrap().stack;
 
     // check outputs
     insta::assert_debug_snapshot!("stack_outputs", fast_stack_outputs);

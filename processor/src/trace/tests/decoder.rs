@@ -25,11 +25,11 @@ use crate::{
 // BLOCK STACK TABLE TESTS
 // ================================================================================================
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p1_span_with_respan() {
+async fn decoder_p1_span_with_respan() {
     let (ops, _) = build_span_with_respan_ops();
-    let trace = build_trace_from_ops(ops, &[]);
+    let trace = build_trace_from_ops(ops, &[]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -68,9 +68,9 @@ fn decoder_p1_span_with_respan() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p1_join() {
+async fn decoder_p1_join() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -88,7 +88,7 @@ fn decoder_p1_join() {
         Program::new(mast_forest.into(), join_id)
     };
 
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -141,9 +141,9 @@ fn decoder_p1_join() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p1_split() {
+async fn decoder_p1_split() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -161,7 +161,7 @@ fn decoder_p1_split() {
         Program::new(mast_forest.into(), split_id)
     };
 
-    let trace = build_trace_from_program(&program, &[1]);
+    let trace = build_trace_from_program(&program, &[1]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -201,9 +201,9 @@ fn decoder_p1_split() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p1_loop_with_repeat() {
+async fn decoder_p1_loop_with_repeat() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -225,7 +225,7 @@ fn decoder_p1_loop_with_repeat() {
     // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
-    let trace = build_trace_from_program(&program, &[1, 1, 0]);
+    let trace = build_trace_from_program(&program, &[1, 1, 0]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -335,9 +335,9 @@ fn decoder_p1_loop_with_repeat() {
 // BLOCK HASH TABLE TESTS
 // ================================================================================================
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p2_span_with_respan() {
+async fn decoder_p2_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -349,7 +349,7 @@ fn decoder_p2_span_with_respan() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
@@ -374,9 +374,9 @@ fn decoder_p2_span_with_respan() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p2_join() {
+async fn decoder_p2_join() {
     let mut mast_forest = MastForest::new();
 
     let basic_block_1_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
@@ -396,7 +396,7 @@ fn decoder_p2_join() {
 
     let program = Program::new(mast_forest.into(), join_id);
 
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
@@ -442,9 +442,9 @@ fn decoder_p2_join() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p2_split_true() {
+async fn decoder_p2_split_true() {
     // build program
     let mut mast_forest = MastForest::new();
 
@@ -464,7 +464,7 @@ fn decoder_p2_split_true() {
     let program = Program::new(mast_forest.into(), split_id);
 
     // build trace from program
-    let trace = build_trace_from_program(&program, &[1]);
+    let trace = build_trace_from_program(&program, &[1]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
@@ -501,9 +501,9 @@ fn decoder_p2_split_true() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p2_split_false() {
+async fn decoder_p2_split_false() {
     // build program
     let mut mast_forest = MastForest::new();
 
@@ -524,7 +524,7 @@ fn decoder_p2_split_false() {
     let program = Program::new(mast_forest.into(), split_id);
 
     // build trace from program
-    let trace = build_trace_from_program(&program, &[0]);
+    let trace = build_trace_from_program(&program, &[0]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
@@ -561,9 +561,9 @@ fn decoder_p2_split_false() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p2_loop_with_repeat() {
+async fn decoder_p2_loop_with_repeat() {
     // build program
     let mut mast_forest = MastForest::new();
 
@@ -589,7 +589,7 @@ fn decoder_p2_loop_with_repeat() {
     // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
-    let trace = build_trace_from_program(&program, &[1, 1, 0]);
+    let trace = build_trace_from_program(&program, &[1, 1, 0]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p2 = aux_columns.get_column(P2_COL_IDX);
@@ -684,11 +684,11 @@ fn decoder_p2_loop_with_repeat() {
 // OP GROUP TABLE TESTS
 // ================================================================================================
 
-#[test]
-fn decoder_p3_trace_empty_table() {
+#[tokio::test]
+async fn decoder_p3_trace_empty_table() {
     let stack = [1, 2];
     let operations = vec![Operation::Add];
-    let trace = build_trace_from_ops(operations, &stack);
+    let trace = build_trace_from_ops(operations, &stack).await;
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
@@ -701,9 +701,9 @@ fn decoder_p3_trace_empty_table() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p3_trace_one_batch() {
+async fn decoder_p3_trace_one_batch() {
     let stack = [1, 2, 3, 4, 5, 6, 7, 8];
     let ops = vec![
         Operation::Add,
@@ -719,7 +719,7 @@ fn decoder_p3_trace_one_batch() {
         Operation::Mul,
         Operation::Add,
     ];
-    let trace = build_trace_from_ops(ops.clone(), &stack);
+    let trace = build_trace_from_ops(ops.clone(), &stack).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);
@@ -767,11 +767,11 @@ fn decoder_p3_trace_one_batch() {
     }
 }
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn decoder_p3_trace_two_batches() {
+async fn decoder_p3_trace_two_batches() {
     let (ops, iv) = build_span_with_respan_ops();
-    let trace = build_trace_from_ops(ops, &[]);
+    let trace = build_trace_from_ops(ops, &[]).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p3 = aux_columns.get_column(P3_COL_IDX);

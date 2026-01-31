@@ -14,9 +14,9 @@ const TWO: Felt = Felt::new(2);
 // OVERFLOW TABLE TESTS
 // ================================================================================================
 
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn p1_trace() {
+async fn p1_trace() {
     let ops = vec![
         Operation::U32add, // no shift, clk 1
         Operation::Pad,    // right shift, clk 2
@@ -31,7 +31,7 @@ fn p1_trace() {
         Operation::Drop,   // left shift, clk 11
     ];
     let init_stack = (1..17).rev().collect::<Vec<_>>();
-    let trace = build_trace_from_ops(ops, &init_stack);
+    let trace = build_trace_from_ops(ops, &init_stack).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);

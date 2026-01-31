@@ -1,3 +1,6 @@
+// Functions and constants used in rstest #[case] attributes are not detected by dead_code lint
+#![allow(dead_code)]
+
 use alloc::{string::String, sync::Arc};
 
 use miden_core::{
@@ -71,6 +74,7 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 /// boundaries is correct, given that we test elsewhere the correctness of the trace generated in a
 /// single fragment.
 #[rstest]
+#[tokio::test]
 // Case 1: Tests the trace fragment generation for when a fragment starts in the start phase of a
 // Join node (i.e. clk 4). Execution:
 //  0: JOIN
@@ -304,7 +308,7 @@ fn external_lib_proc_hash_for_stack() -> &'static [Felt] {
 // 18: END
 // 19: HALT
 #[case(dyn_program(), 12, external_lib_proc_hash_for_stack())]
-fn test_trace_generation_at_fragment_boundaries(
+async fn test_trace_generation_at_fragment_boundaries(
     testname: String,
     #[case] program: Program,
     #[case] fragment_size: usize,
@@ -325,7 +329,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host).unwrap();
+            processor.execute_for_trace(&program, &mut host).await.unwrap();
 
         build_trace(execution_output, trace_fragment_contexts, program.to_info())
     };
@@ -341,7 +345,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let mut host = DefaultHost::default();
         host.load_library(create_simple_library()).unwrap();
         let (execution_output, trace_fragment_contexts) =
-            processor.execute_for_trace_sync(&program, &mut host).unwrap();
+            processor.execute_for_trace(&program, &mut host).await.unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
         build_trace(execution_output, trace_fragment_contexts, program.to_info())

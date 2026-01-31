@@ -95,8 +95,8 @@ fn test_reset_stack_in_buffer_from_restore_context() {
 }
 
 /// Tests that a syscall fails when the syscall target is not in the kernel.
-#[test]
-fn test_syscall_fail() {
+#[tokio::test]
+async fn test_syscall_fail() {
     let mut host = DefaultHost::default();
 
     // set the initial FMP to a value close to FMP_MAX
@@ -116,7 +116,7 @@ fn test_syscall_fail() {
 
     let processor = FastProcessor::new(stack_inputs);
 
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
 
     // Check that the error is due to the syscall target not being in the kernel
     assert_matches!(
@@ -130,8 +130,8 @@ fn test_syscall_fail() {
 
 /// Tests that `ExecutionError::CycleLimitExceeded` is correctly emitted when a program exceeds the
 /// number of allowed cycles.
-#[test]
-fn test_cycle_limit_exceeded() {
+#[tokio::test]
+async fn test_cycle_limit_exceeded() {
     let mut host = DefaultHost::default();
 
     let options = ExecutionOptions::new(
@@ -149,7 +149,7 @@ fn test_cycle_limit_exceeded() {
 
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
 }
@@ -158,8 +158,8 @@ fn test_cycle_limit_exceeded() {
 ///
 /// This is a regression test for the off-by-one error where the cycle limit check used `>=`
 /// instead of `>`, causing programs that used exactly `max_cycles` cycles to fail.
-#[test]
-fn test_cycle_limit_exactly_max_cycles_succeeds() {
+#[tokio::test]
+async fn test_cycle_limit_exactly_max_cycles_succeeds() {
     let mut host = DefaultHost::default();
 
     // With 2018 Noop operations, the program uses exactly MIN_TRACE_LEN (2048) cycles.
@@ -182,7 +182,7 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
 
     let processor =
         FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
 
     // The program should succeed since it uses exactly max_cycles cycles.
     assert!(
@@ -191,8 +191,8 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     );
 }
 
-#[test]
-fn test_assert() {
+#[tokio::test]
+async fn test_assert() {
     let mut host = DefaultHost::default();
 
     // Case 1: the stack top is ONE
@@ -201,7 +201,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(stack_inputs);
-        let result = processor.execute_sync(&program, &mut host);
+        let result = processor.execute(&program, &mut host).await;
 
         // Check that the execution succeeds
         assert!(result.is_ok());
@@ -213,7 +213,7 @@ fn test_assert() {
         let program = simple_program_with_ops(vec![Operation::Assert(ZERO)]);
 
         let processor = FastProcessor::new(stack_inputs);
-        let err = processor.execute_sync(&program, &mut host).unwrap_err();
+        let err = processor.execute(&program, &mut host).await.unwrap_err();
 
         // Check that the error is due to a failed assertion
         assert_matches!(
@@ -235,12 +235,16 @@ fn test_assert() {
 #[case(vec![ZERO, ONE], ZERO)]
 #[case(vec![ONE, ZERO], ZERO)]
 #[case(vec![ONE, ONE], ONE)]
-fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected_output: Felt) {
+#[tokio::test]
+async fn test_valid_combinations_and(
+    #[case] stack_inputs: Vec<Felt>,
+    #[case] expected_output: Felt,
+) {
     let program = simple_program_with_ops(vec![Operation::And]);
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
+    let stack_outputs = processor.execute(&program, &mut host).await.unwrap().stack;
 
     assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
@@ -254,20 +258,24 @@ fn test_valid_combinations_and(#[case] stack_inputs: Vec<Felt>, #[case] expected
 #[case(vec![ZERO, ONE], ONE)]
 #[case(vec![ONE, ZERO], ONE)]
 #[case(vec![ONE, ONE], ONE)]
-fn test_valid_combinations_or(#[case] stack_inputs: Vec<Felt>, #[case] expected_output: Felt) {
+#[tokio::test]
+async fn test_valid_combinations_or(
+    #[case] stack_inputs: Vec<Felt>,
+    #[case] expected_output: Felt,
+) {
     let program = simple_program_with_ops(vec![Operation::Or]);
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
+    let stack_outputs = processor.execute(&program, &mut host).await.unwrap().stack;
 
     assert_eq!(stack_outputs.get_num_elements(1)[0], expected_output);
 }
 
 /// Tests a valid set of inputs for the `Frie2f4` operation. This test reuses most of the logic of
 /// `op_fri_ext2fold4` in `Process`.
-#[test]
-fn test_frie2f4() {
+#[tokio::test]
+async fn test_frie2f4() {
     let mut host = DefaultHost::default();
 
     // --- build stack inputs ---------------------------------------------
@@ -303,13 +311,13 @@ fn test_frie2f4() {
 
     // fast processor
     let fast_processor = FastProcessor::new(stack_inputs);
-    let stack_outputs = fast_processor.execute_sync(&program, &mut host).unwrap().stack;
+    let stack_outputs = fast_processor.execute(&program, &mut host).await.unwrap().stack;
 
     insta::assert_debug_snapshot!(stack_outputs);
 }
 
-#[test]
-fn test_call_node_preserves_stack_overflow_table() {
+#[tokio::test]
+async fn test_call_node_preserves_stack_overflow_table() {
     let mut host = DefaultHost::default();
 
     // equivalent to:
@@ -388,7 +396,7 @@ fn test_call_node_preserves_stack_overflow_table() {
     );
 
     // Execute the program
-    let result = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let result = processor.execute_mut(&program, &mut host).await.unwrap();
 
     assert_eq!(
         result.get_num_elements(16),
@@ -420,8 +428,8 @@ fn test_call_node_preserves_stack_overflow_table() {
 // EXTERNAL NODE TESTS
 // -----------------------------------------------------------------------------------------------
 
-#[test]
-fn test_external_node_decorator_sequencing() {
+#[tokio::test]
+async fn test_external_node_decorator_sequencing() {
     let mut lib_forest = MastForest::new();
 
     // Add a decorator to the lib forest to track execution inside the external node
@@ -456,7 +464,7 @@ fn test_external_node_decorator_sequencing() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify all decorators executed

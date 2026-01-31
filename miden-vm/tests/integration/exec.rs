@@ -22,16 +22,17 @@ fn advice_map_loaded_before_execution() {
     let program_without_advice_map: Program =
         Assembler::default().assemble_program(source).unwrap();
 
-    // Test `miden_processor::execute_sync` fails if no advice map provided with the program
+    // Test `miden_processor::execute` fails if no advice map provided with the program
     let mut host =
         DefaultHost::default().with_source_manager(Arc::new(DefaultSourceManager::default()));
-    match miden_processor::execute_sync(
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    match rt.block_on(miden_processor::execute(
         &program_without_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-    ) {
+    )) {
         Ok(_) => panic!("Expected error"),
         Err(e) => {
             assert_matches!(
@@ -44,7 +45,7 @@ fn advice_map_loaded_before_execution() {
         },
     }
 
-    // Test `miden_processor::execute_sync` works if advice map provided with the program
+    // Test `miden_processor::execute` works if advice map provided with the program
     let mast_forest: MastForest = (**program_without_advice_map.mast_forest()).clone();
 
     let key = Word::new([ONE, ONE, ONE, ONE]);
@@ -56,12 +57,13 @@ fn advice_map_loaded_before_execution() {
         Program::new(mast_forest.into(), program_without_advice_map.entrypoint());
 
     let mut host = DefaultHost::default();
-    miden_processor::execute_sync(
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    rt.block_on(miden_processor::execute(
         &program_with_advice_map,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
-    )
+    ))
     .unwrap();
 }

@@ -54,6 +54,7 @@ rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rstest = { version = "0.26" }
 serde_json.workspace = true
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [build-dependencies]
 env_logger.workspace = true

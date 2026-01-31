@@ -101,8 +101,8 @@ proptest! {
     }
 }
 
-#[test]
-fn log_precompile_request_procedure() {
+#[tokio::test]
+async fn log_precompile_request_procedure() {
     // This test ensures that `exec.sys::log_precompile_request` correctly invokes the
     // `log_precompile` instruction, records the deferred request, and yields the expected
     // precompile sponge update. We run both direct execution (debug test) and a full
@@ -133,7 +133,7 @@ fn log_precompile_request_procedure() {
     let mut test = build_debug_test!(&source, &[]);
     test.add_event_handler(EVENT_NAME, handler.clone());
 
-    let trace = test.execute().expect("failed to execute log_precompile test");
+    let trace = test.execute_async().await.expect("failed to execute log_precompile test");
 
     let requests = trace.precompile_requests();
     assert_eq!(requests.len(), 1);
@@ -167,7 +167,8 @@ fn log_precompile_request_procedure() {
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
     let (stack_outputs, proof) =
-        miden_utils_testing::prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
+        miden_prover::prove(&program, stack_inputs, advice_inputs, &mut host, options)
+            .await
             .expect("failed to generate proof for log_precompile helper");
 
     // Proof should include the single deferred request that we expect.

@@ -3,12 +3,12 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove_sync};
+use miden_prover::{AdviceInputs, ProvingOptions, StackInputs, prove};
 use miden_verifier::verify;
 use miden_vm::{DefaultHost, HashFunction};
 
-#[test]
-fn test_blake3_256_prove_verify() {
+#[tokio::test]
+async fn test_blake3_256_prove_verify() {
     // Compute many Fibonacci iterations to generate a trace >= 2048 rows
     let source = "
         begin
@@ -28,9 +28,9 @@ fn test_blake3_256_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
 
     println!("Proving with Blake3_256...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .await
+        .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Verifying proof...");
@@ -41,8 +41,8 @@ fn test_blake3_256_prove_verify() {
     println!("Verification successful! Security level: {}", security_level);
 }
 
-#[test]
-fn test_keccak_prove_verify() {
+#[tokio::test]
+async fn test_keccak_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin
@@ -66,9 +66,9 @@ fn test_keccak_prove_verify() {
 
     // Prove the program
     println!("Proving with Keccak...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .await
+        .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -81,8 +81,8 @@ fn test_keccak_prove_verify() {
     println!("Verification successful! Security level: {}", security_level);
 }
 
-#[test]
-fn test_rpo_prove_verify() {
+#[tokio::test]
+async fn test_rpo_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin
@@ -106,9 +106,9 @@ fn test_rpo_prove_verify() {
 
     // Prove the program
     println!("Proving with RPO...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .await
+        .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -121,8 +121,8 @@ fn test_rpo_prove_verify() {
     println!("Verification successful! Security level: {}", security_level);
 }
 
-#[test]
-fn test_poseidon2_prove_verify() {
+#[tokio::test]
+async fn test_poseidon2_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin
@@ -142,9 +142,9 @@ fn test_poseidon2_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Poseidon2);
 
     println!("Proving with Poseidon2...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .await
+        .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -157,8 +157,8 @@ fn test_poseidon2_prove_verify() {
 }
 
 /// Test end-to-end proving and verification with RPX
-#[test]
-fn test_rpx_prove_verify() {
+#[tokio::test]
+async fn test_rpx_prove_verify() {
     // Compute 150th Fibonacci number to generate a longer trace
     let source = "
         begin
@@ -178,9 +178,9 @@ fn test_rpx_prove_verify() {
     let options = ProvingOptions::with_96_bit_security(HashFunction::Rpx256);
 
     println!("Proving with RPX...");
-    let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
-            .expect("Proving failed");
+    let (stack_outputs, proof) = prove(&program, stack_inputs, advice_inputs, &mut host, options)
+        .await
+        .expect("Proving failed");
 
     println!("Proof generated successfully!");
     println!("Stack outputs: {:?}", stack_outputs);
@@ -218,8 +218,8 @@ mod fast_parallel {
     /// Note: We only test one hash function here since
     /// `test_trace_equivalence_slow_vs_fast_parallel` verifies trace equivalence, and the slow
     /// processor tests already cover all hash functions.
-    #[test]
-    fn test_fast_parallel_prove_verify() {
+    #[tokio::test]
+    async fn test_fast_parallel_prove_verify() {
         // Use a program with enough iterations to generate a meaningful trace
         let source = "
             begin
@@ -241,7 +241,8 @@ mod fast_parallel {
         let fast_processor =
             FastProcessor::new_with_options(stack_inputs, advice_inputs.clone(), options);
         let (execution_output, trace_context) = fast_processor
-            .execute_for_trace_sync(&program, &mut host)
+            .execute_for_trace(&program, &mut host)
+            .await
             .expect("Fast processor execution failed");
 
         let fast_stack_outputs = execution_output.stack;

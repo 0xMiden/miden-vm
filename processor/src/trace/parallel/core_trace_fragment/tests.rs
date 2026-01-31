@@ -48,8 +48,8 @@ type DecoderTrace = Vec<Vec<Felt>>;
 // BASIC BLOCK TESTS
 // ================================================================================================
 
-#[test]
-fn test_basic_block_one_group_decoding() {
+#[tokio::test]
+async fn test_basic_block_one_group_decoding() {
     let ops = vec![Operation::Pad, Operation::Add, Operation::Mul];
     let (basic_block, program) = {
         let mut mast_forest = MastForest::new();
@@ -63,7 +63,7 @@ fn test_basic_block_one_group_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 1, 0, 0);
@@ -95,8 +95,8 @@ fn test_basic_block_one_group_decoding() {
     }
 }
 
-#[test]
-fn test_basic_block_small_decoding() {
+#[tokio::test]
+async fn test_basic_block_small_decoding() {
     let iv = [ONE, TWO];
     let ops = vec![
         Operation::Push(iv[0]),
@@ -117,7 +117,7 @@ fn test_basic_block_small_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
@@ -159,8 +159,8 @@ fn test_basic_block_small_decoding() {
     }
 }
 
-#[test]
-fn test_basic_block_small_with_emit_decoding() {
+#[tokio::test]
+async fn test_basic_block_small_with_emit_decoding() {
     let emit_event_felt = EMIT_EVENT.to_event_id().as_felt();
     let ops = vec![
         Operation::Push(ONE),
@@ -181,7 +181,7 @@ fn test_basic_block_small_with_emit_decoding() {
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 4, 0, 0);
@@ -221,8 +221,8 @@ fn test_basic_block_small_with_emit_decoding() {
     }
 }
 
-#[test]
-fn test_basic_block_decoding() {
+#[tokio::test]
+async fn test_basic_block_decoding() {
     let iv = [ONE, TWO, Felt::new(3), Felt::new(4), Felt::new(5)];
     let ops = vec![
         Operation::Push(iv[0]),
@@ -251,7 +251,7 @@ fn test_basic_block_decoding() {
 
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 8, 0, 0);
@@ -313,8 +313,8 @@ fn test_basic_block_decoding() {
     }
 }
 
-#[test]
-fn test_basic_block_with_respan_decoding() {
+#[tokio::test]
+async fn test_basic_block_with_respan_decoding() {
     let iv = [
         ONE,
         TWO,
@@ -359,7 +359,7 @@ fn test_basic_block_with_respan_decoding() {
 
         (basic_block, Program::new(mast_forest.into(), basic_block_id))
     };
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Span, 12, 0, 0);
@@ -436,8 +436,8 @@ fn test_basic_block_with_respan_decoding() {
 // JOIN NODE TESTS
 // ================================================================================================
 
-#[test]
-fn test_join_node_decoding() {
+#[tokio::test]
+async fn test_join_node_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -458,7 +458,7 @@ fn test_join_node_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), join_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[], &program);
+    let (trace, trace_len) = build_trace_helper(&[], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
@@ -508,8 +508,8 @@ fn test_join_node_decoding() {
 // SPLIT NODE TESTS
 // ================================================================================================
 
-#[test]
-fn test_split_node_true_decoding() {
+#[tokio::test]
+async fn test_split_node_true_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -530,7 +530,7 @@ fn test_split_node_true_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), split_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[1], &program);
+    let (trace, trace_len) = build_trace_helper(&[1], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
@@ -567,8 +567,8 @@ fn test_split_node_true_decoding() {
     }
 }
 
-#[test]
-fn test_split_node_false_decoding() {
+#[tokio::test]
+async fn test_split_node_false_decoding() {
     let (basic_block1, basic_block2, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -589,7 +589,7 @@ fn test_split_node_false_decoding() {
         (basic_block1, basic_block2, Program::new(mast_forest.into(), split_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0], &program);
+    let (trace, trace_len) = build_trace_helper(&[0], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let basic_block_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
@@ -629,8 +629,8 @@ fn test_split_node_false_decoding() {
 // LOOP BLOCK TESTS
 // ================================================================================================
 
-#[test]
-fn test_loop_node_decoding() {
+#[tokio::test]
+async fn test_loop_node_decoding() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -647,7 +647,7 @@ fn test_loop_node_decoding() {
     };
 
     // Input [1, 0]: position 0 (top) = 1 (loop enters), position 1 = 0 (loop exits after body)
-    let (trace, trace_len) = build_trace_helper(&[1, 0], &program);
+    let (trace, trace_len) = build_trace_helper(&[1, 0], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let body_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
@@ -686,8 +686,8 @@ fn test_loop_node_decoding() {
     }
 }
 
-#[test]
-fn test_loop_node_skip_decoding() {
+#[tokio::test]
+async fn test_loop_node_skip_decoding() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -703,7 +703,7 @@ fn test_loop_node_skip_decoding() {
         (loop_body, Program::new(mast_forest.into(), loop_node_id))
     };
 
-    let (trace, trace_len) = build_trace_helper(&[0], &program);
+    let (trace, trace_len) = build_trace_helper(&[0], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Loop, 0, 0, 0);
@@ -732,8 +732,8 @@ fn test_loop_node_skip_decoding() {
     }
 }
 
-#[test]
-fn test_loop_node_repeat_decoding() {
+#[tokio::test]
+async fn test_loop_node_repeat_decoding() {
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -752,7 +752,7 @@ fn test_loop_node_repeat_decoding() {
     // Input [1, 1, 0]: position 0 (top) = 1 (1st iteration enters)
     // After Pad+Drop: position 0 = 1 (2nd iteration enters)
     // After Pad+Drop: position 0 = 0 (loop exits)
-    let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program);
+    let (trace, trace_len) = build_trace_helper(&[1, 1, 0], &program).await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     let iter1_addr = INIT_ADDR + HASH_CYCLE_LEN_FELT;
@@ -811,11 +811,10 @@ fn test_loop_node_repeat_decoding() {
 // CALL BLOCK TESTS
 // ================================================================================================
 
-#[test]
+#[tokio::test]
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
-fn test_call_decoding() {
-    
+async fn test_call_decoding() {
     // build a program which looks like this:
     //
     // pub proc foo
@@ -886,7 +885,7 @@ fn test_call_decoding() {
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
     let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program);
+        build_call_trace_helper(&program).await;
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -1105,11 +1104,10 @@ fn test_call_decoding() {
 // SYSCALL TESTS
 // ================================================================================================
 
-#[test]
+#[tokio::test]
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
-fn test_syscall_decoding() {
-
+async fn test_syscall_decoding() {
     // build a program which looks like this:
     //
     // --- kernel ---
@@ -1188,7 +1186,7 @@ fn test_syscall_decoding() {
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
     let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program);
+        build_call_trace_helper(&program).await;
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -1398,8 +1396,8 @@ fn test_syscall_decoding() {
 // DYN NODE TESTS
 // ================================================================================================
 
-#[test]
-fn test_dyn_node_decoding() {
+#[tokio::test]
+async fn test_dyn_node_decoding() {
     // Equivalent masm:
     //
     // proc foo
@@ -1461,7 +1459,8 @@ fn test_dyn_node_decoding() {
             foo_root_node.digest()[3].as_canonical_u64(),
         ],
         &program,
-    );
+    )
+    .await;
 
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
     check_op_decoding(&trace, 0, ZERO, Operation::Join, 0, 0, 0);
@@ -1549,8 +1548,8 @@ fn test_dyn_node_decoding() {
 // HELPER REGISTERS TESTS
 // ================================================================================================
 
-#[test]
-fn set_user_op_helpers_many() {
+#[tokio::test]
+async fn set_user_op_helpers_many() {
     // --- user operation with 4 helper values ----------------------------------------------------
     let program = {
         let mut mast_forest = MastForest::new();
@@ -1565,7 +1564,7 @@ fn set_user_op_helpers_many() {
     let a = rand_value::<u32>();
     let b = rand_value::<u32>();
     let (dividend, divisor) = if a > b { (a, b) } else { (b, a) };
-    let (trace, ..) = build_trace_helper(&[divisor as u64, dividend as u64], &program);
+    let (trace, ..) = build_trace_helper(&[divisor as u64, dividend as u64], &program).await;
     let hasher_state = get_hasher_state(&trace, 1);
 
     // Check the hasher state of the user operation which was executed.
@@ -1595,7 +1594,7 @@ const MAX_FRAGMENT_SIZE: usize = 1 << 20;
 
 /// Builds the trace using FastProcessor and parallel::build_trace, returning the decoder trace
 /// portion.
-fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
+async fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     let stack_inputs: Vec<Felt> = stack_inputs.iter().map(|&v| Felt::new(v)).collect();
     let processor = FastProcessor::new_with_options(
         StackInputs::new(&stack_inputs).unwrap(),
@@ -1608,7 +1607,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     host.register_handler(EMIT_EVENT, Arc::new(NoopEventHandler)).unwrap();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).await.unwrap();
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
@@ -1622,13 +1621,13 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
 }
 
 /// Builds the trace for DYN operations using FastProcessor and parallel::build_trace.
-fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
+async fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace, usize) {
     // DYN trace uses the same infrastructure
-    build_trace_helper(stack_inputs, program)
+    build_trace_helper(stack_inputs, program).await
 }
 
 /// Builds both system and decoder traces for CALL/SYSCALL operations.
-fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usize) {
+async fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usize) {
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -1639,7 +1638,7 @@ fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usi
     let mut host = DefaultHost::default();
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).await.unwrap();
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 

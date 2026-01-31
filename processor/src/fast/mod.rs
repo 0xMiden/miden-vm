@@ -509,6 +509,85 @@ impl FastProcessor {
         }
     }
 
+    /// Executes the program step by step, calling `step()` in a loop until completion.
+    ///
+    /// This is useful for testing and debugging to compare with regular execution.
+    pub async fn execute_by_step(
+        mut self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut current_resume_ctx = self.get_initial_resume_context(program)?;
+
+        loop {
+            match self.step(host, current_resume_ctx).await {
+                Ok(maybe_resume_ctx) => match maybe_resume_ctx {
+                    Some(next_resume_ctx) => {
+                        current_resume_ctx = next_resume_ctx;
+                    },
+                    None => {
+                        // End of program was reached
+                        break Ok(StackOutputs::new(
+                            &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                                .iter()
+                                .rev()
+                                .copied()
+                                .collect::<Vec<_>>(),
+                        )
+                        .unwrap());
+                    },
+                },
+                Err(err) => {
+                    break Err(err);
+                },
+            }
+        }
+    }
+
+    /// Executes the program and returns the stack outputs, keeping the processor state accessible.
+    ///
+    /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
+    /// that the processor state may be accessed after execution. It is incorrect to execute a
+    /// second program using the same processor. This is mainly meant to be used in tests.
+    pub async fn execute_mut(
+        &mut self,
+        program: &Program,
+        host: &mut impl Host,
+    ) -> Result<StackOutputs, ExecutionError> {
+        let mut continuation_stack = ContinuationStack::new(program);
+        let mut current_forest = program.mast_forest().clone();
+
+        // Merge the program's advice map into the advice provider
+        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
+
+        match self
+            .execute_impl(
+                &mut continuation_stack,
+                &mut current_forest,
+                program.kernel(),
+                host,
+                &mut NoopTracer,
+                &NeverStopper,
+            )
+            .await
+        {
+            ControlFlow::Continue(_) => Ok(StackOutputs::new(
+                &self.stack[self.stack_bot_idx..self.stack_top_idx]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()),
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_) => {
+                    unreachable!("Execution never stops prematurely with NeverStopper")
+                },
+            },
+        }
+    }
+
     /// Executes the given program with the provided tracer and returns the stack outputs.
     ///
     /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
@@ -805,186 +884,6 @@ impl FastProcessor {
         // Update indices.
         self.stack_bot_idx = new_stack_bot_idx;
         self.stack_top_idx = new_stack_top_idx;
-    }
-
-    // SYNC WRAPPERS
-    // ----------------------------------------------------------------------------------------------
-
-    /// Convenience sync wrapper to [Self::step].
-    pub fn step_sync(
-        &mut self,
-        host: &mut impl Host,
-        resume_ctx: ResumeContext,
-    ) -> Result<Option<ResumeContext>, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-
-        let execution_output = rt.block_on(self.step(host, resume_ctx))?;
-
-        Ok(execution_output)
-    }
-
-    /// Executes the given program step by step (calling [`Self::step`] repeatedly) and returns the
-    /// stack outputs.
-    pub fn execute_by_step_sync(
-        mut self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<StackOutputs, ExecutionError> {
-        // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-        let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
-
-        rt.block_on(async {
-            loop {
-                match self.step(host, current_resume_ctx).await {
-                    Ok(maybe_resume_ctx) => match maybe_resume_ctx {
-                        Some(next_resume_ctx) => {
-                            current_resume_ctx = next_resume_ctx;
-                        },
-                        None => {
-                            // End of program was reached
-                            break Ok(StackOutputs::new(
-                                &self.stack[self.stack_bot_idx..self.stack_top_idx]
-                                    .iter()
-                                    .rev()
-                                    .copied()
-                                    .collect::<Vec<_>>(),
-                            )
-                            .unwrap());
-                        },
-                    },
-                    Err(err) => {
-                        break Err(err);
-                    },
-                }
-            }
-        })
-    }
-
-    /// Convenience sync wrapper to [Self::execute].
-    ///
-    /// This method is only available on non-wasm32 targets. On wasm32, use the
-    /// async `execute()` method directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use the async `execute()`
-    /// method instead in async contexts.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn execute_sync(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<ExecutionOutput, ExecutionError> {
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_sync from within a Tokio runtime. \
-                     Use the async execute() method instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(self.execute(program, host))
-            },
-        }
-    }
-
-    /// Convenience sync wrapper to [Self::execute_for_trace].
-    ///
-    /// This method is only available on non-wasm32 targets. On wasm32, use the
-    /// async `execute_for_trace()` method directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use the async `execute_for_trace()`
-    /// method instead in async contexts.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[instrument(name = "execute_for_trace_sync", skip_all)]
-    pub fn execute_for_trace_sync(
-        self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<(ExecutionOutput, TraceGenerationContext), ExecutionError> {
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_for_trace_sync from within a Tokio runtime. \
-                     Use the async execute_for_trace() method instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(self.execute_for_trace(program, host))
-            },
-        }
-    }
-
-    /// Similar to [Self::execute_sync], but allows mutable access to the processor.
-    ///
-    /// This method is only available on non-wasm32 targets for testing. On wasm32, use
-    /// async execution methods directly since wasm32 runs in the browser's event loop.
-    ///
-    /// # Panics
-    /// Panics if called from within an existing Tokio runtime. Use async execution
-    /// methods instead in async contexts.
-    #[cfg(all(any(test, feature = "testing"), not(target_arch = "wasm32")))]
-    pub fn execute_sync_mut(
-        &mut self,
-        program: &Program,
-        host: &mut impl Host,
-    ) -> Result<StackOutputs, ExecutionError> {
-        let mut continuation_stack = ContinuationStack::new(program);
-        let mut current_forest = program.mast_forest().clone();
-
-        // Merge the program's advice map into the advice provider
-        self.advice.extend_map(current_forest.advice_map()).map_exec_err_no_ctx()?;
-
-        let execute_fut = async {
-            match self
-                .execute_impl(
-                    &mut continuation_stack,
-                    &mut current_forest,
-                    program.kernel(),
-                    host,
-                    &mut NoopTracer,
-                    &NeverStopper,
-                )
-                .await
-            {
-                ControlFlow::Continue(stack_outputs) => Ok(stack_outputs),
-                ControlFlow::Break(break_reason) => match break_reason {
-                    BreakReason::Err(err) => Err(err),
-                    BreakReason::Stopped(_) => {
-                        unreachable!("Execution never stops prematurely with NeverStopper")
-                    },
-                },
-            }
-        };
-
-        match tokio::runtime::Handle::try_current() {
-            Ok(_handle) => {
-                // We're already inside a Tokio runtime - this is not supported
-                // because we cannot safely create a nested runtime or move the
-                // non-Send host reference to another thread
-                panic!(
-                    "Cannot call execute_sync_mut from within a Tokio runtime. \
-                     Use async execution methods instead."
-                )
-            },
-            Err(_) => {
-                // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
-                rt.block_on(execute_fut)
-            },
-        }
     }
 }
 

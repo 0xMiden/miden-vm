@@ -32,9 +32,9 @@ use crate::PrimeField64;
 /// Note: Communication with the Hash chiplet is also required, due to the span block decoding, but
 /// for this test we set those values explicitly, enforcing only that the same initial and final
 /// values are requested & provided.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn b_chip_trace_mem() {
+async fn b_chip_trace_mem() {
     const FOUR: Felt = Felt::new(4);
 
     let stack = [0, 1, 2, 3, 4];
@@ -54,7 +54,7 @@ fn b_chip_trace_mem() {
         Operation::Drop,       // ensure the stack overflow table is empty
         Operation::MStream,    // read 2 words starting at address 0
     ];
-    let trace = build_trace_from_ops(operations, &stack);
+    let trace = build_trace_from_ops(operations, &stack).await;
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();

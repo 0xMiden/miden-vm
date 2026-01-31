@@ -49,9 +49,9 @@ pub const DECODER_OP_BITS_RANGE: Range<usize> =
 
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a single `SPAN`
 /// with one operation batch.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-pub fn b_chip_span() {
+pub async fn b_chip_span() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -64,7 +64,7 @@ pub fn b_chip_span() {
         Program::new(mast_forest.into(), basic_block_id)
     };
 
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -124,9 +124,9 @@ pub fn b_chip_span() {
 
 /// Tests the generation of the `b_chip` bus column when the hasher only performs a `SPAN` but it
 /// includes multiple batches.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-pub fn b_chip_span_with_respan() {
+pub async fn b_chip_span_with_respan() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -138,7 +138,7 @@ pub fn b_chip_span_with_respan() {
 
         Program::new(mast_forest.into(), basic_block_id)
     };
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -233,9 +233,9 @@ pub fn b_chip_span_with_respan() {
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a merge of two code
 /// blocks requested by the decoder. (This also requires a `SPAN` block.)
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-pub fn b_chip_merge() {
+pub async fn b_chip_merge() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -253,7 +253,7 @@ pub fn b_chip_merge() {
         Program::new(mast_forest.into(), split_id)
     };
 
-    let trace = build_trace_from_program(&program, &[]);
+    let trace = build_trace_from_program(&program, &[]).await;
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -356,9 +356,9 @@ pub fn b_chip_merge() {
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a permutation
 /// requested by the `HPerm` user operation.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-pub fn b_chip_permutation() {
+pub async fn b_chip_permutation() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -370,7 +370,7 @@ pub fn b_chip_permutation() {
         Program::new(mast_forest.into(), basic_block_id)
     };
     let stack = vec![8, 7, 6, 5, 4, 3, 2, 1, 0, 0, 0, 8];
-    let trace = build_trace_from_program(&program, &stack);
+    let trace = build_trace_from_program(&program, &stack).await;
 
     let mut hperm_state: [Felt; STATE_WIDTH] = stack
         .iter()
@@ -471,9 +471,9 @@ pub fn b_chip_permutation() {
 /// Tests the generation of the `b_chip` bus column when the hasher performs a log_precompile
 /// operation requested by the stack. The operation absorbs TAG and COMM into a Poseidon2
 /// sponge with capacity CAP_PREV, producing (CAP_NEXT, R0, R1).
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-pub fn b_chip_log_precompile() {
+pub async fn b_chip_log_precompile() {
     let program = {
         let mut mast_forest = MastForest::new();
 
@@ -489,7 +489,7 @@ pub fn b_chip_log_precompile() {
     let tag_word: Word = [Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)].into();
     // stack! takes elements in runtime order (first = top) and handles reversal
     let stack_inputs = stack![5, 6, 7, 8, 1, 2, 3, 4];
-    let trace = build_trace_from_program(&program, &stack_inputs);
+    let trace = build_trace_from_program(&program, &stack_inputs).await;
 
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -596,9 +596,9 @@ pub fn b_chip_log_precompile() {
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle path
 /// verification requested by the `MpVerify` user operation.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn b_chip_mpverify() {
+async fn b_chip_mpverify() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let tree = MerkleTree::new(&leaves).unwrap();
@@ -616,7 +616,8 @@ fn b_chip_mpverify() {
         vec![Operation::MpVerify(ZERO)],
         stack_inputs,
         advice_inputs,
-    );
+    )
+    .await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
@@ -715,9 +716,9 @@ fn b_chip_mpverify() {
 
 /// Tests the generation of the `b_chip` bus column when the hasher performs a Merkle root update
 /// requested by the `MrUpdate` user operation.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn b_chip_mrupdate() {
+async fn b_chip_mrupdate() {
     let index = 5usize;
     let leaves = init_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
     let mut tree = MerkleTree::new(&leaves).unwrap();
@@ -738,7 +739,8 @@ fn b_chip_mrupdate() {
     let advice_inputs = AdviceInputs::default().with_merkle_store(store);
 
     let trace =
-        build_trace_from_ops_with_inputs(vec![Operation::MrUpdate], stack_inputs, advice_inputs);
+        build_trace_from_ops_with_inputs(vec![Operation::MrUpdate], stack_inputs, advice_inputs)
+            .await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);

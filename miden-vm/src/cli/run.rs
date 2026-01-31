@@ -148,8 +148,9 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .with_debugging(!params.release)
         .with_tracing(!params.release);
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host)
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let (execution_output, trace_generation_context) = rt
+        .block_on(processor.execute_for_trace(&program, &mut host))
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info());
@@ -208,8 +209,9 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .with_debugging(!params.release)
         .with_tracing(!params.release);
 
-    let (execution_output, trace_generation_context) = processor
-        .execute_for_trace_sync(&program, &mut host)
+    let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+    let (execution_output, trace_generation_context) = rt
+        .block_on(processor.execute_for_trace(&program, &mut host))
         .wrap_err("Failed to execute program")?;
 
     let trace = build_trace(execution_output, trace_generation_context, program.to_info());

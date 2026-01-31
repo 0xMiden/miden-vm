@@ -52,9 +52,9 @@ end";
 
 /// In this test, we load 2 libraries which have a MAST forest with an advice map that contains
 /// different values at the same key (which triggers the `AdviceMapKeyAlreadyPresent` error).
-#[test]
+#[tokio::test]
 #[ignore = "program must now call same node from both libraries (Issue #1949)"]
-fn test_diagnostic_advice_map_key_already_present() {
+async fn test_diagnostic_advice_map_key_already_present() {
     let test_context = TestContext::new();
 
     let (lib_1, lib_2) = {
@@ -82,7 +82,7 @@ fn test_diagnostic_advice_map_key_already_present() {
     let program = Program::new(mast_forest.into(), basic_block_id);
 
     let processor = FastProcessor::new(StackInputs::default());
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
 
     assert_diagnostic_lines!(
         err,
@@ -700,8 +700,8 @@ fn test_diagnostic_merkle_store_lookup_failed() {
 // NoMastForestWithProcedure
 // -------------------------------------------------------------------------------------------------
 
-#[test]
-fn test_diagnostic_no_mast_forest_with_procedure_call() {
+#[tokio::test]
+async fn test_diagnostic_no_mast_forest_with_procedure_call() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -745,7 +745,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
@@ -758,8 +758,8 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
     );
 }
 
-#[test]
-fn test_diagnostic_no_mast_forest_with_procedure_loop() {
+#[tokio::test]
+async fn test_diagnostic_no_mast_forest_with_procedure_loop() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -806,7 +806,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
@@ -820,8 +820,8 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
     );
 }
 
-#[test]
-fn test_diagnostic_no_mast_forest_with_procedure_split() {
+#[tokio::test]
+async fn test_diagnostic_no_mast_forest_with_procedure_split() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let lib_module = {
@@ -870,7 +870,7 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
     assert_diagnostic_lines!(
         err,
         "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
@@ -1063,8 +1063,8 @@ fn test_diagnostic_not_u32_value() {
 // SyscallTargetNotInKernel
 // -------------------------------------------------------------------------------------------------
 
-#[test]
-fn test_diagnostic_syscall_target_not_in_kernel() {
+#[tokio::test]
+async fn test_diagnostic_syscall_target_not_in_kernel() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 
     let kernel_source = "
@@ -1097,7 +1097,7 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
         .with_tracing(true);
-    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
     assert_diagnostic_lines!(
         err,
         "syscall failed: procedure with root 0x3b7651d5f57f0d3eb4eb69c7491cf16ca9f2f0010e32ed41cffadf9c8e18e61b was not found in the kernel",

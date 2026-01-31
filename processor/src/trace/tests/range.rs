@@ -10,11 +10,11 @@ use super::{Felt, build_trace_from_ops};
 /// processed in the Range Checker.
 ///
 /// The `U32add` operation results in 4 16-bit range checks of 256, 0, 0, 0.
-#[test]
-fn b_range_trace_stack() {
+#[tokio::test]
+async fn b_range_trace_stack() {
     let stack = [1, 255];
     let operations = vec![Operation::U32add];
-    let trace = build_trace_from_ops(operations, &stack);
+    let trace = build_trace_from_ops(operations, &stack).await;
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let alpha = rand_elements[0];
@@ -70,9 +70,9 @@ fn b_range_trace_stack() {
 ///
 /// The `StoreW` memory operation results in 2 16-bit range checks of 1, 0.
 /// The `LoadW` memory operation results in 2 16-bit range checks of 5, 0.
-#[test]
+#[tokio::test]
 #[expect(clippy::needless_range_loop)]
-fn b_range_trace_mem() {
+async fn b_range_trace_mem() {
     let stack = [0, 1, 2, 3, 4, 0];
     let operations = vec![
         Operation::MStoreW,
@@ -82,7 +82,7 @@ fn b_range_trace_mem() {
         Operation::Drop,
         Operation::MLoadW,
     ];
-    let trace = build_trace_from_ops(operations, &stack);
+    let trace = build_trace_from_ops(operations, &stack).await;
 
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let alpha = rand_elements[0];

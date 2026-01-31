@@ -42,3 +42,4 @@ pretty_assertions = { version = "1.4", default-features = false, features = [
 env_logger.workspace = true
 pretty_assertions = "1.4"
 proptest.workspace = true
+tokio = { workspace = true, features = ["rt"] }

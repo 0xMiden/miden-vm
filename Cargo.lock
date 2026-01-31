@@ -1295,6 +1295,7 @@ dependencies = [
  "rstest",
  "serde_json",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -1507,6 +1508,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "test-case",
+ "tokio",
 ]
 
 [[package]]
