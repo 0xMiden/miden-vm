@@ -58,7 +58,7 @@ impl<'a> PathComponent<'a> {
 
     /// Returns true if this path component requires quoting when displayed/stored as a string
     pub fn requires_quoting(&self) -> bool {
-        matches!(self, Self::Normal(component) if component.contains("::"))
+        matches!(self, Self::Normal(component) if component.contains("::") || Ident::validate(component).is_err())
     }
 }
 
