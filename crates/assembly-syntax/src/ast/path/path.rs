@@ -295,7 +295,7 @@ impl Path {
                 let first = components.next().and_then(|c| c.ok()).map(|c| c.as_str())?;
                 Some((first, components.as_path()))
             },
-            PathComponent::Normal(first) => Some((first, components.as_path())),
+            first @ PathComponent::Normal(_) => Some((first.as_str(), components.as_path())),
         }
     }
 
@@ -307,7 +307,7 @@ impl Path {
         let mut components = self.components();
         match components.next_back()?.ok()? {
             PathComponent::Root => None,
-            PathComponent::Normal(last) => Some((last, components.as_path())),
+            last @ PathComponent::Normal(_) => Some((last.as_str(), components.as_path())),
         }
     }
 

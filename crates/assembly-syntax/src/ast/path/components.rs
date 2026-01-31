@@ -22,10 +22,14 @@ pub enum PathComponent<'a> {
 
 impl<'a> PathComponent<'a> {
     /// Get this component as a [prim@str]
-    #[inline(always)]
+    ///
+    /// NOTE: If the component is quoted, the resulting string does _not_ contain quotes. Depending
+    /// on how the resulting string is used, you may need to ensure quotes are added manually. In
+    /// general, the `Path`/`PathBuf` APIs handle this for you.
     pub fn as_str(&self) -> &'a str {
         match self {
             Self::Root => "::",
+            Self::Normal(id) if id.starts_with('"') && id.ends_with('"') => &id[1..(id.len() - 1)],
             Self::Normal(id) => id,
         }
     }
@@ -33,20 +37,18 @@ impl<'a> PathComponent<'a> {
     /// Get this component as an [Ident], if it represents an identifier
     #[inline]
     pub fn to_ident(&self) -> Option<Ident> {
-        match self {
-            Self::Root => None,
-            Self::Normal(id) => Some(Ident::from_raw_parts(Span::unknown(Arc::from(
-                id.to_string().into_boxed_str(),
-            )))),
+        if matches!(self, Self::Root) {
+            None
+        } else {
+            Some(Ident::from_raw_parts(Span::unknown(Arc::from(
+                self.as_str().to_string().into_boxed_str(),
+            ))))
         }
     }
 
     /// Get the size in [prim@char]s of this component when printed
     pub fn char_len(&self) -> usize {
-        match self {
-            Self::Root => 2,
-            Self::Normal(id) => id.chars().count(),
-        }
+        self.as_str().chars().count()
     }
 
     /// Returns true if this path component is a quoted string

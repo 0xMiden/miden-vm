@@ -145,14 +145,9 @@ impl PathBuf {
         let parent = parent.as_ref();
         match self.split_last() {
             Some((last, _)) => {
-                let parent = parent.as_str();
-                let mut buf = String::with_capacity(last.len() + parent.len() + 2);
-                if !parent.is_empty() {
-                    buf.push_str(parent);
-                    buf.push_str("::");
-                }
-                buf.push_str(last);
-                self.inner = buf;
+                let mut parent = parent.to_path_buf();
+                parent.push_component(last);
+                core::mem::swap(&mut self.inner, &mut parent.inner);
             },
             None => {
                 self.inner.clear();
@@ -194,7 +189,13 @@ impl PathBuf {
         for component in path.components() {
             self.inner.push_str("::");
             let component = component.unwrap();
-            self.inner.push_str(component.as_str());
+            if component.is_quoted() {
+                self.inner.push('"');
+                self.inner.push_str(component.as_str());
+                self.inner.push('"');
+            } else {
+                self.inner.push_str(component.as_str());
+            }
         }
     }
 
@@ -436,8 +437,8 @@ mod tests {
         let path = PathBuf::new("\"miden:base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 1);
-        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
-        assert_eq!(path.first(), Some("\"miden:base/account@0.1.0\""));
+        assert_eq!(path.last(), Some("miden:base/account@0.1.0"));
+        assert_eq!(path.first(), Some("miden:base/account@0.1.0"));
     }
 
     #[test]
@@ -445,7 +446,7 @@ mod tests {
         let path = PathBuf::new("foo::\"miden:base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 2);
-        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
+        assert_eq!(path.last(), Some("miden:base/account@0.1.0"));
         assert_eq!(path.first(), Some("foo"));
     }
 
@@ -533,7 +534,7 @@ mod tests {
 
         assert!(p1.is_absolute());
         assert_eq!(p1.components().count(), 4);
-        assert_eq!(p1.last(), Some(quoted_function));
+        assert_eq!(p1.last(), Some(function));
         assert_eq!(p1.first(), Some("root_ns:root@1.0.0"));
         let parent = p1.parent().unwrap();
         assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
@@ -541,7 +542,7 @@ mod tests {
 
         assert!(p2.is_absolute());
         assert_eq!(p2.components().count(), 4);
-        assert_eq!(p2.last(), Some(quoted_function));
+        assert_eq!(p2.last(), Some(function));
         assert_eq!(p2.first(), Some("root_ns:root@1.0.0"));
         let parent = p2.parent().unwrap();
         assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
