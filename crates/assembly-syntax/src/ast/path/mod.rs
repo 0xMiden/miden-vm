@@ -1,10 +1,12 @@
 mod components;
+mod join;
 #[expect(clippy::module_inception)]
 mod path;
 mod path_buf;
 
 pub use self::{
     components::{Iter, PathComponent},
+    join::Join,
     path::Path,
     path_buf::PathBuf,
 };

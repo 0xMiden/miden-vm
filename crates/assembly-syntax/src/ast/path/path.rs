@@ -4,7 +4,7 @@ use alloc::{
 };
 use core::fmt;
 
-use super::{Iter, PathBuf, PathComponent, PathError, StartsWith};
+use super::{Iter, Join, PathBuf, PathComponent, PathError, StartsWith};
 use crate::ast::Ident;
 
 /// A borrowed reference to a subset of a path, e.g. another [Path] or a [PathBuf]
@@ -365,22 +365,21 @@ impl Path {
     ///
     /// If `path` is absolute, it replaces the current path.
     ///
-    /// See [PathBuf::push] for more details on what it means to adjoin a path.
-    pub fn join(&self, path: impl AsRef<Path>) -> PathBuf {
-        let path = path.as_ref();
-
-        if path.is_empty() {
-            return self.to_path_buf();
-        }
-
-        if self.is_empty() || path.is_absolute() {
-            return path.to_path_buf();
-        }
-
-        let mut buf = self.to_path_buf();
-        buf.push(path);
-
-        buf
+    /// The semantics of how `other` is joined to `self` in the resulting path depends on the
+    /// implementation of [Join] used. The implementation for [Path] and [PathBuf] joins all
+    /// components of `other` to self`; while the implementation for [prim@str], string-like values,
+    /// and identifiers/symbols joins just a single component. You must be careful to ensure that
+    /// if you are passing a string here, that you specifically want to join it as a single
+    /// component, or the resulting path may be different than you expect. It is recommended that
+    /// you use `Path::new(&string)` if you want to be explicit about treating a string-like value
+    /// as a multi-component path.
+    #[inline]
+    pub fn join<P>(&self, other: &P) -> PathBuf
+    where
+        P: ?Sized,
+        Path: Join<P>,
+    {
+        <Path as Join<P>>::join(self, other)
     }
 }
 
