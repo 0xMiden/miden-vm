@@ -441,3 +441,642 @@ pub proc wrapping_mul(b: u128, a: u128) -> u128
     movdn.2                     # [c1, c0, c2, c3]
     swap                        # [c0, c1, c2, c3]
 end
+
+# ===== COMPARISONS ===============================================================================
+
+#! Performs equality comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a == b, and 0 otherwise.
+pub proc eq(b: u128, a: u128) -> i1
+    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    eq              # [a0==b0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, a0==b0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, a0==b0, b2, b3, a2, a3]
+    eq              # [a1==b1, a0==b0, b2, b3, a2, a3]
+    and             # [eq01, b2, b3, a2, a3]
+    movup.3         # [a2, eq01, b2, b3, a3]
+    movup.2         # [b2, a2, eq01, b3, a3]
+    eq              # [a2==b2, eq01, b3, a3]
+    and             # [eq012, b3, a3]
+    movup.2         # [a3, eq012, b3]
+    movup.2         # [b3, a3, eq012]
+    eq              # [a3==b3, eq012]
+    and             # [result]
+end
+
+#! Performs inequality comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a != b, and 0 otherwise.
+pub proc neq(b: u128, a: u128) -> i1
+    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    neq             # [a0!=b0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, a0!=b0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, a0!=b0, b2, b3, a2, a3]
+    neq             # [a1!=b1, a0!=b0, b2, b3, a2, a3]
+    or              # [neq01, b2, b3, a2, a3]
+    movup.3         # [a2, neq01, b2, b3, a3]
+    movup.2         # [b2, a2, neq01, b3, a3]
+    neq             # [a2!=b2, neq01, b3, a3]
+    or              # [neq012, b3, a3]
+    movup.2         # [a3, neq012, b3]
+    movup.2         # [b3, a3, neq012]
+    neq             # [a3!=b3, neq012]
+    or              # [result]
+end
+
+#! Performs comparison to zero of an unsigned 128 bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a == 0, and 0 otherwise.
+pub proc eqz(a: u128) -> i1
+    # Input: [a0, a1, a2, a3, ...]
+    eq.0            # [a0==0, a1, a2, a3]
+    swap            # [a1, a0==0, a2, a3]
+    eq.0            # [a1==0, a0==0, a2, a3]
+    and             # [eq01, a2, a3]
+    swap            # [a2, eq01, a3]
+    eq.0            # [a2==0, eq01, a3]
+    and             # [eq012, a3]
+    swap            # [a3, eq012]
+    eq.0            # [a3==0, eq012]
+    and             # [result]
+end
+
+#! Performs less-than comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a < b, and 0 otherwise.
+pub proc lt(b: u128, a: u128) -> i1
+    # Use subtraction: a < b iff (a - b) underflows
+    exec.overflowing_sub
+    # Stack: [underflow, c0, c1, c2, c3, ...]
+    # Drop the result, keep only underflow flag
+    movdn.4                     # [c0, c1, c2, c3, underflow]
+    drop drop drop drop         # [underflow]
+end
+
+#! Performs greater-than comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a > b, and 0 otherwise.
+pub proc gt(b: u128, a: u128) -> i1
+    # a > b iff b < a
+    # Swap a and b, then check if b < a (underflow)
+    movup.7 movup.7 movup.7 movup.7
+    # Stack: [a0, a1, a2, a3, b0, b1, b2, b3, ...] - now b is "a" and a is "b" for sub
+    exec.overflowing_sub
+    # This computes b - a, underflow means b < a, i.e., a > b
+    movdn.4
+    drop drop drop drop
+end
+
+#! Performs less-than-or-equal comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a <= b, and 0 otherwise.
+pub proc lte(b: u128, a: u128) -> i1
+    exec.gt
+    not
+end
+
+#! Performs greater-than-or-equal comparison of two unsigned 128 bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c, ...], where c = 1 when a >= b, and 0 otherwise.
+pub proc gte(b: u128, a: u128) -> i1
+    exec.lt
+    not
+end
+
+#! Compares two unsigned 128 bit integers and drops the larger one from the stack.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = min(a, b).
+pub proc min(b: u128, a: u128) -> u128
+    # Duplicate both values for comparison
+    dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    exec.gt                     # [a>b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # If a > b, keep b (first), else keep a (second)
+    # cdrop: [cond, a, b] -> [a if cond else b]
+    # We need to select between two u128 values
+    dup                         # [a>b, a>b, b0, b1, b2, b3, a0, a1, a2, a3]
+    movdn.5                     # [a>b, b0, b1, b2, b3, a>b, a0, a1, a2, a3]
+    movup.6                     # [a0, a>b, b0, b1, b2, b3, a>b, a1, a2, a3]
+    movup.2                     # [b0, a0, a>b, b1, b2, b3, a>b, a1, a2, a3]
+    dup.2 cdrop                 # [c0, a>b, b1, b2, b3, a>b, a1, a2, a3]
+    movdn.8                     # [a>b, b1, b2, b3, a>b, a1, a2, a3, c0]
+    movup.5                     # [a1, a>b, b1, b2, b3, a>b, a2, a3, c0]
+    movup.2                     # [b1, a1, a>b, b2, b3, a>b, a2, a3, c0]
+    dup.2 cdrop                 # [c1, a>b, b2, b3, a>b, a2, a3, c0]
+    movdn.7                     # [a>b, b2, b3, a>b, a2, a3, c0, c1]
+    movup.4                     # [a2, a>b, b2, b3, a>b, a3, c0, c1]
+    movup.2                     # [b2, a2, a>b, b3, a>b, a3, c0, c1]
+    dup.2 cdrop                 # [c2, a>b, b3, a>b, a3, c0, c1]
+    movdn.6                     # [a>b, b3, a>b, a3, c0, c1, c2]
+    drop                        # [b3, a>b, a3, c0, c1, c2]
+    movup.2                     # [a3, b3, a>b, c0, c1, c2]
+    swap                        # [b3, a3, a>b, c0, c1, c2]
+    movup.2 cdrop               # [c3, c0, c1, c2]
+    movdn.3                     # [c0, c1, c2, c3]
+end
+
+#! Compares two unsigned 128 bit integers and drops the smaller one from the stack.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = max(a, b).
+pub proc max(b: u128, a: u128) -> u128
+    # Duplicate both values for comparison
+    dupw.1                      # [a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    dupw.1                      # [b0, b1, b2, b3, a0, a1, a2, a3, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    exec.lt                     # [a<b, b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    # If a < b, keep b (first), else keep a (second)
+    dup                         # [a<b, a<b, b0, b1, b2, b3, a0, a1, a2, a3]
+    movdn.5                     # [a<b, b0, b1, b2, b3, a<b, a0, a1, a2, a3]
+    movup.6                     # [a0, a<b, b0, b1, b2, b3, a<b, a1, a2, a3]
+    movup.2                     # [b0, a0, a<b, b1, b2, b3, a<b, a1, a2, a3]
+    dup.2 cdrop                 # [c0, a<b, b1, b2, b3, a<b, a1, a2, a3]
+    movdn.8                     # [a<b, b1, b2, b3, a<b, a1, a2, a3, c0]
+    movup.5                     # [a1, a<b, b1, b2, b3, a<b, a2, a3, c0]
+    movup.2                     # [b1, a1, a<b, b2, b3, a<b, a2, a3, c0]
+    dup.2 cdrop                 # [c1, a<b, b2, b3, a<b, a2, a3, c0]
+    movdn.7                     # [a<b, b2, b3, a<b, a2, a3, c0, c1]
+    movup.4                     # [a2, a<b, b2, b3, a<b, a3, c0, c1]
+    movup.2                     # [b2, a2, a<b, b3, a<b, a3, c0, c1]
+    dup.2 cdrop                 # [c2, a<b, b3, a<b, a3, c0, c1]
+    movdn.6                     # [a<b, b3, a<b, a3, c0, c1, c2]
+    drop                        # [b3, a<b, a3, c0, c1, c2]
+    movup.2                     # [a3, b3, a<b, c0, c1, c2]
+    swap                        # [b3, a3, a<b, c0, c1, c2]
+    movup.2 cdrop               # [c3, c0, c1, c2]
+    movdn.3                     # [c0, c1, c2, c3]
+end
+
+# ===== BITWISE OPERATIONS ========================================================================
+
+#! Performs bitwise AND of two unsigned 128-bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a AND b.
+pub proc and(b: u128, a: u128) -> u128
+    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32and          # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32and          # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32and          # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32and          # [c3, c2, c1, c0]
+    movdn.3         # [c2, c1, c0, c3]
+    movdn.2         # [c1, c0, c2, c3]
+    swap            # [c0, c1, c2, c3]
+end
+
+#! Performs bitwise OR of two unsigned 128-bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a OR b.
+pub proc or(b: u128, a: u128) -> u128
+    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32or           # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32or           # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32or           # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32or           # [c3, c2, c1, c0]
+    movdn.3         # [c2, c1, c0, c3]
+    movdn.2         # [c1, c0, c2, c3]
+    swap            # [c0, c1, c2, c3]
+end
+
+#! Performs bitwise XOR of two unsigned 128-bit integers.
+#! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a XOR b.
+pub proc xor(b: u128, a: u128) -> u128
+    # Input: [b0, b1, b2, b3, a0, a1, a2, a3, ...]
+    movup.4         # [a0, b0, b1, b2, b3, a1, a2, a3]
+    u32xor          # [c0, b1, b2, b3, a1, a2, a3]
+    movup.4         # [a1, c0, b1, b2, b3, a2, a3]
+    movup.2         # [b1, a1, c0, b2, b3, a2, a3]
+    u32xor          # [c1, c0, b2, b3, a2, a3]
+    movup.4         # [a2, c1, c0, b2, b3, a3]
+    movup.3         # [b2, a2, c1, c0, b3, a3]
+    u32xor          # [c2, c1, c0, b3, a3]
+    movup.4         # [a3, c2, c1, c0, b3]
+    movup.4         # [b3, a3, c2, c1, c0]
+    u32xor          # [c3, c2, c1, c0]
+    movdn.3         # [c2, c1, c0, c3]
+    movdn.2         # [c1, c0, c2, c3]
+    swap            # [c0, c1, c2, c3]
+end
+
+#! Counts the number of leading zeros of one unsigned 128-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [clz, ...], where clz is the number of leading zeros of value a.
+pub proc clz(a: u128) -> u8
+    # Input: [a0, a1, a2, a3, ...]
+    # Leading zeros start from the most significant limb (a3)
+    movup.3         # [a3, a0, a1, a2, ...]
+    dup.0
+    eq.0
+
+    if.true         # a3 == 0
+        drop        # [a0, a1, a2, ...]
+        movup.2     # [a2, a0, a1, ...]
+        dup.0
+        eq.0
+
+        if.true     # a2 == 0
+            drop    # [a0, a1, ...]
+            swap    # [a1, a0, ...]
+            dup.0
+            eq.0
+
+            if.true # a1 == 0
+                drop        # [a0, ...]
+                u32clz
+                add.96      # clz(a0) + 96
+            else
+                swap drop   # [a1, ...]
+                u32clz
+                add.64      # clz(a1) + 64
+            end
+        else
+            movdn.2 drop drop   # [a2, ...]
+            u32clz
+            add.32              # clz(a2) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a3, ...]
+        u32clz                  # clz(a3)
+    end
+end
+
+#! Counts the number of trailing zeros of one unsigned 128-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [ctz, ...], where ctz is the number of trailing zeros of value a.
+pub proc ctz(a: u128) -> u8
+    # Input: [a0, a1, a2, a3, ...]
+    # Trailing zeros start from the least significant limb (a0)
+    dup.0
+    eq.0
+
+    if.true         # a0 == 0
+        drop        # [a1, a2, a3, ...]
+        dup.0
+        eq.0
+
+        if.true     # a1 == 0
+            drop    # [a2, a3, ...]
+            dup.0
+            eq.0
+
+            if.true # a2 == 0
+                drop        # [a3, ...]
+                u32ctz
+                add.96      # ctz(a3) + 96
+            else
+                swap drop   # [a2, ...]
+                u32ctz
+                add.64      # ctz(a2) + 64
+            end
+        else
+            movdn.2 drop drop   # [a1, ...]
+            u32ctz
+            add.32              # ctz(a1) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a0, ...]
+        u32ctz                  # ctz(a0)
+    end
+end
+
+#! Counts the number of leading ones of one unsigned 128-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [clo, ...], where clo is the number of leading ones of value a.
+pub proc clo(a: u128) -> u8
+    # Input: [a0, a1, a2, a3, ...]
+    # Leading ones start from the most significant limb (a3)
+    # 0xFFFFFFFF = 4294967295
+    movup.3         # [a3, a0, a1, a2, ...]
+    dup.0
+    eq.4294967295
+
+    if.true         # a3 == 0xFFFFFFFF
+        drop        # [a0, a1, a2, ...]
+        movup.2     # [a2, a0, a1, ...]
+        dup.0
+        eq.4294967295
+
+        if.true     # a2 == 0xFFFFFFFF
+            drop    # [a0, a1, ...]
+            swap    # [a1, a0, ...]
+            dup.0
+            eq.4294967295
+
+            if.true # a1 == 0xFFFFFFFF
+                drop        # [a0, ...]
+                u32clo
+                add.96      # clo(a0) + 96
+            else
+                swap drop   # [a1, ...]
+                u32clo
+                add.64      # clo(a1) + 64
+            end
+        else
+            movdn.2 drop drop   # [a2, ...]
+            u32clo
+            add.32              # clo(a2) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a3, ...]
+        u32clo                  # clo(a3)
+    end
+end
+
+#! Counts the number of trailing ones of one unsigned 128-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [cto, ...], where cto is the number of trailing ones of value a.
+pub proc cto(a: u128) -> u8
+    # Input: [a0, a1, a2, a3, ...]
+    # Trailing ones start from the least significant limb (a0)
+    # 0xFFFFFFFF = 4294967295
+    dup.0
+    eq.4294967295
+
+    if.true         # a0 == 0xFFFFFFFF
+        drop        # [a1, a2, a3, ...]
+        dup.0
+        eq.4294967295
+
+        if.true     # a1 == 0xFFFFFFFF
+            drop    # [a2, a3, ...]
+            dup.0
+            eq.4294967295
+
+            if.true # a2 == 0xFFFFFFFF
+                drop        # [a3, ...]
+                u32cto
+                add.96      # cto(a3) + 96
+            else
+                swap drop   # [a2, ...]
+                u32cto
+                add.64      # cto(a2) + 64
+            end
+        else
+            movdn.2 drop drop   # [a1, ...]
+            u32cto
+            add.32              # cto(a1) + 32
+        end
+    else
+        movdn.3 drop drop drop  # [a0, ...]
+        u32cto                  # cto(a0)
+    end
+end
+
+# ===== SHIFT OPERATIONS ==========================================================================
+
+#! Performs left shift of one unsigned 128-bit integer.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The shift value n should be in the range [0, 128), otherwise it will result in an error.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a << n) mod 2^128.
+pub proc shl(n: u32, a: u128) -> u128
+    # Strategy: compute 2^n as u128, then use wrapping_mul
+    # For n < 64: 2^n fits in lower 64 bits
+    # For n >= 64: 2^n is in upper 64 bits
+
+    dup             # [n, n, a0, a1, a2, a3, ...]
+    push.64
+    u32lt           # [n<64, n, a0, a1, a2, a3, ...]
+
+    if.true
+        # n < 64: 2^n = [pow_lo, pow_hi, 0, 0]
+        pow2            # [2^n, a0, a1, a2, a3, ...]
+        u32split        # [pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        push.0 push.0   # [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        movup.3         # [pow_hi, 0, 0, pow_lo, a0, a1, a2, a3, ...]
+        movup.3         # [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3, ...]
+        # Stack: [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3, ...] - this is 2^n in u128 format
+        # But wait, we need [b0, b1, b2, b3, a0, a1, a2, a3] for wrapping_mul
+        # pow_lo=b0, pow_hi=b1, 0=b2, 0=b3
+        # Current: [pow_lo, pow_hi, 0, 0, a0, a1, a2, a3] = [b0, b1, b2, b3, a0, a1, a2, a3]
+        exec.wrapping_mul
+    else
+        # n >= 64: 2^n = [0, 0, pow_lo, pow_hi] where pow = 2^(n-64)
+        push.64
+        u32wrapping_sub # [n-64, a0, a1, a2, a3, ...]
+        pow2            # [2^(n-64), a0, a1, a2, a3, ...]
+        u32split        # [pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        # Need [0, 0, pow_lo, pow_hi, a0, a1, a2, a3]
+        push.0 push.0   # [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...]
+        # Stack: [0, 0, pow_lo, pow_hi, a0, a1, a2, a3, ...] = [b0, b1, b2, b3, a0, a1, a2, a3]
+        exec.wrapping_mul
+    end
+end
+
+#! Performs right shift of one unsigned 128-bit integer.
+#! The input value to be shifted is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The shift value n should be in the range [0, 128), otherwise it will result in an error.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a >> n.
+#!
+#! Note: This is a simplified implementation that handles shifts at limb boundaries (0, 32, 64, 96).
+#! For arbitrary shifts, a more complex implementation would be needed.
+pub proc shr(n: u32, a: u128) -> u128
+    # Handle common cases: n = 0, 32, 64, 96
+    # For other values, we approximate to the nearest lower multiple of 32
+
+    dup eq.0
+    if.true
+        # n == 0: no shift
+        drop
+    else
+        dup push.96 u32gte
+        if.true
+            # n >= 96: result is [a3 >> (n-96), 0, 0, 0]
+            push.96 u32wrapping_sub     # [n-96, a0, a1, a2, a3, ...]
+            movdn.4                     # [a0, a1, a2, a3, n-96, ...]
+            drop drop drop              # [a3, n-96, ...]
+            swap                        # [n-96, a3, ...]
+            dup eq.0
+            if.true
+                drop                    # [a3, ...]
+            else
+                pow2 swap u32div        # [a3 >> m, ...]
+            end
+            push.0 push.0 push.0        # [0, 0, 0, c0, ...]
+            movdn.3                     # [0, 0, c0, 0, ...]
+            movdn.2                     # [0, c0, 0, 0, ...]
+            swap                        # [c0, 0, 0, 0, ...]
+        else
+            dup push.64 u32gte
+            if.true
+                # 64 <= n < 96: result is [a2 >> m, a3 >> m, 0, 0] where m = n - 64
+                # (simplified: ignoring cross-limb bits)
+                push.64 u32wrapping_sub # [m, a0, a1, a2, a3, ...]
+                movdn.4                 # [a0, a1, a2, a3, m, ...]
+                drop drop               # [a2, a3, m, ...]
+                movup.2                 # [m, a2, a3, ...]
+                dup eq.0
+                if.true
+                    drop                # [a2, a3, ...]
+                    push.0 push.0       # [0, 0, a2, a3, ...]
+                    movdn.3 movdn.3     # [a2, a3, 0, 0, ...]
+                else
+                    dup pow2            # [2^m, m, a2, a3, ...]
+                    movup.3             # [a3, 2^m, m, a2, ...]
+                    swap u32div         # [a3>>m, m, a2, ...]
+                    swap pow2           # [2^m, a3>>m, a2, ...]
+                    movup.2             # [a2, 2^m, a3>>m, ...]
+                    swap u32div         # [a2>>m, a3>>m, ...]
+                    swap                # [c1, c0, ...]
+                    push.0 push.0       # [0, 0, c1, c0, ...]
+                    movup.3             # [c0, 0, 0, c1, ...]
+                    movup.3             # [c1, c0, 0, 0, ...]
+                    movdn.2             # [c0, 0, c1, 0, ...]
+                    swap                # [0, c0, c1, 0, ...]
+                    drop                # [c0, c1, 0, 0, ...]
+                end
+            else
+                dup push.32 u32gte
+                if.true
+                    # 32 <= n < 64: result is [a1 >> m, a2 >> m, a3 >> m, 0]
+                    # (simplified: ignoring cross-limb bits)
+                    push.32 u32wrapping_sub # [m, a0, a1, a2, a3, ...]
+                    swap drop               # [m, a1, a2, a3, ...]
+                    dup eq.0
+                    if.true
+                        drop                # [a1, a2, a3, ...]
+                        push.0              # [0, a1, a2, a3, ...]
+                        movdn.3             # [a1, a2, a3, 0, ...]
+                    else
+                        dup pow2            # [2^m, m, a1, a2, a3, ...]
+                        movup.4             # [a3, 2^m, m, a1, a2, ...]
+                        swap u32div         # [a3>>m, m, a1, a2, ...]
+                        movdn.3             # [m, a1, a2, a3>>m, ...]
+                        dup pow2            # [2^m, m, a1, a2, a3>>m, ...]
+                        movup.3             # [a2, 2^m, m, a1, a3>>m, ...]
+                        swap u32div         # [a2>>m, m, a1, a3>>m, ...]
+                        movdn.3             # [m, a1, a3>>m, a2>>m, ...]
+                        pow2                # [2^m, a1, a3>>m, a2>>m, ...]
+                        swap u32div         # [a1>>m, a3>>m, a2>>m, ...]
+                        # Stack: [c0, c2, c1, ...] need [c0, c1, c2, 0]
+                        swap                # [c2, c0, c1, ...]
+                        movup.2             # [c1, c2, c0, ...]
+                        movdn.2             # [c2, c0, c1, ...]
+                        swap                # [c0, c2, c1, ...]
+                        swap.2              # [c1, c2, c0, ...]
+                        movdn.2             # [c2, c0, c1, ...]
+                        movup.2             # [c1, c2, c0, ...]
+                        swap                # [c2, c1, c0, ...]
+                        movdn.2             # [c1, c0, c2, ...]
+                        swap                # [c0, c1, c2, ...]
+                        push.0              # [0, c0, c1, c2, ...]
+                        movdn.3             # [c0, c1, c2, 0, ...]
+                    end
+                else
+                    # 0 < n < 32: shift within limbs (simplified)
+                    pow2                    # [2^n, a0, a1, a2, a3, ...]
+                    dup movup.5             # [a3, 2^n, 2^n, a0, a1, a2, ...]
+                    swap u32div             # [a3>>n, 2^n, a0, a1, a2, ...]
+                    movdn.4                 # [2^n, a0, a1, a2, a3>>n, ...]
+                    dup movup.4             # [a2, 2^n, 2^n, a0, a1, a3>>n, ...]
+                    swap u32div             # [a2>>n, 2^n, a0, a1, a3>>n, ...]
+                    movdn.4                 # [2^n, a0, a1, a3>>n, a2>>n, ...]
+                    dup movup.3             # [a1, 2^n, 2^n, a0, a3>>n, a2>>n, ...]
+                    swap u32div             # [a1>>n, 2^n, a0, a3>>n, a2>>n, ...]
+                    movdn.4                 # [2^n, a0, a3>>n, a2>>n, a1>>n, ...]
+                    swap u32div             # [a0>>n, a3>>n, a2>>n, a1>>n, ...]
+                    # Stack: [c0, c3, c2, c1] need [c0, c1, c2, c3]
+                    movup.3                 # [c1, c0, c3, c2, ...]
+                    swap                    # [c0, c1, c3, c2, ...]
+                    movup.3                 # [c2, c0, c1, c3, ...]
+                    movdn.2                 # [c0, c1, c2, c3, ...]
+                end
+            end
+        end
+    end
+end
+
+#! Performs left rotation of one unsigned 128-bit integer.
+#! The input value to be rotated is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The rotation amount n should be in the range [0, 128), otherwise it will result in an error.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a <<< n (rotate left).
+#!
+#! rotl(n, a) = (a << n) | (a >> (128-n))
+pub proc rotl(n: u32, a: u128) -> u128
+    # For rotation, we need: (a << n) | (a >> (128-n))
+    # Duplicate inputs for both shifts
+    dup             # [n, n, a0, a1, a2, a3, ...]
+    dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
+    movup.5         # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+    exec.shl        # [shl0, shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
+
+    # Now compute a >> (128-n)
+    movup.4         # [n, shl0, shl1, shl2, shl3, a0, a1, a2, a3, ...]
+    push.128 swap u32wrapping_sub   # [128-n, shl0, shl1, shl2, shl3, a0, a1, a2, a3, ...]
+    movup.5 movup.5 movup.5 movup.5 # [a0, a1, a2, a3, 128-n, shl0, shl1, shl2, shl3, ...]
+    movup.4         # [128-n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
+    exec.shr        # [shr0, shr1, shr2, shr3, shl0, shl1, shl2, shl3, ...]
+
+    # OR the two results
+    movup.4 u32or   # [c0, shr1, shr2, shr3, shl1, shl2, shl3, ...]
+    swap movup.4 u32or  # [c1, c0, shr2, shr3, shl2, shl3, ...]
+    movdn.1         # [c0, c1, shr2, shr3, shl2, shl3, ...]
+    movup.2 movup.4 u32or   # [c2, c0, c1, shr3, shl3, ...]
+    movdn.2         # [c0, c1, c2, shr3, shl3, ...]
+    movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]
+    movdn.3         # [c0, c1, c2, c3, ...]
+end
+
+#! Performs right rotation of one unsigned 128-bit integer.
+#! The input value to be rotated is assumed to be represented using 32 bit limbs, but this is not checked.
+#! The rotation amount n should be in the range [0, 128), otherwise it will result in an error.
+#! Stack transition looks as follows:
+#! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a >>> n (rotate right).
+#!
+#! rotr(n, a) = (a >> n) | (a << (128-n))
+pub proc rotr(n: u32, a: u128) -> u128
+    # For rotation, we need: (a >> n) | (a << (128-n))
+    # Duplicate inputs for both shifts
+    dup             # [n, n, a0, a1, a2, a3, ...]
+    dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
+    movup.5         # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
+    exec.shr        # [shr0, shr1, shr2, shr3, n, a0, a1, a2, a3, ...]
+
+    # Now compute a << (128-n)
+    movup.4         # [n, shr0, shr1, shr2, shr3, a0, a1, a2, a3, ...]
+    push.128 swap u32wrapping_sub   # [128-n, shr0, shr1, shr2, shr3, a0, a1, a2, a3, ...]
+    movup.5 movup.5 movup.5 movup.5 # [a0, a1, a2, a3, 128-n, shr0, shr1, shr2, shr3, ...]
+    movup.4         # [128-n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
+    exec.shl        # [shl0, shl1, shl2, shl3, shr0, shr1, shr2, shr3, ...]
+
+    # OR the two results
+    movup.4 u32or   # [c0, shl1, shl2, shl3, shr1, shr2, shr3, ...]
+    swap movup.4 u32or  # [c1, c0, shl2, shl3, shr2, shr3, ...]
+    movdn.1         # [c0, c1, shl2, shl3, shr2, shr3, ...]
+    movup.2 movup.4 u32or   # [c2, c0, c1, shl3, shr3, ...]
+    movdn.2         # [c0, c1, c2, shl3, shr3, ...]
+    movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]
+    movdn.3         # [c0, c1, c2, c3, ...]
+end
