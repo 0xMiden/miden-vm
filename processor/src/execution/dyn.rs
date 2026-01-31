@@ -54,7 +54,7 @@ where
         let clk = processor.system().clock();
         let mem_addr = processor.stack().get(0);
 
-        let word = match processor.memory().read_word(ctx, mem_addr, clk).map_exec_err(
+        let word = match processor.memory_mut().read_word(ctx, mem_addr, clk).map_exec_err(
             current_forest,
             current_node_id,
             host,
@@ -91,7 +91,7 @@ where
 
         // Initialize the frame pointer in memory for the new context.
         if let Err(err) = processor
-            .memory()
+            .memory_mut()
             .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
             .map_exec_err(current_forest, current_node_id, host)
         {

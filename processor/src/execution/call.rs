@@ -68,7 +68,7 @@ where
 
         // Initialize the frame pointer in memory for the new context.
         if let Err(err) = processor
-            .memory()
+            .memory_mut()
             .write_element(new_ctx, FMP_ADDR, FMP_INIT_VALUE)
             .map_exec_err(current_forest, current_node_id, host)
         {

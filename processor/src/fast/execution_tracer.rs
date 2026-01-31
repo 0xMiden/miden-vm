@@ -219,14 +219,12 @@ impl ExecutionTracer {
         };
     }
 
-    fn record_control_node_start<P>(
+    fn record_control_node_start<P: Processor>(
         &mut self,
         node: &MastNode,
         processor: &P,
         current_forest: &MastForest,
-    ) where
-        P: Processor,
-    {
+    ) {
         let (ctx_info, block_type) = match node {
             MastNode::Join(node) => {
                 let child1_hash = current_forest
@@ -426,15 +424,13 @@ impl ExecutionTracer {
 impl Tracer for ExecutionTracer {
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
-    fn start_clock_cycle<P>(
+    fn start_clock_cycle<P: Processor>(
         &mut self,
         processor: &P,
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    ) where
-        P: Processor,
-    {
+    ) {
         // check if we need to start a new trace state
         if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
@@ -629,10 +625,7 @@ impl Tracer for ExecutionTracer {
         // do nothing
     }
 
-    fn increment_stack_size<P>(&mut self, processor: &P)
-    where
-        P: Processor,
-    {
+    fn increment_stack_size<P: Processor>(&mut self, processor: &P) {
         let new_overflow_value = processor.stack().get(15);
         self.overflow_table.push(new_overflow_value, processor.system().clock());
     }

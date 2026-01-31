@@ -91,10 +91,7 @@ pub struct SystemState {
 
 impl SystemState {
     /// Convenience constructor that creates a new `SystemState` from a `Processor`.
-    pub fn from_processor<P>(processor: &P) -> Self
-    where
-        P: Processor,
-    {
+    pub fn from_processor<P: Processor>(processor: &P) -> Self {
         Self {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),

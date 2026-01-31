@@ -93,7 +93,7 @@ use crate::{
     continuation_stack::Continuation,
     fast::{FastProcessor, step::BreakReason},
     parallel::build_trace,
-    processor::Processor,
+    processor::{Processor, SystemInterface},
 };
 
 // RE-EXPORTS
@@ -256,25 +256,25 @@ impl<'a> ProcessorState<'a> {
     /// Returns a reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider(&self) -> &AdviceProvider {
-        &self.processor.advice
+        self.processor.advice_provider()
     }
 
     /// Returns a mutable reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        &mut self.processor.advice
+        self.processor.advice_provider_mut()
     }
 
     /// Returns the current clock cycle of a process.
     #[inline(always)]
-    pub fn clk(&self) -> RowIndex {
-        self.processor.clk
+    pub fn clock(&self) -> RowIndex {
+        self.processor.clock()
     }
 
     /// Returns the current execution context ID.
     #[inline(always)]
     pub fn ctx(&self) -> ContextId {
-        self.processor.ctx
+        self.processor.ctx()
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.
@@ -312,7 +312,7 @@ impl<'a> ProcessorState<'a> {
     /// been accessed previously.
     #[inline(always)]
     pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        self.processor.memory.read_element_impl(ctx, addr)
+        self.processor.memory().read_element_impl(ctx, addr)
     }
 
     /// Returns the batch of elements starting at the specified context/address.
@@ -321,7 +321,7 @@ impl<'a> ProcessorState<'a> {
     /// - If the address is not word aligned.
     #[inline(always)]
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        self.processor.memory.read_word_impl(ctx, addr)
+        self.processor.memory().read_word_impl(ctx, addr)
     }
 
     /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
@@ -355,7 +355,7 @@ impl<'a> ProcessorState<'a> {
     /// have been accessed at least once.
     #[inline(always)]
     pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        self.processor.memory.get_memory_state(ctx)
+        self.processor.memory().get_memory_state(ctx)
     }
 }
 

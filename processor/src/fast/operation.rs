@@ -44,12 +44,22 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider {
+    fn advice_provider(&self) -> &Self::AdviceProvider {
+        &self.advice
+    }
+
+    #[inline(always)]
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider {
         &mut self.advice
     }
 
     #[inline(always)]
-    fn memory(&mut self) -> &mut Self::Memory {
+    fn memory(&self) -> &Self::Memory {
+        &self.memory
+    }
+
+    #[inline(always)]
+    fn memory_mut(&mut self) -> &mut Self::Memory {
         &mut self.memory
     }
 

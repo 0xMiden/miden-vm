@@ -52,6 +52,9 @@ mod external;
 #[cfg(test)]
 mod tests;
 
+// CONSTANTS
+// ================================================================================================
+
 /// The size of the stack buffer.
 ///
 /// Note: This value is much larger than it needs to be for the majority of programs. However, some
@@ -69,6 +72,9 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
+
+// FAST PROCESSOR
+// ================================================================================================
 
 /// A fast processor which doesn't generate any trace.
 ///
@@ -104,30 +110,30 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
-    pub(super) stack: Box<[Felt; STACK_BUFFER_SIZE]>,
+    stack: Box<[Felt; STACK_BUFFER_SIZE]>,
     /// The index of the top of the stack.
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
     stack_bot_idx: usize,
 
     /// The current clock cycle.
-    pub(super) clk: RowIndex,
+    clk: RowIndex,
 
     /// The current context ID.
-    pub(super) ctx: ContextId,
+    ctx: ContextId,
 
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
     /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
-    pub(super) caller_hash: Word,
+    caller_hash: Word,
 
     /// The advice provider to be used during execution.
-    pub(super) advice: AdviceProvider,
+    advice: AdviceProvider,
 
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
-    pub(super) memory: Memory,
+    memory: Memory,
 
     /// A map storing metadata per call to the ACE chiplet.
-    pub(super) ace: Ace,
+    ace: Ace,
 
     /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
     /// `dyncall`) to keep track of the information needed to return to the previous context upon

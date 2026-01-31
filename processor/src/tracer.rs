@@ -200,15 +200,13 @@ pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     #[inline(always)]
-    fn start_clock_cycle<P>(
+    fn start_clock_cycle<P: Processor>(
         &mut self,
         _processor: &P,
         _continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
-    ) where
-        P: Processor,
-    {
+    ) {
         // do nothing
     }
 
@@ -340,10 +338,7 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn increment_stack_size<P>(&mut self, _processor: &P)
-    where
-        P: Processor,
-    {
+    fn increment_stack_size<P: Processor>(&mut self, _processor: &P) {
         // do nothing
     }
 

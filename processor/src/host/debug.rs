@@ -89,7 +89,7 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
             trace_id,
-            process.clk(),
+            process.clock(),
             process.ctx()
         )
         .map_err(TraceError::from)
@@ -106,7 +106,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         process: &ProcessorState,
     ) -> fmt::Result {
         if stack.is_empty() {
-            writeln!(self.writer, "{stack_type} empty before step {}.", process.clk())?;
+            writeln!(self.writer, "{stack_type} empty before step {}.", process.clock())?;
             return Ok(());
         }
 
@@ -120,10 +120,10 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 self.writer,
                 "{stack_type} state in interval [0, {}] before step {}:",
                 num_items - 1,
-                process.clk()
+                process.clock()
             )?
         } else {
-            writeln!(self.writer, "{stack_type} state before step {}:", process.clk())?
+            writeln!(self.writer, "{stack_type} state before step {}:", process.clock())?
         }
 
         // Build stack items for display
@@ -153,7 +153,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         writeln!(
             self.writer,
             "Memory state before step {} for the context {}:",
-            process.clk(),
+            process.clock(),
             process.ctx()
         )?;
 
@@ -181,7 +181,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "Memory state before step {} for the context {} at address {:#010x}: {value_str}",
-                process.clk(),
+                process.clock(),
                 process.ctx(),
                 start
             )
@@ -189,7 +189,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "Memory state before step {} for the context {} in the interval [{}, {}]:",
-                process.clk(),
+                process.clock(),
                 process.ctx(),
                 start,
                 end
@@ -235,13 +235,13 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "State of procedure local {start} before step {}: {value_str}",
-                process.clk(),
+                process.clock(),
             )
         } else {
             writeln!(
                 self.writer,
                 "State of procedure locals [{start}, {end}] before step {}:",
-                process.clk()
+                process.clock()
             )?;
             let local_items: Vec<_> = range
                 .map(|local_idx| {

@@ -640,11 +640,19 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         self
     }
 
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider {
+    fn advice_provider(&self) -> &Self::AdviceProvider {
+        &self.context.replay.advice
+    }
+
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider {
         &mut self.context.replay.advice
     }
 
-    fn memory(&mut self) -> &mut Self::Memory {
+    fn memory(&self) -> &Self::Memory {
+        &self.context.replay.memory_reads
+    }
+
+    fn memory_mut(&mut self) -> &mut Self::Memory {
         &mut self.context.replay.memory_reads
     }
 
@@ -995,7 +1003,7 @@ fn eval_circuit_parallel_(
 ) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory(), tracer)
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory_mut(), tracer)
 }
 
 // BASIC BLOCK CONTEXT

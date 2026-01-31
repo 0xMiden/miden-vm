@@ -75,7 +75,7 @@ fn test_op_mloadw() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // store a word at address 4
     let word: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
@@ -100,9 +100,10 @@ fn test_op_mloadw() {
     assert_eq!(expected, processor.stack_top());
 
     // check memory state
-    assert_eq!(1, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    assert_eq!(1, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOADW with address greater than u32::MAX leads to an error ----------------
@@ -120,7 +121,7 @@ fn test_op_mload() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // store a word at address 4
     let word: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
@@ -139,9 +140,10 @@ fn test_op_mload() {
     assert_eq!(expected, processor.stack_top());
 
     // check memory state
-    assert_eq!(1, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    assert_eq!(1, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word, stored_word);
 
     // --- calling MLOAD with address greater than u32::MAX leads to an error -----------------
@@ -166,11 +168,13 @@ fn test_op_mstream() {
     store_word(&mut processor, 8, word2, &mut tracer);
 
     // check memory state
-    assert_eq!(2, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    assert_eq!(2, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word1 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(8), clk).unwrap();
+    let stored_word2 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(8), clk).unwrap();
     assert_eq!(word2, stored_word2);
 
     // clear the stack (drop the 8 elements we pushed while storing)
@@ -222,7 +226,7 @@ fn test_op_mstorew() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // push the first word onto the stack and save it at address 0
     let word1: Word = [Felt::new(1), Felt::new(3), Felt::new(5), Felt::new(7)].into();
@@ -233,9 +237,10 @@ fn test_op_mstorew() {
     assert_eq!(expected, processor.stack_top());
 
     // check memory state
-    assert_eq!(1, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    assert_eq!(1, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(word1, stored_word);
 
     // push the second word onto the stack and save it at address 4
@@ -247,11 +252,13 @@ fn test_op_mstorew() {
     assert_eq!(expected, processor.stack_top());
 
     // check memory state
-    assert_eq!(2, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    assert_eq!(2, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word1 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(word1, stored_word1);
-    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word2 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(word2, stored_word2);
 
     // --- calling MSTOREW with address greater than u32::MAX leads to an error ----------------
@@ -269,7 +276,7 @@ fn test_op_mstore() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // push new element onto the stack and save it as first element of the word on
     // uninitialized memory at address 0
@@ -282,9 +289,10 @@ fn test_op_mstore() {
 
     // check memory state - the word should be [10, 0, 0, 0]
     let expected_word: Word = [element, ZERO, ZERO, ZERO].into();
-    assert_eq!(1, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word = processor.memory.read_word(ContextId::root(), Felt::new(0), clk).unwrap();
+    assert_eq!(1, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(0), clk).unwrap();
     assert_eq!(expected_word, stored_word);
 
     // push a word onto the stack and save it at address 4
@@ -302,9 +310,10 @@ fn test_op_mstore() {
 
     // check memory state to make sure the other 3 elements were not affected
     let expected_word2: Word = [element2, Felt::new(3), Felt::new(5), Felt::new(7)].into();
-    assert_eq!(2, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    assert_eq!(2, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word2 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
     assert_eq!(expected_word2, stored_word2);
 
     // --- calling MSTORE with address greater than u32::MAX leads to an error ----------------
@@ -348,10 +357,12 @@ fn test_op_pipe() {
     // check memory state contains the words from the advice stack
     // pop_stack_dword returns [Word([30,29,28,27]), Word([26,25,24,23])]
     // words[0] stored at addr 4, words[1] at addr 8
-    assert_eq!(2, processor.memory.num_accessed_words());
-    let clk = processor.clk;
-    let stored_word1 = processor.memory.read_word(ContextId::root(), Felt::new(4), clk).unwrap();
-    let stored_word2 = processor.memory.read_word(ContextId::root(), Felt::new(8), clk).unwrap();
+    assert_eq!(2, processor.memory().num_accessed_words());
+    let clk = processor.clock();
+    let stored_word1 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(4), clk).unwrap();
+    let stored_word2 =
+        processor.memory_mut().read_word(ContextId::root(), Felt::new(8), clk).unwrap();
 
     let word1 = stored_word1;
     let word2 = stored_word2;
@@ -387,7 +398,7 @@ fn test_read_and_write_in_same_clock_cycle() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // emulate reading and writing in the same clock cycle (no increment_clk between operations)
     op_mload(&mut processor, &mut tracer).unwrap();
@@ -401,7 +412,7 @@ fn test_write_twice_in_same_clock_cycle() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // emulate writing twice in the same clock cycle (no increment_clk between operations)
     op_mstore(&mut processor, &mut tracer).unwrap();
@@ -414,7 +425,7 @@ fn test_read_twice_in_same_clock_cycle() {
     let mut processor = FastProcessor::new(StackInputs::default());
     let mut tracer = NoopTracer;
 
-    assert_eq!(0, processor.memory.num_accessed_words());
+    assert_eq!(0, processor.memory().num_accessed_words());
 
     // emulate reading twice in the same clock cycle (no increment_clk between operations)
     op_mload(&mut processor, &mut tracer).unwrap();

@@ -43,11 +43,17 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal system.
     fn system_mut(&mut self) -> &mut Self::System;
 
+    /// Returns a reference to the internal advice provider.
+    fn advice_provider(&self) -> &Self::AdviceProvider;
+
     /// Returns a mutable reference to the internal advice provider.
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider;
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider;
+
+    /// Returns a reference to the internal memory subsystem.
+    fn memory(&self) -> &Self::Memory;
 
     /// Returns a mutable reference to the internal memory subsystem.
-    fn memory(&mut self) -> &mut Self::Memory;
+    fn memory_mut(&mut self) -> &mut Self::Memory;
 
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
