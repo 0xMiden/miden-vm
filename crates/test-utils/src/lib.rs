@@ -277,11 +277,11 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = if self.in_debug_mode {
-            FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
-        } else {
-            FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
-        };
+        let processor = FastProcessor::builder(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(self.in_debug_mode)
+            .with_tracing(self.in_debug_mode)
+            .build();
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -420,7 +420,11 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
+        let processor = FastProcessor::builder(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(true)
+            .with_tracing(true)
+            .build();
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -438,7 +442,11 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
+        let processor = FastProcessor::builder(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(true)
+            .with_tracing(true)
+            .build();
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -570,11 +578,11 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let fast_process = if self.in_debug_mode {
-                FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
-            } else {
-                FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
-            };
+            let fast_process = FastProcessor::builder(self.stack_inputs)
+                .with_advice(self.advice_inputs.clone())
+                .with_debugging(self.in_debug_mode)
+                .with_tracing(self.in_debug_mode)
+                .build();
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

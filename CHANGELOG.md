@@ -21,6 +21,7 @@
 
 #### Changes
 
+- Added `FastProcessorBuilder` and `FastProcessor::builder()` method for fluent processor configuration. Deprecated `FastProcessor::new()`, `new_with_advice_inputs()`, and `new_debug()` constructors ([#2602](https://github.com/0xMiden/miden-vm/issues/2602)).
 - Changed `assert_u32` helper function to return `u32` instead of `Felt` ([#2575](https://github.com/0xMiden/miden-vm/issues/2575)).
 - Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
 - [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).

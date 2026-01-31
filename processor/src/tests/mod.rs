@@ -1,3 +1,6 @@
+// Allow deprecated methods in tests as we're testing both old and new APIs
+#![allow(deprecated)]
+
 use alloc::{string::ToString, sync::Arc};
 
 use miden_assembly::{

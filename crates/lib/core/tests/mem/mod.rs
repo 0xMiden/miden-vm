@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 use miden_air::trace::RowIndex;
 use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing, stack::StackInputs};
 use miden_processor::{
