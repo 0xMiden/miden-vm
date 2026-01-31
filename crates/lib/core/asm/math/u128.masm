@@ -684,6 +684,24 @@ pub proc xor(b: u128, a: u128) -> u128
     swap            # [c0, c1, c2, c3]
 end
 
+#! Performs bitwise NOT of one unsigned 128-bit integer.
+#! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = NOT a.
+pub proc not(a: u128) -> u128
+    # Input: [a0, a1, a2, a3, ...]
+    u32not          # [c0, a1, a2, a3]
+    swap            # [a1, c0, a2, a3]
+    u32not          # [c1, c0, a2, a3]
+    swap            # [c0, c1, a2, a3]
+    movup.2         # [a2, c0, c1, a3]
+    u32not          # [c2, c0, c1, a3]
+    movdn.2         # [c0, c1, c2, a3]
+    movup.3         # [a3, c0, c1, c2]
+    u32not          # [c3, c0, c1, c2]
+    movdn.3         # [c0, c1, c2, c3]
+end
+
 #! Counts the number of leading zeros of one unsigned 128-bit integer.
 #! The input value is assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
@@ -1042,7 +1060,7 @@ pub proc rotl(n: u32, a: u128) -> u128
     # OR the two results
     movup.4 u32or   # [c0, shr1, shr2, shr3, shl1, shl2, shl3, ...]
     swap movup.4 u32or  # [c1, c0, shr2, shr3, shl2, shl3, ...]
-    movdn.1         # [c0, c1, shr2, shr3, shl2, shl3, ...]
+    swap            # [c0, c1, shr2, shr3, shl2, shl3, ...]
     movup.2 movup.4 u32or   # [c2, c0, c1, shr3, shl3, ...]
     movdn.2         # [c0, c1, c2, shr3, shl3, ...]
     movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]
@@ -1074,7 +1092,7 @@ pub proc rotr(n: u32, a: u128) -> u128
     # OR the two results
     movup.4 u32or   # [c0, shl1, shl2, shl3, shr1, shr2, shr3, ...]
     swap movup.4 u32or  # [c1, c0, shl2, shl3, shr2, shr3, ...]
-    movdn.1         # [c0, c1, shl2, shl3, shr2, shr3, ...]
+    swap            # [c0, c1, shl2, shl3, shr2, shr3, ...]
     movup.2 movup.4 u32or   # [c2, c0, c1, shl3, shr3, ...]
     movdn.2         # [c0, c1, c2, shl3, shr3, ...]
     movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]

@@ -366,3 +366,278 @@ fn split_u128(value: u128) -> (u64, u64, u64, u64) {
         value as u32 as u64,
     )
 }
+
+// =================================================================================================
+// COMPARISON TESTS
+// =================================================================================================
+
+proptest! {
+    #[test]
+    fn test_eq(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a == b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::eq
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_neq(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a != b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::neq
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_lt(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a < b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::lt
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_lte(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a <= b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::lte
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_gt(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a > b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::gt
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_gte(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let expected = if a >= b { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::gte
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_eqz(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let expected = if a == 0 { 1u64 } else { 0u64 };
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::eqz
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+}
+
+// =================================================================================================
+// BITWISE TESTS
+// =================================================================================================
+
+proptest! {
+    #[test]
+    fn test_and(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let c = a & b;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::and
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_or(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let c = a | b;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::or
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_xor(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let c = a ^ b;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::xor
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_not(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let c = !a;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::not
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+}
+
+// =================================================================================================
+// SHIFT TESTS
+// =================================================================================================
+
+proptest! {
+    #[test]
+    fn test_shl(a in any::<u128>(), n in 0u32..128u32) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let c = a << n;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::shl
+            end
+        ";
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_shr(a in any::<u128>(), n in 0u32..128u32) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let c = a >> n;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::shr
+            end
+        ";
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_rotl(a in any::<u128>(), n in 0u32..128u32) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let c = a.rotate_left(n);
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::rotl
+            end
+        ";
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_rotr(a in any::<u128>(), n in 0u32..128u32) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let c = a.rotate_right(n);
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::rotr
+            end
+        ";
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+}
