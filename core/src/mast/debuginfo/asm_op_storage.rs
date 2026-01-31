@@ -96,7 +96,7 @@ impl OpToAsmOpId {
     /// Note: This is the number of operations that have an AssemblyOp, not the total
     /// number of operations.
     pub fn num_operations(&self) -> usize {
-        self.inner.num_data()
+        self.inner.num_elements()
     }
 
     /// Registers AssemblyOps for a node's operations.
@@ -248,7 +248,7 @@ impl OpToAsmOpId {
         }
 
         // Build the new CSR structure
-        let mut new_inner = CsrMatrix::with_capacity(num_new_nodes, self.inner.num_data());
+        let mut new_inner = CsrMatrix::with_capacity(num_new_nodes, self.inner.num_elements());
 
         for new_idx in 0..num_new_nodes {
             if let Some(data) = new_node_data.get(&new_idx) {

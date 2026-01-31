@@ -15,25 +15,8 @@ use thiserror::Error;
 
 use crate::{Idx, IndexVec, IndexedVecError};
 
-/// Errors that can occur during CSR validation.
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum CsrValidationError {
-    /// The indptr array must start at 0.
-    #[error("indptr must start at 0, got {0}")]
-    IndptrStartNotZero(usize),
-
-    /// The indptr array must be monotonically increasing.
-    #[error("indptr not monotonic at index {index}: {prev} > {curr}")]
-    IndptrNotMonotonic { index: usize, prev: usize, curr: usize },
-
-    /// The last indptr value must equal data.len().
-    #[error("indptr ends at {indptr_end}, but data.len() is {data_len}")]
-    IndptrDataMismatch { indptr_end: usize, data_len: usize },
-
-    /// A data value failed domain-specific validation.
-    #[error("invalid data value at row {row}, position {position}")]
-    InvalidData { row: usize, position: usize },
-}
+// CSR MATRIX
+// ================================================================================================
 
 /// Compressed Sparse Row matrix mapping row indices to variable-length data.
 ///
@@ -52,7 +35,7 @@ pub enum CsrValidationError {
 /// newtype_id!(NodeId);
 ///
 /// let mut csr = CsrMatrix::<NodeId, u32>::new();
-/// csr.push_row([1, 2, 3]);      // Row 0: [1, 2, 3]
+/// csr.push_row([1, 2, 3]);       // Row 0: [1, 2, 3]
 /// csr.push_empty_row();          // Row 1: []
 /// csr.push_row([4, 5]);          // Row 2: [4, 5]
 ///
@@ -91,19 +74,19 @@ impl<I: Idx, D> CsrMatrix<I, D> {
     ///
     /// # Arguments
     ///
-    /// - `rows`: Expected number of rows.
-    /// - `data`: Expected total number of data elements across all rows.
-    pub fn with_capacity(rows: usize, data: usize) -> Self {
+    /// - `num_rows`: Expected number of rows.
+    /// - `num_elements`: Expected total number of data elements across all rows.
+    pub fn with_capacity(num_rows: usize, num_elements: usize) -> Self {
         Self {
-            data: Vec::with_capacity(data),
-            indptr: IndexVec::with_capacity(rows + 1),
+            data: Vec::with_capacity(num_elements),
+            indptr: IndexVec::with_capacity(num_rows + 1),
         }
     }
 
     // MUTATION
     // --------------------------------------------------------------------------------------------
 
-    /// Appends a new row with the given data values.
+    /// Appends a new row with the given data values and returns the index of the newly added row.
     ///
     /// Rows must be added in sequential order starting from row 0.
     ///
@@ -139,8 +122,7 @@ impl<I: Idx, D> CsrMatrix<I, D> {
 
     /// Appends empty rows to fill gaps up to (but not including) `target_row`.
     ///
-    /// If `target_row` is less than or equal to the current number of rows,
-    /// this is a no-op.
+    /// If `target_row` is less than or equal to the current number of rows, this is a no-op.
     ///
     /// # Errors
     ///
@@ -171,7 +153,7 @@ impl<I: Idx, D> CsrMatrix<I, D> {
     }
 
     /// Returns the total number of data elements across all rows.
-    pub fn num_data(&self) -> usize {
+    pub fn num_elements(&self) -> usize {
         self.data.len()
     }
 
@@ -295,6 +277,29 @@ impl<I: Idx, D> CsrMatrix<I, D> {
     }
 }
 
+// CSR VALIDATION ERROR
+// ================================================================================================
+
+/// Errors that can occur during CSR validation.
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum CsrValidationError {
+    /// The indptr array must start at 0.
+    #[error("indptr must start at 0, got {0}")]
+    IndptrStartNotZero(usize),
+
+    /// The indptr array must be monotonically increasing.
+    #[error("indptr not monotonic at index {index}: {prev} > {curr}")]
+    IndptrNotMonotonic { index: usize, prev: usize, curr: usize },
+
+    /// The last indptr value must equal data.len().
+    #[error("indptr ends at {indptr_end}, but data.len() is {data_len}")]
+    IndptrDataMismatch { indptr_end: usize, data_len: usize },
+
+    /// A data value failed domain-specific validation.
+    #[error("invalid data value at row {row}, position {position}")]
+    InvalidData { row: usize, position: usize },
+}
+
 // SERIALIZATION
 // ================================================================================================
 
@@ -353,6 +358,9 @@ where
     }
 }
 
+// TESTS
+// ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use alloc::vec;
@@ -367,7 +375,7 @@ mod tests {
         let csr = CsrMatrix::<TestRowId, u32>::new();
         assert!(csr.is_empty());
         assert_eq!(csr.num_rows(), 0);
-        assert_eq!(csr.num_data(), 0);
+        assert_eq!(csr.num_elements(), 0);
     }
 
     #[test]
@@ -377,13 +385,13 @@ mod tests {
         let id0 = csr.push_row([1, 2, 3]).unwrap();
         assert_eq!(id0, TestRowId::from(0));
         assert_eq!(csr.num_rows(), 1);
-        assert_eq!(csr.num_data(), 3);
+        assert_eq!(csr.num_elements(), 3);
         assert_eq!(csr.row(TestRowId::from(0)), Some(&[1, 2, 3][..]));
 
         let id1 = csr.push_row([4, 5]).unwrap();
         assert_eq!(id1, TestRowId::from(1));
         assert_eq!(csr.num_rows(), 2);
-        assert_eq!(csr.num_data(), 5);
+        assert_eq!(csr.num_elements(), 5);
         assert_eq!(csr.row(TestRowId::from(1)), Some(&[4, 5][..]));
     }
 
