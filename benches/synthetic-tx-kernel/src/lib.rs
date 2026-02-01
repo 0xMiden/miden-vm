@@ -25,9 +25,11 @@ pub fn load_profile<P: AsRef<Path>>(path: P) -> Result<profile::VmProfile> {
 /// For workspace-relative paths, use `load_profile` with an explicit path.
 pub fn latest_profile() -> Result<profile::VmProfile> {
     // Try to find the workspace root by looking for Cargo.toml with workspace definition
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+    let manifest_dir =
+        std::env::var("CARGO_MANIFEST_DIR").map(std::path::PathBuf::from).or_else(|_| {
+            std::env::current_dir()
+                .map_err(|e| anyhow::anyhow!("Failed to determine current directory: {}", e))
+        })?;
 
     load_profile(manifest_dir.join("profiles/latest.json"))
 }

@@ -6,21 +6,22 @@ use miden_vm::{Assembler, DefaultHost, StackInputs};
 use synthetic_tx_kernel::{generator::MasmGenerator, load_profile};
 
 /// Helper function to execute a benchmark with the given program
-fn bench_program(b: &mut criterion::Bencher, program: miden_vm::Program) {
-    b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(
-        || {
-            let host = DefaultHost::default();
-            let processor = FastProcessor::new_with_advice_inputs(
-                StackInputs::default(),
-                miden_processor::AdviceInputs::default(),
-            );
-            (host, processor, program.clone())
-        },
-        |(mut host, processor, program)| async move {
-            black_box(processor.execute(&program, &mut host).await.unwrap());
-        },
-        BatchSize::SmallInput,
-    );
+fn bench_program(b: &mut criterion::Bencher, program: &miden_vm::Program) {
+    b.to_async(tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"))
+        .iter_batched(
+            || {
+                let host = DefaultHost::default();
+                let processor = FastProcessor::new_with_advice_inputs(
+                    StackInputs::default(),
+                    miden_processor::AdviceInputs::default(),
+                );
+                (host, processor)
+            },
+            |(mut host, processor)| async move {
+                black_box(processor.execute(program, &mut host).await.unwrap());
+            },
+            BatchSize::SmallInput,
+        );
 }
 
 fn benchmark_signature_verification(c: &mut Criterion) {
@@ -38,7 +39,7 @@ fn benchmark_signature_verification(c: &mut Criterion) {
             .expect("Failed to generate benchmark");
 
         let program = Assembler::default().assemble_program(&source).expect("Failed to assemble");
-        bench_program(b, program);
+        bench_program(b, &program);
     });
 
     group.finish();
@@ -59,7 +60,7 @@ fn benchmark_hashing(c: &mut Criterion) {
         "#;
 
         let program = Assembler::default().assemble_program(source).expect("Failed to assemble");
-        bench_program(b, program);
+        bench_program(b, &program);
     });
 
     group.finish();
@@ -82,7 +83,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
         "#;
 
         let program = Assembler::default().assemble_program(source).expect("Failed to assemble");
-        bench_program(b, program);
+        bench_program(b, &program);
     });
 
     group.finish();

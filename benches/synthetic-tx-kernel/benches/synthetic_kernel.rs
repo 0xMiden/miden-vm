@@ -2,6 +2,11 @@
 //!
 //! This benchmark generates and executes a Miden program that mirrors
 //! the instruction mix and operation profile of the real transaction kernel.
+//!
+//! # Environment Variables
+//!
+//! - `MASM_WRITE`: When set, writes the generated MASM code to `target/synthetic_kernel.masm` for
+//!   debugging purposes.
 
 use std::time::Duration;
 
@@ -34,7 +39,6 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
     println!("Total cycles in reference: {}", profile.transaction_kernel.total_cycles);
 
     // Generate the synthetic kernel
-    let _total_cycles_expected = profile.transaction_kernel.total_cycles;
     let generator = MasmGenerator::new(profile);
     let source = generator.generate_kernel().expect("Failed to generate synthetic kernel");
 
@@ -64,7 +68,7 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
         miden_processor::AdviceInputs::default(),
     );
     let test_result = tokio::runtime::Runtime::new()
-        .unwrap()
+        .expect("Failed to create runtime for smoke test")
         .block_on(async { test_processor.execute(&program, &mut test_host).await });
 
     match test_result {

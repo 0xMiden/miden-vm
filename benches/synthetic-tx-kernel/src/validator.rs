@@ -5,7 +5,6 @@ use anyhow::{bail, Result};
 use crate::profile::VmProfile;
 
 /// Validates a VM profile for correctness
-#[derive(Debug, Clone, Copy, Default)]
 pub struct ProfileValidator;
 
 impl ProfileValidator {
@@ -365,5 +364,38 @@ mod tests {
 
         assert_eq!(diff.new_phases.len(), 1);
         assert_eq!(diff.new_phases[0], "new_phase");
+    }
+
+    #[test]
+    fn profile_diff_infinity_display_and_serialization() {
+        // Test that infinity values in ProfileDiff are handled correctly
+        let mut baseline_phases = BTreeMap::new();
+        baseline_phases.insert(
+            "zero_phase".to_string(),
+            PhaseProfile { cycles: 0, operations: BTreeMap::new() },
+        );
+
+        let mut current_phases = BTreeMap::new();
+        current_phases.insert(
+            "zero_phase".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
+
+        let baseline = create_test_profile("1.0", 0, baseline_phases);
+        let current = create_test_profile("1.0", 100, current_phases);
+
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
+
+        // Verify the infinity value is present
+        assert_eq!(diff.phase_deltas[0].percent_change, f64::INFINITY);
+
+        // When serialized to JSON, infinity becomes null
+        // This test documents this behavior for consumers
+        let json = serde_json::to_string(&diff.phase_deltas[0].percent_change).unwrap();
+        assert_eq!(json, "null");
+
+        // Display/debug should show "inf"
+        let debug_str = format!("{:?}", diff.phase_deltas[0].percent_change);
+        assert!(debug_str.contains("inf"));
     }
 }

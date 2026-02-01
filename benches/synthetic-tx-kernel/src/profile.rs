@@ -1,5 +1,7 @@
 //! VM profile types (mirrors miden-base profile format)
 
+// BTreeMap is used instead of HashMap for deterministic iteration order
+// which ensures consistent serialization and easier testing
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -50,10 +52,9 @@ pub struct ProcedureProfile {
     pub invocations: u64,
 }
 
-/// Tolerance for floating point comparisons (1%)
-const INSTRUCTION_MIX_TOLERANCE: f64 = 0.01;
-
 impl InstructionMix {
+    /// Tolerance for floating point comparisons (1%)
+    const TOLERANCE: f64 = 0.01;
     /// Validates that:
     /// - All individual values are between 0.0 and 1.0 (inclusive)
     /// - Values sum to approximately 1.0 (within 1% tolerance)
@@ -83,7 +84,7 @@ impl InstructionMix {
             + self.memory
             + self.control_flow
             + self.signature_verify;
-        if (total - 1.0).abs() > INSTRUCTION_MIX_TOLERANCE {
+        if (total - 1.0).abs() > Self::TOLERANCE {
             anyhow::bail!("Instruction mix percentages sum to {}, expected ~1.0", total);
         }
 
@@ -194,6 +195,62 @@ mod tests {
             signature_verify: 0.2,
         };
         assert!(mix.validate().is_ok());
+    }
+
+    #[test]
+    fn instruction_mix_tolerance_boundary_just_under_passes() {
+        // Sum = 1.0095 (just under 1.0 + TOLERANCE = 1.01)
+        let delta = 0.0019;
+        let mix = InstructionMix {
+            arithmetic: 0.2 + delta,
+            hashing: 0.2 + delta,
+            memory: 0.2 + delta,
+            control_flow: 0.2 + delta,
+            signature_verify: 0.2 + delta,
+        };
+        assert!(mix.validate().is_ok());
+    }
+
+    #[test]
+    fn instruction_mix_tolerance_boundary_just_over_fails() {
+        // Sum = 1.0105 (just over 1.0 + TOLERANCE = 1.01)
+        let delta = 0.0021;
+        let mix = InstructionMix {
+            arithmetic: 0.2 + delta,
+            hashing: 0.2 + delta,
+            memory: 0.2 + delta,
+            control_flow: 0.2 + delta,
+            signature_verify: 0.2 + delta,
+        };
+        assert!(mix.validate().is_err());
+    }
+
+    #[test]
+    fn instruction_mix_tolerance_boundary_just_over_min_passes() {
+        // Sum = 0.9905 (just over 1.0 - TOLERANCE = 0.99)
+        let delta = -0.0019;
+        let mix = InstructionMix {
+            arithmetic: 0.2 + delta,
+            hashing: 0.2 + delta,
+            memory: 0.2 + delta,
+            control_flow: 0.2 + delta,
+            signature_verify: 0.2 + delta,
+        };
+        assert!(mix.validate().is_ok());
+    }
+
+    #[test]
+    fn instruction_mix_tolerance_boundary_just_under_min_fails() {
+        // Sum = 0.9895 (just under 1.0 - TOLERANCE = 0.99)
+        let delta = -0.0021;
+        let mix = InstructionMix {
+            arithmetic: 0.2 + delta,
+            hashing: 0.2 + delta,
+            memory: 0.2 + delta,
+            control_flow: 0.2 + delta,
+            signature_verify: 0.2 + delta,
+        };
+        assert!(mix.validate().is_err());
     }
 
     #[test]
