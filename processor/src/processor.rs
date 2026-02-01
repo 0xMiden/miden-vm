@@ -17,6 +17,9 @@ use crate::{
     tracer::Tracer,
 };
 
+// PROCESSOR
+// ================================================================================================
+
 /// Abstract definition of a processor's components: system, stack, advice provider, memory, hasher,
 /// and operation helper register computation.
 pub trait Processor: Sized {
@@ -27,9 +30,9 @@ pub trait Processor: Sized {
     type Hasher: HasherInterface;
     type HelperRegisters: OperationHelperRegisters;
 
-    // -------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
     // REQUIRED METHODS
-    // -------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Returns a reference to the internal stack.
     fn stack(&self) -> &Self::Stack;
@@ -137,12 +140,28 @@ pub trait Processor: Sized {
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason>;
+
+    // --------------------------------------------------------------------------------------------
+    // PROVIDED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the next context ID that would be created given the current state.
+    ///
+    /// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
+    /// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
+    /// context.
+    fn next_ctx_id(&self) -> ContextId {
+        (self.system().clock() + 1).into()
+    }
 }
+
+// SYSTEM INTERFACE
+// ================================================================================================
 
 /// Trait representing the system state of the processor.
 pub trait SystemInterface {
     // ACCESSORS
-    // ===============================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Returns the value of the CALLER_HASH register, which is the hash of the procedure that
     /// called the currently executing procedure.
@@ -155,7 +174,7 @@ pub trait SystemInterface {
     fn ctx(&self) -> ContextId;
 
     // MUTATORS
-    // ===============================================================================================
+    // --------------------------------------------------------------------------------------------
 
     /// Sets the CALLER_HASH register to the provided value.
     fn set_caller_hash(&mut self, caller_hash: Word);
@@ -166,6 +185,9 @@ pub trait SystemInterface {
     // Increments the clock by 1.
     fn increment_clock(&mut self);
 }
+
+// STACK INTERFACE
+// ================================================================================================
 
 /// We model the stack as a slice of `Felt` values, where the top of the stack is at the last index
 /// of the slice. The stack is mutable, and the processor can manipulate it directly. A "stack top
@@ -278,6 +300,9 @@ pub trait StackInterface {
     fn decrement_size(&mut self, tracer: &mut impl Tracer);
 }
 
+// ADVICE PROVIDER INTERFACE
+// ================================================================================================
+
 /// Trait representing an advice provider for the processor.
 pub trait AdviceProviderInterface {
     /// Pops an element from the advice stack and returns it.
@@ -329,6 +354,9 @@ pub trait AdviceProviderInterface {
     ) -> Result<Option<MerklePath>, AdviceError>;
 }
 
+// MEMORY INTERFACE
+// ================================================================================================
+
 /// Trait representing the memory subsystem of the processor.
 pub trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
@@ -355,6 +383,9 @@ pub trait MemoryInterface {
         word: Word,
     ) -> Result<(), MemoryError>;
 }
+
+// HASHER INTERFACE
+// ================================================================================================
 
 /// Trait representing the hasher subsystem of the processor.
 pub trait HasherInterface {
@@ -412,6 +443,9 @@ pub trait HasherInterface {
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<(Felt, Word), OperationError>;
 }
+
+// OPERATION HELPER REGISTERS
+// ================================================================================================
 
 /// Trait for computing helper registers for operations.
 ///

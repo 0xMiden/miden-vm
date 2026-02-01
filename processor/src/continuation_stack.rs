@@ -8,6 +8,9 @@ use miden_core::{
 /// A hint for the initial size of the continuation stack.
 const CONTINUATION_STACK_SIZE_HINT: usize = 64;
 
+// CONTINUATION
+// ================================================================================================
+
 /// Represents a unit of work in the continuation stack.
 ///
 /// This enum defines the different types of continuations that can be performed on MAST nodes
@@ -93,6 +96,9 @@ impl Continuation {
     }
 }
 
+// CONTINUATION STACK
+// ================================================================================================
+
 /// [ContinuationStack] reifies the call stack used by the processor when executing a program made
 /// up of possibly multiple MAST forests.
 ///
@@ -115,6 +121,9 @@ impl ContinuationStack {
 
         Self { stack }
     }
+
+    // STATE MUTATORS
+    // --------------------------------------------------------------------------------------------
 
     /// Pushes a continuation onto the continuation stack.
     pub fn push_continuation(&mut self, continuation: Continuation) {
@@ -173,8 +182,8 @@ impl ContinuationStack {
         self.stack.pop()
     }
 
-    // ACCESSORS
-    // ------------------------------------------------------------
+    // PUBLIC ACCESSORS
+    // --------------------------------------------------------------------------------------------
 
     /// Peeks at the next continuation to execute without removing it.
     ///
@@ -214,6 +223,9 @@ impl ContinuationStack {
         })
     }
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {

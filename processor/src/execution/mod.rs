@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, Host, Stopper,
+    Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     fast::step::BreakReason,
     processor::{Processor, SystemInterface},
@@ -25,7 +25,7 @@ mod split;
 mod operations;
 
 // RE-EXPORTS
-// ----------------------------------------------------------------------------------------------
+// ================================================================================================
 
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
@@ -33,7 +33,7 @@ pub(crate) use external::finish_load_mast_forest_from_external;
 pub(crate) use operations::execute_sync_op;
 
 // MAIN EXECUTION FUNCTION
-// ----------------------------------------------------------------------------------------------
+// ================================================================================================
 
 /// Executes the main execution loop given an abstract processor until a break condition is met.
 ///
@@ -412,7 +412,7 @@ impl From<BreakReason> for InternalBreakReason {
 }
 
 // HELPERS
-// ----------------------------------------------------------------------------------------------
+// ================================================================================================
 
 /// This function marks the end of a clock cycle.
 ///
@@ -464,13 +464,4 @@ where
     processor.system_mut().increment_clock();
 
     stopper.should_stop(processor, continuation_after_stop)
-}
-
-/// Returns the next context ID that would be created given the current state.
-///
-/// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
-/// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
-/// context.
-fn get_next_ctx_id(processor: &impl Processor) -> ContextId {
-    (processor.system().clock() + 1).into()
 }
