@@ -50,6 +50,9 @@ pub struct ProcedureProfile {
     pub invocations: u64,
 }
 
+/// Tolerance for floating point comparisons (1%)
+const INSTRUCTION_MIX_TOLERANCE: f64 = 0.01;
+
 impl InstructionMix {
     /// Validates that:
     /// - All individual values are between 0.0 and 1.0 (inclusive)
@@ -80,7 +83,7 @@ impl InstructionMix {
             + self.memory
             + self.control_flow
             + self.signature_verify;
-        if (total - 1.0).abs() > 0.01 {
+        if (total - 1.0).abs() > INSTRUCTION_MIX_TOLERANCE {
             anyhow::bail!("Instruction mix percentages sum to {}, expected ~1.0", total);
         }
 
