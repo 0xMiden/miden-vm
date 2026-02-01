@@ -10,8 +10,10 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
+    ProgramInfo,
+    field::ExtensionField,
     precompile::PrecompileTranscriptState,
+    stack::{StackInputs, StackOutputs},
 };
 
 pub mod config;

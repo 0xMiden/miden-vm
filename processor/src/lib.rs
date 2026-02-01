@@ -20,14 +20,14 @@ pub use execution_options::{
     DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ExecutionOptionsError,
 };
 pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
-    StackOutputs, WORD_SIZE, Word, ZERO,
+    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, WORD_SIZE, Word,
+    ZERO,
     crypto::merkle::SMT_DEPTH,
-    errors::InputError,
     events,
     field::{PrimeField64, QuadFelt},
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
+    stack::{InputError, StackInputs, StackOutputs},
     utils::DeserializationError,
 };
 

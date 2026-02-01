@@ -3,8 +3,8 @@ use alloc::{collections::VecDeque, vec::Vec};
 use miden_core::{
     AdviceMap, Felt, Word,
     crypto::merkle::MerkleStore,
-    errors::InputError,
     field::{PrimeField64, QuotientMap},
+    stack::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

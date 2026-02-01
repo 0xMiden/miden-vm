@@ -12,10 +12,10 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Kernel, ProgramInfo, Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    stack::MIN_STACK_DEPTH,
+    stack::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::ColMatrix,
 };
 use p3_matrix::{Matrix, dense::RowMajorMatrix};

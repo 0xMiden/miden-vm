@@ -61,6 +61,7 @@ pub mod chiplets;
 pub mod events;
 pub mod mast;
 pub mod precompile;
+pub mod stack;
 pub mod utils;
 
 pub mod errors;
@@ -133,9 +134,6 @@ mod operations;
 pub use operations::{
     AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
 };
-
-pub mod stack;
-pub use stack::{StackInputs, StackOutputs};
 
 mod advice;
 pub use advice::map::AdviceMap;

@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
 use core::{ops::Deref, slice};
 
-use super::{
-    super::ZERO, ByteWriter, Felt, InputError, MIN_STACK_DEPTH, Serializable, get_num_stack_values,
+use super::{MIN_STACK_DEPTH, get_num_stack_values};
+use crate::{
+    Felt, ZERO,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
-use crate::utils::{ByteReader, Deserializable, DeserializationError};
 
 // STACK INPUTS
 // ================================================================================================
@@ -116,4 +117,15 @@ impl Deserializable for StackInputs {
             DeserializationError::InvalidValue(format!("failed to create stack inputs: {err}",))
         })
     }
+}
+
+// INPUT ERROR
+// ================================================================================================
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum InputError {
+    #[error("value {0} exceeds field modulus")]
+    InvalidStackElement(u64),
+    #[error("number of input values on the stack cannot exceed {0}, but was {1}")]
+    InputStackTooBig(usize, usize),
 }

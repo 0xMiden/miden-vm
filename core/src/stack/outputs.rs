@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
 use core::ops::Deref;
 
-use miden_crypto::{WORD_SIZE, Word, ZERO};
-
-use super::{ByteWriter, Felt, MIN_STACK_DEPTH, OutputError, Serializable, get_num_stack_values};
-use crate::utils::{ByteReader, Deserializable, DeserializationError};
+use super::{MIN_STACK_DEPTH, get_num_stack_values};
+use crate::{
+    Felt, WORD_SIZE, Word, ZERO,
+    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+};
 
 // STACK OUTPUTS
 // ================================================================================================
@@ -150,4 +151,15 @@ impl Deserializable for StackOutputs {
             DeserializationError::InvalidValue(format!("failed to create stack outputs: {err}",))
         })
     }
+}
+
+// OUTPUT ERROR
+// ================================================================================================
+
+#[derive(Clone, Debug, thiserror::Error)]
+pub enum OutputError {
+    #[error("value {0} exceeds field modulus")]
+    InvalidStackElement(u64),
+    #[error("number of output values on the stack cannot exceed {0}, but was {1}")]
+    OutputStackTooBig(usize, usize),
 }
