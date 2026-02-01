@@ -3,12 +3,13 @@
 //! This crate generates Miden assembly benchmarks based on VM profiles
 //! exported from miden-base's transaction kernel.
 
-pub mod profile;
 pub mod generator;
+pub mod profile;
 pub mod validator;
 
-use anyhow::Result;
 use std::path::Path;
+
+use anyhow::Result;
 
 /// Load a VM profile from a JSON file
 pub fn load_profile<P: AsRef<Path>>(path: P) -> Result<profile::VmProfile> {
@@ -18,6 +19,16 @@ pub fn load_profile<P: AsRef<Path>>(path: P) -> Result<profile::VmProfile> {
 }
 
 /// Get the latest profile from the profiles directory
+///
+/// # Note
+/// This function looks for the profile relative to the current working directory.
+/// For workspace-relative paths, use `load_profile` with an explicit path.
 pub fn latest_profile() -> Result<profile::VmProfile> {
-    load_profile("profiles/latest.json")
+    // Try to find the workspace root by looking for Cargo.toml with workspace definition
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
+
+    let profile_path = manifest_dir.join("profiles/latest.json");
+    load_profile(profile_path)
 }

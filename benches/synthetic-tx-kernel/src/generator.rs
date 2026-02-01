@@ -1,7 +1,8 @@
 //! Generates Miden assembly from VM profiles
 
-use crate::profile::VmProfile;
 use anyhow::Result;
+
+use crate::profile::VmProfile;
 
 /// Generates masm code for a synthetic transaction kernel
 pub struct MasmGenerator {
@@ -79,7 +80,11 @@ impl MasmGenerator {
     }
 
     /// Generate a component benchmark for a specific operation type
-    pub fn generate_component_benchmark(&self, operation: &str, iterations: usize) -> Result<String> {
+    pub fn generate_component_benchmark(
+        &self,
+        operation: &str,
+        iterations: usize,
+    ) -> Result<String> {
         let mut code = String::new();
 
         code.push_str(&format!("# Component Benchmark: {}\n", operation));
