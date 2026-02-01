@@ -5,19 +5,10 @@ use anyhow::{bail, Result};
 use crate::profile::VmProfile;
 
 /// Validates a VM profile for correctness
+#[derive(Debug, Clone, Copy)]
 pub struct ProfileValidator;
 
-impl Default for ProfileValidator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl ProfileValidator {
-    pub fn new() -> Self {
-        Self
-    }
-
     /// Validate a profile
     pub fn validate(&self, profile: &VmProfile) -> Result<()> {
         // Check version
@@ -175,9 +166,8 @@ mod tests {
         );
 
         let profile = create_test_profile("1.0", 100, phases);
-        let validator = ProfileValidator::new();
 
-        assert!(validator.validate(&profile).is_ok());
+        assert!(ProfileValidator.validate(&profile).is_ok());
     }
 
     #[test]
@@ -189,9 +179,8 @@ mod tests {
         );
 
         let profile = create_test_profile("2.0", 100, phases);
-        let validator = ProfileValidator::new();
 
-        let result = validator.validate(&profile);
+        let result = ProfileValidator.validate(&profile);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Unsupported profile version"));
     }
@@ -200,9 +189,8 @@ mod tests {
     fn validate_zero_cycles_fails() {
         let phases = BTreeMap::new();
         let profile = create_test_profile("1.0", 0, phases);
-        let validator = ProfileValidator::new();
 
-        let result = validator.validate(&profile);
+        let result = ProfileValidator.validate(&profile);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Total cycles is zero"));
     }
@@ -216,9 +204,8 @@ mod tests {
         );
         // total_cycles is 1000 but phases only sum to 50
         let profile = create_test_profile("1.0", 1000, phases);
-        let validator = ProfileValidator::new();
 
-        let result = validator.validate(&profile);
+        let result = ProfileValidator.validate(&profile);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("differs from total"));
     }
@@ -234,9 +221,8 @@ mod tests {
 
         // total_cycles = 10, phases sum to 10, diff = 0, tolerance = max(10/100, 1) = 1
         let profile = create_test_profile("1.0", 10, phases);
-        let validator = ProfileValidator::new();
 
-        assert!(validator.validate(&profile).is_ok());
+        assert!(ProfileValidator.validate(&profile).is_ok());
     }
 
     #[test]
@@ -256,8 +242,7 @@ mod tests {
         let baseline = create_test_profile("1.0", 100, baseline_phases);
         let current = create_test_profile("1.0", 150, current_phases);
 
-        let validator = ProfileValidator::new();
-        let diff = validator.compare_profiles(&baseline, &current);
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
 
         assert_eq!(diff.total_cycles_delta, 50);
         assert_eq!(diff.phase_deltas.len(), 1);
@@ -283,8 +268,7 @@ mod tests {
         let baseline = create_test_profile("1.0", 0, baseline_phases);
         let current = create_test_profile("1.0", 50, current_phases);
 
-        let validator = ProfileValidator::new();
-        let diff = validator.compare_profiles(&baseline, &current);
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
 
         assert_eq!(diff.phase_deltas.len(), 1);
         assert_eq!(diff.phase_deltas[0].percent_change, f64::INFINITY);
@@ -307,8 +291,7 @@ mod tests {
         let baseline = create_test_profile("1.0", 0, baseline_phases);
         let current = create_test_profile("1.0", 0, current_phases);
 
-        let validator = ProfileValidator::new();
-        let diff = validator.compare_profiles(&baseline, &current);
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
 
         assert_eq!(diff.phase_deltas.len(), 1);
         assert_eq!(diff.phase_deltas[0].percent_change, 0.0);
@@ -336,8 +319,7 @@ mod tests {
         let baseline = create_test_profile("1.0", 200, baseline_phases);
         let current = create_test_profile("1.0", 100, current_phases);
 
-        let validator = ProfileValidator::new();
-        let diff = validator.compare_profiles(&baseline, &current);
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
 
         assert_eq!(diff.missing_phases.len(), 1);
         assert_eq!(diff.missing_phases[0], "epilogue");
@@ -364,23 +346,9 @@ mod tests {
         let baseline = create_test_profile("1.0", 100, baseline_phases);
         let current = create_test_profile("1.0", 150, current_phases);
 
-        let validator = ProfileValidator::new();
-        let diff = validator.compare_profiles(&baseline, &current);
+        let diff = ProfileValidator.compare_profiles(&baseline, &current);
 
         assert_eq!(diff.new_phases.len(), 1);
         assert_eq!(diff.new_phases[0], "new_phase");
-    }
-
-    #[test]
-    fn default_validator_works() {
-        let validator = ProfileValidator;
-        let mut phases = BTreeMap::new();
-        phases.insert(
-            "prologue".to_string(),
-            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
-        );
-
-        let profile = create_test_profile("1.0", 100, phases);
-        assert!(validator.validate(&profile).is_ok());
     }
 }

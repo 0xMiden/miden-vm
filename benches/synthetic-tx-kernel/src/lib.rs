@@ -29,6 +29,5 @@ pub fn latest_profile() -> Result<profile::VmProfile> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
 
-    let profile_path = manifest_dir.join("profiles/latest.json");
-    load_profile(profile_path)
+    load_profile(manifest_dir.join("profiles/latest.json"))
 }
