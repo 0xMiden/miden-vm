@@ -14,7 +14,7 @@ help:
 	@printf "  make test-assembly               # Test assembly crate\n"
 	@printf "  make test-assembly-syntax        # Test assembly-syntax crate\n"
 	@printf "  make test-core                   # Test core crate\n"
-	@printf "  make test-miden-vm               # Test miden-vm crate\n"
+	@printf "  make test-vm                     # Test miden-vm crate\n"
 	@printf "  make test-processor              # Test processor crate\n"
 	@printf "  make test-prover                 # Test prover crate\n"
 	@printf "  make test-core-lib               # Test core-lib crate\n"
@@ -48,10 +48,11 @@ FEATURES_air             := testing
 FEATURES_assembly        := testing
 FEATURES_assembly-syntax := testing,serde
 FEATURES_core            :=
-FEATURES_miden-vm        := concurrent,executable,metal,internal
+FEATURES_vm              := concurrent,executable,metal,internal
 FEATURES_processor       := concurrent,testing,bus-debugger
 FEATURES_prover          := concurrent,metal
-FEATURES_core-lib        :=FEATURES_verifier        :=
+FEATURES_core-lib        :=
+FEATURES_verifier        :=
 
 # -- linting --------------------------------------------------------------------------------------
 
