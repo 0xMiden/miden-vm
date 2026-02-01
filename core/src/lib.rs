@@ -65,17 +65,14 @@ pub mod precompile;
 pub mod stack;
 pub mod utils;
 
-pub mod errors;
-pub use errors::InvalidHashFunctionError;
-
 mod proof;
-pub use proof::{ExecutionProof, HashFunction};
+pub use proof::{ExecutionProof, HashFunction, InvalidHashFunctionError};
 
 mod program;
 pub use program::{Program, ProgramInfo};
 
 mod kernel;
-pub use kernel::Kernel;
+pub use kernel::{Kernel, KernelError};
 
 pub mod field {
     pub use miden_crypto::field::*;

@@ -1,11 +1,13 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    errors::InvalidHashFunctionError,
     precompile::PrecompileRequest,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
@@ -193,4 +195,16 @@ impl Deserializable for ExecutionProof {
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests })
     }
+}
+
+// HASH FUNCTION ERROR
+// ================================================================================================
+
+/// Error type for invalid hash function strings.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
+)]
+pub struct InvalidHashFunctionError {
+    pub hash_function: String,
 }
