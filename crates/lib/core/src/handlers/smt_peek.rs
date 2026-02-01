@@ -7,8 +7,9 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    EventName, Felt, WORD_SIZE, Word,
+    Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
+    events::EventName,
 };
 use miden_processor::{AdviceMutation, EventError, ProcessorState};
 

@@ -1,7 +1,8 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    EventName, Felt, LexicographicWord, Word,
+    Felt, LexicographicWord, Word,
+    events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
 };
 use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessorState};

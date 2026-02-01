@@ -133,10 +133,7 @@ pub use operations::{
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
-mod event_id;
-pub use event_id::{EventId, EventName};
-
-pub mod sys_events;
+pub mod events;
 
 mod advice;
 pub use advice::map::AdviceMap;

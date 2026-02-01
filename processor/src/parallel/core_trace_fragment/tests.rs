@@ -11,7 +11,8 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    events::EventName,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,

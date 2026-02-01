@@ -12,8 +12,8 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     AssemblyOp, Decorator, DecoratorList, Felt, Operation,
+    events::SystemEvent,
     mast::{DecoratorId, MastNodeId},
-    sys_events::SystemEvent,
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};

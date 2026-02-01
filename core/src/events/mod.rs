@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Felt, utils::hash_string_to_word};
 
+mod sys_events;
+pub use sys_events::SystemEvent;
+
 // EVENT ID
 // ================================================================================================
 
@@ -172,6 +175,9 @@ impl Deserializable for EventName {
         Ok(Self::from_string(name))
     }
 }
+
+// TESTING
+// ================================================================================================
 
 #[cfg(all(feature = "arbitrary", test))]
 impl proptest::prelude::Arbitrary for EventId {

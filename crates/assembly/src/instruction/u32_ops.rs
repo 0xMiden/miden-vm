@@ -7,8 +7,8 @@ use miden_core::{
     Felt,
     Operation::{self, *},
     ZERO,
+    events::SystemEvent,
     field::PrimeCharacteristicRing,
-    sys_events::SystemEvent,
 };
 
 use super::{field_ops::append_pow2_op, push_u32_value};

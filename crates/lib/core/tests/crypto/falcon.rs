@@ -2,7 +2,7 @@ use std::{sync::Arc, vec};
 
 use miden_air::Felt;
 use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventName, ZERO, field::PrimeField64};
+use miden_core::{ZERO, events::EventName, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,

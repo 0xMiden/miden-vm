@@ -2,8 +2,11 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
-    mast::MastForest, precompile::PrecompileRequest,
+    AdviceMap, DebugOptions, Felt, Word,
+    crypto::merkle::InnerNodeInfo,
+    events::{EventId, EventName},
+    mast::MastForest,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 

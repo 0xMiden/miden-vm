@@ -6,7 +6,10 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId, EventName, sys_events::SystemEvent};
+use miden_core::{
+    DebugOptions,
+    events::{EventId, EventName, SystemEvent},
+};
 
 use crate::{AdviceMutation, ExecutionError, ProcessorState};
 

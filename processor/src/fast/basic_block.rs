@@ -2,9 +2,8 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{
-    EventId,
+    events::{EventId, SystemEvent},
     mast::{BasicBlockNode, MastForest, MastNodeId},
-    sys_events::SystemEvent,
 };
 
 use crate::{

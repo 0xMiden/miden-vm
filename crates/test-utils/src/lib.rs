@@ -26,7 +26,11 @@ pub use miden_core::{
     stack::MIN_STACK_DEPTH,
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{
+    ProgramInfo,
+    chiplets::hasher::apply_permutation,
+    events::{EventName, SystemEvent},
+};
 pub use miden_processor::{
     AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
     ProcessorState,
@@ -66,7 +70,6 @@ pub mod rand;
 
 mod test_builders;
 
-use miden_core::sys_events::SystemEvent;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
 // CONSTANTS

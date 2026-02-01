@@ -4,7 +4,8 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    EventId, EventName, Felt, Word,
+    Felt, Word,
+    events::{EventId, EventName},
     field::QuadFelt,
     mast::{MastForest, MastNodeId},
     stack::MIN_STACK_DEPTH,

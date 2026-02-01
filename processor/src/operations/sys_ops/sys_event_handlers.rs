@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
+    events::SystemEvent,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
-    sys_events::SystemEvent,
 };
 
 use crate::{AdviceError, MemoryError, PrimeField64, ProcessorState, errors::OperationError};

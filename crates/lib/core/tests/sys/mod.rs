@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    EventId, EventName, Felt, HashFunction, ProgramInfo, Word,
+    Felt, HashFunction, ProgramInfo, Word,
+    events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,

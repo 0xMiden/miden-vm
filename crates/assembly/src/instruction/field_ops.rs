@@ -5,8 +5,8 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Operation::*,
+    events::SystemEvent,
     field::{Field, PrimeCharacteristicRing, PrimeField64},
-    sys_events::SystemEvent,
 };
 
 use super::BasicBlockBuilder;

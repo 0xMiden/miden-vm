@@ -1,4 +1,4 @@
-use miden_core::{EventName, ZERO, mast};
+use miden_core::{ZERO, events::EventName, mast};
 use miden_processor::{ExecutionError, NoopEventHandler, OperationError};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 

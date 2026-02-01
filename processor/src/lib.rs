@@ -24,10 +24,10 @@ pub use miden_core::{
     StackOutputs, WORD_SIZE, Word, ZERO,
     crypto::merkle::SMT_DEPTH,
     errors::InputError,
+    events,
     field::{PrimeField64, QuadFelt},
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
-    sys_events::SystemEvent,
     utils::DeserializationError,
 };
 
