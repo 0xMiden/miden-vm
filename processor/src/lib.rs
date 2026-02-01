@@ -7,7 +7,10 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use core::fmt::{Display, LowerHex};
+use core::{
+    fmt::{Display, LowerHex},
+    ops::ControlFlow,
+};
 
 pub use miden_air::trace::RowIndex;
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
@@ -29,10 +32,11 @@ pub use miden_core::{
 };
 
 pub(crate) mod continuation_stack;
+pub(crate) mod execution;
 
 pub mod fast;
 pub mod parallel;
-pub(crate) mod processor;
+pub mod processor;
 
 mod operations;
 
@@ -40,6 +44,8 @@ pub(crate) mod row_major_adapter;
 
 mod system;
 pub use system::ContextId;
+
+pub mod tracer;
 
 #[cfg(test)]
 mod test_utils;
@@ -83,7 +89,12 @@ mod tests;
 
 mod debug;
 
-use crate::{fast::FastProcessor, parallel::build_trace};
+use crate::{
+    continuation_stack::Continuation,
+    fast::{FastProcessor, step::BreakReason},
+    parallel::build_trace,
+    processor::{Processor, SystemInterface},
+};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -245,25 +256,25 @@ impl<'a> ProcessorState<'a> {
     /// Returns a reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider(&self) -> &AdviceProvider {
-        &self.processor.advice
+        self.processor.advice_provider()
     }
 
     /// Returns a mutable reference to the advice provider.
     #[inline(always)]
     pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        &mut self.processor.advice
+        self.processor.advice_provider_mut()
     }
 
     /// Returns the current clock cycle of a process.
     #[inline(always)]
-    pub fn clk(&self) -> RowIndex {
-        self.processor.clk
+    pub fn clock(&self) -> RowIndex {
+        self.processor.clock()
     }
 
     /// Returns the current execution context ID.
     #[inline(always)]
     pub fn ctx(&self) -> ContextId {
-        self.processor.ctx
+        self.processor.ctx()
     }
 
     /// Returns the value located at the specified position on the stack at the current clock cycle.
@@ -301,7 +312,7 @@ impl<'a> ProcessorState<'a> {
     /// been accessed previously.
     #[inline(always)]
     pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        self.processor.memory.read_element_impl(ctx, addr)
+        self.processor.memory().read_element_impl(ctx, addr)
     }
 
     /// Returns the batch of elements starting at the specified context/address.
@@ -310,7 +321,7 @@ impl<'a> ProcessorState<'a> {
     /// - If the address is not word aligned.
     #[inline(always)]
     pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        self.processor.memory.read_word_impl(ctx, addr)
+        self.processor.memory().read_word_impl(ctx, addr)
     }
 
     /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
@@ -344,6 +355,29 @@ impl<'a> ProcessorState<'a> {
     /// have been accessed at least once.
     #[inline(always)]
     pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        self.processor.memory.get_memory_state(ctx)
+        self.processor.memory().get_memory_state(ctx)
     }
+}
+
+// STOPPER
+// ===============================================================================================
+
+/// A trait for types that determine whether execution should be stopped at a given point.
+pub trait Stopper {
+    type Processor: Processor;
+
+    /// Determines whether execution should be stopped.
+    ///
+    /// The `continuation_after_stop` is provided in cases where simply resuming execution from the
+    /// top of the continuation stack is not sufficient to continue execution correctly. For
+    /// example, when stopping execution in the middle of a basic block, we need to provide a
+    /// `ResumeBasicBlock` continuation to ensure that execution resumes at the correct operation
+    /// within the basic block (i.e. the operation right after the one that was last executed before
+    /// being stopped). No continuation is provided in case of error, since it is expected that
+    /// execution will not be resumed.
+    fn should_stop(
+        &self,
+        processor: &Self::Processor,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason>;
 }

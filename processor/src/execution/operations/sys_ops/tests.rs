@@ -8,8 +8,10 @@ use miden_core::{
 
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
-    fast::{FastProcessor, NoopTracer, step::NeverStopper},
-    processor::{Processor, StackInterface, operations::stack_ops::op_push},
+    execution::operations::stack_ops::op_push,
+    fast::FastProcessor,
+    processor::{Processor, StackInterface, SystemInterface},
+    tracer::NoopTracer,
 };
 
 // TESTS
@@ -45,7 +47,7 @@ fn test_op_sdepth() {
     assert_eq!(MIN_STACK_DEPTH as u32 + 2, processor.stack_depth());
 
     // stack has 3 items - add a pad (push 0)
-    Processor::stack(&mut processor).increment_size(&mut tracer).unwrap();
+    Processor::stack_mut(&mut processor).increment_size(&mut tracer).unwrap();
     processor.stack_write(0, ZERO);
 
     op_sdepth(&mut processor, &mut tracer).unwrap();
@@ -69,17 +71,17 @@ fn test_op_clk() {
     // Note though that in a real program, the first operation executed is never clk, since at least
     // one SPAN must be executed first.
     op_clk(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
     let expected = build_expected(&[0]);
     assert_eq!(expected, processor.stack_top());
 
     // push another value onto the stack
     op_push(&mut processor, ONE, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // clk is 2 after executing two operations
     op_clk(&mut processor, &mut tracer).unwrap();
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     let expected = build_expected(&[2, 1, 0]);
     assert_eq!(expected, processor.stack_top());

@@ -7,8 +7,8 @@ use miden_core::{
 use crate::{
     ExecutionError, Host,
     errors::MapExecErrWithOpIdx,
-    fast::Tracer,
     processor::{Processor, StackInterface},
+    tracer::Tracer,
 };
 
 mod crypto_ops;
@@ -33,7 +33,7 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub(super) fn execute_sync_op(
+pub fn execute_sync_op(
     processor: &mut impl Processor,
     op: &Operation,
     current_forest: &MastForest,
@@ -199,7 +199,7 @@ pub(super) fn execute_sync_op(
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor, tracer)?,
-        Operation::Drop => processor.stack().decrement_size(tracer),
+        Operation::Drop => processor.stack_mut().decrement_size(tracer),
         Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
         Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
         Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
@@ -213,24 +213,24 @@ pub(super) fn execute_sync_op(
         Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
         Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
         Operation::Swap => stack_ops::op_swap(processor),
-        Operation::SwapW => processor.stack().swapw_nth(1),
-        Operation::SwapW2 => processor.stack().swapw_nth(2),
-        Operation::SwapW3 => processor.stack().swapw_nth(3),
+        Operation::SwapW => processor.stack_mut().swapw_nth(1),
+        Operation::SwapW2 => processor.stack_mut().swapw_nth(2),
+        Operation::SwapW3 => processor.stack_mut().swapw_nth(3),
         Operation::SwapDW => stack_ops::op_swap_double_word(processor),
-        Operation::MovUp2 => processor.stack().rotate_left(3),
-        Operation::MovUp3 => processor.stack().rotate_left(4),
-        Operation::MovUp4 => processor.stack().rotate_left(5),
-        Operation::MovUp5 => processor.stack().rotate_left(6),
-        Operation::MovUp6 => processor.stack().rotate_left(7),
-        Operation::MovUp7 => processor.stack().rotate_left(8),
-        Operation::MovUp8 => processor.stack().rotate_left(9),
-        Operation::MovDn2 => processor.stack().rotate_right(3),
-        Operation::MovDn3 => processor.stack().rotate_right(4),
-        Operation::MovDn4 => processor.stack().rotate_right(5),
-        Operation::MovDn5 => processor.stack().rotate_right(6),
-        Operation::MovDn6 => processor.stack().rotate_right(7),
-        Operation::MovDn7 => processor.stack().rotate_right(8),
-        Operation::MovDn8 => processor.stack().rotate_right(9),
+        Operation::MovUp2 => processor.stack_mut().rotate_left(3),
+        Operation::MovUp3 => processor.stack_mut().rotate_left(4),
+        Operation::MovUp4 => processor.stack_mut().rotate_left(5),
+        Operation::MovUp5 => processor.stack_mut().rotate_left(6),
+        Operation::MovUp6 => processor.stack_mut().rotate_left(7),
+        Operation::MovUp7 => processor.stack_mut().rotate_left(8),
+        Operation::MovUp8 => processor.stack_mut().rotate_left(9),
+        Operation::MovDn2 => processor.stack_mut().rotate_right(3),
+        Operation::MovDn3 => processor.stack_mut().rotate_right(4),
+        Operation::MovDn4 => processor.stack_mut().rotate_right(5),
+        Operation::MovDn5 => processor.stack_mut().rotate_right(6),
+        Operation::MovDn6 => processor.stack_mut().rotate_right(7),
+        Operation::MovDn7 => processor.stack_mut().rotate_right(8),
+        Operation::MovDn8 => processor.stack_mut().rotate_right(9),
         Operation::CSwap => stack_ops::op_cswap(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,

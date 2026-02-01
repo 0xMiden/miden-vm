@@ -10,15 +10,29 @@ use miden_core::{
 use crate::{
     chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::FastProcessor,
+    processor::Processor,
     system::ContextId,
 };
 
-/// A trait for tracing the execution of a [FastProcessor].
+// TRACER TRAIT
+// ================================================================================================
+
+/// A trait for tracing the execution of a processor.
+///
+/// Allows for recording different aspects of the processor's execution. For example, the
+/// [`crate::fast::FastProcessor::execute_for_trace`] execution mode needs to build a
+/// [`crate::fast::execution_tracer::TraceGenerationContext`] which records information necessary to
+/// build the trace at each clock cycle.
+///
+/// A useful mental model to differentiate between the processor and the tracer is:
+/// - Processor: maintains and mutates the state of the VM components (system, stack, memory, etc)
+///   as execution progresses
+/// - Tracer: records auxiliary information *derived from* the processor state
 pub trait Tracer {
-    /// Signals the start of a new clock cycle, guaranteed to be called before executing the
-    /// operation at the given clock cycle. For example, it is safe to access the processor's stack
-    /// and memory state as they are before executing the operation at this clock cycle.
+    /// Signals the start of a new clock cycle, guaranteed to be called at the start of the clock
+    /// cycle, before any mutations to the processor state is made. For example, it is safe to
+    /// access the processor's stack and memory state as they are before executing the operation at
+    /// the current clock cycle.
     ///
     /// `continuation` represents what is to be executed at the beginning of this clock cycle, while
     /// `continuation_stack` represents whatever comes after execution `continuation`.
@@ -32,16 +46,23 @@ pub trait Tracer {
     ///   after-exit decorators are executed at the end of an `END` operation; never at the start of
     ///   a clock cycle
     ///
-    ///
     /// Additionally, [miden_core::mast::ExternalNode] nodes are guaranteed to be resolved before
     /// this method is called.
-    fn start_clock_cycle(
+    fn start_clock_cycle<P>(
         &mut self,
-        processor: &FastProcessor,
+        processor: &P,
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
-    );
+    ) where
+        P: Processor;
+
+    /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
+    /// clock, and after all mutations to the processor state have been applied.
+    ///
+    /// Implementations should use this method to finalize any tracing information related to the
+    /// just-completed clock cycle.
+    fn finalize_clock_cycle(&mut self);
 
     /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].
     ///
@@ -55,7 +76,7 @@ pub trait Tracer {
     fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>);
 
     // HASHER METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the result of a call to `Hasher::permute()`.
     fn record_hasher_permute(
@@ -91,7 +112,7 @@ pub trait Tracer {
     );
 
     // MEMORY METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the element read from memory at the given address.
     fn record_memory_read_element(
@@ -118,7 +139,7 @@ pub trait Tracer {
     fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
 
     // ADVICE PROVIDER METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack] operation.
     fn record_advice_pop_stack(&mut self, value: Felt);
@@ -130,7 +151,7 @@ pub trait Tracer {
     fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]);
 
     // U32 METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the operands of a u32and operation.
     fn record_u32and(&mut self, a: Felt, b: Felt);
@@ -143,25 +164,24 @@ pub trait Tracer {
     fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt);
 
     // KERNEL METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the procedure hash of a syscall.
     fn record_kernel_proc_access(&mut self, proc_hash: Word);
 
     // ACE CHIPLET METHODS
-    // -----------------------------------------------
+    // --------------------------------------------------------------------------------------------
 
     /// Records the evaluation of a circuit.
     fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation);
 
     // MISCELLANEOUS
-    // -----------------------------------------------
-
-    /// Signals that the processor clock is being incremented.
-    fn increment_clk(&mut self);
+    // --------------------------------------------------------------------------------------------
 
     /// Signals that the stack depth is incremented as a result of pushing a new element.
-    fn increment_stack_size(&mut self, processor: &FastProcessor);
+    fn increment_stack_size<P>(&mut self, processor: &P)
+    where
+        P: Processor;
 
     /// Signals that the stack depth is decremented as a result of popping an element off the stack.
     ///
@@ -178,14 +198,17 @@ pub trait Tracer {
     fn restore_context(&mut self);
 }
 
+// NOOP TRACER
+// ================================================================================================
+
 /// A [Tracer] that does nothing.
 pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
     #[inline(always)]
-    fn start_clock_cycle(
+    fn start_clock_cycle<P: Processor>(
         &mut self,
-        _processor: &FastProcessor,
+        _processor: &P,
         _continuation: Continuation,
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
@@ -316,12 +339,12 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn increment_clk(&mut self) {
+    fn finalize_clock_cycle(&mut self) {
         // do nothing
     }
 
     #[inline(always)]
-    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
+    fn increment_stack_size<P: Processor>(&mut self, _processor: &P) {
         // do nothing
     }
 

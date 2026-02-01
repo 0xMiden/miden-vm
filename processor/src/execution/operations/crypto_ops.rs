@@ -15,12 +15,12 @@ use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
     ONE,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
-    fast::Tracer,
     operations::utils::validate_dual_word_stream_addrs,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
         Processor, StackInterface, SystemInterface,
     },
+    tracer::Tracer,
 };
 
 #[cfg(test)]
@@ -72,9 +72,9 @@ pub(super) fn op_hperm<P: Processor>(
     let r0: Word = output_state[STATE_RATE_0_RANGE].try_into().expect("r0 slice has length 4");
     let r1: Word = output_state[STATE_RATE_1_RANGE].try_into().expect("r1 slice has length 4");
     let cap: Word = output_state[STATE_CAP_RANGE].try_into().expect("cap slice has length 4");
-    processor.stack().set_word(0, &r0);
-    processor.stack().set_word(4, &r1);
-    processor.stack().set_word(8, &cap);
+    processor.stack_mut().set_word(0, &r0);
+    processor.stack_mut().set_word(4, &r1);
+    processor.stack_mut().set_word(8, &cap);
 
     tracer.record_hasher_permute(input_state, output_state);
     P::HelperRegisters::op_hperm_registers(addr)
@@ -182,7 +182,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     // get a Merkle path to it. The length of the returned path is expected to match the
     // specified depth. If the new node is the root of a tree, this instruction will append the
     // whole sub-tree to this node.
-    let path = processor.advice_provider().update_merkle_node(
+    let path = processor.advice_provider_mut().update_merkle_node(
         claimed_old_root,
         depth,
         index,
@@ -221,7 +221,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     );
 
     // Replace the old node value with computed new root.
-    processor.stack().set_word(0, &new_root);
+    processor.stack_mut().set_word(0, &new_root);
 
     Ok(P::HelperRegisters::op_merkle_path_registers(addr))
 }
@@ -288,14 +288,14 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
     let ctx = processor.system().ctx();
 
     // Read the evaluation point alpha from memory
     let alpha = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let eval_point_0 = processor.memory().read_element(ctx, addr)?;
-        let eval_point_1 = processor.memory().read_element(ctx, addr + ONE)?;
+        let eval_point_0 = processor.memory_mut().read_element(ctx, addr)?;
+        let eval_point_1 = processor.memory_mut().read_element(ctx, addr + ONE)?;
 
         tracer.record_memory_read_element(eval_point_0, addr, ctx, clk);
 
@@ -332,8 +332,8 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 
     // Update the accumulator values on the stack (LE: low at lower index)
     let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
-    processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
-    processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
+    processor.stack_mut().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
+    processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_base_registers(alpha, tmp0, tmp1))
@@ -393,7 +393,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     const ACC_LOW_INDEX: usize = 14;
     const ACC_HIGH_INDEX: usize = 15;
 
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
     let ctx = processor.system().ctx();
 
     // Read the coefficients from the stack as extension field elements (4 QuadFelt elements)
@@ -408,12 +408,12 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     // Read the evaluation point alpha from memory
     let (alpha, k0, k1) = {
         let addr = processor.stack().get(ALPHA_ADDR_INDEX);
-        let word = processor.memory().read_word(ctx, addr, clk)?;
+        let word = processor.memory_mut().read_word(ctx, addr, clk)?;
         tracer.record_memory_read_word(
             word,
             addr,
             processor.system().ctx(),
-            processor.system().clk(),
+            processor.system().clock(),
         );
 
         (
@@ -438,8 +438,8 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 
     // Update the accumulator values on the stack (LE: low at lower index)
     let acc_new_base_elements = acc_new.as_basis_coefficients_slice();
-    processor.stack().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
-    processor.stack().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
+    processor.stack_mut().set(ACC_HIGH_INDEX, acc_new_base_elements[1]);
+    processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
     Ok(P::HelperRegisters::op_horner_eval_ext_registers(alpha, k0, k1, acc_tmp))
@@ -496,9 +496,9 @@ pub(super) fn op_log_precompile<P: Processor>(
     processor.set_precompile_transcript_state(cap_next);
 
     // Write the output to the stack (top 12 elements): [R0, R1, CAP_NEXT, ...].
-    processor.stack().set_word(0, &r0);
-    processor.stack().set_word(4, &r1);
-    processor.stack().set_word(8, &cap_next);
+    processor.stack_mut().set_word(0, &r0);
+    processor.stack_mut().set_word(4, &r1);
+    processor.stack_mut().set_word(8, &cap_next);
 
     // Record the hasher permutation for trace generation
     tracer.record_hasher_permute(hasher_state, output_state);
@@ -533,7 +533,7 @@ pub(super) fn op_crypto_stream<P: Processor>(
     const DST_PTR_IDX: usize = 13;
 
     let ctx = processor.system().ctx();
-    let clk = processor.system().clk();
+    let clk = processor.system().clock();
 
     // Get source and destination pointers
     let src_addr = processor.stack().get(SRC_PTR_IDX);
@@ -544,10 +544,10 @@ pub(super) fn op_crypto_stream<P: Processor>(
 
     // Load plaintext from source memory (2 words = 8 elements)
     let src_addr_word2 = src_addr + WORD_SIZE_FELT;
-    let plaintext_word1 = processor.memory().read_word(ctx, src_addr, clk)?;
+    let plaintext_word1 = processor.memory_mut().read_word(ctx, src_addr, clk)?;
     tracer.record_memory_read_word(plaintext_word1, src_addr, ctx, clk);
 
-    let plaintext_word2 = processor.memory().read_word(ctx, src_addr_word2, clk)?;
+    let plaintext_word2 = processor.memory_mut().read_word(ctx, src_addr_word2, clk)?;
     tracer.record_memory_read_word(plaintext_word2, src_addr_word2, ctx, clk);
 
     // Get rate (keystream) from stack[0..7]
@@ -571,19 +571,19 @@ pub(super) fn op_crypto_stream<P: Processor>(
 
     // Write ciphertext to destination memory
     let dst_addr_word2 = dst_addr + WORD_SIZE_FELT;
-    processor.memory().write_word(ctx, dst_addr, clk, ciphertext_word1)?;
+    processor.memory_mut().write_word(ctx, dst_addr, clk, ciphertext_word1)?;
     tracer.record_memory_write_word(ciphertext_word1, dst_addr, ctx, clk);
 
-    processor.memory().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)?;
+    processor.memory_mut().write_word(ctx, dst_addr_word2, clk, ciphertext_word2)?;
     tracer.record_memory_write_word(ciphertext_word2, dst_addr_word2, ctx, clk);
 
     // Update stack[0..7] with ciphertext (becomes new rate for next hperm)
-    processor.stack().set_word(0, &ciphertext_word1);
-    processor.stack().set_word(4, &ciphertext_word2);
+    processor.stack_mut().set_word(0, &ciphertext_word1);
+    processor.stack_mut().set_word(4, &ciphertext_word2);
 
     // Increment pointers by 8 (2 words)
-    processor.stack().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
-    processor.stack().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+    processor.stack_mut().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
+    processor.stack_mut().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
 
     Ok(())
 }

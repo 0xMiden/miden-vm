@@ -23,7 +23,7 @@ pub struct ProcessorStateSnapshot {
 impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     fn from(state: &ProcessorState) -> Self {
         ProcessorStateSnapshot {
-            clk: state.clk().into(),
+            clk: state.clock().into(),
             ctx: state.ctx().into(),
             stack_state: state.get_stack_state(),
             stack_words: [
@@ -69,7 +69,7 @@ impl DebugHandler for TraceCollector {
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
         // Record the execution order with clock cycle
-        self.execution_order.push((trace_id, process.clk().into()));
+        self.execution_order.push((trace_id, process.clock().into()));
 
         Ok(())
     }

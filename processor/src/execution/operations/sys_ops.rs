@@ -3,12 +3,15 @@ use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
 use crate::{
     ExecutionError,
     errors::OperationError,
-    fast::Tracer,
     processor::{Processor, StackInterface, SystemInterface},
+    tracer::Tracer,
 };
 
 #[cfg(test)]
 mod tests;
+
+// OPERATION HANDLERS
+// ================================================================================================
 
 /// Pops a value off the stack and asserts that it is equal to ONE.
 ///
@@ -25,7 +28,7 @@ pub(super) fn op_assert<P: Processor>(
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
     Ok(())
 }
 
@@ -36,17 +39,21 @@ pub(super) fn op_sdepth<P: Processor>(
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
     let depth = processor.stack().depth();
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, Felt::from_u32(depth));
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, Felt::from_u32(depth));
 
     Ok(())
 }
 
-/// Analogous to `Process::op_caller`.
+/// Overwrites the top four stack items with the hash of a function which initiated the current
+/// SYSCALL.
+///
+/// # Errors
+/// Returns an error if the VM is not currently executing a SYSCALL block.
 #[inline(always)]
 pub(super) fn op_caller<P: Processor>(processor: &mut P) -> Result<(), ExecutionError> {
     let caller_hash = processor.system().caller_hash();
-    processor.stack().set_word(0, &caller_hash);
+    processor.stack_mut().set_word(0, &caller_hash);
 
     Ok(())
 }
@@ -57,9 +64,9 @@ pub(super) fn op_clk<P: Processor>(
     processor: &mut P,
     tracer: &mut impl Tracer,
 ) -> Result<(), ExecutionError> {
-    let clk: Felt = processor.system().clk().into();
-    processor.stack().increment_size(tracer)?;
-    processor.stack().set(0, clk);
+    let clk: Felt = processor.system().clock().into();
+    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().set(0, clk);
 
     Ok(())
 }

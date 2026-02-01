@@ -6,8 +6,8 @@ use miden_core::{
 
 use crate::{
     errors::OperationError,
-    fast::Tracer,
     processor::{OperationHelperRegisters, Processor, StackInterface},
+    tracer::Tracer,
 };
 
 #[cfg(test)]
@@ -98,20 +98,20 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let poe2 = poe * poe;
     let poe4 = poe2 * poe2;
 
-    processor.stack().decrement_size(tracer);
+    processor.stack_mut().decrement_size(tracer);
 
-    processor.stack().set(0, tmp0[1]);
-    processor.stack().set(1, tmp0[0]);
-    processor.stack().set(2, tmp1[1]);
-    processor.stack().set(3, tmp1[0]);
-    processor.stack().set_word(4, &ds.into());
-    processor.stack().set(8, poe2);
-    processor.stack().set(9, f_tau);
-    processor.stack().set(10, layer_ptr + EIGHT);
-    processor.stack().set(11, poe4);
-    processor.stack().set(12, folded_pos);
-    processor.stack().set(13, folded_value[1]);
-    processor.stack().set(14, folded_value[0]);
+    processor.stack_mut().set(0, tmp0[1]);
+    processor.stack_mut().set(1, tmp0[0]);
+    processor.stack_mut().set(2, tmp1[1]);
+    processor.stack_mut().set(3, tmp1[0]);
+    processor.stack_mut().set_word(4, &ds.into());
+    processor.stack_mut().set(8, poe2);
+    processor.stack_mut().set(9, f_tau);
+    processor.stack_mut().set(10, layer_ptr + EIGHT);
+    processor.stack_mut().set(11, poe4);
+    processor.stack_mut().set(12, folded_pos);
+    processor.stack_mut().set(13, folded_value[1]);
+    processor.stack_mut().set(14, folded_value[0]);
 
     Ok(P::HelperRegisters::op_fri_ext2fold4_registers(ev, es, x, x_inv))
 }

@@ -10,7 +10,11 @@ use super::{
     compute_evaluation_points, fold4 as fri_fold4, get_domain_segment_flags, get_tau_factor,
     op_fri_ext2fold4,
 };
-use crate::fast::{FastProcessor, NoopTracer, step::NeverStopper};
+use crate::{
+    fast::FastProcessor,
+    processor::{Processor, SystemInterface},
+    tracer::NoopTracer,
+};
 
 // FRI FOLDING TESTS
 // --------------------------------------------------------------------------------------------
@@ -113,12 +117,12 @@ proptest! {
         // This shifts everything down by one position, moving end_ptr to overflow
         let v0 = query_values[0].as_basis_coefficients_slice()[0];
         op_push(&mut processor, v0, &mut tracer).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation
         let result = op_fri_ext2fold4(&mut processor, &mut tracer);
         prop_assert!(result.is_ok(), "op_fri_ext2fold4 failed: {:?}", result.err());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected values
         let f_tau = get_tau_factor(d_seg as usize);

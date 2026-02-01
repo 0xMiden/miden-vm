@@ -15,7 +15,9 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::{FastProcessor, NoopTracer, step::NeverStopper},
+    fast::FastProcessor,
+    processor::{Processor, SystemInterface},
+    tracer::NoopTracer,
 };
 
 // CONSTANTS
@@ -97,7 +99,7 @@ proptest! {
 
         // Execute the operation
         let _ = op_hperm(&mut processor, &mut tracer);
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
@@ -183,26 +185,28 @@ proptest! {
         let plaintext_word1: Word = [Felt::new(p0), Felt::new(p1), Felt::new(p2), Felt::new(p3)].into();
         let plaintext_word2: Word = [Felt::new(p4), Felt::new(p5), Felt::new(p6), Felt::new(p7)].into();
 
-        processor.memory.write_word(
+        let clk = processor.clock();
+        processor.memory_mut().write_word(
             ContextId::root(),
             Felt::new(src_addr),
-            processor.clk,
+            clk,
             plaintext_word1,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
-        processor.memory.write_word(
+        let clk = processor.clock();
+        processor.memory_mut().write_word(
             ContextId::root(),
             Felt::new(src_addr + 4),
-            processor.clk,
+            clk,
             plaintext_word2,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation
         let result = op_crypto_stream(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected ciphertext: ciphertext = plaintext + rate
         let expected_cipher1 = [
@@ -219,9 +223,9 @@ proptest! {
         ];
 
         // Check that ciphertext was written to destination memory
-        let clk = processor.clk;
-        let cipher_word1 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr), clk).unwrap();
-        let cipher_word2 = processor.memory.read_word(ContextId::root(), Felt::new(dst_addr + 4), clk).unwrap();
+        let clk = processor.clock();
+        let cipher_word1 = processor.memory_mut().read_word(ContextId::root(), Felt::new(dst_addr), clk).unwrap();
+        let cipher_word2 = processor.memory_mut().read_word(ContextId::root(), Felt::new(dst_addr + 4), clk).unwrap();
 
         prop_assert_eq!(cipher_word1[0], expected_cipher1[0], "cipher word1[0]");
         prop_assert_eq!(cipher_word1[1], expected_cipher1[1], "cipher word1[1]");
@@ -312,13 +316,14 @@ proptest! {
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, 0, 0]
         let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
-        processor.memory.write_word(
+        let clk = processor.clock();
+        processor.memory_mut().write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),
-            processor.clk,
+            clk,
             alpha_word,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation.
         //
@@ -326,7 +331,7 @@ proptest! {
         // `FastProcessor` does not generate them (as they are only relevant in trace generation).
         let result = op_horner_eval_base(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected result
         let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
@@ -437,18 +442,19 @@ proptest! {
         // Store alpha in memory at ALPHA_ADDR
         // Memory format requirement: [alpha_0, alpha_1, k0, k1] (k0, k1 are unused but read)
         let alpha_word: Word = [Felt::new(alpha_0), Felt::new(alpha_1), ZERO, ZERO].into();
-        processor.memory.write_word(
+        let clk = processor.clock();
+        processor.memory_mut().write_word(
             ContextId::root(),
             Felt::new(ALPHA_ADDR),
-            processor.clk,
+            clk,
             alpha_word,
         ).unwrap();
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Execute the operation
         let result = op_horner_eval_ext(&mut processor, &mut tracer);
         prop_assert!(result.is_ok());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Compute expected result
         let alpha = QuadFelt::new([Felt::new(alpha_0), Felt::new(alpha_1)]);
@@ -563,7 +569,7 @@ proptest! {
         // Execute the operation
         let result = op_mpverify(&mut processor, ZERO, &program, &mut tracer);
         prop_assert!(result.is_ok(), "op_mpverify failed: {:?}", result.err());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // The stack should remain unchanged after verification
         let stack = processor.stack_top();
@@ -657,7 +663,7 @@ proptest! {
         // Execute the operation
         let result = op_mrupdate(&mut processor, &mut tracer);
         prop_assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
-        let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+        processor.system_mut().increment_clock();
 
         // Check the result
         let stack = processor.stack_top();
@@ -685,8 +691,8 @@ proptest! {
         prop_assert_eq!(stack[2], new_leaf[3], "new_leaf[3] at position 13");
 
         // make sure both Merkle trees are still in the advice provider
-        assert!(processor.advice.has_merkle_root(tree.root()));
-        assert!(processor.advice.has_merkle_root(new_tree.root()));
+        assert!(processor.advice_provider().has_merkle_root(tree.root()));
+        assert!(processor.advice_provider().has_merkle_root(new_tree.root()));
     }
 }
 
@@ -764,7 +770,7 @@ fn test_op_mrupdate_merge_subtree() {
     // Execute the operation
     let result = op_mrupdate(&mut processor, &mut tracer);
     assert!(result.is_ok(), "op_mrupdate failed: {:?}", result.err());
-    let _ = processor.increment_clk(&mut tracer, &NeverStopper);
+    processor.system_mut().increment_clock();
 
     // Check the result
     let stack = processor.stack_top();
@@ -792,7 +798,7 @@ fn test_op_mrupdate_merge_subtree() {
     assert_eq!(stack[2], target_node[3], "target_node[3] at position 13");
 
     // assert the expected root now exists in the advice provider
-    assert!(processor.advice.has_merkle_root(expected_root));
+    assert!(processor.advice_provider().has_merkle_root(expected_root));
 }
 
 // HELPER FUNCTIONS

@@ -210,7 +210,7 @@ pub trait DebugHandler: Sync {
         std::println!(
             "Trace with id {} emitted at step {} in context {}",
             trace_id,
-            process.clk(),
+            process.clock(),
             process.ctx()
         );
         Ok(())

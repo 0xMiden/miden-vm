@@ -1,22 +1,27 @@
+use alloc::sync::Arc;
+use core::ops::ControlFlow;
+
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
-    Felt, Operation, Word,
+    Felt, Word,
     crypto::merkle::MerklePath,
     field::QuadFelt,
-    mast::{MastForest, MastNodeId},
+    mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
 };
 
 use crate::{
     AdviceError, ContextId, ExecutionError, Host, MemoryError,
     errors::{AceEvalError, OperationError},
-    fast::Tracer,
-    processor::operations::execute_sync_op,
+    fast::step::BreakReason,
+    tracer::Tracer,
 };
 
-mod operations;
+// PROCESSOR
+// ================================================================================================
 
-/// Processor abstraction for executing Miden VM programs.
+/// Abstract definition of a processor's components: system, stack, advice provider, memory, hasher,
+/// and operation helper register computation.
 pub trait Processor: Sized {
     type System: SystemInterface;
     type Stack: StackInterface;
@@ -25,24 +30,46 @@ pub trait Processor: Sized {
     type Hasher: HasherInterface;
     type HelperRegisters: OperationHelperRegisters;
 
-    // -------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
     // REQUIRED METHODS
-    // -------------------------------------------------------------------------------------------
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns a reference to the internal stack.
+    fn stack(&self) -> &Self::Stack;
 
     /// Returns a mutable reference to the internal stack.
-    fn stack(&mut self) -> &mut Self::Stack;
+    fn stack_mut(&mut self) -> &mut Self::Stack;
+
+    /// Returns a reference to the internal system.
+    fn system(&self) -> &Self::System;
 
     /// Returns a mutable reference to the internal system.
-    fn system(&mut self) -> &mut Self::System;
+    fn system_mut(&mut self) -> &mut Self::System;
+
+    /// Returns a reference to the internal advice provider.
+    fn advice_provider(&self) -> &Self::AdviceProvider;
 
     /// Returns a mutable reference to the internal advice provider.
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider;
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider;
+
+    /// Returns a reference to the internal memory subsystem.
+    fn memory(&self) -> &Self::Memory;
 
     /// Returns a mutable reference to the internal memory subsystem.
-    fn memory(&mut self) -> &mut Self::Memory;
+    fn memory_mut(&mut self) -> &mut Self::Memory;
 
     /// Returns a mutable reference to the internal hasher subsystem.
     fn hasher(&mut self) -> &mut Self::Hasher;
+
+    /// Saves the current execution context and truncates the stack to 16 elements in preparation to
+    /// start a new execution context.
+    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer);
+
+    /// Restores the execution context to the state it was in before the last `call`, `syscall` or
+    /// `dyncall`.
+    ///
+    /// This includes restoring the overflow stack and the system parameters.
+    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
 
     /// Returns the current precompile transcript state (sponge capacity).
     ///
@@ -53,10 +80,6 @@ pub trait Processor: Sized {
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    // -------------------------------------------------------------------------------------------
-    // PROVIDED METHODS
-    // -------------------------------------------------------------------------------------------
 
     /// Checks that the evaluation of an arithmetic circuit is equal to zero.
     ///
@@ -81,39 +104,90 @@ pub trait Processor: Sized {
     /// All processors need to support this operation.
     fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
-    /// Executes the provided synchronous operation.
-    ///
-    /// This excludes `Emit`, which must be executed asynchronously, as well as control flow
-    /// operations, which are never executed directly.
-    ///
-    /// # Panics
-    /// - If a control flow operation is provided.
-    /// - If an `Emit` operation is provided.
-    fn execute_sync_op(
+    /// Executes the decorators that should be executed before entering a node.
+    fn execute_before_enter_decorators(
         &mut self,
-        op: &Operation,
-        current_forest: &MastForest,
         node_id: MastNodeId,
+        current_forest: &MastForest,
         host: &mut impl Host,
-        tracer: &mut impl Tracer,
-        op_idx: usize,
-    ) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-        execute_sync_op(self, op, current_forest, node_id, host, tracer, op_idx)
+    ) -> ControlFlow<BreakReason>;
+
+    /// Executes the decorators that should be executed after exiting a node.
+    fn execute_after_exit_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason>;
+
+    /// Executes any decorator in a basic block that is to be executed before the operation at the
+    /// given index in the block.
+    fn execute_decorators_for_op(
+        &mut self,
+        node_id: MastNodeId,
+        op_idx_in_block: usize,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason>;
+
+    /// Executes any decorator in a basic block that is to be executed after all operations in the
+    /// block. This only differs from `execute_after_exit_decorators` in that these decorators are
+    /// stored in the basic block node itself.
+    fn execute_end_of_block_decorators(
+        &mut self,
+        basic_block_node: &BasicBlockNode,
+        node_id: MastNodeId,
+        current_forest: &Arc<MastForest>,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason>;
+
+    // --------------------------------------------------------------------------------------------
+    // PROVIDED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the next context ID that would be created given the current state.
+    ///
+    /// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
+    /// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
+    /// context.
+    fn next_ctx_id(&self) -> ContextId {
+        (self.system().clock() + 1).into()
     }
 }
 
+// SYSTEM INTERFACE
+// ================================================================================================
+
 /// Trait representing the system state of the processor.
 pub trait SystemInterface {
+    // ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
     /// Returns the value of the CALLER_HASH register, which is the hash of the procedure that
     /// called the currently executing procedure.
     fn caller_hash(&self) -> Word;
 
     /// Returns the current clock cycle.
-    fn clk(&self) -> RowIndex;
+    fn clock(&self) -> RowIndex;
 
     /// Returns the current context ID.
     fn ctx(&self) -> ContextId;
+
+    // MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Sets the CALLER_HASH register to the provided value.
+    fn set_caller_hash(&mut self, caller_hash: Word);
+
+    /// Sets the current context ID to the provided value.
+    fn set_ctx(&mut self, ctx: ContextId);
+
+    // Increments the clock by 1.
+    fn increment_clock(&mut self);
 }
+
+// STACK INTERFACE
+// ================================================================================================
 
 /// We model the stack as a slice of `Felt` values, where the top of the stack is at the last index
 /// of the slice. The stack is mutable, and the processor can manipulate it directly. A "stack top
@@ -148,7 +222,7 @@ pub trait StackInterface {
     /// - `stack_get_word(1)` returns `[b, c, d, e]`,
     /// - etc.
     ///
-    /// Word[0] corresponds to the top of stack.
+    /// Word\[0\] corresponds to the top of stack.
     fn get_word(&self, start_idx: usize) -> Word;
 
     /// Returns two words (8 elements) from the stack starting at index `start_idx`.
@@ -175,7 +249,7 @@ pub trait StackInterface {
 
     /// Writes a word to the stack starting at the given index.
     ///
-    /// Word[0] goes to stack position start_idx (top), word[1] to start_idx+1, etc.
+    /// Word\[0\] goes to stack position start_idx (top), word\[1\] to start_idx+1, etc.
     fn set_word(&mut self, start_idx: usize, word: &Word);
 
     /// Swaps the elements at the given indices on the stack.
@@ -225,6 +299,9 @@ pub trait StackInterface {
     /// (since the stack size can never be less than 16).
     fn decrement_size(&mut self, tracer: &mut impl Tracer);
 }
+
+// ADVICE PROVIDER INTERFACE
+// ================================================================================================
 
 /// Trait representing an advice provider for the processor.
 pub trait AdviceProviderInterface {
@@ -277,6 +354,9 @@ pub trait AdviceProviderInterface {
     ) -> Result<Option<MerklePath>, AdviceError>;
 }
 
+// MEMORY INTERFACE
+// ================================================================================================
+
 /// Trait representing the memory subsystem of the processor.
 pub trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
@@ -303,6 +383,9 @@ pub trait MemoryInterface {
         word: Word,
     ) -> Result<(), MemoryError>;
 }
+
+// HASHER INTERFACE
+// ================================================================================================
 
 /// Trait representing the hasher subsystem of the processor.
 pub trait HasherInterface {
@@ -360,6 +443,9 @@ pub trait HasherInterface {
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<(Felt, Word), OperationError>;
 }
+
+// OPERATION HELPER REGISTERS
+// ================================================================================================
 
 /// Trait for computing helper registers for operations.
 ///
