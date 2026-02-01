@@ -78,7 +78,6 @@ miden-core-lib.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies
-blake3.workspace = true
 clap = { version = "4.5", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
 serde = { workspace = true, optional = true }

@@ -1284,7 +1284,6 @@ dependencies = [
 name = "miden-core-lib"
 version = "0.21.0"
 dependencies = [
- "blake3",
  "criterion",
  "env_logger",
  "fs-err",
@@ -1304,8 +1303,6 @@ dependencies = [
  "rand_chacha",
  "rstest",
  "serde_json",
- "sha2",
- "sha3",
  "thiserror",
 ]
 
@@ -1575,7 +1572,6 @@ version = "0.21.0"
 dependencies = [
  "assert_cmd",
  "bincode",
- "blake3",
  "clap",
  "criterion",
  "escargot",
