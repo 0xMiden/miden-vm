@@ -250,7 +250,7 @@ where
 }
 
 // HELPERS
-// ----------------------------------------------------------------------------------------------
+// ================================================================================================
 
 /// Executes a single operation batch within a basic block node, starting from the operation
 /// index `start_op_idx`.
@@ -379,7 +379,7 @@ fn get_continuation_after_executing_operation(
 }
 
 // EXPORTS
-// ----------------------------------------------------------------------------------------------
+// ================================================================================================
 
 /// Function to be called after [`InternalBreakReason::Emit`] is handled. See the documentation of
 /// that enum variant for more details.

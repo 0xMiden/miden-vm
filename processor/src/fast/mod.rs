@@ -333,6 +333,12 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Returns a narrowed interface for reading and updating the processor state.
+    #[inline(always)]
+    pub fn state(&mut self) -> ProcessorState<'_> {
+        ProcessorState { processor: self }
+    }
+
     // MUTATORS
     // -------------------------------------------------------------------------------------------
 
@@ -964,17 +970,6 @@ pub struct ExecutionOutput {
     pub advice: AdviceProvider,
     pub memory: Memory,
     pub final_pc_transcript: PrecompileTranscript,
-}
-
-// PROCESSOR STATE
-// ===============================================================================================
-
-/// Processor state accessor.
-impl FastProcessor {
-    #[inline(always)]
-    pub fn state(&mut self) -> ProcessorState<'_> {
-        ProcessorState { processor: self }
-    }
 }
 
 // EXECUTION CONTEXT INFO

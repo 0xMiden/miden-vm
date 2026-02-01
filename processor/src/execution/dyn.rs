@@ -46,8 +46,7 @@ where
 
     let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
-    // Retrieve callee hash from memory, using stack top as the memory
-    // address.
+    // Retrieve callee hash from memory, using stack top as the memory address.
     let callee_hash = {
         let ctx = processor.system().ctx();
         let clk = processor.system().clock();
