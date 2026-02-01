@@ -1,6 +1,6 @@
 use alloc::{
     borrow::{Borrow, Cow, ToOwned},
-    string::{String, ToString},
+    string::ToString,
 };
 use core::fmt;
 
@@ -37,9 +37,26 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
     where
         D: serde::Deserializer<'de>,
     {
-        let inner = <&'de str as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        use serde::de::Visitor;
 
-        Ok(Path::new(inner))
+        struct PathVisitor;
+
+        impl<'de> Visitor<'de> for PathVisitor {
+            type Value = &'de Path;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a borrowed Path")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Path::validate(v).map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(PathVisitor)
     }
 }
 
@@ -223,11 +240,7 @@ impl Path {
 
     /// Returns true if this path is an absolute path
     pub fn is_absolute(&self) -> bool {
-        matches!(
-            self.components().next(),
-            Some(Ok(PathComponent::Root))
-                | Some(Ok(PathComponent::Normal(Self::KERNEL_PATH | Self::EXEC_PATH))),
-        )
+        matches!(self.components().next(), Some(Ok(PathComponent::Root)))
     }
 
     /// Make this path absolute, if not already
@@ -237,10 +250,10 @@ impl Path {
         if self.is_absolute() {
             Cow::Borrowed(self)
         } else {
-            let mut inner = String::with_capacity(self.byte_len() + 2);
-            inner.push_str("::");
-            inner.push_str(&self.inner);
-            Cow::Owned(PathBuf { inner })
+            let mut buf = PathBuf::with_capacity(self.byte_len() + 2);
+            buf.push_component("::");
+            buf.extend_with_components(self.components()).expect("invalid path");
+            Cow::Owned(buf)
         }
     }
 
@@ -327,7 +340,7 @@ impl Path {
         }
 
         match self.split_last() {
-            Some((_, prefix)) => Self::KERNEL == prefix,
+            Some((_, prefix)) => prefix.is_kernel_path(),
             None => false,
         }
     }
@@ -338,6 +351,18 @@ impl Path {
             Some(Self::EXEC_PATH) => true,
             Some(_) => false,
             None => &self.inner == Self::EXEC_PATH,
+        }
+    }
+
+    /// Returns true if this path is for the executable module or an item in it
+    pub fn is_in_exec(&self) -> bool {
+        if self.is_exec_path() {
+            return true;
+        }
+
+        match self.split_last() {
+            Some((_, prefix)) => prefix.is_exec_path(),
+            None => false,
         }
     }
 
@@ -380,6 +405,20 @@ impl Path {
         Path: Join<P>,
     {
         <Path as Join<P>>::join(self, other)
+    }
+
+    /// Canonicalize this path by ensuring that all components are in canonical form.
+    ///
+    /// Canonical form dictates that:
+    ///
+    /// * A component is quoted only if it requires quoting, and unquoted otherwise
+    /// * Is made absolute if relative and the first component is $kernel or $exec
+    ///
+    /// Returns `Err` if the path is invalid
+    pub fn canonicalize(&self) -> Result<PathBuf, PathError> {
+        let mut buf = PathBuf::with_capacity(self.byte_len());
+        buf.extend_with_components(self.components())?;
+        Ok(buf)
     }
 }
 
@@ -472,5 +511,69 @@ impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_canonicalize_path_identity() -> Result<(), PathError> {
+        let path = Path::new("foo::bar");
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_kernel_is_absolute() -> Result<(), PathError> {
+        let path = Path::new("$kernel::bar");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("::$kernel::bar");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_exec_is_absolute() -> Result<(), PathError> {
+        let path = Path::new("$exec::$main");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("::$exec::$main");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_remove_unnecessary_quoting() -> Result<(), PathError> {
+        let path = Path::new("foo::\"bar\"");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("foo::bar");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_preserve_necessary_quoting() -> Result<(), PathError> {
+        let path = Path::new("foo::\"bar::baz\"");
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_add_required_quoting_to_components_without_delimiter()
+    -> Result<(), PathError> {
+        let path = Path::new("foo::$bar");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("foo::\"$bar\"");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
     }
 }

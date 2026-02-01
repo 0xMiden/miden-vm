@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.20.5 (TBD)
+
+- Fixed issue with deserialization of Paths due to lifetime restrictions [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+- Implemented path canonicalization and modified Path/PathBuf APIs to canonicalize paths during construction. This also addressed some issues uncovered during testing where some APIs were not canonicalizing paths, or path-related functions were inconsistent in their behavior due to special-casing that was previously needed [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+
+
 ## 0.20.4 (2026-01-30)
 
 - Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)

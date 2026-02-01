@@ -80,10 +80,10 @@ where
 #[cfg(feature = "serde")]
 pub fn deserialize<'de, P, D>(deserializer: D) -> Result<P, D::Error>
 where
-    P: From<&'de Path>,
+    P: From<PathBuf>,
     D: serde::Deserializer<'de>,
 {
-    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
     Ok(P::from(path))
 }
 
@@ -91,10 +91,10 @@ where
 #[cfg(feature = "serde")]
 pub fn deserialize_spanned<'de, P, D>(deserializer: D) -> Result<Span<P>, D::Error>
 where
-    P: From<&'de Path>,
+    P: From<PathBuf>,
     D: serde::Deserializer<'de>,
 {
-    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
     Ok(Span::unknown(P::from(path)))
 }
 
@@ -145,7 +145,7 @@ pub mod arbitrary {
                       (components in components_any(min, max)) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in components {
-                buf.push(&component);
+                buf.push_component(&component);
             }
             buf
         }
@@ -157,7 +157,7 @@ pub mod arbitrary {
                       (components in bare_components_any(min, max)) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in components {
-                buf.push(&component);
+                buf.push_component(&component);
             }
             buf
         }
@@ -172,9 +172,9 @@ pub mod arbitrary {
                         (prefix in components_any(min, max), name in ident::arbitrary::const_ident_any_random_length()) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in prefix {
-                buf.push(&component);
+                buf.push_component(&component);
             }
-            buf.push(&name);
+            buf.push_component(&name);
             buf
         }
     }
@@ -196,9 +196,9 @@ pub mod arbitrary {
                           ((name, prefix) in (ident::arbitrary::bare_ident_any_random_length(), components_any(min, max))) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in prefix {
-                buf.push(&component);
+                buf.push_component(&component);
             }
-            buf.push(&name);
+            buf.push_component(&name);
             buf
         }
     }

@@ -58,7 +58,16 @@ impl<'a> PathComponent<'a> {
 
     /// Returns true if this path component requires quoting when displayed/stored as a string
     pub fn requires_quoting(&self) -> bool {
-        matches!(self, Self::Normal(component) if component.contains("::") || Ident::validate(component).is_err())
+        match self {
+            Self::Root => false,
+            Self::Normal(Path::KERNEL_PATH | Path::EXEC_PATH) => false,
+            Self::Normal(component)
+                if component.contains("::") || Ident::requires_quoting(component) =>
+            {
+                true
+            },
+            Self::Normal(_) => false,
+        }
     }
 }
 
@@ -134,8 +143,8 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.components.next() {
-            Some(Ok(PathComponent::Normal(component)))
-                if component.len() > Path::MAX_COMPONENT_LENGTH =>
+            Some(Ok(component @ PathComponent::Normal(_)))
+                if component.as_str().chars().count() > Path::MAX_COMPONENT_LENGTH =>
             {
                 Some(Err(PathError::InvalidComponent(crate::ast::IdentError::InvalidLength {
                     max: Path::MAX_COMPONENT_LENGTH,
@@ -149,8 +158,8 @@ impl<'a> Iterator for Iter<'a> {
 impl<'a> DoubleEndedIterator for Iter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self.components.next_back() {
-            Some(Ok(PathComponent::Normal(component)))
-                if component.len() > Path::MAX_COMPONENT_LENGTH =>
+            Some(Ok(component @ PathComponent::Normal(_)))
+                if component.as_str().chars().count() > Path::MAX_COMPONENT_LENGTH =>
             {
                 Some(Err(PathError::InvalidComponent(crate::ast::IdentError::InvalidLength {
                     max: Path::MAX_COMPONENT_LENGTH,
@@ -215,12 +224,6 @@ impl<'a> Iterator for Components<'a> {
                         self.path = rest;
                         self.front = State::Body;
                         self.front_pos += 2;
-                        return Some(Ok(PathComponent::Root));
-                    },
-                    None if self.path.starts_with(Path::KERNEL_PATH)
-                        || self.path.starts_with(Path::EXEC_PATH) =>
-                    {
-                        self.front = State::Body;
                         return Some(Ok(PathComponent::Root));
                     },
                     None => {
@@ -344,12 +347,7 @@ impl<'a> DoubleEndedIterator for Components<'a> {
                             return Some(Ok(PathComponent::Root));
                         },
                         other => {
-                            assert!(
-                                other.starts_with(Path::KERNEL_PATH)
-                                    || other.starts_with(Path::EXEC_PATH),
-                                "expected path in start state to be a valid path prefix, got '{other}'"
-                            );
-                            return Some(Ok(PathComponent::Root));
+                            return Some(Ok(PathComponent::Normal(other)));
                         },
                     }
                 },
@@ -387,13 +385,7 @@ impl<'a> DoubleEndedIterator for Components<'a> {
                         None => {
                             self.back = State::Start;
                             let component = self.path;
-                            if component.starts_with(Path::KERNEL_PATH)
-                                || component.starts_with(Path::EXEC_PATH)
-                            {
-                                self.path = "::";
-                            } else {
-                                self.path = "";
-                            }
+                            self.path = "";
                             self.back_pos = 0;
                             if let Err(err) =
                                 Ident::validate(component).map_err(PathError::InvalidComponent)
@@ -559,6 +551,10 @@ mod tests {
     #[test]
     fn special_path() {
         let mut components = Iter::new("$kernel");
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next(), None);
+
+        let mut components = Iter::new("::$kernel");
         assert_matches!(components.next(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next(), None);
@@ -568,6 +564,10 @@ mod tests {
     fn special_path_back() {
         let mut components = Iter::new("$kernel");
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next_back(), None);
+
+        let mut components = Iter::new("::$kernel");
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next_back(), None);
     }
@@ -575,6 +575,11 @@ mod tests {
     #[test]
     fn special_nested_path() {
         let mut components = Iter::new("$kernel::bar");
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next(), None);
+
+        let mut components = Iter::new("::$kernel::bar");
         assert_matches!(components.next(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
@@ -584,6 +589,11 @@ mod tests {
     #[test]
     fn special_nested_path_back() {
         let mut components = Iter::new("$kernel::bar");
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next_back(), None);
+
+        let mut components = Iter::new("::$kernel::bar");
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Root)));
