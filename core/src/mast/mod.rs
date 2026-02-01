@@ -500,6 +500,42 @@ impl MastForest {
         use serialization::StrippedMastForest;
         StrippedMastForest(self).write_into(target);
     }
+
+    /// Serializes this MastForest in hashless format for untrusted deserialization.
+    ///
+    /// This produces a smaller output by omitting node digests for all nodes except External
+    /// nodes. External node digests are preserved because they reference procedures not present
+    /// in this forest and their digests cannot be recomputed from available data.
+    ///
+    /// The resulting bytes can be deserialized with [`UntrustedMastForest::read_from_bytes`],
+    /// which will recompute all digests during validation.
+    ///
+    /// This format is intended for scenarios where:
+    /// - The serialized data may come from an untrusted source
+    /// - Digests will be recomputed during validation anyway
+    /// - Maximum space efficiency is desired
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use miden_core::{mast::MastForest, utils::Serializable};
+    ///
+    /// let forest = MastForest::new();
+    ///
+    /// // Full serialization (with all digests)
+    /// let full_bytes = forest.to_bytes();
+    ///
+    /// // Hashless serialization (External digests only)
+    /// let mut hashless_bytes = Vec::new();
+    /// forest.write_hashless(&mut hashless_bytes);
+    ///
+    /// // Hashless format must be deserialized with UntrustedMastForest
+    /// // let restored = UntrustedMastForest::read_from_bytes(&hashless_bytes)?.validate()?;
+    /// ```
+    pub fn write_hashless<W: ByteWriter>(&self, target: &mut W) {
+        use serialization::HashlessMastForest;
+        HashlessMastForest(self).write_into(target);
+    }
 }
 
 // ------------------------------------------------------------------------------------------------

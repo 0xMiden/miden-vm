@@ -124,6 +124,64 @@ impl Deserializable for MastNodeInfo {
     }
 }
 
+// HASHLESS MAST NODE INFO
+// ================================================================================================
+
+/// Represents a serialized [`MastNode`] in hashless format.
+///
+/// This format omits the digest for all nodes except External nodes.
+/// External node digests are preserved because they reference procedures
+/// not present in this forest and cannot be recomputed.
+#[derive(Debug)]
+pub struct MastNodeInfoHashless {
+    ty: MastNodeType,
+    /// Digest is only present for External nodes in hashless format.
+    /// For all other node types, this is None.
+    digest: Option<Word>,
+}
+
+impl MastNodeInfoHashless {
+    /// Constructs a new [`MastNodeInfoHashless`] from a [`MastNode`], along with an `ops_offset`
+    ///
+    /// For non-basic block nodes, `ops_offset` is ignored, and should be set to 0.
+    /// Only External nodes include their digest; all other nodes have digest omitted.
+    pub fn new(mast_node: &MastNode, ops_offset: NodeDataOffset) -> Self {
+        if !matches!(mast_node, &MastNode::Block(_)) {
+            debug_assert_eq!(ops_offset, 0);
+        }
+
+        let ty = MastNodeType::new(mast_node, ops_offset);
+
+        // Only External nodes preserve their digest in hashless format
+        let digest = if matches!(mast_node, MastNode::External(_)) {
+            Some(mast_node.digest())
+        } else {
+            None
+        };
+
+        Self { ty, digest }
+    }
+}
+
+impl Serializable for MastNodeInfoHashless {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        let Self { ty, digest } = self;
+
+        ty.write_into(target);
+        // Only write digest for External nodes
+        if let Some(digest) = digest {
+            digest.write_into(target);
+        }
+    }
+}
+
+// TODO: Implement Deserializable for MastNodeInfoHashless.
+// This requires:
+// - Reading the MastNodeType to determine the node type
+// - For External nodes: read the digest (32 bytes)
+// - For all other node types: digest is None (will be computed during validation)
+// - The deserialized info should be usable with try_into_mast_node_builder() for hashless mode
+
 // MAST NODE TYPE
 // ================================================================================================
 

@@ -1762,3 +1762,18 @@ impl crate::utils::ByteReader for CountingReader<'_> {
         self.pos < self.source.len()
     }
 }
+
+// TODO: Add round-trip proptest for hashless serialization format.
+// This should:
+// - Generate arbitrary MastForest instances
+// - Serialize with write_hashless()
+// - Deserialize (once hashless deserialization is implemented)
+// - Verify that the deserialized forest produces the same digests after validation
+// - Test both forests with and without External nodes
+
+// TODO: Add fuzzing targets for hashless serialization.
+// This should:
+// - Fuzz the hashless serialization format with arbitrary byte inputs
+// - Ensure deserialization fails gracefully on malformed input
+// - Test with budgeted reading to prevent OOM attacks
+// - Verify that validation catches any corruption that slips through deserialization

@@ -22,10 +22,27 @@ fn mast_serialization_size(c: &mut Criterion) {
     let mut stripped_bytes = Vec::new();
     mast_forest.write_stripped(&mut stripped_bytes);
     let stripped_size = stripped_bytes.len() as u64;
+    let mut hashless_bytes = Vec::new();
+    mast_forest.write_hashless(&mut hashless_bytes);
+    let hashless_size = hashless_bytes.len() as u64;
+
+    // Calculate space savings
+    let hashless_savings_vs_full = full_size - hashless_size;
+    let hashless_savings_vs_stripped = stripped_size - hashless_size;
+    let hashless_pct_vs_full = (hashless_savings_vs_full as f64 / full_size as f64) * 100.0;
+    let hashless_pct_vs_stripped =
+        (hashless_savings_vs_stripped as f64 / stripped_size as f64) * 100.0;
 
     eprintln!(
-        "core-lib MastForest serialized size (bytes): full={}, stripped={}",
-        full_size, stripped_size
+        "core-lib MastForest serialized size (bytes): full={}, stripped={}, hashless={}",
+        full_size, stripped_size, hashless_size
+    );
+    eprintln!(
+        "hashless space savings: {} bytes ({:.1}%) vs full, {} bytes ({:.1}%) vs stripped",
+        hashless_savings_vs_full,
+        hashless_pct_vs_full,
+        hashless_savings_vs_stripped,
+        hashless_pct_vs_stripped
     );
 
     group.throughput(Throughput::Bytes(full_size));
@@ -41,6 +58,15 @@ fn mast_serialization_size(c: &mut Criterion) {
         bench.iter(|| {
             let mut bytes = Vec::new();
             mast_forest.write_stripped(&mut bytes);
+            black_box(bytes.len());
+        });
+    });
+
+    group.throughput(Throughput::Bytes(hashless_size));
+    group.bench_function("hashless", |bench| {
+        bench.iter(|| {
+            let mut bytes = Vec::new();
+            mast_forest.write_hashless(&mut bytes);
             black_box(bytes.len());
         });
     });

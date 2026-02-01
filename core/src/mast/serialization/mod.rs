@@ -95,10 +95,17 @@ const MAGIC: &[u8; 4] = b"MAST";
 /// The deserializer will create an empty `DebugInfo` with valid CSR structures.
 const FLAG_STRIPPED: u8 = 0x01;
 
+/// Flag indicating node digests are omitted (hashless format for untrusted deserialization).
+///
+/// When this bit is set, all node digests except External node digests are omitted from
+/// serialization. The deserializer will recompute digests during validation.
+/// This format is intended for untrusted input where digests are recomputed anyway.
+const FLAG_HASHLESS: u8 = 0x02;
+
 /// Mask for reserved flag bits that must be zero.
 ///
-/// Bits 1-7 are reserved for future use. If any are set, deserialization fails.
-const FLAGS_RESERVED_MASK: u8 = 0xfe;
+/// Bits 2-7 are reserved for future use. If any are set, deserialization fails.
+const FLAGS_RESERVED_MASK: u8 = 0xfc;
 
 /// The format version.
 ///
@@ -198,7 +205,73 @@ impl MastForest {
             self.debug_info.write_into(target);
         }
     }
+
+    /// Serializes this MastForest in hashless format.
+    ///
+    /// This format omits node digests for all nodes except External nodes.
+    /// External node digests are preserved because they reference procedures
+    /// not present in this forest and cannot be recomputed.
+    ///
+    /// The resulting bytes can be deserialized with UntrustedMastForest which
+    /// will recompute all digests during validation.
+    fn write_into_hashless<W: ByteWriter>(&self, target: &mut W) {
+        use info::MastNodeInfoHashless;
+
+        let mut basic_block_data_builder = BasicBlockDataBuilder::new();
+
+        // magic & flags (hashless + stripped - no debug info needed for untrusted input)
+        target.write_bytes(MAGIC);
+        target.write_u8(FLAG_HASHLESS | FLAG_STRIPPED);
+
+        // version
+        target.write_bytes(&VERSION);
+
+        // node & decorator counts
+        target.write_usize(self.nodes.len());
+        target.write_usize(0); // decorators stripped in hashless mode
+
+        // roots
+        let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
+        target.write_usize(roots.len());
+        for root in roots {
+            write_u32_varint(target, root);
+        }
+
+        // Prepare MAST node infos in hashless format
+        let mast_node_infos: Vec<MastNodeInfoHashless> = self
+            .nodes
+            .iter()
+            .map(|mast_node| {
+                let ops_offset = if let MastNode::Block(basic_block) = mast_node {
+                    basic_block_data_builder.encode_basic_block(basic_block)
+                } else {
+                    0
+                };
+
+                MastNodeInfoHashless::new(mast_node, ops_offset)
+            })
+            .collect();
+
+        let basic_block_data = basic_block_data_builder.finalize();
+        basic_block_data.write_into(target);
+
+        // Write node infos
+        for mast_node_info in mast_node_infos {
+            mast_node_info.write_into(target);
+        }
+
+        self.advice_map.write_into(target);
+
+        // DebugInfo is always stripped in hashless mode
+    }
 }
+
+// TODO: Implement deserialization support for the hashless format.
+// This requires:
+// - Reading the FLAG_HASHLESS flag in Deserializable for MastForest
+// - Using MastNodeInfoHashless for deserialization when FLAG_HASHLESS is set
+// - Computing digests for all non-External nodes during/after deserialization
+// - The deserialized forest should be usable with UntrustedMastForest::validate()
 
 impl Deserializable for MastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
@@ -380,5 +453,26 @@ pub(super) struct StrippedMastForest<'a>(pub(super) &'a MastForest);
 impl Serializable for StrippedMastForest<'_> {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.0.write_into_with_options(target, true);
+    }
+}
+
+// HASHLESS SERIALIZATION
+// ================================================================================================
+
+/// Wrapper for serializing a [`MastForest`] in hashless format.
+///
+/// This newtype enables an alternative serialization format that omits node digests for all
+/// nodes except External nodes. External node digests are preserved because they reference
+/// procedures not present in this forest.
+///
+/// The resulting bytes can be deserialized with [`UntrustedMastForest::read_from_bytes`],
+/// which will recompute all digests during validation.
+///
+/// This format is intended for untrusted input scenarios where digests are recomputed anyway.
+pub(super) struct HashlessMastForest<'a>(pub(super) &'a MastForest);
+
+impl Serializable for HashlessMastForest<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into_hashless(target);
     }
 }
