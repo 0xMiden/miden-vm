@@ -147,7 +147,7 @@ pub enum DebugVarLocation {
     ///
     /// The actual memory address is computed as: `FMP + offset`
     /// where offset is typically negative (locals are below FMP).
-    /// For example, with 3 locals: local[0] has offset -3, local[2] has offset -1.
+    /// For example, with 3 locals: local\[0\] has offset -3, local\[2\] has offset -1.
     Local(i16),
     /// Complex location described by expression bytes.
     /// This is used for variables that require computation to locate,
@@ -389,7 +389,7 @@ mod tests {
     fn debug_var_location_serialization_round_trip() {
         let locations = [
             DebugVarLocation::Stack(7),
-            DebugVarLocation::Memory(0xDEAD_BEEF),
+            DebugVarLocation::Memory(0xdead_beef),
             DebugVarLocation::Const(Felt::new(999)),
             DebugVarLocation::Local(-3),
             DebugVarLocation::Expression(vec![0x10, 0x20, 0x30]),
@@ -406,7 +406,7 @@ mod tests {
 
     #[test]
     fn debug_var_info_serialization_round_trip_all_fields() {
-        let mut var = DebugVarInfo::new("full", DebugVarLocation::Expression(vec![0xAA, 0xBB]));
+        let mut var = DebugVarInfo::new("full", DebugVarLocation::Expression(vec![0xaa, 0xbb]));
         var.set_type_id(7);
         var.set_arg_index(2);
         var.set_location(FileLineCol::new(

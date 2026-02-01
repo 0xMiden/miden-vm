@@ -13,19 +13,19 @@ use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use super::DecoratorIndexError;
 use crate::{
     mast::MastNodeId,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-use super::DecoratorIndexError;
-
 // DEBUG VAR ID
 // ================================================================================================
 
-/// An identifier for a debug variable stored in [`DebugInfo`].
+/// An identifier for a debug variable stored in [DebugInfo](super::DebugInfo).
 ///
-/// This is analogous to [`DecoratorId`] but specifically for debug variable information.
+/// This is analogous to [DecoratorId](crate::mast::DecoratorId) but specifically for debug
+/// variable information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugVarId(u32);
@@ -88,8 +88,9 @@ impl Deserializable for DebugVarId {
 /// A two-level compressed sparse row (CSR) representation for indexing debug variable IDs
 /// per operation per node.
 ///
-/// This structure is analogous to [`OpToDecoratorIds`] but specifically for debug variable
-/// information. It provides efficient access to debug variables in a hierarchical manner:
+/// This structure is analogous to [OpToDecoratorIds](super::OpToDecoratorIds) but specifically for
+/// debug variable information. It provides efficient access to debug variables in a hierarchical
+/// manner:
 /// 1. First level: Node -> Operations
 /// 2. Second level: Operation -> DebugVarIds
 ///
