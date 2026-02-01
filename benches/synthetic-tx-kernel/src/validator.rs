@@ -126,11 +126,18 @@ pub struct PhaseDelta {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::profile::{InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile};
     use std::collections::BTreeMap;
 
-    fn create_test_profile(version: &str, total_cycles: u64, phases: BTreeMap<String, PhaseProfile>) -> VmProfile {
+    use super::*;
+    use crate::profile::{
+        InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile,
+    };
+
+    fn create_test_profile(
+        version: &str,
+        total_cycles: u64,
+        phases: BTreeMap<String, PhaseProfile>,
+    ) -> VmProfile {
         VmProfile {
             profile_version: version.to_string(),
             source: "test".to_string(),
@@ -158,8 +165,14 @@ mod tests {
     #[test]
     fn validate_valid_profile_passes() {
         let mut phases = BTreeMap::new();
-        phases.insert("prologue".to_string(), PhaseProfile { cycles: 50, operations: BTreeMap::new() });
-        phases.insert("epilogue".to_string(), PhaseProfile { cycles: 50, operations: BTreeMap::new() });
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
+        phases.insert(
+            "epilogue".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
 
         let profile = create_test_profile("1.0", 100, phases);
         let validator = ProfileValidator::new();
@@ -170,7 +183,10 @@ mod tests {
     #[test]
     fn validate_unsupported_version_fails() {
         let mut phases = BTreeMap::new();
-        phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
 
         let profile = create_test_profile("2.0", 100, phases);
         let validator = ProfileValidator::new();
@@ -194,7 +210,10 @@ mod tests {
     #[test]
     fn validate_mismatched_totals_fails() {
         let mut phases = BTreeMap::new();
-        phases.insert("prologue".to_string(), PhaseProfile { cycles: 50, operations: BTreeMap::new() });
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
         // total_cycles is 1000 but phases only sum to 50
         let profile = create_test_profile("1.0", 1000, phases);
         let validator = ProfileValidator::new();
@@ -208,7 +227,10 @@ mod tests {
     fn validate_small_profile_with_min_tolerance() {
         // Profile with total_cycles < 100 should still work with max(1) tolerance
         let mut phases = BTreeMap::new();
-        phases.insert("prologue".to_string(), PhaseProfile { cycles: 10, operations: BTreeMap::new() });
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 10, operations: BTreeMap::new() },
+        );
 
         // total_cycles = 10, phases sum to 10, diff = 0, tolerance = max(10/100, 1) = 1
         let profile = create_test_profile("1.0", 10, phases);
@@ -220,10 +242,16 @@ mod tests {
     #[test]
     fn compare_profiles_detects_deltas() {
         let mut baseline_phases = BTreeMap::new();
-        baseline_phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        baseline_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
 
         let mut current_phases = BTreeMap::new();
-        current_phases.insert("prologue".to_string(), PhaseProfile { cycles: 150, operations: BTreeMap::new() });
+        current_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 150, operations: BTreeMap::new() },
+        );
 
         let baseline = create_test_profile("1.0", 100, baseline_phases);
         let current = create_test_profile("1.0", 150, current_phases);
@@ -241,10 +269,16 @@ mod tests {
     #[test]
     fn compare_profiles_zero_baseline_cycles() {
         let mut baseline_phases = BTreeMap::new();
-        baseline_phases.insert("prologue".to_string(), PhaseProfile { cycles: 0, operations: BTreeMap::new() });
+        baseline_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 0, operations: BTreeMap::new() },
+        );
 
         let mut current_phases = BTreeMap::new();
-        current_phases.insert("prologue".to_string(), PhaseProfile { cycles: 50, operations: BTreeMap::new() });
+        current_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
 
         let baseline = create_test_profile("1.0", 0, baseline_phases);
         let current = create_test_profile("1.0", 50, current_phases);
@@ -259,10 +293,16 @@ mod tests {
     #[test]
     fn compare_profiles_both_zero_cycles() {
         let mut baseline_phases = BTreeMap::new();
-        baseline_phases.insert("prologue".to_string(), PhaseProfile { cycles: 0, operations: BTreeMap::new() });
+        baseline_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 0, operations: BTreeMap::new() },
+        );
 
         let mut current_phases = BTreeMap::new();
-        current_phases.insert("prologue".to_string(), PhaseProfile { cycles: 0, operations: BTreeMap::new() });
+        current_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 0, operations: BTreeMap::new() },
+        );
 
         let baseline = create_test_profile("1.0", 0, baseline_phases);
         let current = create_test_profile("1.0", 0, current_phases);
@@ -277,11 +317,20 @@ mod tests {
     #[test]
     fn compare_profiles_detects_missing_phases() {
         let mut baseline_phases = BTreeMap::new();
-        baseline_phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
-        baseline_phases.insert("epilogue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        baseline_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
+        baseline_phases.insert(
+            "epilogue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
 
         let mut current_phases = BTreeMap::new();
-        current_phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        current_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
         // epilogue is missing
 
         let baseline = create_test_profile("1.0", 200, baseline_phases);
@@ -297,11 +346,20 @@ mod tests {
     #[test]
     fn compare_profiles_detects_new_phases() {
         let mut baseline_phases = BTreeMap::new();
-        baseline_phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        baseline_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
 
         let mut current_phases = BTreeMap::new();
-        current_phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
-        current_phases.insert("new_phase".to_string(), PhaseProfile { cycles: 50, operations: BTreeMap::new() });
+        current_phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
+        current_phases.insert(
+            "new_phase".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
 
         let baseline = create_test_profile("1.0", 100, baseline_phases);
         let current = create_test_profile("1.0", 150, current_phases);
@@ -315,9 +373,12 @@ mod tests {
 
     #[test]
     fn default_validator_works() {
-        let validator = ProfileValidator::default();
+        let validator = ProfileValidator;
         let mut phases = BTreeMap::new();
-        phases.insert("prologue".to_string(), PhaseProfile { cycles: 100, operations: BTreeMap::new() });
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 100, operations: BTreeMap::new() },
+        );
 
         let profile = create_test_profile("1.0", 100, phases);
         assert!(validator.validate(&profile).is_ok());

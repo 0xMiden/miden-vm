@@ -22,15 +22,19 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
 
     // Load the VM profile using CARGO_MANIFEST_DIR for crate-relative path
     let profile_path = format!("{}/profiles/latest.json", env!("CARGO_MANIFEST_DIR"));
-    let profile = load_profile(&profile_path)
-        .expect("Failed to load VM profile. Run miden-base bench-transaction first.");
+    let profile = load_profile(&profile_path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to load VM profile from '{}': {}. Run miden-base bench-transaction first.",
+            profile_path, e
+        )
+    });
 
     println!("Loaded profile from: {}", profile.source);
     println!("Miden VM version: {}", profile.miden_vm_version);
     println!("Total cycles in reference: {}", profile.transaction_kernel.total_cycles);
 
     // Generate the synthetic kernel
-    let total_cycles_expected = profile.transaction_kernel.total_cycles;
+    let _total_cycles_expected = profile.transaction_kernel.total_cycles;
     let generator = MasmGenerator::new(profile);
     let source = generator.generate_kernel().expect("Failed to generate synthetic kernel");
 
@@ -50,6 +54,28 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
     let program = assembler
         .assemble_program(&source)
         .expect("Failed to assemble synthetic kernel");
+
+    // Smoke test: execute once to verify the program runs correctly
+    let mut test_host = DefaultHost::default()
+        .with_library(&core_lib)
+        .expect("Failed to initialize test host");
+    let test_processor = FastProcessor::new_with_advice_inputs(
+        StackInputs::default(),
+        miden_processor::AdviceInputs::default(),
+    );
+    let test_result = tokio::runtime::Runtime::new()
+        .unwrap()
+        .block_on(async { test_processor.execute(&program, &mut test_host).await });
+
+    match test_result {
+        Ok(_output) => {
+            println!("Program executed successfully");
+            // Note: cycle count verification would require tracking clk from the processor
+        },
+        Err(e) => {
+            panic!("Generated program failed to execute: {}", e);
+        },
+    }
 
     group.bench_function("execute", |b| {
         b.to_async(tokio::runtime::Runtime::new().unwrap()).iter_batched(

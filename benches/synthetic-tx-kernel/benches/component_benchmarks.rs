@@ -14,9 +14,9 @@ fn bench_program(b: &mut criterion::Bencher, program: miden_vm::Program) {
                 StackInputs::default(),
                 miden_processor::AdviceInputs::default(),
             );
-            (host, processor)
+            (host, processor, program.clone())
         },
-        |(mut host, processor)| async move {
+        |(mut host, processor, program)| async move {
             black_box(processor.execute(&program, &mut host).await.unwrap());
         },
         BatchSize::SmallInput,

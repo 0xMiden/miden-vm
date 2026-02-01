@@ -1,1 +1,42 @@
-miden-base-v0.20.0.json
+{
+  "_comment": "This file is a copy of miden-base-v0.20.0.json. Update this when the reference profile changes.",
+  "profile_version": "1.0",
+  "source": "miden-base/bin/bench-transaction",
+  "timestamp": "2025-01-31T12:00:00Z",
+  "miden_vm_version": "0.20.0",
+  "transaction_kernel": {
+    "total_cycles": 73123,
+    "phases": {
+      "prologue": {
+        "cycles": 3173,
+        "operations": {}
+      },
+      "notes_processing": {
+        "cycles": 1714,
+        "operations": {}
+      },
+      "tx_script_processing": {
+        "cycles": 42,
+        "operations": {}
+      },
+      "epilogue": {
+        "cycles": 63977,
+        "operations": {}
+      }
+    },
+    "instruction_mix": {
+      "arithmetic": 0.05,
+      "hashing": 0.45,
+      "memory": 0.08,
+      "control_flow": 0.05,
+      "signature_verify": 0.37
+    },
+    "key_procedures": [
+      {
+        "name": "auth_procedure",
+        "cycles": 62667,
+        "invocations": 1
+      }
+    ]
+  }
+}

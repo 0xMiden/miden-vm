@@ -37,18 +37,12 @@ cd /path/to/miden-base
 cargo run --bin bench-transaction --features concurrent
 ```
 
-2. Copy the generated profile:
+2. Copy the generated profile to `latest.json`:
 ```bash
-cp bench-tx-vm-profile.json /path/to/miden-vm/benches/synthetic-tx-kernel/profiles/
+cp bench-tx-vm-profile.json /path/to/miden-vm/benches/synthetic-tx-kernel/profiles/latest.json
 ```
 
-3. Update the symlink:
-```bash
-cd /path/to/miden-vm/benches/synthetic-tx-kernel/profiles
-ln -sf bench-tx-vm-profile.json latest.json
-```
-
-4. Commit the new profile in miden-vm.
+3. Commit the updated profile in miden-vm.
 
 ## Profile Format
 
