@@ -32,8 +32,8 @@ use miden_core::{
     events::{EventName, SystemEvent},
 };
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
-    ProcessorState,
+    ContextId, ExecutionError, ExecutionTrace, ProcessorState,
+    advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, EventHandler, Program,

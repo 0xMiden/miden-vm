@@ -7,7 +7,9 @@ use miden_core::{
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
-use crate::{AdviceError, MemoryError, PrimeField64, ProcessorState, errors::OperationError};
+use crate::{
+    MemoryError, PrimeField64, ProcessorState, advice::AdviceError, errors::OperationError,
+};
 
 // SYSTEM EVENT ERROR
 // ================================================================================================

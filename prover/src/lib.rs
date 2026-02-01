@@ -25,8 +25,8 @@ pub use miden_crypto::{
     stark::{Commitments, OpenedValues, Proof},
 };
 pub use miden_processor::{
-    AdviceInputs, ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, crypto, math,
-    utils,
+    ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
+    crypto, math, utils,
 };
 pub use proving_options::ProvingOptions;
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};

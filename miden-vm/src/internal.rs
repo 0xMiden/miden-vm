@@ -13,7 +13,8 @@ use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 
 use crate::{
-    AdviceInputs, StackInputs, Word, ZERO,
+    StackInputs, Word, ZERO,
+    advice::AdviceInputs,
     crypto::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
 };
 

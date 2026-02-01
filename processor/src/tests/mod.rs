@@ -6,7 +6,7 @@ use miden_assembly::{
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
-    AdviceMap,
+    advice::AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
     stack::StackInputs,

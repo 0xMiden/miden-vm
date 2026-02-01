@@ -38,7 +38,7 @@ use alloc::vec::Vec;
 
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
-    AdviceMap,
+    advice::AdviceMap,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

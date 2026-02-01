@@ -5,7 +5,7 @@ use miden_core::{
     events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
 };
-use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessorState};
+use miden_processor::{EventError, MemoryError, ProcessorState, advice::AdviceMutation};
 
 /// Event name for the lowerbound_array operation.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =

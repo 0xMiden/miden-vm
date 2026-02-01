@@ -1,7 +1,8 @@
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    AdviceMap, Kernel, Word,
+    Kernel, Word,
+    advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId},
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };

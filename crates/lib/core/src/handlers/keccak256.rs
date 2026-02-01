@@ -34,7 +34,7 @@ use miden_core::{
     utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::hash::{keccak::Keccak256, poseidon2::Poseidon2};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{EventError, EventHandler, ProcessorState, advice::AdviceMutation};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 

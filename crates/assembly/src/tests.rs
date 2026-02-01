@@ -18,7 +18,7 @@ use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
 };
 #[cfg(test)]
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
+use miden_processor::{DefaultHost, ExecutionOptions, advice::AdviceInputs};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},

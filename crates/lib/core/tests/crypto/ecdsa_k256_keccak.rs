@@ -17,7 +17,7 @@ use miden_core_lib::{
     handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
 use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::poseidon2::Poseidon2};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{EventError, EventHandler, ProcessorState, advice::AdviceMutation};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::helpers::masm_store_felts;

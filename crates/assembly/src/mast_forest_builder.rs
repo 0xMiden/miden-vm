@@ -8,7 +8,8 @@ use core::ops::{Index, IndexMut};
 #[cfg(test)]
 use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
-    AdviceMap, AssemblyOp, Decorator, DecoratorList, Felt, Operation, Word,
+    AssemblyOp, Decorator, DecoratorList, Felt, Operation, Word,
+    advice::AdviceMap,
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint,
         DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest,

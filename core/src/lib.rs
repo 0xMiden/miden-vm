@@ -57,6 +57,7 @@ assertion failed: `(left matches right)`
 
 pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
 
+pub mod advice;
 pub mod chiplets;
 pub mod events;
 pub mod mast;
@@ -134,9 +135,6 @@ mod operations;
 pub use operations::{
     AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
 };
-
-mod advice;
-pub use advice::map::AdviceMap;
 
 // CONSTANTS
 // ================================================================================================

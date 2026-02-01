@@ -2,7 +2,8 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, Felt, Word,
+    DebugOptions, Felt, Word,
+    advice::AdviceMap,
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
     mast::MastForest,

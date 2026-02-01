@@ -13,7 +13,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId,
+    ContextId,
+    advice::AdviceError,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     errors::OperationError,

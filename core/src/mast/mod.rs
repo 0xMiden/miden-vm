@@ -54,7 +54,8 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, AssemblyOp, Decorator, Felt, LexicographicWord, Word,
+    AssemblyOp, Decorator, Felt, LexicographicWord, Word,
+    advice::AdviceMap,
     field::PrimeField64,
     utils::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Idx,

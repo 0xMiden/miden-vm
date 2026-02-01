@@ -1,9 +1,11 @@
 use alloc::sync::Arc;
 
 use miden_assembly::{Assembler, DefaultSourceManager};
-use miden_core::{ONE, Program, assert_matches};
-use miden_processor::{AdviceError, AdviceInputs, ExecutionOptions, MastForest};
-use miden_prover::{StackInputs, Word};
+use miden_core::{ONE, Program, Word, assert_matches};
+use miden_processor::{
+    ExecutionOptions, MastForest, StackInputs,
+    advice::{AdviceError, AdviceInputs},
+};
 use miden_vm::DefaultHost;
 
 #[test]

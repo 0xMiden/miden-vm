@@ -5,7 +5,8 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
 use crate::{
-    AdviceMap, AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, Program, Word,
+    AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, Program, Word,
+    advice::AdviceMap,
     mast::{
         CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         LoopNodeBuilder, SplitNodeBuilder,

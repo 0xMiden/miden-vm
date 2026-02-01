@@ -23,7 +23,7 @@ use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
     hash::{poseidon2::Poseidon2, sha2::Sha512},
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{EventError, EventHandler, ProcessorState, advice::AdviceMutation};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::helpers::masm_store_felts;

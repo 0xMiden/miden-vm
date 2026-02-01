@@ -11,7 +11,7 @@ use miden_core::{
     events::{EventId, EventName, SystemEvent},
 };
 
-use crate::{AdviceMutation, ExecutionError, ProcessorState};
+use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================

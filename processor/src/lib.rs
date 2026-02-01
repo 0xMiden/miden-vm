@@ -58,10 +58,8 @@ mod range;
 use range::RangeChecker;
 
 mod host;
-
 pub use host::{
-    AdviceMutation, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
-    advice::{AdviceError, AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{
@@ -69,6 +67,15 @@ pub use host::{
         TraceError,
     },
 };
+
+pub mod advice {
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
+
+    pub use super::host::{
+        AdviceMutation,
+        advice::{AdviceError, AdviceProvider},
+    };
+}
 
 mod chiplets;
 pub use chiplets::MemoryError;
@@ -90,6 +97,7 @@ mod tests;
 mod debug;
 
 use crate::{
+    advice::{AdviceInputs, AdviceProvider},
     continuation_stack::Continuation,
     fast::{FastProcessor, step::BreakReason},
     parallel::build_trace,

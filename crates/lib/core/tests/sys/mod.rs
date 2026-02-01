@@ -11,8 +11,8 @@ use miden_core::{
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, EventHandler, ProcessorState, Program,
-    StackInputs,
+    DefaultHost, EventError, EventHandler, ProcessorState, Program, StackInputs,
+    advice::{AdviceInputs, AdviceMutation},
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};

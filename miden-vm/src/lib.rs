@@ -13,8 +13,8 @@ pub use miden_core::{ExecutionProof, HashFunction};
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, DefaultHost, ExecutionError, ExecutionTrace, Host, Kernel,
-    Operation, PrimeField64, Program, ProgramInfo, StackInputs, ZERO, crypto, execute, utils,
+    DefaultHost, ExecutionError, ExecutionTrace, Host, Kernel, Operation, PrimeField64, Program,
+    ProgramInfo, StackInputs, ZERO, advice, crypto, execute, utils,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;

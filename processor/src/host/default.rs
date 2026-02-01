@@ -8,8 +8,9 @@ use miden_core::{
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
 use crate::{
-    AdviceMutation, DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    Host, MastForestStore, MemMastForestStore, ProcessorState, TraceError,
+    DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError, Host,
+    MastForestStore, MemMastForestStore, ProcessorState, TraceError,
+    advice::AdviceMutation,
     host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
 };
 

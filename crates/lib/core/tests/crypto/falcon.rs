@@ -5,8 +5,10 @@ use miden_assembly::{Assembler, utils::Serializable};
 use miden_core::{ZERO, events::EventName, field::PrimeField64};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
-    ProcessorState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    DefaultHost, EventError, ExecutionError, OperationError, ProcessorState, Program, ProgramInfo,
+    StackInputs,
+    advice::{AdviceInputs, AdviceMutation},
+    crypto::RpoRandomCoin,
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{
@@ -457,7 +459,7 @@ fn generate_data_probabilistic_product_test(
     builder.push_element(challenge.1);
     builder.push_element(challenge.0);
     builder.push_elements(polynomials.iter().copied());
-    let advice_stack = builder.into_u64_vec();
+    let advice_stack = builder.build_vec_u64();
 
     // compute hash of h and place it on the stack.
     let h_hash = Poseidon2::hash_elements(&to_elements(h.clone()));
