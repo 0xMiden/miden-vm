@@ -5,14 +5,14 @@ use anyhow::{bail, Result};
 use crate::profile::VmProfile;
 
 /// Validates a VM profile for correctness
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct ProfileValidator;
 
 impl ProfileValidator {
     /// Validate a profile
     pub fn validate(&self, profile: &VmProfile) -> Result<()> {
-        // Check version
-        if profile.profile_version != "1.0" {
+        // Check version - supports "1.0" or "1.0.x" format
+        if !profile.profile_version.starts_with("1.0") {
             bail!("Unsupported profile version: {}", profile.profile_version);
         }
 
@@ -165,7 +165,22 @@ mod tests {
             PhaseProfile { cycles: 50, operations: BTreeMap::new() },
         );
 
-        let profile = create_test_profile("1.0", 100, phases);
+        // Test with "1.0.0" format (major.minor.patch)
+        let profile = create_test_profile("1.0.0", 100, phases);
+
+        assert!(ProfileValidator.validate(&profile).is_ok());
+    }
+
+    #[test]
+    fn validate_valid_profile_short_version_passes() {
+        let mut phases = BTreeMap::new();
+        phases.insert(
+            "prologue".to_string(),
+            PhaseProfile { cycles: 50, operations: BTreeMap::new() },
+        );
+
+        // Test with "1.0" format (major.minor)
+        let profile = create_test_profile("1.0", 50, phases);
 
         assert!(ProfileValidator.validate(&profile).is_ok());
     }
