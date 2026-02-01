@@ -1,13 +1,11 @@
-use miden_crypto::{Felt, ONE, Word};
-use miden_utils_indexing::Idx;
-
 use super::*;
 use crate::{
-    Decorator, Operation,
+    Decorator, Felt, ONE, Operation, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
+    utils::Idx,
 };
 
 fn block_foo() -> BasicBlockNodeBuilder {

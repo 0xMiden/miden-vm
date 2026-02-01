@@ -1,10 +1,12 @@
 use alloc::string::String;
 
-use miden_utils_indexing::{CsrMatrix, CsrValidationError, Idx};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{DecoratorId, MastNodeId};
+use crate::{
+    mast::{DecoratorId, MastNodeId},
+    utils::{CsrMatrix, CsrValidationError, Idx},
+};
 
 /// A CSR (Compressed Sparse Row) representation for storing node-level decorators (before_enter and
 /// after_exit).

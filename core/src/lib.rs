@@ -55,7 +55,14 @@ assertion failed: `(left matches right)`
 // EXPORTS
 // ================================================================================================
 
+pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+
 pub mod chiplets;
+pub mod events;
+pub mod mast;
+pub mod precompile;
+pub mod utils;
+
 pub mod errors;
 pub use errors::InvalidHashFunctionError;
 
@@ -67,7 +74,6 @@ pub use program::{Program, ProgramInfo};
 
 mod kernel;
 pub use kernel::Kernel;
-pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
 
 pub mod field {
     pub use miden_crypto::field::*;
@@ -104,8 +110,6 @@ pub mod crypto {
     }
 }
 
-pub mod mast;
-
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};
 
@@ -133,19 +137,8 @@ pub use operations::{
 pub mod stack;
 pub use stack::{StackInputs, StackOutputs};
 
-pub mod events;
-
 mod advice;
 pub use advice::map::AdviceMap;
-
-pub mod precompile;
-pub mod utils;
-
-// Re-export indexing functionality from the new standalone crate
-pub use miden_utils_indexing::{
-    CsrMatrix, CsrValidationError, DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx,
-    newtype_id,
-};
 
 // CONSTANTS
 // ================================================================================================

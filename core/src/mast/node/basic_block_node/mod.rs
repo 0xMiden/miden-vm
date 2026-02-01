@@ -1,16 +1,17 @@
 use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
-use miden_crypto::{Felt, Word, ZERO, field::PrimeField64, hash::blake::Blake3_256};
-use miden_formatting::prettier::PrettyPrint;
-
 use crate::{
-    DecoratorList, Operation,
+    DecoratorList, Felt, Operation, Word, ZERO,
     chiplets::hasher,
+    crypto::hash::Blake3_256,
+    field::PrimeField64,
     mast::{
-        DecoratedLinksIter, DecoratedOpLink, DecoratorId, MastForest, MastForestError, MastNode,
-        MastNodeFingerprint, MastNodeId,
+        DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
+        MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
     },
+    prettier::PrettyPrint,
+    utils::LookupByIdx,
 };
 
 mod op_batch;
@@ -18,7 +19,6 @@ pub use op_batch::OpBatch;
 use op_batch::OpBatchAccumulator;
 
 use super::{MastForestContributor, MastNodeExt};
-use crate::mast::DecoratorStore;
 
 #[cfg(any(test, feature = "arbitrary"))]
 pub mod arbitrary;
@@ -801,7 +801,6 @@ impl PrettyPrint for BasicBlockNodePrettyPrint<'_> {
 
 impl fmt::Display for BasicBlockNodePrettyPrint<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use crate::prettier::PrettyPrint;
         self.pretty_print(f)
     }
 }
@@ -1538,8 +1537,8 @@ impl MastForestContributor for BasicBlockNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // For BasicBlockNode, we need to implement custom logic because BasicBlock has special
         // decorator handling with operation indices that other nodes don't have
 
@@ -1637,39 +1636,30 @@ impl MastForestContributor for BasicBlockNodeBuilder {
         }
     }
 
-    fn remap_children(
-        self,
-        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // BasicBlockNode has no children to remap
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
-    fn with_digest(mut self, digest: crate::Word) -> Self {
+    fn with_digest(mut self, digest: Word) -> Self {
         self.digest = Some(digest);
         self
     }

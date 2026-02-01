@@ -1181,7 +1181,7 @@ fn digest_from_seed(seed: [u8; 32]) -> Word {
 
 #[test]
 fn test_asm_op_id_basic() {
-    use crate::{Idx, mast::AsmOpId};
+    use crate::{mast::AsmOpId, utils::Idx};
 
     let id = AsmOpId::new(42);
     assert_eq!(id.to_usize(), 42);

@@ -1,17 +1,16 @@
 use std::string::ToString;
 
-use miden_crypto::{Felt, ONE, Word, field::PrimeCharacteristicRing};
-use miden_utils_indexing::Idx;
-
 use super::*;
 use crate::{
-    DebugOptions, Decorator,
+    DebugOptions, Decorator, Felt, ONE, Word,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
         SplitNodeBuilder, UntrustedMastForest,
     },
     operations::Operation,
+    utils::Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure

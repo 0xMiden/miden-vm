@@ -3,11 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::Idx;
-
 use crate::{
     Word,
     mast::{MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
+    utils::Idx,
 };
 
 type ForestIndex = usize;

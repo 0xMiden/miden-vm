@@ -38,8 +38,6 @@ use core::{
     ops::{Index, IndexMut},
 };
 
-use miden_crypto::field::PrimeField64;
-pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -56,10 +54,11 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
+    AdviceMap, AssemblyOp, Decorator, Felt, LexicographicWord, Word,
+    field::PrimeField64,
     utils::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, hash_string_to_word,
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Idx,
+        IndexVec, Serializable, SliceReader, hash_string_to_word,
     },
 };
 

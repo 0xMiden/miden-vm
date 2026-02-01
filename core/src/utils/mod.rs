@@ -20,6 +20,10 @@ pub use miden_crypto::utils::{
     uninit_vector,
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+pub use miden_utils_indexing::{
+    CsrMatrix, CsrValidationError, DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx,
+    newtype_id,
+};
 
 // TO ELEMENTS
 // ================================================================================================

@@ -24,13 +24,15 @@
 
 use alloc::{collections::BTreeMap, format, string::String, vec::Vec};
 
-use miden_utils_indexing::{CsrMatrix, CsrValidationError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     mast::{AsmOpId, MastNodeId},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{
+        ByteReader, ByteWriter, CsrMatrix, CsrValidationError, Deserializable,
+        DeserializationError, Serializable,
+    },
 };
 
 // OP TO ASMOP ID

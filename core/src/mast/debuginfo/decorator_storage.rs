@@ -3,13 +3,15 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
+use crate::{
+    mast::{DecoratedOpLink, DecoratorId, MastNodeId},
+    utils::{Idx, IndexVec},
+};
 
 /// A two-level compressed sparse row (CSR) representation for indexing decorator IDs per
 /// operation per node.

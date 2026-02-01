@@ -1,6 +1,5 @@
-use miden_utils_indexing::IndexVec;
-
 use super::*;
+use crate::utils::IndexVec;
 
 /// Helper function to create a test DecoratorId
 fn test_decorator_id(value: u32) -> DecoratorId {

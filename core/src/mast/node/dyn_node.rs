@@ -1,15 +1,18 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, Word};
-use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    Felt, OPCODE_DYN, OPCODE_DYNCALL, Word,
+    mast::{
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
+        MastNodeId,
+    },
+    prettier::{Document, PrettyPrint, const_text, nl},
+    utils::LookupByIdx,
 };
 
 // DYN NODE
@@ -248,7 +251,7 @@ impl MastNodeExt for DynNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
+                MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();
@@ -377,8 +380,8 @@ impl MastForestContributor for DynNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // DynNode has no children, so we don't need hash_by_node_id
         // Use the fingerprint_from_parts helper function with empty children array
         crate::mast::node_fingerprint::fingerprint_from_parts(
@@ -398,35 +401,26 @@ impl MastForestContributor for DynNodeBuilder {
         )
     }
 
-    fn remap_children(
-        self,
-        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // DynNode has no children to remap, but preserve the digest
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 

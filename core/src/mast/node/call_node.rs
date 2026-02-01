@@ -1,7 +1,6 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, Word};
 use miden_formatting::{
     hex::ToHex,
     prettier::{Document, PrettyPrint, const_text, nl, text},
@@ -11,9 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    Idx, OPCODE_CALL, OPCODE_SYSCALL,
+    Felt, OPCODE_CALL, OPCODE_SYSCALL, Word,
     chiplets::hasher,
-    mast::{DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    mast::{
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
+        MastNodeId,
+    },
+    utils::{Idx, LookupByIdx},
 };
 
 // CALL NODE
@@ -270,7 +273,7 @@ impl MastNodeExt for CallNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::Call(call_node) => call_node as *const CallNode as *const (),
+                MastNode::Call(call_node) => call_node as *const CallNode as *const (),
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();
@@ -428,8 +431,8 @@ impl MastForestContributor for CallNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // Use the fingerprint_from_parts helper function
         crate::mast::node_fingerprint::fingerprint_from_parts(
             forest,
@@ -456,10 +459,7 @@ impl MastForestContributor for CallNodeBuilder {
         )
     }
 
-    fn remap_children(
-        self,
-        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         CallNodeBuilder {
             callee: *remapping.get(self.callee).unwrap_or(&self.callee),
             is_syscall: self.is_syscall,
@@ -469,27 +469,21 @@ impl MastForestContributor for CallNodeBuilder {
         }
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
@@ -550,7 +544,7 @@ impl proptest::prelude::Arbitrary for CallNodeBuilder {
         use proptest::prelude::*;
 
         (
-            any::<crate::mast::MastNodeId>(),
+            any::<MastNodeId>(),
             any::<bool>(),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
