@@ -1,33 +1,25 @@
 use alloc::vec::Vec;
-use core::{
-    fmt::Debug,
-    ops::{Bound, Range},
-};
-
-mod col_matrix;
-pub use col_matrix::ColMatrix;
-// RE-EXPORTS
-// ================================================================================================
-#[cfg(feature = "std")]
-pub use miden_crypto::utils::ReadAdapter;
-pub use miden_crypto::{
-    hash::blake::{Blake3_256, Blake3Digest},
-    utils::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
-        uninit_vector,
-    },
-};
-pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
+use core::ops::{Bound, Range};
 
 use crate::{
     Felt, Word,
+    crypto::hash::Blake3_256,
     field::{PrimeCharacteristicRing, PrimeField64},
 };
 
-pub mod math {
-    pub use miden_crypto::field::batch_multiplicative_inverse as batch_inversion;
-}
+// RE-EXPORTS
+// ================================================================================================
+
+mod col_matrix;
+pub use col_matrix::ColMatrix;
+#[cfg(feature = "std")]
+pub use miden_crypto::utils::ReadAdapter;
+pub use miden_crypto::utils::{
+    BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+    SliceReader, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
+    uninit_vector,
+};
+pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 
 // TO ELEMENTS
 // ================================================================================================
@@ -84,20 +76,6 @@ impl IntoBytes<32> for [Felt; 4] {
     }
 }
 
-// PUSH MANY
-// ================================================================================================
-
-pub trait PushMany<T> {
-    fn push_many(&mut self, value: T, n: usize);
-}
-
-impl<T: Copy> PushMany<T> for Vec<T> {
-    fn push_many(&mut self, value: T, n: usize) {
-        let new_len = self.len() + n;
-        self.resize(new_len, value);
-    }
-}
-
 // RANGE
 // ================================================================================================
 
@@ -122,31 +100,6 @@ where
             }
         },
     }
-}
-
-// ARRAY CONSTRUCTORS
-// ================================================================================================
-
-/// Returns an array of N vectors initialized with the specified capacity.
-pub fn new_array_vec<T: Debug, const N: usize>(capacity: usize) -> [Vec<T>; N] {
-    (0..N)
-        .map(|_| Vec::with_capacity(capacity))
-        .collect::<Vec<_>>()
-        .try_into()
-        .expect("failed to convert vector to array")
-}
-
-#[test]
-#[should_panic]
-fn debug_assert_is_checked() {
-    // enforce the release checks to always have `RUSTFLAGS="-C debug-assertions".
-    //
-    // some upstream tests are performed with `debug_assert`, and we want to assert its correctness
-    // downstream.
-    //
-    // for reference, check
-    // https://github.com/0xMiden/miden-vm/issues/433
-    debug_assert!(false);
 }
 
 // BYTE CONVERSIONS
@@ -242,5 +195,18 @@ mod tests {
             // Should be equal
             prop_assert_eq!(felts, roundtrip_felts);
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn debug_assert_is_checked() {
+        // enforce the release checks to always have `RUSTFLAGS="-C debug-assertions".
+        //
+        // some upstream tests are performed with `debug_assert`, and we want to assert its
+        // correctness downstream.
+        //
+        // for reference, check
+        // https://github.com/0xMiden/miden-vm/issues/433
+        debug_assert!(false);
     }
 }

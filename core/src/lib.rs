@@ -6,6 +6,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+// ASSERT MATCHES MACRO
+// ================================================================================================
+
 /// This is an implementation of `std::assert_matches::assert_matches`
 /// so it can be removed when that feature stabilizes upstream
 #[macro_export]
@@ -48,6 +51,9 @@ assertion failed: `(left matches right)`
         }
     }
 }
+
+// EXPORTS
+// ================================================================================================
 
 pub mod chiplets;
 pub mod errors;

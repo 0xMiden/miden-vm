@@ -54,10 +54,11 @@
 - Added malicious advice provider tests for MASM validation using advice stack initialization ([#2583](https://github.com/0xMiden/miden-vm/pull/2583)).
 - [BREAKING] Convert `ProcessState` to a struct wrapping `FastProcessor`, and rename it to `ProcessorState` ([#2604](https://github.com/0xMiden/miden-vm/pull/2604)).
 - [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
-- [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Changed the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
 - [BREAKING] Added widening `u32` add variants and aligned `math::u64/math::u256` APIs and docs with little‑endian stack conventions ([#2614](https://github.com/0xMiden/miden-vm/pull/2614)).
 - [BREAKING] Separate AsmOp storage from Debug/Trace decorators. ([#2606](https://github.com/0xMiden/miden-vm/pull/2606)).
 - [BREAKING] Abstract away program execution using the sans-IO pattern ([#2615](https://github.com/0xMiden/miden-vm/pull/2615)).
+- [BREAKING] Removed `PushMany` trait and `new_array_vec()` from `miden-core` ([#2630](https://github.com/0xMiden/miden-vm/pull/2630)).
 
 ## 0.20.4 (2026-01-30)
 
