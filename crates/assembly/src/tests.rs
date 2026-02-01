@@ -4624,3 +4624,43 @@ fn test_cross_module_quoted_identifier_resolution() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn test_kernel_linking_against_its_own_library() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        proc internal_proc
+            caller
+            drop
+            exec.$kernel::lib::lib_proc
+        end
+
+        pub proc kernel_proc
+            exec.internal_proc
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "$kernel::lib",
+        source_file!(
+            &context,
+            r#"
+            pub proc lib_proc
+                swap
+            end
+            "#
+        ),
+    )?;
+
+    let mut assembler = Assembler::new(context.source_manager());
+
+    assembler.compile_and_statically_link(lib)?;
+
+    let _ = assembler.assemble_kernel(kernel)?;
+
+    Ok(())
+}
