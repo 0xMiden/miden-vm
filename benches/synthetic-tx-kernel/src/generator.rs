@@ -1,6 +1,6 @@
 //! Generates Miden assembly from VM profiles
 
-use crate::profile::{VmProfile, InstructionMix, ProcedureProfile};
+use crate::profile::VmProfile;
 use anyhow::Result;
 
 /// Generates masm code for a synthetic transaction kernel
@@ -61,7 +61,7 @@ impl MasmGenerator {
 
     fn generate_operation(&self, op_name: &str, count: u64) -> Result<String> {
         // Map operation names to masm code
-        match op_name.as_str() {
+        match op_name {
             "hperm" => Ok(format!("    # {} hperm operations\n", count)),
             "hmerge" => Ok(format!("    # {} hmerge operations\n", count)),
             "mtree_get" => Ok(format!("    # {} mtree_get operations\n", count)),
