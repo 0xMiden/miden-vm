@@ -37,7 +37,7 @@ pub use miden_assembly_syntax::{
 };
 /// Syntax components for the Miden Assembly AST
 /// Merkelized abstract syntax tree (MAST) components defining Miden VM programs.
-pub use miden_core::{mast, utils};
+pub use miden_core::{mast, serde, utils};
 
 #[doc(hidden)]
 pub use self::linker::{LinkLibraryKind, LinkerError};

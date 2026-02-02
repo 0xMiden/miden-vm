@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
     precompile::PrecompileRequest,
-    utils::{
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };

@@ -13,7 +13,7 @@ use miden_core::{
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
     program::{Program, StackInputs},
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,

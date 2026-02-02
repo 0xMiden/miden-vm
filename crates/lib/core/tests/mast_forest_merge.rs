@@ -1,6 +1,6 @@
 use miden_processor::{
     MastForest, MastNode, MastNodeExt,
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
 };
 
 /// Tests that the core library merged with itself produces a forest that has the same procedure

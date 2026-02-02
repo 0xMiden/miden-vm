@@ -9,9 +9,8 @@ use crate::{
     advice::AdviceMap,
     field::PrimeCharacteristicRing,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
-    },
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::ToElements,
 };
 
 mod kernel;

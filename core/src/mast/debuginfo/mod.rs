@@ -58,9 +58,8 @@ use crate::{
         decorator::{DecoratorDataBuilder, DecoratorInfo},
     },
     operations::AssemblyOp,
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Idx, IndexVec, Serializable,
-    },
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{Idx, IndexVec},
 };
 
 mod asm_op_storage;

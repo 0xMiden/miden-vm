@@ -10,7 +10,7 @@ pub use opcode_constants::*;
 
 use crate::{
     Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // OPERATIONS OP CODES

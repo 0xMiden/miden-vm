@@ -39,7 +39,7 @@ use alloc::vec::Vec;
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
     advice::AdviceMap,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 pub(crate) mod asm_op;

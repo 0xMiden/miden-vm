@@ -16,7 +16,7 @@ use miden_debug_types::{ByteIndex, Location, Uri};
 use super::string_table::{StringTable, StringTableBuilder};
 use crate::{
     operations::AssemblyOp,
-    utils::{
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
@@ -133,8 +133,6 @@ impl AsmOpDataBuilder {
     ///
     /// Returns the index of the AssemblyOp in the infos list.
     pub fn add_asm_op(&mut self, asm_op: &AssemblyOp) -> usize {
-        use crate::utils::{ByteWriter, Serializable};
-
         let data_offset = self.asm_op_data.len() as AsmOpDataOffset;
 
         // Serialize num_cycles (u8)

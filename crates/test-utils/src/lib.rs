@@ -57,11 +57,7 @@ pub mod math {
     };
 }
 
-pub mod serde {
-    pub use miden_core::utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    };
-}
+pub use miden_core::serde;
 
 pub mod crypto;
 

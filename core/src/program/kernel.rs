@@ -4,7 +4,7 @@ use miden_crypto::Word;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
+use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // KERNEL
 // ================================================================================================

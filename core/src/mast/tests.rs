@@ -12,7 +12,7 @@ use crate::{
     },
     operations::{AssemblyOp, DebugOptions, Decorator, Operation},
     program::{Kernel, ProgramInfo},
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
 };
 
 #[test]

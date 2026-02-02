@@ -15,10 +15,8 @@ use miden_core::{
     events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_packed_u32_elements,
-    },
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::{
     ZERO,

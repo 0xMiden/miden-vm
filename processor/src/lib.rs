@@ -28,7 +28,7 @@ pub use miden_core::{
     operations::{AssemblyOp, Operation},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
     program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
-    utils::DeserializationError,
+    serde,
 };
 
 pub(crate) mod continuation_stack;

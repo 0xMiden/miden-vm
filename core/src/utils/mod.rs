@@ -16,11 +16,7 @@ pub use col_matrix::ColMatrix;
 pub use miden_crypto::utils::ReadAdapter;
 pub use miden_crypto::{
     stark::matrix::{Matrix, RowMajorMatrix},
-    utils::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, flatten_slice_elements, flatten_vector_elements, group_slice_elements,
-        uninit_vector,
-    },
+    utils::{flatten_slice_elements, flatten_vector_elements, group_slice_elements, uninit_vector},
 };
 pub use miden_formatting::hex::{DisplayHex, ToHex, to_hex};
 pub use miden_utils_indexing::{

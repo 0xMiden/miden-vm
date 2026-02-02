@@ -63,7 +63,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     events::{EventId, EventName},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // PRECOMPILE REQUEST

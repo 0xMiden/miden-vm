@@ -6,6 +6,9 @@ use alloc::{
 use core::{fmt, str::FromStr};
 
 use miden_assembly_syntax::DisplayHex;
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -117,8 +120,8 @@ impl Section {
     }
 }
 
-impl miden_core::utils::Serializable for Section {
-    fn write_into<W: miden_core::utils::ByteWriter>(&self, target: &mut W) {
+impl Serializable for Section {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
         let id = self.id.as_str();
         target.write_usize(id.len());
         target.write_bytes(id.as_bytes());
@@ -127,16 +130,12 @@ impl miden_core::utils::Serializable for Section {
     }
 }
 
-impl miden_core::utils::Deserializable for Section {
-    fn read_from<R: miden_core::utils::ByteReader>(
-        source: &mut R,
-    ) -> Result<Self, miden_core::utils::DeserializationError> {
+impl Deserializable for Section {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let id_len = source.read_usize()?;
         let id_bytes = source.read_slice(id_len)?;
         let id_str = core::str::from_utf8(id_bytes).map_err(|err| {
-            miden_core::utils::DeserializationError::InvalidValue(format!(
-                "invalid utf-8 in section name: {err}"
-            ))
+            DeserializationError::InvalidValue(format!("invalid utf-8 in section name: {err}"))
         })?;
         let id = SectionId(Cow::Owned(id_str.to_owned()));
 

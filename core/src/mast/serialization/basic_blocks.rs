@@ -15,7 +15,7 @@ use super::NodeDataOffset;
 use crate::{
     mast::{BasicBlockNode, OP_GROUP_SIZE},
     operations::Operation,
-    utils::{ByteReader, DeserializationError, Serializable, SliceReader},
+    serde::{ByteReader, DeserializationError, Serializable, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER

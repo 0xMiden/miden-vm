@@ -11,7 +11,7 @@ use super::{
 };
 use crate::{
     operations::{DebugOptions, Decorator},
-    utils::{
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };

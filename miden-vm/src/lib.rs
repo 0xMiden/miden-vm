@@ -14,7 +14,7 @@ pub use miden_core::proof::{ExecutionProof, HashFunction};
 pub use miden_processor::execute_sync;
 pub use miden_processor::{
     DefaultHost, ExecutionError, ExecutionOptions, ExecutionTrace, Host, Kernel, Operation,
-    PrimeField64, Program, ProgramInfo, StackInputs, ZERO, advice, crypto, execute, utils,
+    PrimeField64, Program, ProgramInfo, StackInputs, ZERO, advice, crypto, execute, serde, utils,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;

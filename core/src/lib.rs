@@ -73,6 +73,13 @@ pub mod field {
     pub type QuadFelt = BinomialExtensionField<super::Felt, 2>;
 }
 
+pub mod serde {
+    pub use miden_crypto::utils::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    };
+}
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{

@@ -4,7 +4,7 @@ use core::ops::Deref;
 use super::{MIN_STACK_DEPTH, get_num_stack_values};
 use crate::{
     Felt, WORD_SIZE, Word, ZERO,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // STACK OUTPUTS

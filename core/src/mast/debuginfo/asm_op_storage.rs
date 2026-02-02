@@ -29,10 +29,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     mast::{AsmOpId, MastNodeId},
-    utils::{
-        ByteReader, ByteWriter, CsrMatrix, CsrValidationError, Deserializable,
-        DeserializationError, Serializable,
-    },
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{CsrMatrix, CsrValidationError},
 };
 
 // OP TO ASMOP ID
@@ -311,6 +309,7 @@ fn format_validation_error(error: CsrValidationError, asm_op_count: usize) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::serde::SliceReader;
 
     /// Helper to create a test AsmOpId.
     fn test_asm_op_id(value: u32) -> AsmOpId {
@@ -665,8 +664,6 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip_empty() {
-        use crate::utils::SliceReader;
-
         let storage = OpToAsmOpId::new();
 
         let mut bytes = alloc::vec::Vec::new();
@@ -680,8 +677,6 @@ mod tests {
 
     #[test]
     fn test_serialization_roundtrip_with_data() {
-        use crate::utils::SliceReader;
-
         let mut storage = OpToAsmOpId::new();
         // Node 0: 3 ops, asm_ops at indices 0 and 2
         storage

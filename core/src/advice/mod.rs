@@ -5,7 +5,7 @@ use crate::{
     crypto::merkle::MerkleStore,
     field::QuotientMap,
     program::InputError,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 mod map;
@@ -117,7 +117,7 @@ mod tests {
     use super::{AdviceInputs, AdviceStackBuilder};
     use crate::{
         Felt, Word,
-        utils::{Deserializable, Serializable},
+        serde::{Deserializable, Serializable},
     };
 
     #[test]

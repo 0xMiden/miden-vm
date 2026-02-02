@@ -27,9 +27,8 @@ use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
 mod export {
     pub use miden_core::{
         Felt,
-        utils::{
-            ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
-        },
+        serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+        utils::ToElements,
     };
     pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 }

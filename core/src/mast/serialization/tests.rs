@@ -10,6 +10,7 @@ use crate::{
         SplitNodeBuilder, UntrustedMastForest,
     },
     operations::{DebugOptions, Decorator, Operation},
+    serde::SliceReader,
     utils::Idx,
 };
 
@@ -544,8 +545,6 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 /// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
 #[test]
 fn mast_forest_deserialize_invalid_ops_offset_fails() {
-    use crate::utils::Serializable;
-
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
         .add_to_forest(&mut forest)
@@ -553,8 +552,6 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     forest.make_root(block_id);
 
     let serialized = forest.to_bytes();
-
-    use crate::utils::SliceReader;
     let mut reader = SliceReader::new(&serialized);
 
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
@@ -1509,7 +1506,6 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
     //
     // First, determine where the node info section starts
-    use crate::utils::SliceReader;
     let mut reader = SliceReader::new(&bytes);
     let _header: [u8; 8] = reader.read_array().unwrap();
     let _node_count: usize = reader.read().unwrap();
@@ -1617,8 +1613,6 @@ fn test_untrusted_forest_validates_stripped() {
 /// Test that deserialization rejects node counts exceeding MAX_NODES.
 #[test]
 fn test_deserialization_rejects_excessive_node_count() {
-    use crate::utils::{ByteWriter, Serializable};
-
     // Craft a malicious payload with node_count exceeding MAX_NODES
     let mut bytes = Vec::new();
 

@@ -4,7 +4,8 @@ use super::*;
 use crate::{
     mast::debuginfo::{DebugInfo, NodeToDecoratorIds},
     operations::Decorator,
-    utils::{Deserializable, IndexVec, Serializable},
+    serde::{Deserializable, Serializable},
+    utils::IndexVec,
 };
 
 /// Helper function to create a test DecoratorId

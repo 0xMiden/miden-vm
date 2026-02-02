@@ -13,7 +13,8 @@ use miden_core::{
     events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
+    serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,

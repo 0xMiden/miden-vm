@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use crate::{
     program::{StackInputs, StackOutputs},
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
 };
 
 // SERDE INPUTS TESTS

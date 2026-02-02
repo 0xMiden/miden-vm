@@ -1,8 +1,14 @@
 use std::{sync::Arc, vec};
 
 use miden_air::Felt;
-use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{ZERO, events::EventName, field::PrimeField64, proof::HashFunction};
+use miden_assembly::Assembler;
+use miden_core::{
+    ZERO,
+    events::EventName,
+    field::PrimeField64,
+    proof::HashFunction,
+    serde::{Deserializable, Serializable},
+};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
     DefaultHost, EventError, ExecutionError, OperationError, ProcessorState, Program, ProgramInfo,
@@ -65,8 +71,6 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    use miden_core::utils::Deserializable;
-
     let pub_key = process.get_stack_word(1);
     let msg = process.get_stack_word(5);
 

@@ -7,7 +7,7 @@ use miden_assembly::{
 use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{MastArtifact, Package};
-use miden_prover::utils::Deserializable;
+use miden_prover::serde::Deserializable;
 
 use crate::cli::data::{Libraries, ProgramFile};
 

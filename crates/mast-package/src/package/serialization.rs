@@ -35,7 +35,7 @@ use miden_assembly_syntax::{
 use miden_core::{
     Word,
     program::Program,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};

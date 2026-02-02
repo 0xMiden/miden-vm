@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_core::{
     advice::AdviceMap,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;

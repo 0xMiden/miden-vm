@@ -5,7 +5,7 @@ use miden_core::{
     advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId},
     program::Kernel,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
 #[cfg(feature = "arbitrary")]

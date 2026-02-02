@@ -58,10 +58,11 @@ use crate::{
     advice::AdviceMap,
     field::PrimeField64,
     operations::{AssemblyOp, Decorator},
-    utils::{
-        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Idx,
-        IndexVec, Serializable, SliceReader, hash_string_to_word,
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
     },
+    utils::{Idx, IndexVec, hash_string_to_word},
 };
 
 mod debuginfo;
@@ -483,7 +484,7 @@ impl MastForest {
     /// # Example
     ///
     /// ```
-    /// use miden_core::{mast::MastForest, utils::Serializable};
+    /// use miden_core::{mast::MastForest, serde::Serializable};
     ///
     /// let forest = MastForest::new();
     ///
@@ -1228,7 +1229,7 @@ impl serde::Serialize for MastForest {
         S: serde::Serializer,
     {
         // Use the existing miden-crypto serialization which already handles linked decorators
-        let bytes = crate::utils::Serializable::to_bytes(self);
+        let bytes = Serializable::to_bytes(self);
         serializer.serialize_bytes(&bytes)
     }
 }
@@ -1241,8 +1242,8 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     {
         // Deserialize bytes, then use miden-crypto Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = miden_crypto::utils::SliceReader::new(&bytes);
-        crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+        let mut slice_reader = SliceReader::new(&bytes);
+        Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
     }
 }
 
