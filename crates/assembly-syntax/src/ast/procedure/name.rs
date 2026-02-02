@@ -43,7 +43,7 @@ impl QualifiedProcedureName {
     /// and procedure name.
     pub fn new(module: impl AsRef<Path>, name: ProcedureName) -> Self {
         let span = name.span();
-        let path = module.as_ref().join(name).into();
+        let path = module.as_ref().join(&name).into();
         Self { span, path }
     }
 
