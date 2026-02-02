@@ -50,12 +50,10 @@ fn benchmark_hashing(c: &mut Criterion) {
 
     group.bench_function("hperm", |b| {
         let source = r#"
-            use.miden::core::sys
             begin
                 repeat.100
                     hperm
                 end
-                exec.sys::truncate_stack
             end
         "#;
 
@@ -71,14 +69,12 @@ fn benchmark_memory_operations(c: &mut Criterion) {
 
     group.bench_function("load_store", |b| {
         let source = r#"
-            use.miden::core::sys
             begin
                 repeat.100
-                    push.1 mem_storew
-                    push.1 mem_loadw
+                    push.0 mem_storew_be
+                    push.0 mem_loadw_be
                     dropw
                 end
-                exec.sys::truncate_stack
             end
         "#;
 

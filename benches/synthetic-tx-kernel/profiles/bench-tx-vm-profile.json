@@ -1,0 +1,41 @@
+{
+  "profile_version": "1.0",
+  "source": "miden-base/bin/bench-transaction",
+  "timestamp": "2026-02-02T10:13:46.584544+00:00",
+  "miden_vm_version": "0.1.0",
+  "transaction_kernel": {
+    "total_cycles": 69490,
+    "phases": {
+      "prologue": {
+        "cycles": 2995,
+        "operations": {}
+      },
+      "tx_script_processing": {
+        "cycles": 527,
+        "operations": {}
+      },
+      "epilogue": {
+        "cycles": 64243,
+        "operations": {}
+      },
+      "notes_processing": {
+        "cycles": 1725,
+        "operations": {}
+      }
+    },
+    "instruction_mix": {
+      "arithmetic": 0.009715066916103033,
+      "hashing": 0.04857533458051516,
+      "memory": 0.019430133832206067,
+      "control_flow": 0.019430133832206067,
+      "signature_verify": 0.9028493308389697
+    },
+    "key_procedures": [
+      {
+        "name": "auth_procedure",
+        "cycles": 62739,
+        "invocations": 1
+      }
+    ]
+  }
+}

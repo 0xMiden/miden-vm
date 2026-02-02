@@ -23,11 +23,6 @@ impl MasmGenerator {
         code.push_str(&format!("# Generated from: {}\n", self.profile.source));
         code.push_str(&format!("# Version: {}\n\n", self.profile.miden_vm_version));
 
-        // Imports
-        code.push_str("use.miden::core::sys\n");
-        code.push_str("use.miden::core::mem\n");
-        code.push_str("use.miden::std::crypto::falcon::falcon512\n\n");
-
         // Main program
         code.push_str("begin\n");
         code.push_str("    # Synthetic transaction kernel\n");
@@ -40,8 +35,6 @@ impl MasmGenerator {
             code.push_str(&self.generate_phase(phase_name, phase)?);
         }
 
-        code.push_str("\n    # Clean up stack\n");
-        code.push_str("    exec.sys::truncate_stack\n");
         code.push_str("end\n");
 
         Ok(code)
@@ -88,13 +81,34 @@ impl MasmGenerator {
         let mut code = String::new();
 
         code.push_str(&format!("# Component Benchmark: {}\n", operation));
-        code.push_str("use.miden::core::sys\n\n");
         code.push_str("begin\n");
         code.push_str(&format!("    repeat.{}\n", iterations));
-        code.push_str("        # Perform operation\n");
-        code.push_str(&format!("        # {} operation here\n", operation));
+
+        // Generate actual operations based on the operation type
+        match operation {
+            "falcon512_verify" => {
+                // Placeholder: push dummy values for falcon512 verification
+                code.push_str("        push.1 push.2 push.3 push.4\n");
+                code.push_str("        drop drop drop drop\n");
+            }
+            "hperm" => {
+                code.push_str("        hperm\n");
+            }
+            "hmerge" => {
+                code.push_str("        hmerge\n");
+            }
+            "load_store" => {
+                code.push_str("        push.0 mem_storew_be\n");
+                code.push_str("        push.0 mem_loadw_be\n");
+                code.push_str("        dropw\n");
+            }
+            _ => {
+                code.push_str(&format!("        # {} operation (unimplemented)\n", operation));
+                code.push_str("        nop\n");
+            }
+        }
+
         code.push_str("    end\n");
-        code.push_str("    exec.sys::truncate_stack\n");
         code.push_str("end\n");
 
         Ok(code)
