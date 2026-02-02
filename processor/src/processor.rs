@@ -31,10 +31,6 @@ pub trait Processor: Sized {
     type Hasher: HasherInterface;
     type HelperRegisters: OperationHelperRegisters;
 
-    // --------------------------------------------------------------------------------------------
-    // REQUIRED METHODS
-    // --------------------------------------------------------------------------------------------
-
     /// Returns a reference to the internal stack.
     fn stack(&self) -> &Self::Stack;
 
@@ -141,19 +137,6 @@ pub trait Processor: Sized {
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason>;
-
-    // --------------------------------------------------------------------------------------------
-    // PROVIDED METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the next context ID that would be created given the current state.
-    ///
-    /// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
-    /// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
-    /// context.
-    fn next_ctx_id(&self) -> ContextId {
-        (self.system().clock() + 1).into()
-    }
 }
 
 // SYSTEM INTERFACE

@@ -11,6 +11,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         InternalBreakReason, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
+        get_next_ctx_id,
     },
     fast::step::BreakReason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
@@ -79,7 +80,7 @@ where
     // - save the context and reset it,
     // - initialize the frame pointer in memory for the new context.
     if dyn_node.is_dyncall() {
-        let new_ctx: ContextId = processor.next_ctx_id();
+        let new_ctx: ContextId = get_next_ctx_id(processor);
 
         // Save the current state, and update the system registers.
         processor.save_context_and_truncate_stack(tracer);

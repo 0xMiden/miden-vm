@@ -10,7 +10,7 @@ use miden_core::{
 use crate::{
     ContextId, Host, MapExecErr, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation, get_next_ctx_id},
     fast::step::BreakReason,
     operation::OperationError,
     processor::{MemoryInterface, Processor, SystemInterface},
@@ -62,7 +62,7 @@ where
         // set the system registers to the syscall context
         processor.system_mut().set_ctx(ContextId::root());
     } else {
-        let new_ctx: ContextId = processor.next_ctx_id();
+        let new_ctx: ContextId = get_next_ctx_id(processor);
 
         // Set the system registers to the callee context.
         processor.system_mut().set_ctx(new_ctx);

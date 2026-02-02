@@ -8,7 +8,7 @@ use miden_core::{
 };
 
 use crate::{
-    Host, Stopper,
+    ContextId, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     fast::step::BreakReason,
     processor::{Processor, SystemInterface},
@@ -465,4 +465,13 @@ where
     processor.system_mut().increment_clock();
 
     stopper.should_stop(processor, continuation_after_stop)
+}
+
+/// Returns the next context ID that would be created given the current state.
+///
+/// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
+/// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
+/// context.
+fn get_next_ctx_id(processor: &impl Processor) -> ContextId {
+    (processor.system().clock() + 1).into()
 }
