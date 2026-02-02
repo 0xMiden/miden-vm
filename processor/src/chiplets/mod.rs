@@ -7,8 +7,8 @@ use miden_core::{
 };
 
 use super::{
-    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word, ZERO,
-    crypto::MerklePath, utils,
+    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, Felt, ONE, Word, ZERO, crypto::merkle::MerklePath,
+    range::RangeChecker, trace::TraceFragment, utils,
 };
 
 mod bitwise;

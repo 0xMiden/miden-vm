@@ -45,7 +45,11 @@ use miden_crypto::{
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
     hash::poseidon2::Poseidon2,
 };
-use miden_processor::{EventError, EventHandler, ProcessorState, advice::AdviceMutation};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    events::{EventError, EventHandler},
+};
 
 use crate::handlers::read_memory_packed_u32;
 

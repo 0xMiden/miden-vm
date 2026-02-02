@@ -11,7 +11,7 @@ use miden_core::{
     field::ExtensionField,
     utils::{ColMatrix, RowMajorMatrix},
 };
-use miden_processor::ExecutionTrace;
+use miden_processor::trace::ExecutionTrace;
 use tracing::instrument;
 
 /// Converts the main trace from column-major (ExecutionTrace) to row-major (Plonky3) format.

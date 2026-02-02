@@ -970,7 +970,7 @@ impl<'a> Iterator for RawDecoratorOpLinkIterator<'a> {
 // OPERATION OR DECORATOR
 // ================================================================================================
 
-/// Encodes either an [`Operation`] or a [`crate::Decorator`].
+/// Encodes either an [`Operation`] or a [`crate::operations::Decorator`].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OperationOrDecorator<'a> {
     Operation(&'a Operation),

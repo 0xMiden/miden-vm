@@ -32,11 +32,13 @@ use miden_core::{
     program::ProgramInfo,
 };
 pub use miden_processor::{
-    ContextId, ExecutionError, ExecutionTrace, ProcessorState,
+    ContextId, ExecutionError, ProcessorState,
     advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, EventHandler, Program,
+    DefaultDebugHandler, DefaultHost, Program,
+    events::EventHandler,
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
     parallel::build_trace,
 };

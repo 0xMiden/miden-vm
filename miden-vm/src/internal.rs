@@ -15,7 +15,7 @@ pub use tracing::{Level, event, instrument};
 use crate::{
     StackInputs, Word, ZERO,
     advice::AdviceInputs,
-    crypto::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
 };
 
 // CONSTANTS

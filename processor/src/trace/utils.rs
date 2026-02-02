@@ -218,7 +218,7 @@ impl ChipletsLengths {
 
 /// Defines a builder responsible for building a single column in an auxiliary segment of the
 /// execution trace.
-pub trait AuxColumnBuilder<E: ExtensionField<Felt>> {
+pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 

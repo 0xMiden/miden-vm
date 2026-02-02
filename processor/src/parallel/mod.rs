@@ -26,7 +26,7 @@ use rayon::prelude::*;
 use tracing::instrument;
 
 use crate::{
-    ChipletsLengths, ContextId, ExecutionTrace, TraceLenSummary,
+    ContextId,
     chiplets::Chiplets,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
@@ -40,7 +40,7 @@ use crate::{
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::AuxTraceBuilders,
+    trace::{AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary},
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;

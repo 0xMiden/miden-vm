@@ -1,9 +1,9 @@
 // RE-EXPORTS
 // ================================================================================================
-use miden_core::Felt;
+
 pub use miden_core::utils::*;
 
-use crate::PrimeField64;
+use crate::{Felt, field::PrimeField64};
 
 // HELPER FUNCTIONS
 // ================================================================================================

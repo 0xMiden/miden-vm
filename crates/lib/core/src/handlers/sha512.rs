@@ -10,13 +10,17 @@ use core::array;
 
 use miden_core::{
     Felt, Word, ZERO,
+    crypto::hash::{Poseidon2, Sha512},
     events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::{poseidon2::Poseidon2, sha2::Sha512};
-use miden_processor::{EventError, EventHandler, ProcessorState, advice::AdviceMutation};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    events::{EventError, EventHandler},
+};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 

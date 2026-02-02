@@ -12,7 +12,7 @@ use miden_core::{
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, EventError, ProcessorState, TraceError};
+use crate::{DebugError, ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -21,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::DebugHandler;
+use handlers::{DebugHandler, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};

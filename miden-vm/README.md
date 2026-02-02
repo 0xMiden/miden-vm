@@ -100,7 +100,8 @@ use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
-    Assembler, DefaultHost, PrimeField64, ProvingOptions, Program, prove_sync, StackInputs
+    field::PrimeField64,
+    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
 };
 
 // instantiate the assembler
@@ -184,7 +185,8 @@ use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
-    Assembler, DefaultHost, PrimeField64, Program, ProvingOptions, StackInputs
+    field::PrimeField64,
+    Assembler, DefaultHost, Program, ProvingOptions, StackInputs
 };
 
 // set the number of terms to compute

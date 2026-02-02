@@ -23,7 +23,7 @@ pub use miden_core::proof::{ExecutionProof, HashFunction};
 use miden_crypto::stark;
 pub use miden_processor::{
     ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
-    crypto, math, serde, utils,
+    crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};

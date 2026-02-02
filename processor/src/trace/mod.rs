@@ -25,10 +25,13 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::{fast::ExecutionOutput, row_major_adapter};
+use crate::fast::ExecutionOutput;
 
 mod utils;
-pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
+pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
+pub use utils::{ChipletsLengths, TraceLenSummary};
+
+mod row_major_adapter;
 
 #[cfg(test)]
 mod tests;
@@ -250,9 +253,6 @@ impl ExecutionTrace {
         Some(ColMatrix::new(aux_columns))
     }
 }
-
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
 
 // AUX TRACE BUILDERS
 // ================================================================================================

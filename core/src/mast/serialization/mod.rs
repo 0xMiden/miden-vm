@@ -330,7 +330,7 @@ impl Deserializable for super::UntrustedMastForest {
 
     /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
     ///
-    /// This method uses a [`crate::utils::BudgetedReader`] with a budget equal to the input size
+    /// This method uses a [`crate::serde::BudgetedReader`] with a budget equal to the input size
     /// to protect against denial-of-service attacks from malicious input.
     ///
     /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]

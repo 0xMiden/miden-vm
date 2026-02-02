@@ -11,10 +11,10 @@ use miden_core::{
 };
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    DefaultHost, EventError, ExecutionError, OperationError, ProcessorState, Program, ProgramInfo,
-    StackInputs,
+    DefaultHost, ExecutionError, OperationError, ProcessorState, Program, ProgramInfo, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
-    crypto::RpoRandomCoin,
+    crypto::random::RpoRandomCoin,
+    events::EventError,
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{

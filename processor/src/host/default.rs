@@ -8,11 +8,14 @@ use miden_core::{
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
+use super::{
+    FutureMaybeSend,
+    debug::DefaultDebugHandler,
+    handlers::{EventError, EventHandler, EventHandlerRegistry},
+};
 use crate::{
-    DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError, Host,
-    MastForestStore, MemMastForestStore, ProcessorState, TraceError,
-    advice::AdviceMutation,
-    host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
+    DebugError, DebugHandler, ExecutionError, Host, MastForestStore, MemMastForestStore,
+    ProcessorState, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION

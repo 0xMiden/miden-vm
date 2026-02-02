@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, OperationError, math::Felt};
+use miden_processor::{ExecutionError, Felt, OperationError};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };

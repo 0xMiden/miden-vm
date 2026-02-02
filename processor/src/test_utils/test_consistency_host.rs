@@ -6,8 +6,9 @@ use miden_debug_types::{
 };
 
 use crate::{
-    DebugError, DebugHandler, EventError, FutureMaybeSend, Host, MastForest, MastForestStore,
+    DebugError, DebugHandler, FutureMaybeSend, Host, MastForest, MastForestStore,
     MemMastForestStore, ProcessorState, TraceError, Word, advice::AdviceMutation,
+    events::EventError,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.

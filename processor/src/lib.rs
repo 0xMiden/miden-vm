@@ -12,61 +12,68 @@ use core::{
     ops::ControlFlow,
 };
 
-pub use miden_air::trace::RowIndex;
 use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
 
+mod chiplets;
+mod continuation_stack;
+mod debug;
+mod decoder;
+mod errors;
+mod execution;
 mod execution_options;
+mod host;
+mod operations;
+mod range;
+mod stack;
+mod system;
+
+pub mod fast;
+pub mod parallel;
+pub mod processor;
+pub mod trace;
+pub mod tracer;
+pub mod utils;
+
+use crate::{
+    advice::{AdviceInputs, AdviceProvider},
+    fast::{FastProcessor, step::BreakReason},
+    field::PrimeField64,
+    processor::{Processor, SystemInterface},
+    trace::ExecutionTrace,
+};
+
+#[cfg(test)]
+mod test_utils;
+
+#[cfg(test)]
+mod tests;
+
+// RE-EXPORTS
+// ================================================================================================
+
+pub use chiplets::MemoryError;
+pub use errors::{
+    ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
+};
 pub use execution_options::{
     DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ExecutionOptionsError,
 };
+pub use host::{
+    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    debug::DefaultDebugHandler,
+    default::{DefaultHost, HostLibrary},
+    handlers::{DebugError, DebugHandler, TraceError},
+};
+pub use miden_air::trace::RowIndex;
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
-    crypto::merkle::SMT_DEPTH,
-    events,
-    field::{PrimeField64, QuadFelt},
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
     program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
     serde,
 };
-
-pub(crate) mod continuation_stack;
-pub(crate) mod execution;
-
-pub mod fast;
-pub mod parallel;
-pub mod processor;
-
-mod operations;
-
-pub(crate) mod row_major_adapter;
-
-mod system;
 pub use system::ContextId;
-
-pub mod tracer;
-
-#[cfg(test)]
-mod test_utils;
-
-pub(crate) mod decoder;
-
-mod stack;
-
-mod range;
-use range::RangeChecker;
-
-mod host;
-pub use host::{
-    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
-    debug::DefaultDebugHandler,
-    default::{DefaultHost, HostLibrary},
-    handlers::{
-        DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
-        TraceError,
-    },
-};
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
@@ -77,48 +84,11 @@ pub mod advice {
     };
 }
 
-mod chiplets;
-pub use chiplets::MemoryError;
+pub mod events {
+    pub use miden_core::events::*;
 
-mod trace;
-use trace::TraceFragment;
-pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
-
-mod errors;
-pub use errors::{
-    ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
-};
-
-pub mod utils;
-
-#[cfg(test)]
-mod tests;
-
-mod debug;
-
-use crate::{
-    advice::{AdviceInputs, AdviceProvider},
-    continuation_stack::Continuation,
-    fast::{FastProcessor, step::BreakReason},
-    parallel::build_trace,
-    processor::{Processor, SystemInterface},
-};
-
-// RE-EXPORTS
-// ================================================================================================
-
-pub mod math {
-    pub use miden_core::Felt;
-}
-
-pub mod crypto {
-    pub use miden_core::crypto::{
-        hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-        merkle::{
-            MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
-            SimpleSmt,
-        },
-        random::{RpoRandomCoin, RpxRandomCoin},
+    pub use crate::host::handlers::{
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
     };
 }
 
@@ -203,7 +173,7 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = build_trace(
+    let trace = parallel::build_trace(
         execution_output,
         trace_generation_context,
         program.hash(),
@@ -386,6 +356,6 @@ pub trait Stopper {
     fn should_stop(
         &self,
         processor: &Self::Processor,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+        continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
     ) -> ControlFlow<BreakReason>;
 }
