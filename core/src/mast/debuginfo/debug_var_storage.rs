@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::DecoratorIndexError;
 use crate::{
     mast::MastNodeId,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // DEBUG VAR ID
@@ -569,7 +569,7 @@ mod tests {
         let mut bytes = Vec::new();
         storage.write_into(&mut bytes);
 
-        let mut reader = crate::utils::SliceReader::new(&bytes);
+        let mut reader = crate::serde::SliceReader::new(&bytes);
         let deserialized = OpToDebugVarIds::read_from(&mut reader, 6).unwrap();
 
         assert_eq!(storage, deserialized);

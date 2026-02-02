@@ -787,9 +787,9 @@ fn test_sparse_debuginfo_round_trip() {
 #[test]
 fn test_debuginfo_with_debug_vars_round_trip() {
     use crate::{
-        DebugVarInfo, DebugVarLocation, Decorator,
         mast::debuginfo::DebugInfo,
-        utils::{Deserializable, Serializable},
+        operations::{DebugVarInfo, DebugVarLocation, Decorator},
+        serde::{Deserializable, Serializable},
     };
 
     // Create DebugInfo with both decorators and debug vars

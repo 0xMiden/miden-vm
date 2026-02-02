@@ -2,7 +2,7 @@
 
 use alloc::string::String;
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{ColumnNumber, LineNumber};
@@ -490,7 +490,7 @@ mod tests {
     fn roundtrip<T: Serializable + Deserializable + PartialEq + core::fmt::Debug>(value: &T) {
         let mut bytes = alloc::vec::Vec::new();
         value.write_into(&mut bytes);
-        let result = T::read_from(&mut miden_core::utils::SliceReader::new(&bytes)).unwrap();
+        let result = T::read_from(&mut miden_core::serde::SliceReader::new(&bytes)).unwrap();
         assert_eq!(value, &result);
     }
 

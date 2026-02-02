@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // DEBUG VARIABLE INFO
@@ -347,7 +347,7 @@ mod tests {
     use miden_debug_types::{ColumnNumber, LineNumber, Uri};
 
     use super::*;
-    use crate::utils::{Deserializable, Serializable, SliceReader};
+    use crate::serde::{Deserializable, Serializable, SliceReader};
 
     #[test]
     fn debug_var_info_display_simple() {

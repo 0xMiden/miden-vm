@@ -546,7 +546,7 @@ impl MastForestBuilder {
     /// is being tracked.
     pub fn add_debug_var(
         &mut self,
-        debug_var: miden_core::DebugVarInfo,
+        debug_var: miden_core::operations::DebugVarInfo,
     ) -> Result<miden_core::mast::DebugVarId, Report> {
         self.mast_forest
             .add_debug_var(debug_var)

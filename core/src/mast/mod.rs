@@ -580,7 +580,7 @@ impl MastForest {
     /// Adds a debug variable to the forest, and returns the associated [`DebugVarId`].
     pub fn add_debug_var(
         &mut self,
-        debug_var: crate::DebugVarInfo,
+        debug_var: crate::operations::DebugVarInfo,
     ) -> Result<DebugVarId, MastForestError> {
         self.debug_info.add_debug_var(debug_var)
     }
@@ -595,7 +595,7 @@ impl MastForest {
     }
 
     /// Returns the debug variable with the given ID, if it exists.
-    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&crate::DebugVarInfo> {
+    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&crate::operations::DebugVarInfo> {
         self.debug_info.debug_var(debug_var_id)
     }
 
