@@ -118,7 +118,7 @@ impl DecoderState {
     /// of the current node, and the `parent_addr` is set to the (replayed) address of the parent
     /// node (i.e. the node previously on top of the block stack).
     pub fn replay_node_start(&mut self, replay: &mut ExecutionReplay) {
-        self.current_addr = replay.hasher.replay_block_address();
+        self.current_addr = replay.block_address.replay_block_address();
         self.parent_addr = replay.block_stack.replay_node_start_parent_addr();
     }
 
@@ -281,6 +281,7 @@ pub struct ExecutionReplay {
     pub memory_reads: MemoryReadsReplay,
     pub advice: AdviceReplay,
     pub hasher: HasherResponseReplay,
+    pub block_address: BlockAddressReplay,
     pub mast_forest_resolution: MastForestResolutionReplay,
 }
 
@@ -833,6 +834,29 @@ impl IntoIterator for RangeCheckerReplay {
     }
 }
 
+// BLOCK ADDRESS REPLAY
+// ================================================================================================
+
+#[derive(Debug, Default)]
+pub struct BlockAddressReplay {
+    /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
+    block_addresses: VecDeque<Felt>,
+}
+
+impl BlockAddressReplay {
+    /// Records the address associated with a `Hasher::hash_control_block` or
+    /// `Hasher::hash_basic_block` operation.
+    pub fn record_block_address(&mut self, addr: Felt) {
+        self.block_addresses.push_back(addr);
+    }
+
+    /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
+    /// the pre-recorded address
+    pub fn replay_block_address(&mut self) -> Felt {
+        self.block_addresses.pop_front().expect("No block address operations recorded")
+    }
+}
+
 // HASHER RESPONSE REPLAY
 // ================================================================================================
 
@@ -843,9 +867,6 @@ impl IntoIterator for RangeCheckerReplay {
 /// trace generation.
 #[derive(Debug, Default)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
-    block_addresses: VecDeque<Felt>,
-
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
     /// Each entry contains (address, output_state)
@@ -866,12 +887,6 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records the address associated with a `Hasher::hash_control_block` or
-    /// `Hasher::hash_basic_block` operation.
-    pub fn record_block_address(&mut self, addr: Felt) {
-        self.block_addresses.push_back(addr);
-    }
-
     /// Records a `Hasher::permute` operation with its address and result (after applying the
     /// permutation)
     pub fn record_permute(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
@@ -890,12 +905,6 @@ impl HasherResponseReplay {
 
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
-
-    /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
-    /// the pre-recorded address
-    pub fn replay_block_address(&mut self) -> Felt {
-        self.block_addresses.pop_front().expect("No block address operations recorded")
-    }
 
     /// Replays a `Hasher::permute` operation, returning its address and result
     pub fn replay_permute(&mut self) -> (Felt, [Felt; 12]) {

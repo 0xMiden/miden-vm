@@ -20,11 +20,11 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::trace_state::{
-        AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
-        CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
-        HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-        MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay, StackOverflowReplay,
-        StackState, SystemState,
+        AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextSystemInfo,
+        ExecutionReplay, HasherRequestReplay, HasherResponseReplay, KernelReplay,
+        MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
+        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
@@ -395,7 +395,7 @@ impl ExecutionTracer {
     fn finish_current_fragment_context(&mut self) {
         if let Some(snapshot) = self.state_snapshot.take() {
             // Extract the replays
-            let hasher_replay = self.hasher_chiplet_shim.extract_replay();
+            let (hasher_replay, block_addr_replay) = self.hasher_chiplet_shim.extract_replay();
             let memory_reads_replay = core::mem::take(&mut self.memory_reads);
             let advice_replay = core::mem::take(&mut self.advice);
             let external_replay = core::mem::take(&mut self.external);
@@ -406,6 +406,7 @@ impl ExecutionTracer {
                 state: snapshot.state,
                 replay: ExecutionReplay {
                     hasher: hasher_replay,
+                    block_address: block_addr_replay,
                     memory_reads: memory_reads_replay,
                     advice: advice_replay,
                     mast_forest_resolution: external_replay,
@@ -671,7 +672,8 @@ pub struct HasherChipletShim {
     /// node is derived.
     addr: u32,
     /// Replay for the hasher chiplet responses, recording only the hasher chiplet responses.
-    replay: HasherResponseReplay,
+    hasher_replay: HasherResponseReplay,
+    block_addr_replay: BlockAddressReplay,
 }
 
 impl HasherChipletShim {
@@ -679,7 +681,8 @@ impl HasherChipletShim {
     pub fn new() -> Self {
         Self {
             addr: 1,
-            replay: HasherResponseReplay::default(),
+            hasher_replay: HasherResponseReplay::default(),
+            block_addr_replay: BlockAddressReplay::default(),
         }
     }
 
@@ -687,7 +690,7 @@ impl HasherChipletShim {
     pub fn record_hash_control_block(&mut self) -> Felt {
         let block_addr = Felt::from_u32(self.addr);
 
-        self.replay.record_block_address(block_addr);
+        self.block_addr_replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
 
         block_addr
@@ -697,34 +700,38 @@ impl HasherChipletShim {
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
         let block_addr = Felt::from_u32(self.addr);
 
-        self.replay.record_block_address(block_addr);
+        self.block_addr_replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
 
         block_addr
     }
     /// Records the result of a call to `Hasher::permute()`.
     pub fn record_permute_output(&mut self, hashed_state: [Felt; 12]) {
-        self.replay.record_permute(Felt::from_u32(self.addr), hashed_state);
+        self.hasher_replay.record_permute(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
-        self.replay.record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
+        self.hasher_replay
+            .record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
-        self.replay
+        self.hasher_replay
             .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
         self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
-    pub fn extract_replay(&mut self) -> HasherResponseReplay {
-        core::mem::take(&mut self.replay)
+    pub fn extract_replay(&mut self) -> (HasherResponseReplay, BlockAddressReplay) {
+        (
+            core::mem::take(&mut self.hasher_replay),
+            core::mem::take(&mut self.block_addr_replay),
+        )
     }
 }
 
