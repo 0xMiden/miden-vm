@@ -4,7 +4,7 @@ use core::slice;
 use miden_air::trace::{MainTrace, RowIndex};
 use miden_core::field::ExtensionField;
 #[cfg(test)]
-use miden_core::{Operation, utils::ToElements};
+use miden_core::{operations::Operation, utils::ToElements};
 
 use crate::{Felt, chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 

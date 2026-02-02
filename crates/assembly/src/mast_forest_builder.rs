@@ -8,7 +8,7 @@ use core::ops::{Index, IndexMut};
 #[cfg(test)]
 use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, Felt, Operation, Word,
+    Felt, Word,
     advice::AdviceMap,
     mast::{
         AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint,
@@ -16,6 +16,7 @@ use miden_core::{
         MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeExt,
         MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
+    operations::{AssemblyOp, Decorator, DecoratorList, Operation},
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -940,7 +941,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::Operation;
+    use miden_core::operations::Operation;
 
     use super::*;
 

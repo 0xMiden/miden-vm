@@ -3,12 +3,13 @@ use alloc::{string::ToString, sync::Arc, vec};
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    ONE, Operation, assert_matches,
+    ONE, assert_matches,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
     },
+    operations::Operation,
     stack::StackInputs,
 };
 use miden_utils_testing::build_test;

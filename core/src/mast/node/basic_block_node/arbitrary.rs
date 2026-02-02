@@ -5,12 +5,13 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator, Felt, Operation, Word,
+    Felt, Word,
     advice::AdviceMap,
     mast::{
         CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         LoopNodeBuilder, SplitNodeBuilder,
     },
+    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
     program::{Kernel, Program},
 };
 

@@ -54,9 +54,10 @@ pub use node::{
 };
 
 use crate::{
-    AssemblyOp, Decorator, Felt, LexicographicWord, Word,
+    Felt, LexicographicWord, Word,
     advice::AdviceMap,
     field::PrimeField64,
+    operations::{AssemblyOp, Decorator},
     utils::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Idx,
         IndexVec, Serializable, SliceReader, hash_string_to_word,
@@ -92,8 +93,8 @@ mod tests;
 
 /// Represents one or more procedures, represented as a collection of [`MastNode`]s.
 ///
-/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
-/// can be built from a [`MastForest`] to specify an entrypoint.
+/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
+/// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.

@@ -2,7 +2,7 @@ use alloc::{boxed::Box, string::String, vec::Vec};
 use core::{fmt, iter::repeat_n};
 
 use crate::{
-    DecoratorList, Felt, Operation, Word, ZERO,
+    Felt, Word, ZERO,
     chiplets::hasher,
     crypto::hash::Blake3_256,
     field::PrimeField64,
@@ -10,6 +10,7 @@ use crate::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
         MastForestError, MastNode, MastNodeFingerprint, MastNodeId,
     },
+    operations::{DecoratorList, Operation},
     prettier::PrettyPrint,
     utils::LookupByIdx,
 };

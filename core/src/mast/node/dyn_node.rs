@@ -6,11 +6,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    Felt, OPCODE_DYN, OPCODE_DYNCALL, Word,
+    Felt, Word,
     mast::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
         MastNodeId,
     },
+    operations::{OPCODE_DYN, OPCODE_DYNCALL},
     prettier::{Document, PrettyPrint, const_text, nl},
     utils::LookupByIdx,
 };

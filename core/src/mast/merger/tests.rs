@@ -1,10 +1,11 @@
 use super::*;
 use crate::{
-    Decorator, Felt, ONE, Operation, Word,
+    Felt, ONE, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
         node::{MastForestContributor, MastNodeExt},
     },
+    operations::{DebugOptions, Decorator, Operation},
     utils::Idx,
 };
 
@@ -152,7 +153,7 @@ fn mast_forest_merge_remap() {
 #[test]
 fn mast_forest_merge_duplicate() {
     let mut forest_a = MastForest::new();
-    forest_a.add_decorator(Decorator::Debug(crate::DebugOptions::MemAll)).unwrap();
+    forest_a.add_decorator(Decorator::Debug(DebugOptions::MemAll)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
     let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();

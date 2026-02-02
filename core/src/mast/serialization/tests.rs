@@ -2,14 +2,14 @@ use std::string::ToString;
 
 use super::*;
 use crate::{
-    DebugOptions, Decorator, Felt, ONE, Word,
+    Felt, ONE, Word,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
         SplitNodeBuilder, UntrustedMastForest,
     },
-    operations::Operation,
+    operations::{DebugOptions, Decorator, Operation},
     utils::Idx,
 };
 
@@ -1027,8 +1027,8 @@ mod proptests {
 
     use super::*;
     use crate::{
-        Decorator,
         mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
+        operations::Decorator,
     };
 
     proptest! {
@@ -1114,12 +1114,12 @@ mod proptests {
         fn proptest_multi_batch_roundtrip(
             ops in prop::collection::vec(
                 prop::sample::select(vec![
-                    crate::Operation::Add,
-                    crate::Operation::Mul,
-                    crate::Operation::Push(crate::Felt::new(42)),
-                    crate::Operation::Drop,
-                    crate::Operation::Dup0,
-                    crate::Operation::Swap,
+                    Operation::Add,
+                    Operation::Mul,
+                    Operation::Push(crate::Felt::new(42)),
+                    Operation::Drop,
+                    Operation::Dup0,
+                    Operation::Swap,
                 ]),
                 73..=150  // Generate 73-150 operations for multi-batch testing
             )
@@ -1190,11 +1190,11 @@ mod proptests {
             (ops, decorator_indices) in (
                 prop::collection::vec(
                     prop::sample::select(vec![
-                        crate::Operation::Add,
-                        crate::Operation::Mul,
-                        crate::Operation::Push(crate::Felt::new(99)),
-                        crate::Operation::Drop,
-                        crate::Operation::Dup0,
+                        Operation::Add,
+                        Operation::Mul,
+                        Operation::Push(Felt::new(99)),
+                        Operation::Drop,
+                        Operation::Dup0,
                     ]),
                     10..=50
                 )
@@ -1322,11 +1322,6 @@ mod proptests {
 /// Test DebugInfo serialization with empty decorators (no decorators at all)
 #[test]
 fn test_debuginfo_serialization_empty() {
-    use crate::{
-        Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     // Create forest with no decorators
     let mut forest = MastForest::new();
 
@@ -1348,11 +1343,6 @@ fn test_debuginfo_serialization_empty() {
 /// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
 #[test]
 fn test_debuginfo_serialization_sparse() {
-    use crate::{
-        Decorator, Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     let mut forest = MastForest::new();
 
     // Create 10 blocks, only 2 with decorators (20% sparse)
@@ -1391,11 +1381,6 @@ fn test_debuginfo_serialization_sparse() {
 /// Test DebugInfo serialization with dense decorators (80% of nodes have decorators)
 #[test]
 fn test_debuginfo_serialization_dense() {
-    use crate::{
-        Decorator, Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     let mut forest = MastForest::new();
 
     // Create 10 blocks, 8 with decorators (80% dense)

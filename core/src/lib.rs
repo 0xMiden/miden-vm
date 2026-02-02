@@ -61,6 +61,7 @@ pub mod advice;
 pub mod chiplets;
 pub mod events;
 pub mod mast;
+pub mod operations;
 pub mod precompile;
 pub mod program;
 pub mod proof;
@@ -120,11 +121,6 @@ pub mod prettier {
         doc
     }
 }
-
-mod operations;
-pub use operations::{
-    AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
-};
 
 // CONSTANTS
 // ================================================================================================

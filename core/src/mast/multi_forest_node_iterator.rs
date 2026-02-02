@@ -309,11 +309,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        Operation, Word,
+        Word,
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
             MastForestContributor, SplitNodeBuilder,
         },
+        operations::Operation,
     };
 
     fn random_digest() -> Word {

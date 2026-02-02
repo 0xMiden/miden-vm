@@ -7,8 +7,8 @@ use alloc::{
 use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::{
-    DebugOptions,
     events::{EventId, EventName, SystemEvent},
+    operations::DebugOptions,
 };
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};

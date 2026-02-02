@@ -4,13 +4,14 @@ use miden_air::trace::chiplets::hasher::{
     DIGEST_LEN, HASH_CYCLE_LEN, NUM_ROUNDS, NUM_SELECTORS, STATE_COL_RANGE,
 };
 use miden_core::{
-    ONE, Operation, ZERO,
+    ONE, ZERO,
     chiplets::hasher,
     crypto::merkle::{MerkleTree, NodeIndex},
     mast::{
         BasicBlockNodeBuilder, DecoratorId, JoinNodeBuilder, LoopNodeBuilder, MastForest,
         MastForestContributor, MastNode, MastNodeExt, SplitNodeBuilder,
     },
+    operations::Operation,
 };
 use miden_utils_testing::rand::rand_array;
 

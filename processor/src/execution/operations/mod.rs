@@ -1,7 +1,8 @@
 use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
-    Felt, Operation,
+    Felt,
     mast::{MastForest, MastNodeId},
+    operations::Operation,
 };
 
 use crate::{

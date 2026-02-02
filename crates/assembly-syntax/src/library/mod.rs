@@ -1045,8 +1045,8 @@ impl proptest::prelude::Arbitrary for Library {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use miden_core::{
-            Operation,
             mast::{BasicBlockNodeBuilder, MastForestContributor},
+            operations::Operation,
         };
         use proptest::prelude::*;
 

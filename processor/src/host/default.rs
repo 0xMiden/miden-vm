@@ -1,9 +1,10 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    DebugOptions, Word,
+    Word,
     events::{EventId, EventName},
     mast::MastForest,
+    operations::DebugOptions,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 

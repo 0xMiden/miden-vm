@@ -7,10 +7,11 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    Felt, Operation, Word, assert_matches,
+    Felt, Word, assert_matches,
     events::EventId,
     field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
+    operations::Operation,
     program::Program,
     stack::StackInputs,
     utils::{Deserializable, Serializable},

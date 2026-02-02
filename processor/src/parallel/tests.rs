@@ -1,13 +1,14 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_core::{
-    Felt, Operation,
+    Felt,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
+    operations::Operation,
     program::{Kernel, Program},
     stack::StackInputs,
 };

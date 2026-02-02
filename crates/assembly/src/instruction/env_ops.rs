@@ -7,7 +7,7 @@ use miden_assembly_syntax::{
     diagnostics::Report,
     parser::{ParsingError, WordValue},
 };
-use miden_core::Operation::*;
+use miden_core::operations::Operation::*;
 
 use super::{BasicBlockBuilder, mem_ops::local_to_absolute_addr, push_felt};
 use crate::ProcedureContext;

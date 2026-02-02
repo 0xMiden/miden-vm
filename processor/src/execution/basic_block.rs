@@ -2,8 +2,8 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{
-    Operation,
     mast::{BasicBlockNode, MastForest, MastNodeId},
+    operations::Operation,
 };
 
 use crate::{

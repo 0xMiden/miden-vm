@@ -1,10 +1,11 @@
 use miden_core::{
-    FMP_INIT_VALUE, Operation,
+    FMP_INIT_VALUE,
     field::PrimeField64,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
         MastNodeExt,
     },
+    operations::Operation,
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};

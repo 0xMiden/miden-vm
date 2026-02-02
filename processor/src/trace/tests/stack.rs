@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, STACK_AUX_TRACE_OFFSET};
-use miden_core::{ONE, Operation, ZERO, field::Field};
+use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 
 use super::{Felt, build_trace_from_ops, rand_array};
 use crate::stack::OverflowTableRow;

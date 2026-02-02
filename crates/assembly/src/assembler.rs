@@ -11,11 +11,12 @@ use miden_assembly_syntax::{
     library::{ConstantExport, ItemInfo, LibraryExport, ProcedureExport, TypeExport},
 };
 use miden_core::{
-    AssemblyOp, Operation, Word,
+    Word,
     mast::{
         DecoratorId, LoopNodeBuilder, MastForestContributor, MastNodeExt, MastNodeId,
         SplitNodeBuilder,
     },
+    operations::{AssemblyOp, Operation},
     program::{Kernel, Program},
 };
 

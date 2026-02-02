@@ -1,5 +1,11 @@
+use alloc::collections::BTreeMap;
+
 use super::*;
-use crate::utils::IndexVec;
+use crate::{
+    mast::debuginfo::{DebugInfo, NodeToDecoratorIds},
+    operations::Decorator,
+    utils::{Deserializable, IndexVec, Serializable},
+};
 
 /// Helper function to create a test DecoratorId
 fn test_decorator_id(value: u32) -> DecoratorId {
@@ -725,14 +731,6 @@ fn test_sparse_case_two_nodes() {
 
 #[test]
 fn test_sparse_debuginfo_round_trip() {
-    use alloc::collections::BTreeMap;
-
-    use crate::{
-        Decorator,
-        mast::debuginfo::{DebugInfo, NodeToDecoratorIds},
-        utils::{Deserializable, Serializable},
-    };
-
     // Create a sparse CSR structure like we'd see with 10 nodes where only 0 and 5 have
     // decorators
     let decorator_ids = vec![test_decorator_id(0), test_decorator_id(1)];

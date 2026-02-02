@@ -7,7 +7,7 @@ extern crate alloc;
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use miden_core::{ONE, ZERO};
+use miden_core::{Felt, ONE, ZERO, operations::Operation};
 
 mod assembler;
 mod basic_block_builder;
@@ -66,8 +66,8 @@ const MAX_EXP_BITS: u8 = 64;
 // ================================================================================================
 
 /// Pushes the provided value onto the stack using the most optimal sequence of operations.
-fn push_value_ops(value: miden_core::Felt) -> alloc::vec::Vec<miden_core::Operation> {
-    use miden_core::Operation::*;
+fn push_value_ops(value: Felt) -> alloc::vec::Vec<Operation> {
+    use miden_core::operations::Operation::*;
 
     if value == ZERO {
         vec![Pad]

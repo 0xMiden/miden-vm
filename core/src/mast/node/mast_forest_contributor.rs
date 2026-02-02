@@ -135,11 +135,12 @@ mod fingerprint_invariant_tests {
     use proptest::prelude::*;
 
     use crate::{
-        Decorator, Felt, Operation,
+        Felt,
         mast::{
             BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor,
             arbitrary::op_non_control_strategy,
         },
+        operations::{Decorator, Operation},
     };
 
     /// Creates a decorator and returns its ID
@@ -359,11 +360,12 @@ mod round_trip_tests {
     use miden_crypto::Felt;
 
     use crate::{
-        Operation, Word,
+        Word,
         mast::{
             BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
             MastNodeExt, node::mast_forest_contributor::MastForestContributor,
         },
+        operations::Operation,
     };
 
     #[test]

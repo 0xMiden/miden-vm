@@ -1,4 +1,6 @@
-use miden_core::{Felt, Operation::*, ZERO, events::SystemEvent, field::PrimeCharacteristicRing};
+use miden_core::{
+    Felt, ZERO, events::SystemEvent, field::PrimeCharacteristicRing, operations::Operation::*,
+};
 
 use super::BasicBlockBuilder;
 use crate::Report;

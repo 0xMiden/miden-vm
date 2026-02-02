@@ -1,6 +1,6 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, Felt};
+use miden_core::{Felt, operations::DebugOptions};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };

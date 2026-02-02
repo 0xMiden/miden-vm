@@ -10,12 +10,13 @@ use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    Felt, OPCODE_CALL, OPCODE_SYSCALL, Word,
+    Felt, Word,
     chiplets::hasher,
     mast::{
         DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
         MastNodeId,
     },
+    operations::{OPCODE_CALL, OPCODE_SYSCALL},
     utils::{Idx, LookupByIdx},
 };
 

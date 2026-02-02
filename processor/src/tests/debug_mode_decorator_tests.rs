@@ -1,8 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Decorator, Operation,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    operations::{DebugOptions, Decorator, Operation},
     stack::StackInputs,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -83,7 +83,7 @@ fn test_decorators_only_execute_in_debug_mode() {
         fn on_debug(
             &mut self,
             _process: &mut ProcessorState,
-            _options: &miden_core::DebugOptions,
+            _options: &DebugOptions,
         ) -> Result<(), DebugError> {
             Ok(())
         }

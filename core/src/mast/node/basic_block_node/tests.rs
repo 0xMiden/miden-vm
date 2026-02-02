@@ -4,8 +4,9 @@ use proptest::prelude::*;
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
-    Decorator, Felt, ONE, Word,
+    Felt, ONE, Word,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
+    operations::Decorator,
     utils::IndexVec,
 };
 

@@ -15,7 +15,7 @@ use miden_debug_types::{ByteIndex, Location, Uri};
 
 use super::string_table::{StringTable, StringTableBuilder};
 use crate::{
-    AssemblyOp,
+    operations::AssemblyOp,
     utils::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },

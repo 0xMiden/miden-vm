@@ -9,9 +9,10 @@ use miden_air::{
     },
 };
 use miden_core::{
-    ONE, OPCODE_PUSH, Operation, WORD_SIZE, Word, ZERO,
+    ONE, WORD_SIZE, Word, ZERO,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
+    operations::{OPCODE_PUSH, Operation},
     precompile::PrecompileTranscriptState,
     stack::MIN_STACK_DEPTH,
     utils::range,
