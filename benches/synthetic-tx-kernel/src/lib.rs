@@ -3,6 +3,7 @@
 //! This crate generates Miden assembly benchmarks based on VM profiles
 //! exported from miden-base's transaction kernel.
 
+pub mod data_generator;
 pub mod generator;
 pub mod profile;
 pub mod validator;

@@ -148,6 +148,7 @@ mod tests {
                     cycles: 100,
                     invocations: 1,
                 }],
+                operation_details: Vec::new(),
             },
         }
     }

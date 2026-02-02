@@ -6,7 +6,6 @@ use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::fast::FastProcessor;
 use miden_processor::AdviceInputs;
 use miden_vm::{Assembler, DefaultHost, StackInputs};
-use synthetic_tx_kernel::{generator::MasmGenerator, load_profile};
 
 /// Helper function to execute a benchmark with the given program
 fn bench_program(
@@ -40,21 +39,22 @@ fn bench_program(
 fn benchmark_signature_verification(c: &mut Criterion) {
     let mut group = c.benchmark_group("signature_verification");
 
-    // Load profile for signature verification benchmark
-    let profile_path = format!("{}/profiles/latest.json", env!("CARGO_MANIFEST_DIR"));
-    let profile = load_profile(&profile_path).expect("Failed to load profile");
-    let generator = MasmGenerator::new(profile);
-
     // Falcon512 verification benchmark
     group.bench_function("falcon512_verify", |b| {
-        let source = generator
-            .generate_component_benchmark("falcon512_verify", 1)
-            .expect("Failed to generate benchmark");
+        // Direct assembly that calls falcon512 verify with proper setup
+        let source = r#"
+            use miden::core::crypto::dsa::falcon512poseidon2
+
+            begin
+                # Stack already has PK and MSG from inputs
+                exec.falcon512poseidon2::verify
+            end
+        "#;
 
         let program = Assembler::default()
             .with_dynamic_library(CoreLibrary::default())
             .expect("Failed to load core library")
-            .assemble_program(&source)
+            .assemble_program(source)
             .expect("Failed to assemble");
 
         let secret_key = falcon512_poseidon2::SecretKey::new();
@@ -69,8 +69,8 @@ fn benchmark_signature_verification(c: &mut Criterion) {
             .expect("Failed to generate signature");
 
         let mut stack = Vec::with_capacity(8);
-        stack.extend_from_slice(&public_key);
-        stack.extend_from_slice(&message);
+        stack.extend_from_slice(public_key.as_slice());
+        stack.extend_from_slice(message.as_slice());
         let stack_inputs = StackInputs::new(&stack).expect("Failed to build stack inputs");
         let advice_inputs = AdviceInputs::default().with_stack(signature);
 

@@ -26,6 +26,9 @@ pub struct TransactionKernelProfile {
     pub phases: BTreeMap<String, PhaseProfile>,
     pub instruction_mix: InstructionMix,
     pub key_procedures: Vec<ProcedureProfile>,
+    /// Detailed operation information for generating realistic benchmarks
+    #[serde(default)]
+    pub operation_details: Vec<OperationDetails>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,6 +53,20 @@ pub struct ProcedureProfile {
     pub name: String,
     pub cycles: u64,
     pub invocations: u64,
+}
+
+/// Detailed information about a specific operation type
+/// Used by synthetic benchmark generators to create realistic workloads
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperationDetails {
+    /// Operation type identifier (e.g., "falcon512_verify", "hperm", "hmerge")
+    pub op_type: String,
+    /// Size of each input in bytes (for operations with variable input sizes)
+    pub input_sizes: Vec<usize>,
+    /// Number of times this operation is executed
+    pub iterations: u64,
+    /// Estimated cycle cost per operation (for validation)
+    pub cycle_cost: u64,
 }
 
 impl InstructionMix {
@@ -137,6 +154,7 @@ mod tests {
                     cycles: 62667,
                     invocations: 1,
                 }],
+                operation_details: Vec::new(),
             },
         }
     }
@@ -295,6 +313,7 @@ mod tests {
                     signature_verify: 0.2,
                 },
                 key_procedures: vec![],
+                operation_details: Vec::new(),
             },
         };
 
@@ -329,6 +348,7 @@ mod tests {
                     signature_verify: 0.2,
                 },
                 key_procedures: vec![],
+                operation_details: Vec::new(),
             },
         };
 
