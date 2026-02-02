@@ -17,7 +17,7 @@ use miden_air::{
 };
 use miden_core::{
     Kernel, ONE, Operation, Word, ZERO,
-    field::PrimeCharacteristicRing,
+    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     stack::MIN_STACK_DEPTH,
     utils::{ColMatrix, uninit_vector},
 };
@@ -40,7 +40,6 @@ use crate::{
     range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::AuxTraceBuilders,
-    utils::invert_column_allow_zeros,
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
@@ -216,7 +215,7 @@ fn generate_core_trace_columns(
     // row of each fragment with non-inverted values.
     {
         let h0_column = &mut core_trace_columns[STACK_TRACE_OFFSET + H0_COL_IDX];
-        h0_column.par_chunks_mut(fragment_size).for_each(invert_column_allow_zeros);
+        h0_column.par_chunks_mut(fragment_size).for_each(batch_inversion_allow_zeros);
     }
 
     // Truncate the core trace columns. After this point, there is no more uninitialized memory.
