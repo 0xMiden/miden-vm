@@ -58,7 +58,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     library::{ItemInfo, ModuleInfo},
 };
-use miden_core::{Kernel, Word, advice::AdviceMap};
+use miden_core::{Word, advice::AdviceMap, program::Kernel};
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{

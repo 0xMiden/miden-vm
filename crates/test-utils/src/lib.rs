@@ -27,9 +27,9 @@ pub use miden_core::{
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
 use miden_core::{
-    ProgramInfo,
     chiplets::hasher::apply_permutation,
     events::{EventName, SystemEvent},
+    program::ProgramInfo,
 };
 pub use miden_processor::{
     ContextId, ExecutionError, ExecutionTrace, ProcessorState,

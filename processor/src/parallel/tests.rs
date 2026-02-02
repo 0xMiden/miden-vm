@@ -1,13 +1,14 @@
 use alloc::{string::String, sync::Arc};
 
 use miden_core::{
-    Felt, Kernel, Operation, Program,
+    Felt, Operation,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor, MastNodeExt,
         SplitNodeBuilder,
     },
+    program::{Kernel, Program},
     stack::StackInputs,
 };
 use miden_utils_testing::get_column_name;

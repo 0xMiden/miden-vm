@@ -5,12 +5,13 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, Program, Word,
+    AssemblyOp, DebugOptions, Decorator, Felt, Operation, Word,
     advice::AdviceMap,
     mast::{
         CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         LoopNodeBuilder, SplitNodeBuilder,
     },
+    program::{Kernel, Program},
 };
 
 // Strategy for operations without immediate values (non-control flow)
@@ -91,7 +92,6 @@ pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
 
 // Strategy for operations with immediate values
 pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
-    use crate::mast::Felt;
     prop_oneof![any::<u64>().prop_map(Felt::new).prop_map(Operation::Push)]
 }
 
@@ -691,10 +691,6 @@ impl Arbitrary for Program {
             max_decorator_id_u32: 2,
         })
         .prop_map(|node| {
-            use alloc::sync::Arc;
-
-            use crate::Program;
-
             // Create a new MastForest
             let mut forest = MastForest::new();
 

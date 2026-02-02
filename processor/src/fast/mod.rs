@@ -7,9 +7,10 @@ use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
-    Decorator, EMPTY_WORD, Kernel, Program, WORD_SIZE, Word, ZERO,
+    Decorator, EMPTY_WORD, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNodeExt, MastNodeId},
     precompile::PrecompileTranscript,
+    program::{Kernel, Program},
     stack::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::range,
 };

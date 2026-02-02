@@ -4,6 +4,7 @@ use miden_assembly::{
     Assembler, DefaultSourceManager, KernelLibrary,
     diagnostics::{IntoDiagnostic, Report, WrapErr},
 };
+use miden_core::program::Program;
 use miden_core_lib::CoreLibrary;
 use miden_mast_package::{MastArtifact, Package};
 use miden_prover::utils::Deserializable;
@@ -11,7 +12,7 @@ use miden_prover::utils::Deserializable;
 use crate::cli::data::{Libraries, ProgramFile};
 
 /// Returns a `Program` type from a `.masp` package file.
-pub fn get_masp_program(path: &Path) -> Result<miden_core::Program, Report> {
+pub fn get_masp_program(path: &Path) -> Result<Program, Report> {
     let bytes = fs::read(path).into_diagnostic().wrap_err("Failed to read package file")?;
     // Use `read_from_bytes` provided by the Deserializable trait.
     let package = Package::read_from_bytes(&bytes)
@@ -32,7 +33,7 @@ pub fn get_masm_program(
     libraries: &Libraries,
     _debug_on: bool,
     kernel_file: Option<&Path>,
-) -> Result<(miden_core::Program, Arc<DefaultSourceManager>), Report> {
+) -> Result<(Program, Arc<DefaultSourceManager>), Report> {
     // Assembler debug mode is always enabled (issue #1821)
     let program_file = ProgramFile::read(path)?;
     let source_manager = program_file.source_manager().clone();

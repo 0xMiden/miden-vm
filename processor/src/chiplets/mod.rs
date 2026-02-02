@@ -2,7 +2,8 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 use miden_core::{
-    Kernel, field::PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+    field::PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+    program::Kernel,
 };
 
 use super::{

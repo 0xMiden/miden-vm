@@ -1,9 +1,10 @@
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    Kernel, Word,
+    Word,
     advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId},
+    program::Kernel,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};

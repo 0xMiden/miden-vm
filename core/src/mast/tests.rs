@@ -4,12 +4,13 @@ use miden_crypto::{WORD_SIZE, field::PrimeCharacteristicRing, rand::test_utils::
 use proptest::prelude::*;
 
 use crate::{
-    AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
+    AssemblyOp, DebugOptions, Decorator, Felt, Operation, Word,
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
+    program::{Kernel, ProgramInfo},
     utils::{Deserializable, Serializable},
 };
 

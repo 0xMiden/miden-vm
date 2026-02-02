@@ -6,12 +6,13 @@ use miden_air::trace::{
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
 use miden_core::{
-    ONE, Operation, Program, Word, ZERO,
+    ONE, Operation, Word, ZERO,
     field::{ExtensionField, Field, PrimeCharacteristicRing},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
     },
+    program::Program,
 };
 use miden_utils_testing::rand::rand_array;
 

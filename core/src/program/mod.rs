@@ -5,7 +5,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Felt, Kernel, WORD_SIZE, Word,
+    Felt, WORD_SIZE, Word,
     advice::AdviceMap,
     field::PrimeCharacteristicRing,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
@@ -13,6 +13,9 @@ use crate::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
     },
 };
+
+mod kernel;
+pub use kernel::{Kernel, KernelError};
 
 // PROGRAM
 // ===============================================================================================

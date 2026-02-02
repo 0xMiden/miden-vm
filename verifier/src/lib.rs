@@ -14,11 +14,12 @@ use miden_crypto::stark;
 // ================================================================================================
 mod exports {
     pub use miden_core::{
-        Kernel, ProgramInfo, Word,
+        Word,
         precompile::{
             PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
             PrecompileVerifierRegistry,
         },
+        program::{Kernel, ProgramInfo},
         proof::{ExecutionProof, HashFunction},
         stack::{StackInputs, StackOutputs},
     };

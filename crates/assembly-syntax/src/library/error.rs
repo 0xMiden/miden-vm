@@ -1,6 +1,6 @@
 use alloc::sync::Arc;
 
-use miden_core::KernelError;
+use miden_core::program::KernelError;
 
 use crate::{
     ast::Path,

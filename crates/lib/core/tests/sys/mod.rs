@@ -2,12 +2,13 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, ProgramInfo, Word,
+    Felt, Word,
     events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,
     },
+    program::ProgramInfo,
     proof::HashFunction,
 };
 use miden_core_lib::CoreLibrary;

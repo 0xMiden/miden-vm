@@ -33,7 +33,8 @@ use miden_assembly_syntax::{
     library::{FunctionTypeDeserializer, FunctionTypeSerializer},
 };
 use miden_core::{
-    Program, Word,
+    Word,
+    program::Program,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

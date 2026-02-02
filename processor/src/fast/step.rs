@@ -3,7 +3,7 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{Kernel, mast::MastForest};
+use miden_core::{mast::MastForest, program::Kernel};
 
 use crate::{
     ExecutionError, Stopper,

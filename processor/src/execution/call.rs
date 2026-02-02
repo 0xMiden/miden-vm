@@ -2,8 +2,9 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Kernel,
+    FMP_ADDR, FMP_INIT_VALUE,
     mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
+    program::Kernel,
 };
 
 use crate::{

@@ -16,8 +16,9 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ONE, Operation, Word, ZERO,
+    ONE, Operation, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    program::Kernel,
     stack::MIN_STACK_DEPTH,
     utils::{ColMatrix, uninit_vector},
 };

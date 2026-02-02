@@ -62,15 +62,10 @@ pub mod chiplets;
 pub mod events;
 pub mod mast;
 pub mod precompile;
+pub mod program;
 pub mod proof;
 pub mod stack;
 pub mod utils;
-
-mod program;
-pub use program::{Program, ProgramInfo};
-
-mod kernel;
-pub use kernel::{Kernel, KernelError};
 
 pub mod field {
     pub use miden_crypto::field::*;

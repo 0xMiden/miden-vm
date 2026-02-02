@@ -11,13 +11,14 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    EMPTY_WORD, Felt, ONE, Operation, WORD_SIZE, ZERO,
     events::EventName,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
+    program::{Kernel, Program},
     stack::StackInputs,
 };
 use miden_utils_testing::rand::rand_value;
