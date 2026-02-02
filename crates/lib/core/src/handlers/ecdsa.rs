@@ -48,7 +48,7 @@ use miden_crypto::{
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
-    events::{EventError, EventHandler},
+    event::{EventError, EventHandler},
 };
 
 use crate::handlers::read_memory_packed_u32;

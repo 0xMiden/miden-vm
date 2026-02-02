@@ -39,7 +39,7 @@ use crate::{
     fast::{FastProcessor, step::BreakReason},
     field::PrimeField64,
     processor::{Processor, SystemInterface},
-    trace::ExecutionTrace,
+    trace::{ExecutionTrace, RowIndex},
 };
 
 #[cfg(test)]
@@ -55,19 +55,15 @@ pub use chiplets::MemoryError;
 pub use errors::{
     ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
 };
-pub use execution_options::{
-    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ExecutionOptionsError,
-};
+pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
     default::{DefaultHost, HostLibrary},
     handlers::{DebugError, DebugHandler, TraceError},
 };
-pub use miden_air::trace::RowIndex;
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     operations::{AssemblyOp, Operation},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
     program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
@@ -84,7 +80,7 @@ pub mod advice {
     };
 }
 
-pub mod events {
+pub mod event {
     pub use miden_core::events::*;
 
     pub use crate::host::handlers::{

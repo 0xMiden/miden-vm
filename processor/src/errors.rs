@@ -14,7 +14,7 @@ use miden_core::{
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{DebugError, Host, MemoryError, TraceError, advice::AdviceError, events::EventError};
+use crate::{DebugError, Host, MemoryError, TraceError, advice::AdviceError, event::EventError};
 
 // EXECUTION ERROR
 // ================================================================================================

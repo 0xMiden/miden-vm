@@ -12,7 +12,7 @@ use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{ProcessorState, advice::AdviceMutation, events::EventError};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::read_memory_region;
 

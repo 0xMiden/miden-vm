@@ -11,7 +11,7 @@ use miden_core::{
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
     events::EventName,
 };
-use miden_processor::{ProcessorState, advice::AdviceMutation, events::EventError};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 /// Event name for the smt_peek operation.
 pub const SMT_PEEK_EVENT_NAME: EventName =

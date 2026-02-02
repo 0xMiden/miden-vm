@@ -8,7 +8,7 @@ use alloc::{vec, vec::Vec};
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
-    events::{EventError, EventName},
+    event::{EventError, EventName},
     field::PrimeField64,
 };
 

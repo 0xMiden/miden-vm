@@ -132,14 +132,12 @@ fn test_syscall_fail() {
 /// number of allowed cycles.
 #[test]
 fn test_cycle_limit_exceeded() {
-    use crate::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions};
-
     let mut host = DefaultHost::default();
 
     let options = ExecutionOptions::new(
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
-        DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
         false,
     )

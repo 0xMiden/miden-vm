@@ -21,7 +21,7 @@ use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::poseidon2::Poseidon2
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
-    events::{EventError, EventHandler},
+    event::{EventError, EventHandler},
 };
 use rand::{SeedableRng, rngs::StdRng};
 

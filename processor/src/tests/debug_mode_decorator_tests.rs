@@ -10,7 +10,7 @@ use miden_debug_types::{Location, SourceFile, SourceSpan};
 use crate::{
     DebugError, FutureMaybeSend, Host, ProcessorState, Program, TraceError, Word,
     advice::{AdviceInputs, AdviceMutation},
-    events::EventError,
+    event::EventError,
     fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
 };

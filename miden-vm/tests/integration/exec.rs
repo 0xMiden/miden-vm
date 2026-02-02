@@ -3,8 +3,9 @@ use alloc::sync::Arc;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{ONE, Word, assert_matches, program::Program};
 use miden_processor::{
-    ExecutionOptions, MastForest, StackInputs,
+    ExecutionOptions, StackInputs,
     advice::{AdviceError, AdviceInputs},
+    mast::MastForest,
 };
 use miden_vm::DefaultHost;
 

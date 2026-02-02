@@ -27,7 +27,7 @@ use miden_crypto::{
 use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
-    events::{EventError, EventHandler},
+    event::{EventError, EventHandler},
 };
 use rand::{SeedableRng, rngs::StdRng};
 

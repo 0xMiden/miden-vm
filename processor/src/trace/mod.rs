@@ -29,12 +29,17 @@ use crate::fast::ExecutionOutput;
 
 mod utils;
 pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
-pub use utils::{ChipletsLengths, TraceLenSummary};
 
 mod row_major_adapter;
 
 #[cfg(test)]
 mod tests;
+
+// RE-EXPORTS
+// ================================================================================================
+
+pub use miden_air::trace::RowIndex;
+pub use utils::{ChipletsLengths, TraceLenSummary};
 
 // VM EXECUTION TRACE
 // ================================================================================================

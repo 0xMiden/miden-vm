@@ -14,7 +14,7 @@ use miden_processor::{
     DefaultHost, ExecutionError, OperationError, ProcessorState, Program, ProgramInfo, StackInputs,
     advice::{AdviceInputs, AdviceMutation},
     crypto::random::RpoRandomCoin,
-    events::EventError,
+    event::EventError,
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{

@@ -1,5 +1,5 @@
 use miden_processor::{
-    MastForest, MastNode, MastNodeExt,
+    mast::{MastForest, MastNode, MastNodeExt},
     serde::{Deserializable, Serializable},
 };
 

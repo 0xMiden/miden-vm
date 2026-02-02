@@ -3,8 +3,8 @@ use std::sync::Arc;
 use miden_core::operations::DebugOptions;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
-    DebugError, FutureMaybeSend, Host, MastForest, ProcessorState, TraceError,
-    advice::AdviceMutation, events::EventError,
+    DebugError, FutureMaybeSend, Host, ProcessorState, TraceError, advice::AdviceMutation,
+    event::EventError, mast::MastForest,
 };
 use miden_prover::Word;
 use miden_utils_testing::PrimeField64;

@@ -38,7 +38,7 @@ pub use miden_processor::{
 };
 use miden_processor::{
     DefaultDebugHandler, DefaultHost, Program,
-    events::EventHandler,
+    event::EventHandler,
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
     parallel::build_trace,
 };
