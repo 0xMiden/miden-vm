@@ -49,9 +49,7 @@ mod tests;
 // ================================================================================================
 
 pub use chiplets::MemoryError;
-pub use errors::{
-    ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
-};
+pub use errors::{ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
@@ -60,9 +58,7 @@ pub use host::{
     handlers::{DebugError, DebugHandler, TraceError},
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
-    operations::{AssemblyOp, Operation},
-    precompile,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
     program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
     serde,
 };
@@ -83,6 +79,12 @@ pub mod event {
     pub use crate::host::handlers::{
         EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
     };
+}
+
+pub mod operation {
+    pub use miden_core::operations::*;
+
+    pub use crate::errors::OperationError;
 }
 
 // TYPE ALIASES

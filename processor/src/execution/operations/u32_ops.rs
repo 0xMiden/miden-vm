@@ -5,7 +5,8 @@ use miden_core::{Felt, ZERO, field::PrimeField64};
 use paste::paste;
 
 use crate::{
-    ExecutionError, OperationError,
+    ExecutionError,
+    operation::OperationError,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
     utils::split_element,

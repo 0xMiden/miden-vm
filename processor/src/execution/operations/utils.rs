@@ -1,5 +1,6 @@
 use crate::{
-    ContextId, Felt, MemoryError, ONE, OperationError, PrimeField64, ZERO, trace::RowIndex,
+    ContextId, Felt, MemoryError, ONE, PrimeField64, ZERO, operation::OperationError,
+    trace::RowIndex,
 };
 
 /// Asserts that the given value is a binary value (0 or 1).

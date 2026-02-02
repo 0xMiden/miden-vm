@@ -1,7 +1,8 @@
 use miden_core::{Felt, ZERO, field::PrimeField64};
 
 use crate::{
-    ExecutionError, OperationError,
+    ExecutionError,
+    operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };

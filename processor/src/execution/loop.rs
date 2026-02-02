@@ -7,10 +7,11 @@ use miden_core::{
 };
 
 use crate::{
-    Host, OperationError, Stopper,
+    Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     fast::step::BreakReason,
+    operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };

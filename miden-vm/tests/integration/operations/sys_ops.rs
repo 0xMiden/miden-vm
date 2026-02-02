@@ -1,5 +1,9 @@
-use miden_core::{ZERO, events::EventName, mast};
-use miden_processor::{ExecutionError, OperationError, event::NoopEventHandler};
+use miden_processor::{
+    ExecutionError, ZERO,
+    event::{EventName, NoopEventHandler},
+    mast,
+    operation::OperationError,
+};
 use miden_utils_testing::{build_op_test, expect_exec_error_matches};
 
 // SYSTEM OPS ASSERTIONS - MANUAL TESTS

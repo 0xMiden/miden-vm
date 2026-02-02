@@ -6,7 +6,7 @@ use miden_core::{
 
 use super::utils::assert_binary;
 use crate::{
-    OperationError,
+    operation::OperationError,
     processor::{OperationHelperRegisters, Processor, StackInterface},
     tracer::Tracer,
 };

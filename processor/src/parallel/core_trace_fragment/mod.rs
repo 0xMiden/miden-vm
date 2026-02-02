@@ -34,6 +34,7 @@ use crate::{
         },
     },
     host::default::NoopHost,
+    operation::OperationError,
     parallel::CORE_TRACE_WIDTH,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     tracer::{NoopTracer, Tracer},
@@ -667,7 +668,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
         let _ = self.context.state.stack.start_context();
     }
 
-    fn restore_context(&mut self, _tracer: &mut impl Tracer) -> Result<(), crate::OperationError> {
+    fn restore_context(&mut self, _tracer: &mut impl Tracer) -> Result<(), OperationError> {
         let ctx_info = self.context.replay.block_stack.replay_execution_context();
         self.restore_context_from_replay(&ctx_info);
 
