@@ -12,8 +12,6 @@ use core::{
     ops::ControlFlow,
 };
 
-use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
-
 mod chiplets;
 mod continuation_stack;
 mod debug;
@@ -22,7 +20,6 @@ mod errors;
 mod execution;
 mod execution_options;
 mod host;
-mod operations;
 mod range;
 mod stack;
 mod system;
@@ -65,7 +62,7 @@ pub use host::{
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast,
     operations::{AssemblyOp, Operation},
-    precompile::{PrecompileRequest, PrecompileTranscriptState},
+    precompile,
     program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
     serde,
 };
@@ -132,16 +129,6 @@ impl core::ops::Add<u32> for MemoryAddress {
     fn add(self, rhs: u32) -> Self::Output {
         MemoryAddress(self.0 + rhs)
     }
-}
-
-pub struct RangeCheckTrace {
-    trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    aux_builder: range::AuxTraceBuilder,
-}
-
-pub struct ChipletsTrace {
-    trace: [Vec<Felt>; CHIPLETS_WIDTH],
-    aux_builder: chiplets::AuxTraceBuilder,
 }
 
 // EXECUTORS

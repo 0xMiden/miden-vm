@@ -50,6 +50,8 @@ mod basic_block;
 mod call_and_dyn;
 mod external;
 
+pub use basic_block::SystemEventError;
+
 #[cfg(test)]
 mod tests;
 

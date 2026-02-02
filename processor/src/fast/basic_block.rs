@@ -10,8 +10,11 @@ use crate::{
     Host,
     errors::{MapExecErr, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor},
-    operations::sys_ops::sys_event_handlers::handle_system_event,
 };
+
+mod sys_event_handlers;
+pub use sys_event_handlers::SystemEventError;
+use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
     // Executes any decorators which have not been executed during span ops execution; this can

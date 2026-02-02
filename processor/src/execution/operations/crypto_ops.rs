@@ -11,11 +11,10 @@ use miden_core::{
     mast::MastForest,
 };
 
-use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
+use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT, utils::validate_dual_word_stream_addrs};
 use crate::{
     ONE,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
-    operations::utils::validate_dual_word_stream_addrs,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
         Processor, StackInterface, SystemInterface,

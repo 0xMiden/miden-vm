@@ -7,7 +7,8 @@ use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     PublicInputs,
     trace::{
-        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        AuxTraceBuilder, CHIPLETS_WIDTH, DECODER_TRACE_OFFSET, MainTrace, RANGE_CHECK_TRACE_WIDTH,
+        STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -50,6 +51,16 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: StackAuxTraceBuilder,
     pub(crate) range: RangeCheckerAuxTraceBuilder,
     pub(crate) chiplets: ChipletsAuxTraceBuilder,
+}
+
+pub struct RangeCheckTrace {
+    pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
+    pub(crate) aux_builder: RangeCheckerAuxTraceBuilder,
+}
+
+pub struct ChipletsTrace {
+    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) aux_builder: ChipletsAuxTraceBuilder,
 }
 
 /// Execution trace which is generated when a program is executed on the VM.

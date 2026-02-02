@@ -4,7 +4,7 @@ use miden_core::utils::ToElements;
 use miden_utils_testing::rand::rand_array;
 
 use super::{Felt, RangeChecker, ZERO};
-use crate::{PrimeField64, RangeCheckTrace};
+use crate::{PrimeField64, trace::RangeCheckTrace};
 
 #[test]
 fn range_checks() {

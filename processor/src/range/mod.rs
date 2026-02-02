@@ -1,8 +1,9 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_air::trace::RowIndex;
-
-use super::{Felt, RangeCheckTrace, ZERO};
+use super::{
+    Felt, ZERO,
+    trace::{RangeCheckTrace, RowIndex},
+};
 use crate::utils::uninit_vector;
 
 mod aux_trace;

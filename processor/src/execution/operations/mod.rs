@@ -19,6 +19,7 @@ mod io_ops;
 mod stack_ops;
 mod sys_ops;
 mod u32_ops;
+mod utils;
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);

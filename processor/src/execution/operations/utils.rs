@@ -1,7 +1,17 @@
-use miden_air::trace::RowIndex;
+use crate::{
+    ContextId, Felt, MemoryError, ONE, OperationError, PrimeField64, ZERO, trace::RowIndex,
+};
 
-use super::Felt;
-use crate::{ContextId, MemoryError, ONE, PrimeField64, ZERO};
+/// Asserts that the given value is a binary value (0 or 1).
+#[inline(always)]
+pub fn assert_binary(value: Felt) -> Result<(), OperationError> {
+    if value != ZERO && value != ONE {
+        Err(OperationError::NotBinaryValue { value })
+    } else {
+        Ok(())
+    }
+}
+
 // Note: assert_binary now returns OperationError, imported via crate::OperationError in the
 // function
 
