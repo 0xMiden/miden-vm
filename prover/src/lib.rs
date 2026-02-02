@@ -19,11 +19,8 @@ mod proving_options;
 // ================================================================================================
 
 pub use miden_air::{DeserializationError, ProcessorAir, config};
-pub use miden_core::{ExecutionProof, HashFunction};
-pub use miden_crypto::{
-    stark,
-    stark::{Commitments, OpenedValues, Proof},
-};
+pub use miden_core::proof::{ExecutionProof, HashFunction};
+use miden_crypto::stark;
 pub use miden_processor::{
     ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
     crypto, math, utils,

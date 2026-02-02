@@ -70,6 +70,7 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true

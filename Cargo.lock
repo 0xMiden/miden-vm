@@ -1576,6 +1576,7 @@ dependencies = [
  "miden-assembly",
  "miden-core",
  "miden-core-lib",
+ "miden-crypto",
  "miden-debug-types",
  "miden-mast-package",
  "miden-processor",

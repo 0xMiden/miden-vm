@@ -62,11 +62,9 @@ pub mod chiplets;
 pub mod events;
 pub mod mast;
 pub mod precompile;
+pub mod proof;
 pub mod stack;
 pub mod utils;
-
-mod proof;
-pub use proof::{ExecutionProof, HashFunction, InvalidHashFunctionError};
 
 mod program;
 pub use program::{Program, ProgramInfo};
