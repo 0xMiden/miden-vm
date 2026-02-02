@@ -5,14 +5,13 @@
 
 use alloc::vec::Vec;
 
-use miden_air::{
+use miden_air::trace::{AUX_TRACE_WIDTH, TRACE_WIDTH};
+use miden_core::{
     Felt,
-    trace::{AUX_TRACE_WIDTH, TRACE_WIDTH},
+    field::ExtensionField,
+    utils::{ColMatrix, RowMajorMatrix},
 };
-use miden_core::utils::ColMatrix;
-use miden_crypto::field::ExtensionField;
 use miden_processor::ExecutionTrace;
-use p3_matrix::dense::RowMajorMatrix;
 use tracing::instrument;
 
 /// Converts the main trace from column-major (ExecutionTrace) to row-major (Plonky3) format.

@@ -1197,13 +1197,6 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
- "p3-blake3",
- "p3-commit",
- "p3-dft",
- "p3-keccak",
- "p3-matrix",
- "p3-merkle-tree",
- "p3-miden-fri",
  "proptest",
  "serde",
  "thiserror",
@@ -1308,9 +1301,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0f9d6d4097e130f91403c7fd17eecb7b7407185dda43f054225e419061b724d"
+checksum = "52c78dc212c81b0db403bbcce820c2b85d729f23014ce46ce061241d92aaee57"
 dependencies = [
  "blake3",
  "cc",
@@ -1327,11 +1320,18 @@ dependencies = [
  "num",
  "num-complex",
  "p3-air",
+ "p3-blake3",
  "p3-challenger",
+ "p3-commit",
+ "p3-dft",
  "p3-field",
  "p3-goldilocks",
+ "p3-keccak",
+ "p3-matrix",
  "p3-maybe-rayon",
+ "p3-merkle-tree",
  "p3-miden-air",
+ "p3-miden-fri",
  "p3-miden-prover",
  "p3-symmetric",
  "p3-util",
@@ -1350,9 +1350,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e77bfd277ee2e750a54b14eb7bb2223d01c6691e35e71263bdcbaa780bcfe28"
+checksum = "88b6e1051ce9c3708254c1896927cc821209328e3a9b8ab6e74f3946dbda015b"
 dependencies = [
  "quote",
  "syn 2.0.114",
@@ -1447,7 +1447,6 @@ dependencies = [
  "miden-test-utils",
  "miden-utils-diagnostics",
  "miden-utils-indexing",
- "p3-matrix",
  "paste",
  "pretty_assertions",
  "proptest",
@@ -1468,8 +1467,6 @@ dependencies = [
  "miden-crypto",
  "miden-debug-types",
  "miden-processor",
- "p3-matrix",
- "p3-merkle-tree",
  "serde",
  "tokio",
  "tracing",
@@ -1477,9 +1474,9 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.22.0"
+version = "0.22.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48aa9a1174ee4c4c07de99d56bb18732e8634fd4609cde8e9f01db2bd062481e"
+checksum = "84f1d177ac3992ae51f9dfdc0e7b24f17430a2c38f1bf19ac2d2b597e95eb600"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
@@ -3475,6 +3472,6 @@ checksum = "b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0"
 
 [[package]]
 name = "zmij"
-version = "1.0.18"
+version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1966f8ac2c1f76987d69a74d0e0f929241c10e78136434e3be70ff7f58f64214"
+checksum = "3ff05f8caa9038894637571ae6b9e29466c1f4f829d26c9b28f869a29cbe3445"

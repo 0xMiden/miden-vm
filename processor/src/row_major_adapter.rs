@@ -10,9 +10,8 @@ use miden_air::trace::MainTrace;
 use miden_core::{
     Felt,
     field::{ExtensionField, PrimeCharacteristicRing},
-    utils::ColMatrix,
+    utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 use tracing::instrument;
 
 use crate::trace::AuxTraceBuilders;

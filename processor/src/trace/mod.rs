@@ -16,9 +16,8 @@ use miden_core::{
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
     stack::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
-    utils::ColMatrix,
+    utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,

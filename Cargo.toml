@@ -90,19 +90,6 @@ thiserror       = { version = "2.0", default-features = false }
 tokio           = { version = "1.48", default-features = false }
 tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 
-# Upstream Plonky3 dependencies
-p3-blake3       = { version = "0.4.2", default-features = false }
-p3-commit       = { version = "0.4.2", default-features = false }
-p3-dft          = { version = "0.4.2", default-features = false }
-p3-keccak       = { version = "0.4.2", default-features = false }
-p3-matrix       = { version = "0.4.2", default-features = false }
-p3-merkle-tree  = { version = "0.4.2", default-features = false }
-
-# Miden-specific Plonky3 crates
-p3-miden-air    = { version = "0.4.2", default-features = false }
-p3-miden-fri    = { version = "0.4.2", default-features = false }
-p3-miden-prover = { version = "0.4.2", default-features = false }
-
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 

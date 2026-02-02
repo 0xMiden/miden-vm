@@ -15,6 +15,7 @@ use miden_core::{
     precompile::PrecompileTranscriptState,
     stack::{StackInputs, StackOutputs},
 };
+use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
 
 pub mod config;
 mod constraints;
@@ -176,9 +177,9 @@ where
 
     fn build_aux_trace(
         &self,
-        main: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
+    ) -> Option<RowMajorMatrix<Felt>> {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
         let builders = self.aux_builder.as_ref()?;
@@ -187,8 +188,6 @@ where
     }
 
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        use p3_matrix::Matrix;
-
         use crate::constraints;
 
         let main = builder.main();

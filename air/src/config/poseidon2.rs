@@ -8,12 +8,13 @@ use miden_crypto::{
     hash::poseidon2::{
         Poseidon2Challenger, Poseidon2Compression, Poseidon2Hasher, Poseidon2Permutation256,
     },
-    stark::StarkConfig,
+    stark::{
+        StarkConfig,
+        commit::{ExtensionMmcs, MerkleTreeMmcs},
+        dft::Radix2DitParallel,
+        pcs::{FriParameters, TwoAdicFriPcs},
+    },
 };
-use p3_commit::ExtensionMmcs;
-use p3_dft::Radix2DitParallel;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 
 use crate::Felt;
 
