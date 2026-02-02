@@ -21,9 +21,9 @@ use crate::{
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::trace_state::{
         AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextSystemInfo,
-        ExecutionReplay, HasherRequestReplay, HasherResponseReplay, KernelReplay,
-        MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
         RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
     },
     processor::{Processor, StackInterface, SystemInterface},
@@ -91,6 +91,7 @@ pub struct ExecutionTracer {
 
     pub block_stack: BlockStack,
     pub block_stack_replay: BlockStackReplay,
+    pub execution_context_replay: ExecutionContextReplay,
 
     pub hasher_chiplet_shim: HasherChipletShim,
     pub memory_reads: MemoryReadsReplay,
@@ -122,6 +123,7 @@ impl ExecutionTracer {
             overflow_replay: StackOverflowReplay::default(),
             block_stack: BlockStack::default(),
             block_stack_replay: BlockStackReplay::default(),
+            execution_context_replay: ExecutionContextReplay::default(),
             hasher_chiplet_shim: HasherChipletShim::default(),
             memory_reads: MemoryReadsReplay::default(),
             range_checker: RangeCheckerReplay::default(),
@@ -381,7 +383,7 @@ impl ExecutionTracer {
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
     fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
-        self.block_stack_replay.record_execution_context(ctx_info);
+        self.execution_context_replay.record_execution_context(ctx_info);
     }
 
     /// Records the current core trace state, if any.
@@ -401,6 +403,7 @@ impl ExecutionTracer {
             let external_replay = core::mem::take(&mut self.external);
             let stack_overflow_replay = core::mem::take(&mut self.overflow_replay);
             let block_stack_replay = core::mem::take(&mut self.block_stack_replay);
+            let execution_context_replay = core::mem::take(&mut self.execution_context_replay);
 
             let trace_state = CoreTraceFragmentContext {
                 state: snapshot.state,
@@ -412,6 +415,7 @@ impl ExecutionTracer {
                     mast_forest_resolution: external_replay,
                     stack_overflow: stack_overflow_replay,
                     block_stack: block_stack_replay,
+                    execution_context: execution_context_replay,
                 },
                 continuation: snapshot.continuation_stack,
                 initial_mast_forest: snapshot.initial_mast_forest,

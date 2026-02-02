@@ -306,7 +306,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 self.execute_mast_node(call_node.callee(), current_forest)?;
 
                 // Restore context state
-                let ctx_info = self.context.replay.block_stack.replay_execution_context();
+                let ctx_info = self.context.replay.execution_context.replay_execution_context();
                 self.restore_context_from_replay(&ctx_info);
 
                 // 2. Add "end CALL/SYSCALL" row
@@ -359,7 +359,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
                 // Restore context state for DYNCALL
                 if dyn_node.is_dyncall() {
-                    let ctx_info = self.context.replay.block_stack.replay_execution_context();
+                    let ctx_info = self.context.replay.execution_context.replay_execution_context();
                     self.restore_context_from_replay(&ctx_info);
                 }
 
@@ -670,7 +670,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
     }
 
     fn restore_context(&mut self, _tracer: &mut impl Tracer) -> Result<(), OperationError> {
-        let ctx_info = self.context.replay.block_stack.replay_execution_context();
+        let ctx_info = self.context.replay.execution_context.replay_execution_context();
         self.restore_context_from_replay(&ctx_info);
 
         Ok(())

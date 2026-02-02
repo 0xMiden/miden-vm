@@ -277,12 +277,35 @@ impl StackState {
 #[derive(Debug, Default)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
+    pub execution_context: ExecutionContextReplay,
     pub stack_overflow: StackOverflowReplay,
     pub memory_reads: MemoryReadsReplay,
     pub advice: AdviceReplay,
     pub hasher: HasherResponseReplay,
     pub block_address: BlockAddressReplay,
     pub mast_forest_resolution: MastForestResolutionReplay,
+}
+
+// EXECUTION CONTEXT REPLAY
+// ================================================================================================
+
+#[derive(Debug, Default)]
+pub struct ExecutionContextReplay {
+    /// Extra data needed to recover the state on an END operation specifically for
+    /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
+    execution_contexts: VecDeque<ExecutionContextSystemInfo>,
+}
+
+impl ExecutionContextReplay {
+    /// Records an execution context system info for a CALL/SYSCALL/DYNCALL operation.
+    pub fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
+        self.execution_contexts.push_back(ctx_info);
+    }
+
+    /// Replays the next recorded execution context system info.
+    pub fn replay_execution_context(&mut self) -> ExecutionContextSystemInfo {
+        self.execution_contexts.pop_front().expect("No execution context recorded")
+    }
 }
 
 // BLOCK STACK REPLAY
@@ -295,9 +318,6 @@ pub struct BlockStackReplay {
     node_start_parent_addr: VecDeque<Felt>,
     /// The data needed to recover the state on an END operation.
     node_end: VecDeque<NodeEndData>,
-    /// Extra data needed to recover the state on an END operation specifically for
-    /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
-    execution_contexts: VecDeque<ExecutionContextSystemInfo>,
 }
 
 impl BlockStackReplay {
@@ -306,7 +326,6 @@ impl BlockStackReplay {
         Self {
             node_start_parent_addr: VecDeque::new(),
             node_end: VecDeque::new(),
-            execution_contexts: VecDeque::new(),
         }
     }
 
@@ -333,11 +352,6 @@ impl BlockStackReplay {
         });
     }
 
-    /// Records an execution context system info for a CALL/SYSCALL/DYNCALL operation.
-    pub fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
-        self.execution_contexts.push_back(ctx_info);
-    }
-
     /// Replays the node's parent address
     pub fn replay_node_start_parent_addr(&mut self) -> Felt {
         self.node_start_parent_addr
@@ -348,11 +362,6 @@ impl BlockStackReplay {
     /// Replays the data needed to recover the state on an END operation.
     pub fn replay_node_end(&mut self) -> NodeEndData {
         self.node_end.pop_front().expect("No node address and flags recorded")
-    }
-
-    /// Replays the next recorded execution context system info.
-    pub fn replay_execution_context(&mut self) -> ExecutionContextSystemInfo {
-        self.execution_contexts.pop_front().expect("No execution context recorded")
     }
 }
 

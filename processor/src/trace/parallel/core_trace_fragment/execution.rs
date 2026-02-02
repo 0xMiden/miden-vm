@@ -107,7 +107,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
     #[inline(always)]
     pub(super) fn finish_call_node(&mut self, call_node: &CallNode) -> ControlFlow<()> {
         // Restore context
-        let ctx_info = self.context.replay.block_stack.replay_execution_context();
+        let ctx_info = self.context.replay.execution_context.replay_execution_context();
         self.restore_context_from_replay(&ctx_info);
 
         // write END row to trace
@@ -119,7 +119,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
     #[inline(always)]
     pub(super) fn finish_dyn_node(&mut self, dyn_node: &DynNode) -> ControlFlow<()> {
         if dyn_node.is_dyncall() {
-            let ctx_info = self.context.replay.block_stack.replay_execution_context();
+            let ctx_info = self.context.replay.execution_context.replay_execution_context();
             self.restore_context_from_replay(&ctx_info);
         }
 
