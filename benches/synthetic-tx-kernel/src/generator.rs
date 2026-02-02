@@ -81,15 +81,16 @@ impl MasmGenerator {
         let mut code = String::new();
 
         code.push_str(&format!("# Component Benchmark: {}\n", operation));
+        if operation == "falcon512_verify" {
+            code.push_str("use miden::core::crypto::dsa::falcon512poseidon2\n\n");
+        }
         code.push_str("begin\n");
         code.push_str(&format!("    repeat.{}\n", iterations));
 
         // Generate actual operations based on the operation type
         match operation {
             "falcon512_verify" => {
-                // Placeholder: push dummy values for falcon512 verification
-                code.push_str("        push.1 push.2 push.3 push.4\n");
-                code.push_str("        drop drop drop drop\n");
+                code.push_str("        exec.falcon512poseidon2::verify\n");
             }
             "hperm" => {
                 code.push_str("        hperm\n");
@@ -112,5 +113,83 @@ impl MasmGenerator {
         code.push_str("end\n");
 
         Ok(code)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::profile::{
+        InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile, VmProfile,
+    };
+    use miden_core_lib::CoreLibrary;
+    use miden_vm::Assembler;
+    use std::collections::BTreeMap;
+
+    fn test_generator() -> MasmGenerator {
+        let profile = VmProfile {
+            profile_version: "1.0.0".to_string(),
+            source: "test".to_string(),
+            timestamp: "2026-02-02T00:00:00Z".to_string(),
+            miden_vm_version: "0.1.0".to_string(),
+            transaction_kernel: TransactionKernelProfile {
+                total_cycles: 0,
+                phases: BTreeMap::from([(
+                    "prologue".to_string(),
+                    PhaseProfile {
+                        cycles: 0,
+                        operations: BTreeMap::new(),
+                    },
+                )]),
+                instruction_mix: InstructionMix {
+                    arithmetic: 0.2,
+                    hashing: 0.2,
+                    memory: 0.2,
+                    control_flow: 0.2,
+                    signature_verify: 0.2,
+                },
+                key_procedures: vec![ProcedureProfile {
+                    name: "auth_procedure".to_string(),
+                    cycles: 0,
+                    invocations: 0,
+                }],
+            },
+        };
+
+        MasmGenerator::new(profile)
+    }
+
+    #[test]
+    fn component_benchmarks_assemble() {
+        let generator = test_generator();
+        let operations = ["falcon512_verify", "hperm", "hmerge", "load_store"];
+
+        for operation in operations {
+            let source = generator
+                .generate_component_benchmark(operation, 1)
+                .expect("failed to generate benchmark");
+
+            let assembler = if operation == "falcon512_verify" {
+                Assembler::default()
+                    .with_dynamic_library(CoreLibrary::default())
+                    .expect("failed to load core library")
+            } else {
+                Assembler::default()
+            };
+
+            assembler
+                .assemble_program(&source)
+                .expect("failed to assemble benchmark");
+        }
+    }
+
+    #[test]
+    fn falcon512_component_benchmark_emits_verify() {
+        let generator = test_generator();
+        let source = generator
+            .generate_component_benchmark("falcon512_verify", 1)
+            .expect("failed to generate benchmark");
+
+        assert!(source.contains("exec.falcon512poseidon2::verify"));
     }
 }
