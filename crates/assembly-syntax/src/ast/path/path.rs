@@ -213,6 +213,19 @@ impl Path {
     pub fn to_path_buf(&self) -> PathBuf {
         PathBuf { inner: self.inner.to_string() }
     }
+
+    /// Convert an [Ident] to an equivalent [Path] or [PathBuf], depending on whether the identifier
+    /// would require quoting as a path.
+    pub fn from_ident(ident: &Ident) -> Cow<'_, Path> {
+        let ident = ident.as_str();
+        if Ident::requires_quoting(ident) {
+            let mut buf = PathBuf::with_capacity(ident.len() + 2);
+            buf.push_component(ident);
+            Cow::Owned(buf)
+        } else {
+            Cow::Borrowed(Path::new(ident))
+        }
+    }
 }
 
 /// Accesssors
@@ -386,6 +399,28 @@ impl Path {
         <Self as StartsWith<Prefix>>::starts_with_exactly(self, prefix)
     }
 
+    /// Strips `prefix` from `self`, or returns `None` if `self` does not start with `prefix`.
+    ///
+    /// NOTE: Prefixes must be exact, i.e. if you call `path.strip_prefix(prefix)` and `path` is
+    /// relative but `prefix` is absolute, then this will return `None`. The same is true if `path`
+    /// is absolute and `prefix` is relative.
+    pub fn strip_prefix<'a>(&'a self, prefix: &Self) -> Option<&'a Self> {
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => (),
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return None;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return None,
+            }
+        }
+        Some(components.as_path())
+    }
+
     /// Create an owned [PathBuf] with `path` adjoined to `self`.
     ///
     /// If `path` is absolute, it replaces the current path.
@@ -424,33 +459,58 @@ impl Path {
 
 impl StartsWith<str> for Path {
     fn starts_with(&self, prefix: &str) -> bool {
-        if prefix.is_empty() {
-            return true;
-        }
-        if prefix.starts_with("::") {
-            self.inner.starts_with(prefix)
-        } else {
-            match self.inner.strip_prefix("::") {
-                Some(rest) => rest.starts_with(prefix),
-                None => self.inner.starts_with(prefix),
-            }
-        }
+        let this = self.to_relative();
+        <Path as StartsWith<str>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &str) -> bool {
-        self.inner.starts_with(prefix)
+        match prefix {
+            "" => true,
+            "::" => self.is_absolute(),
+            prefix => {
+                let mut components = self.components();
+                let prefix = if let Some(prefix) = prefix.strip_prefix("::") {
+                    let is_absolute =
+                        components.next().is_some_and(|c| matches!(c, Ok(PathComponent::Root)));
+                    if !is_absolute {
+                        return false;
+                    }
+                    prefix
+                } else {
+                    prefix
+                };
+                components.next().is_some_and(
+                    |c| matches!(c, Ok(c @ PathComponent::Normal(_)) if c.as_str() == prefix),
+                )
+            },
+        }
     }
 }
 
 impl StartsWith<Path> for Path {
     fn starts_with(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with(self, prefix.as_str())
+        let this = self.to_relative();
+        let prefix = prefix.to_relative();
+        <Path as StartsWith<Path>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with_exactly(self, prefix.as_str())
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => continue,
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return false;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return false,
+            }
+        }
+        true
     }
 }
 

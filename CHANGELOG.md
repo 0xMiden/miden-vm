@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.20.6 (TBD)
+
+- Fixed issue with link-time symbol resolution that prevented referencing an imported item as locally-defined, e.g. an import like `use some::module::CONST` used via something like `emit.CONST` would fail to resolve correctly. [#2637](https://github.com/0xMiden/miden-vm/pull/2637)
+
 ## 0.20.5 (2026-02-02)
 
 - Fixed issue with deserialization of Paths due to lifetime restrictions [#2627](https://github.com/0xMiden/miden-vm/pull/2627)

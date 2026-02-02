@@ -4575,6 +4575,44 @@ fn test_cross_module_constant_resolution() -> TestResult {
 }
 
 #[test]
+fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            pub const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a::A_VAL
+            pub proc b_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+#[test]
 fn test_cross_module_quoted_identifier_resolution() -> TestResult {
     let context = TestContext::default();
 
@@ -4661,6 +4699,51 @@ fn test_kernel_linking_against_its_own_library() -> TestResult {
     assembler.compile_and_statically_link(lib)?;
 
     let _ = assembler.assemble_kernel(kernel)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
+    let context = TestContext::default();
+
+    // The name of this library is `lib::lib` on purpose
+    let lib = context.parse_module_with_path(
+        "lib::lib",
+        source_file!(
+            &context,
+            r#"
+        pub proc lib_proc
+            swap
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let lib = assembler.assemble_library([lib])?;
+
+    // This program triggers a pathological edge case in symbol resolution, caused by the
+    // import-relative reference `exec.lib::lib_proc`. This causes the following to occur:
+    //
+    // 1. We attempt to expand `lib` to an import, which succeeds, giving us a new relative path,
+    //    `lib::lib::lib_proc`.
+    // 2. Because imports can refer to other imported items, we attempt to resolve `lib` as an
+    //    import again, resulting in us expanding the path to `lib::lib::lib::lib::lib_proc`, and so
+    //    on until we blow the stack
+    //
+    // The fix for this is to disregard import expansions of the same import in the same module
+    // after the first time an import is expanded.
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.with_static_library(lib)?.assemble_program(
+        r#"
+        use lib::lib
+
+        begin
+            exec.lib::lib_proc
+        end
+        "#,
+    )?;
 
     Ok(())
 }
