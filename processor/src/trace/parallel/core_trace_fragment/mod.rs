@@ -35,7 +35,9 @@ use crate::{
     },
     host::default::NoopHost,
     operation::OperationError,
-    processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
+    processor::{
+        MemoryInterface, OperationHelperRegisters, Processor, StackInterface, SystemInterface,
+    },
     tracer::{NoopTracer, Tracer},
     utils::split_u32_into_u16,
 };
@@ -696,7 +698,7 @@ impl<'a> Processor for CoreTraceFragmentFiller<'a> {
             self.system().clock(),
             num_read,
             num_eval,
-            self,
+            self.memory_mut(),
             tracer,
         )?;
 
@@ -995,18 +997,18 @@ impl OperationHelperRegisters for TraceGenerationHelpers {
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
 /// `[CoreTraceFragmentGenerator]`.
-fn eval_circuit_parallel_(
+pub(crate) fn eval_circuit_parallel_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,
     num_vars: Felt,
     num_eval: Felt,
-    processor: &mut CoreTraceFragmentFiller,
+    memory: &mut impl MemoryInterface,
     tracer: &mut impl Tracer,
 ) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, processor.memory_mut(), tracer)
+    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, memory, tracer)
 }
 
 // BASIC BLOCK CONTEXT

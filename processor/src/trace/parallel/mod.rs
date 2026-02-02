@@ -47,6 +47,8 @@ pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STAC
 pub(crate) mod core_trace_fragment;
 use core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller};
 
+mod processor;
+
 use super::chiplets::Chiplets;
 
 #[cfg(test)]
