@@ -4,7 +4,7 @@ use alloc::vec;
 
 use miden_crypto::{
     field::BinomialExtensionField,
-    hash::keccak::{Keccak256Hash, KeccakF},
+    hash::keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
     stark::{
         StarkConfig,
         challenger::{HashChallenger, SerializingChallenger64},
@@ -14,9 +14,6 @@ use miden_crypto::{
         symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher},
     },
 };
-
-// Set to the same value as p3_keccak::VECTOR_LEN
-const VECTOR_LEN: usize = 2;
 
 use crate::Felt;
 

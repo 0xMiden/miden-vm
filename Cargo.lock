@@ -1301,9 +1301,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.22.1"
+version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c78dc212c81b0db403bbcce820c2b85d729f23014ce46ce061241d92aaee57"
+checksum = "8072201571ec2a69f6ed786929b6e6d185418cdde20cb1b224f6deafe0ca2724"
 dependencies = [
  "blake3",
  "cc",
@@ -1350,9 +1350,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.22.1"
+version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88b6e1051ce9c3708254c1896927cc821209328e3a9b8ab6e74f3946dbda015b"
+checksum = "d245d64fcb3d146afefab0e825a67d3de3eb49fca43cc7e4d94c897d5415a8f8"
 dependencies = [
  "quote",
  "syn 2.0.114",
@@ -1474,9 +1474,9 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.22.1"
+version = "0.22.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84f1d177ac3992ae51f9dfdc0e7b24f17430a2c38f1bf19ac2d2b597e95eb600"
+checksum = "0fc82405e71b675c810673239ce891ad19ddbd59a99df629e177e8561408dba0"
 dependencies = [
  "p3-field",
  "p3-goldilocks",
