@@ -49,8 +49,11 @@ For example:
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute_sync, DefaultHost, Program, StackInputs};
-use miden_processor::ExecutionOptions;
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -94,7 +97,11 @@ Here is a simple example of executing a program which pushes two numbers onto th
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, PrimeField64, ProvingOptions, Program, prove_sync, StackInputs};
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    Assembler, DefaultHost, PrimeField64, ProvingOptions, Program, prove_sync, StackInputs
+};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -174,7 +181,11 @@ Notice that except for the first 2 operations which initialize the stack, the se
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, PrimeField64, Program, ProvingOptions, StackInputs};
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    Assembler, DefaultHost, PrimeField64, Program, ProvingOptions, StackInputs
+};
 
 // set the number of terms to compute
 let n = 50;
