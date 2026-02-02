@@ -15,7 +15,7 @@ pub use miden_assembly_syntax::{
     Library, PathBuf,
     ast::{ProcedureName, QualifiedProcedureName},
 };
-pub use miden_core::{Program, Word, mast::MastForest};
+pub use miden_core::{Word, mast::MastForest, program::Program};
 
 pub use self::{
     artifact::MastArtifact,

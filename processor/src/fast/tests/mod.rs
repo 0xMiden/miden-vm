@@ -6,19 +6,20 @@ use alloc::{string::ToString, sync::Arc, vec};
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    ONE, Operation, assert_matches,
+    ONE, assert_matches,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
     },
-    stack::StackInputs,
+    operations::Operation,
+    program::StackInputs,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, OperationError};
+use crate::{AdviceInputs, DefaultHost, operation::OperationError};
 
 mod advice_provider;
 mod all_ops;
@@ -134,14 +135,12 @@ fn test_syscall_fail() {
 /// number of allowed cycles.
 #[test]
 fn test_cycle_limit_exceeded() {
-    use crate::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions};
-
     let mut host = DefaultHost::default();
 
     let options = ExecutionOptions::new(
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
-        DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
         false,
     )
@@ -421,7 +420,10 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);

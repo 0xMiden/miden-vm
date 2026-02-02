@@ -11,8 +11,9 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, OPCODE_DYNCALL, ZERO,
+    FMP_ADDR, FMP_INIT_VALUE, Felt, ONE, ZERO,
     field::{ExtensionField, PrimeCharacteristicRing},
+    operations::OPCODE_DYNCALL,
 };
 
 use crate::{

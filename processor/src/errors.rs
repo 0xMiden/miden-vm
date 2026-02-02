@@ -4,16 +4,20 @@
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    EventId, EventName, Felt, Word,
+    Felt, Word,
+    events::{EventId, EventName},
     field::QuadFelt,
     mast::{MastForest, MastNodeId},
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
     utils::to_hex,
 };
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{AdviceError, DebugError, EventError, Host, MemoryError, TraceError};
+use crate::{
+    DebugError, Host, MemoryError, TraceError, advice::AdviceError, event::EventError,
+    fast::SystemEventError,
+};
 
 // EXECUTION ERROR
 // ================================================================================================
@@ -543,9 +547,7 @@ impl<T> MapExecErrWithOpIdx<T> for Result<T, MemoryError> {
 }
 
 // SystemEventError implementations
-impl<T> MapExecErr<T>
-    for Result<T, crate::operations::sys_ops::sys_event_handlers::SystemEventError>
-{
+impl<T> MapExecErr<T> for Result<T, SystemEventError> {
     #[inline(always)]
     fn map_exec_err(
         self,
@@ -553,7 +555,6 @@ impl<T> MapExecErr<T>
         node_id: MastNodeId,
         host: &impl Host,
     ) -> Result<T, ExecutionError> {
-        use crate::operations::sys_ops::sys_event_handlers::SystemEventError;
         match self {
             Ok(v) => Ok(v),
             Err(err) => {

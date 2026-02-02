@@ -200,11 +200,13 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::{ExecutionProof, HashFunction};
+    use miden_core::proof::{ExecutionProof, HashFunction};
+    use miden_crypto::stark;
     use miden_processor::{
-        AdviceInputs, ExecutionOptions, StackInputs, fast::FastProcessor, parallel::build_trace,
+        ExecutionOptions, StackInputs, advice::AdviceInputs, fast::FastProcessor,
+        parallel::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major, stark};
+    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 

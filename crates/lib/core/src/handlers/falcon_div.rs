@@ -5,8 +5,8 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, ZERO, field::PrimeField64};
-use miden_processor::{AdviceMutation, EventError, ProcessorState};
+use miden_core::{ZERO, events::EventName, field::PrimeField64};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::u64_to_u32_elements;
 

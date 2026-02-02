@@ -13,26 +13,24 @@ use miden_core::{
         SplitNode,
     },
     precompile::PrecompileTranscript,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{
     chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
-    fast::{
-        FastProcessor,
-        trace_state::{
-            AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
-            CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
-            HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay,
-            StackOverflowReplay, StackState, SystemState,
-        },
-        tracer::Tracer,
+    fast::trace_state::{
+        AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
+        CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
+        HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
+        MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay, StackOverflowReplay,
+        StackState, SystemState,
     },
+    processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
     system::ContextId,
+    tracer::Tracer,
     utils::split_u32_into_u16,
 };
 
@@ -221,10 +219,10 @@ impl ExecutionTracer {
         };
     }
 
-    fn record_control_node_start(
+    fn record_control_node_start<P: Processor>(
         &mut self,
         node: &MastNode,
-        processor: &FastProcessor,
+        processor: &P,
         current_forest: &MastForest,
     ) {
         let (ctx_info, block_type) = match node {
@@ -278,7 +276,7 @@ impl ExecutionTracer {
                 );
 
                 let loop_entered = {
-                    let condition = processor.stack_get(0);
+                    let condition = processor.stack().get(0);
                     condition == ONE
                 };
 
@@ -300,9 +298,9 @@ impl ExecutionTracer {
                 let exec_ctx = {
                     let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
                     ExecutionContextInfo::new(
-                        processor.ctx,
-                        processor.caller_hash,
-                        processor.stack_depth(),
+                        processor.system().ctx(),
+                        processor.system().caller_hash(),
+                        processor.stack().depth(),
                         overflow_addr,
                     )
                 };
@@ -333,10 +331,10 @@ impl ExecutionTracer {
                         // records the stack depth after the drop as the beginning of
                         // the new context. For more information, look at the docs for how the
                         // constraints are designed; it's a bit tricky but it works.
-                        let stack_depth_after_drop = processor.stack_depth() - 1;
+                        let stack_depth_after_drop = processor.stack().depth() - 1;
                         ExecutionContextInfo::new(
-                            processor.ctx,
-                            processor.caller_hash,
+                            processor.system().ctx(),
+                            processor.system().caller_hash(),
                             stack_depth_after_drop,
                             overflow_addr,
                         )
@@ -426,19 +424,20 @@ impl ExecutionTracer {
 impl Tracer for ExecutionTracer {
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
-    fn start_clock_cycle(
+    fn start_clock_cycle<P: Processor>(
         &mut self,
-        processor: &FastProcessor,
+        processor: &P,
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state
-        if processor.clk.as_usize().is_multiple_of(self.fragment_size) {
+        if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
                 SystemState::from_processor(processor),
                 processor
-                    .stack_top()
+                    .stack()
+                    .top()
                     .try_into()
                     .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
                 continuation_stack.clone(),
@@ -483,7 +482,7 @@ impl Tracer for ExecutionTracer {
                 self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
             Continuation::FinishLoop { node_id: _, was_entered }
-                if was_entered && processor.stack_get(0) == ONE =>
+                if was_entered && processor.stack().get(0) == ONE =>
             {
                 // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
             },
@@ -622,13 +621,13 @@ impl Tracer for ExecutionTracer {
         self.ace.record_circuit_evaluation(clk, circuit_eval);
     }
 
-    fn increment_clk(&mut self) {
+    fn finalize_clock_cycle(&mut self) {
         // do nothing
     }
 
-    fn increment_stack_size(&mut self, processor: &FastProcessor) {
-        let new_overflow_value = processor.stack_get(15);
-        self.overflow_table.push(new_overflow_value, processor.clk);
+    fn increment_stack_size<P: Processor>(&mut self, processor: &P) {
+        let new_overflow_value = processor.stack().get(15);
+        self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 
     fn decrement_stack_size(&mut self) {

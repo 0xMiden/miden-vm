@@ -5,7 +5,7 @@ use crate::ast::{ImmU8, ImmU16, ImmU32};
 // DEBUG OPTIONS
 // ================================================================================================
 
-/// A proxy for [miden_core::DebugOptions], but with [super::Immediate] values.
+/// A proxy for [miden_core::operations::DebugOptions], but with [super::Immediate] values.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DebugOptions {
     StackAll,

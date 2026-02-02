@@ -22,7 +22,8 @@ use crate::{
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },
-    fast::{Memory, NoopTracer, eval_circuit_fast_},
+    fast::{Memory, eval_circuit_fast_},
+    tracer::NoopTracer,
 };
 
 mod circuit;

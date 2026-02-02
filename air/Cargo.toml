@@ -32,17 +32,6 @@ miden-utils-indexing.workspace = true
 # External dependencies
 thiserror.workspace = true
 tracing.workspace = true
-
-# Plonky3 dependencies
-p3-blake3.workspace = true
-p3-commit.workspace = true
-p3-dft.workspace = true
-p3-miden-fri.workspace = true
-p3-keccak.workspace = true
-p3-matrix.workspace = true
-p3-merkle-tree.workspace = true
-
-# Serialization
 serde.workspace = true
 
 [dev-dependencies]

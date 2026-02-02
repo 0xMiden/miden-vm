@@ -306,14 +306,14 @@ fn generate_mast_forest_contributor_impl(
             fn fingerprint_for_node(
                 &self,
                 forest: &crate::mast::MastForest,
-                hash_by_node_id: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeFingerprint>,
+                hash_by_node_id: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeFingerprint>,
             ) -> Result<crate::mast::MastNodeFingerprint, crate::mast::MastForestError> {
                 match self {
                     #(#enum_name::#variant_names(field) => field.fingerprint_for_node(forest, hash_by_node_id)),*
                 }
             }
 
-            fn remap_children(self, remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>) -> Self {
+            fn remap_children(self, remapping: &impl crate::utils::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>) -> Self {
                 match self {
                     #(#enum_name::#variant_names(field) => #enum_name::#variant_names(field.remap_children(remapping))),*
                 }

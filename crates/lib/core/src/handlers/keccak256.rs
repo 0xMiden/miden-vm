@@ -27,13 +27,18 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, Word, ZERO,
+    Felt, Word, ZERO,
+    crypto::hash::{Keccak256, Poseidon2},
+    events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::{keccak::Keccak256, poseidon2::Poseidon2};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 

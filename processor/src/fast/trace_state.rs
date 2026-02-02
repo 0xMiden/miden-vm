@@ -9,16 +9,18 @@ use miden_core::{
     crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{
-    AdviceError, ContextId,
+    ContextId,
+    advice::AdviceError,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     errors::OperationError,
-    fast::FastProcessor,
-    processor::{AdviceProviderInterface, HasherInterface, MemoryInterface},
+    processor::{
+        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
+    },
 };
 
 // TRACE FRAGMENT CONTEXT
@@ -89,13 +91,13 @@ pub struct SystemState {
 }
 
 impl SystemState {
-    /// Convenience constructor that creates a new `SystemState` from a `FastProcessor`.
-    pub fn from_processor(processor: &FastProcessor) -> Self {
+    /// Convenience constructor that creates a new `SystemState` from a `Processor`.
+    pub fn from_processor<P: Processor>(processor: &P) -> Self {
         Self {
-            clk: processor.clk,
-            ctx: processor.ctx,
-            fn_hash: processor.caller_hash,
-            pc_transcript_state: processor.pc_transcript.state(),
+            clk: processor.system().clock(),
+            ctx: processor.system().ctx(),
+            fn_hash: processor.system().caller_hash(),
+            pc_transcript_state: processor.precompile_transcript_state(),
         }
     }
 }

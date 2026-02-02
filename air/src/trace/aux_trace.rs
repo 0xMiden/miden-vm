@@ -3,6 +3,8 @@
 //! This trait allows ProcessorAir to build auxiliary traces without depending
 //! on the processor crate, avoiding circular dependencies.
 
+use miden_core::utils::RowMajorMatrix;
+
 use crate::Felt;
 
 /// Trait for building auxiliary traces from main trace and challenges.
@@ -28,9 +30,9 @@ pub trait AuxTraceBuilder<EF>: Send + Sync {
     /// returns the auxiliary trace also in row-major format.
     fn build_aux_columns(
         &self,
-        main_trace: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        main_trace: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> p3_matrix::dense::RowMajorMatrix<Felt>;
+    ) -> RowMajorMatrix<Felt>;
 }
 
 /// Dummy implementation for () to support ProcessorAir without aux trace builders (e.g., in
@@ -39,9 +41,9 @@ pub trait AuxTraceBuilder<EF>: Send + Sync {
 impl<EF> AuxTraceBuilder<EF> for () {
     fn build_aux_columns(
         &self,
-        _main_trace: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        _main_trace: &RowMajorMatrix<Felt>,
         _challenges: &[EF],
-    ) -> p3_matrix::dense::RowMajorMatrix<Felt> {
+    ) -> RowMajorMatrix<Felt> {
         panic!("No aux trace builder configured - this should never be called")
     }
 }

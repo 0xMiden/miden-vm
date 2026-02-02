@@ -14,11 +14,12 @@ use miden_air::trace::{
     stack::{B0_COL_IDX, B1_COL_IDX, H0_COL_IDX, STACK_TOP_OFFSET, STACK_TOP_RANGE},
 };
 use miden_core::{
-    Felt, ONE, Operation, Word, ZERO,
+    Felt, ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },
+    operations::Operation,
 };
 
 use super::CoreTraceFragmentFiller;

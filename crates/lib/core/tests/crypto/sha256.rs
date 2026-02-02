@@ -1,8 +1,9 @@
+use miden_air::Serializable;
+use miden_crypto::hash::sha2::Sha256;
 use miden_utils_testing::{
     Felt, IntoBytes, group_slice_elements, push_inputs,
     rand::{rand_array, rand_value, rand_vector},
 };
-use sha2::{Digest, Sha256};
 
 #[test]
 fn sha256_hash_bytes() {
@@ -60,10 +61,7 @@ fn sha256_hash_bytes() {
         inputs = push_inputs(&ifelts)
     );
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
@@ -94,10 +92,7 @@ fn sha256_2_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
@@ -121,10 +116,7 @@ fn sha256_1_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)

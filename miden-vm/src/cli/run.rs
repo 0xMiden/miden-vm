@@ -4,7 +4,8 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, ExecutionTrace, fast::FastProcessor, parallel::build_trace,
+    DefaultHost, ExecutionOptions, fast::FastProcessor, parallel::build_trace,
+    trace::ExecutionTrace,
 };
 use miden_vm::internal::InputFile;
 use tracing::instrument;
@@ -142,11 +143,10 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let processor = FastProcessor::builder(stack_inputs)
+    let processor = FastProcessor::new(stack_inputs)
         .with_advice(advice_inputs)
         .with_debugging(!params.release)
-        .with_tracing(!params.release)
-        .build();
+        .with_tracing(!params.release);
 
     let (execution_output, trace_generation_context) = processor
         .execute_for_trace_sync(&program, &mut host)
@@ -208,11 +208,10 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
 
     let program_hash: [u8; 32] = program.hash().into();
 
-    let processor = FastProcessor::builder(stack_inputs)
+    let processor = FastProcessor::new(stack_inputs)
         .with_advice(advice_inputs)
         .with_debugging(!params.release)
-        .with_tracing(!params.release)
-        .build();
+        .with_tracing(!params.release);
 
     let (execution_output, trace_generation_context) = processor
         .execute_for_trace_sync(&program, &mut host)

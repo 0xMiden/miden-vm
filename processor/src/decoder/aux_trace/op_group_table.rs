@@ -3,8 +3,8 @@ use miden_air::trace::{
     decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
 use miden_core::{
-    OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN,
     field::{ExtensionField, PrimeCharacteristicRing},
+    operations::{OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN},
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};

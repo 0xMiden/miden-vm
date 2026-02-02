@@ -2,8 +2,8 @@ use alloc::vec::Vec;
 
 use miden_air::trace::{MainTrace, RowIndex};
 use miden_core::{
-    OPCODE_DYNCALL,
     field::{ExtensionField, PrimeCharacteristicRing},
+    operations::OPCODE_DYNCALL,
 };
 
 use super::Felt;

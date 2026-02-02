@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{AdviceInputs, ExecutionOptions, fast::FastProcessor, parallel};
+use miden_processor::{ExecutionOptions, advice::AdviceInputs, fast::FastProcessor, parallel};
 use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;

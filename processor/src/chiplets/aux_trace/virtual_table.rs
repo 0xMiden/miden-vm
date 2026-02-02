@@ -4,8 +4,9 @@ use miden_air::trace::{
     log_precompile::{HELPER_CAP_PREV_RANGE, STACK_CAP_NEXT_RANGE},
 };
 use miden_core::{
-    Felt, OPCODE_LOGPRECOMPILE,
+    Felt,
     field::{ExtensionField, PrimeCharacteristicRing},
+    operations::OPCODE_LOGPRECOMPILE,
     precompile::PrecompileTranscriptState,
 };
 

@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_crypto::hash::blake::{Blake3_256, Blake3Digest};
-
 use crate::{
-    LookupByIdx, Word,
+    Word,
+    crypto::hash::{Blake3_256, Blake3Digest},
     mast::{DecoratorId, MastForest, MastForestError, MastNodeId},
+    utils::LookupByIdx,
 };
 
 // MAST NODE EQUALITY

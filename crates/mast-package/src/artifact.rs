@@ -1,7 +1,7 @@
 use alloc::sync::Arc;
 
 use miden_assembly_syntax::Library;
-use miden_core::{Program, Word, mast::MastForest};
+use miden_core::{Word, mast::MastForest, program::Program};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

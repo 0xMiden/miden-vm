@@ -4,13 +4,15 @@ use miden_crypto::{WORD_SIZE, field::PrimeCharacteristicRing, rand::test_utils::
 use proptest::prelude::*;
 
 use crate::{
-    AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, ProgramInfo, Word,
+    Felt, Word,
     chiplets::hasher,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNode, DynNodeBuilder, JoinNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, SplitNodeBuilder,
     },
-    utils::{Deserializable, Serializable},
+    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
+    program::{Kernel, ProgramInfo},
+    serde::{Deserializable, Serializable},
 };
 
 #[test]
@@ -1108,8 +1110,6 @@ fn test_compaction_independent() {
 
 #[test]
 fn test_commitment_caching() {
-    use crate::Operation;
-
     let mut forest = MastForest::new();
 
     // Create some nodes
@@ -1181,7 +1181,7 @@ fn digest_from_seed(seed: [u8; 32]) -> Word {
 
 #[test]
 fn test_asm_op_id_basic() {
-    use crate::{Idx, mast::AsmOpId};
+    use crate::{mast::AsmOpId, utils::Idx};
 
     let id = AsmOpId::new(42);
     assert_eq!(id.to_usize(), 42);

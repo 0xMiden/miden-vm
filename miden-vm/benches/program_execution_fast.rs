@@ -1,6 +1,6 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{AdviceInputs, fast::FastProcessor};
+use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -56,9 +56,8 @@ fn program_execution_fast(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::builder(stack_inputs)
-                                .with_advice(advice_inputs.clone())
-                                .build();
+                            let processor =
+                                FastProcessor::new(stack_inputs).with_advice(advice_inputs.clone());
 
                             (host, program.clone(), processor)
                         },

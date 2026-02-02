@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Decorator, Felt, Operation,
+    Felt,
     field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
-    stack::StackInputs,
+    operations::{Decorator, Operation},
+    program::StackInputs,
 };
 
 use crate::{
@@ -52,7 +53,10 @@ fn test_before_enter_decorator_executed_once_fast() {
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -79,7 +83,10 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
         create_test_program(&before_enter_decorators, &[after_exit_decorator], &operations);
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -122,7 +129,10 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
         create_test_program(&[before_enter_decorator], &after_exit_decorators, &operations);
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -171,7 +181,10 @@ fn test_decorator_execution_order_fast() {
         create_test_program(&before_enter_decorators, &after_exit_decorators, &operations);
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -218,7 +231,10 @@ fn test_processor_decorator_execution() {
         create_test_program(&[before_enter_decorator], &[after_exit_decorator], &operations);
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     let execution_result = processor.execute_sync(&program, &mut host);
     assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
@@ -258,7 +274,10 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
     );
 
     let mut host = TestConsistencyHost::new();
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     // Execute the program
     let result = processor.execute_sync(&program, &mut host);
@@ -335,7 +354,10 @@ fn test_decorator_bypass_in_release_mode() {
 fn test_decorator_bypass_in_debug_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestConsistencyHost::new();
 

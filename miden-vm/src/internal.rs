@@ -13,8 +13,9 @@ use serde::Deserialize;
 pub use tracing::{Level, event, instrument};
 
 use crate::{
-    AdviceInputs, StackInputs, Word, ZERO,
-    crypto::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
+    StackInputs, Word, ZERO,
+    advice::AdviceInputs,
+    crypto::merkle::{MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree, SimpleSmt},
 };
 
 // CONSTANTS

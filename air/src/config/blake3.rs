@@ -10,17 +10,16 @@ use alloc::vec;
 
 use miden_crypto::{
     field::BinomialExtensionField,
+    hash::blake::Blake3Hasher,
     stark::{
         StarkConfig,
         challenger::{HashChallenger, SerializingChallenger64},
+        commit::{ExtensionMmcs, MerkleTreeMmcs},
+        dft::Radix2DitParallel,
+        pcs::{FriParameters, TwoAdicFriPcs},
         symmetric::{CompressionFunctionFromHasher, SerializingHasher},
     },
 };
-use p3_blake3::Blake3;
-use p3_commit::ExtensionMmcs;
-use p3_dft::Radix2DitParallel;
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 
 use crate::Felt;
 
@@ -28,7 +27,7 @@ use crate::Felt;
 pub type Challenge = BinomialExtensionField<Felt, 2>;
 
 /// Blake3 hasher
-type H = Blake3;
+type H = Blake3Hasher;
 
 /// Field element serializing hasher using Blake3
 type FieldHash = SerializingHasher<H>;

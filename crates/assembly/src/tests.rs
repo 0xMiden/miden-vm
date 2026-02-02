@@ -7,16 +7,19 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    EventId, Felt, Operation, Program, StackInputs, Word, assert_matches,
+    Felt, Word, assert_matches,
+    events::EventId,
     field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
-    utils::{Deserializable, Serializable},
+    operations::Operation,
+    program::{Program, StackInputs},
+    serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
 };
 #[cfg(test)]
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
+use miden_processor::{DefaultHost, ExecutionOptions, advice::AdviceInputs};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},

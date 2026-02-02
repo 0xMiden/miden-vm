@@ -1,7 +1,7 @@
 // Allow deprecated methods in tests as we're testing both old and new APIs
 #![allow(deprecated)]
 
-use alloc::{string::ToString, sync::Arc};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, PathBuf,
@@ -9,10 +9,8 @@ use miden_assembly::{
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
-    AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    stack::StackInputs,
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
@@ -21,8 +19,13 @@ use miden_utils_testing::{
 };
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
-use super::*;
-use crate::fast::FastProcessor;
+use crate::{
+    DefaultHost, Kernel, ONE, Program, StackInputs, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap},
+    fast::FastProcessor,
+    field::PrimeField64,
+    operation::Operation,
+};
 
 mod debug;
 mod debug_mode_decorator_tests;
@@ -746,7 +749,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -804,7 +810,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -865,7 +874,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1089,7 +1101,10 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,

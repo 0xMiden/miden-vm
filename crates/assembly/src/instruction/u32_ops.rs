@@ -4,11 +4,10 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
-    Felt,
-    Operation::{self, *},
-    ZERO,
+    Felt, ZERO,
+    events::SystemEvent,
     field::PrimeCharacteristicRing,
-    sys_events::SystemEvent,
+    operations::Operation::{self, *},
 };
 
 use super::{field_ops::append_pow2_op, push_u32_value};

@@ -41,7 +41,6 @@ miden-utils-indexing.workspace = true
 
 # External dependencies
 itertools.workspace = true
-p3-matrix.workspace = true
 paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true

@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use miden_utils_diagnostics::{Diagnostic, miette};
 
-use crate::{Felt, Word, crypto::MerkleError};
+use crate::{Felt, Word, crypto::merkle::MerkleError};
 
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum AdviceError {

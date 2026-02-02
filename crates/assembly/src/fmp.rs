@@ -1,7 +1,8 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE, Felt, Operation, WORD_SIZE, field::PrimeCharacteristicRing,
+    FMP_ADDR, FMP_INIT_VALUE, Felt, WORD_SIZE, field::PrimeCharacteristicRing,
+    operations::Operation,
 };
 
 use crate::push_value_ops;

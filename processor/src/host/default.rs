@@ -1,12 +1,21 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
+use miden_core::{
+    Word,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
+};
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
+use super::{
+    FutureMaybeSend,
+    debug::DefaultDebugHandler,
+    handlers::{EventError, EventHandler, EventHandlerRegistry},
+};
 use crate::{
-    AdviceMutation, DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    Host, MastForestStore, MemMastForestStore, ProcessorState, TraceError,
-    host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
+    DebugError, DebugHandler, ExecutionError, Host, MastForestStore, MemMastForestStore,
+    ProcessorState, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION

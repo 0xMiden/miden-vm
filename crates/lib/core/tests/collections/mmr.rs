@@ -1,5 +1,5 @@
 use miden_core::WORD_SIZE;
-use miden_processor::AdviceStackBuilder;
+use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
     EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
     crypto::{

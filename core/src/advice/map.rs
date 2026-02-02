@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, Word,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // ADVICE MAP

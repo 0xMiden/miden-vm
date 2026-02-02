@@ -1,12 +1,21 @@
 use std::{sync::Arc, vec};
 
 use miden_air::Felt;
-use miden_assembly::{Assembler, utils::Serializable};
-use miden_core::{EventName, ZERO, field::PrimeField64};
+use miden_assembly::Assembler;
+use miden_core::{
+    ZERO,
+    events::EventName,
+    field::PrimeField64,
+    proof::HashFunction,
+    serde::{Deserializable, Serializable},
+};
 use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, ExecutionError, OperationError,
-    ProcessorState, Program, ProgramInfo, StackInputs, crypto::RpoRandomCoin,
+    DefaultHost, ExecutionError, ProcessorState, Program, ProgramInfo, StackInputs,
+    advice::{AdviceInputs, AdviceMutation},
+    crypto::random::RpoRandomCoin,
+    event::EventError,
+    operation::OperationError,
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{
@@ -63,8 +72,6 @@ const EVENT_FALCON_SIG_TO_STACK: EventName = EventName::new("test::falcon::sig_t
 ///
 /// The advice provider is expected to contain the private key associated to the public key PK.
 pub fn push_falcon_signature(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
-    use miden_core::utils::Deserializable;
-
     let pub_key = process.get_stack_word(1);
     let msg = process.get_stack_word(5);
 
@@ -356,7 +363,7 @@ fn falcon_prove_verify() {
     host.register_handler(EVENT_FALCON_SIG_TO_STACK, Arc::new(push_falcon_signature))
         .unwrap();
 
-    let options = ProvingOptions::with_96_bit_security(miden_core::HashFunction::Blake3_256);
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
     let (stack_outputs, proof) =
         prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
             .expect("failed to generate proof");
@@ -457,7 +464,7 @@ fn generate_data_probabilistic_product_test(
     builder.push_element(challenge.1);
     builder.push_element(challenge.0);
     builder.push_elements(polynomials.iter().copied());
-    let advice_stack = builder.into_u64_vec();
+    let advice_stack = builder.build_vec_u64();
 
     // compute hash of h and place it on the stack.
     let h_hash = Poseidon2::hash_elements(&to_elements(h.clone()));

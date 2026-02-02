@@ -11,20 +11,23 @@ use alloc::{vec, vec::Vec};
 use core::convert::TryInto;
 
 use miden_core::{
-    EventName, Felt,
+    Felt,
+    events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        bytes_to_packed_u32_elements,
-    },
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::{
     ZERO,
     dsa::eddsa_25519_sha512::{PublicKey, Signature},
     hash::poseidon2::Poseidon2,
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 
 use crate::handlers::{MemoryReadError, read_memory_packed_u32};
 

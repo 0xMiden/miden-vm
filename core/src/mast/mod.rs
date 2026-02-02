@@ -38,8 +38,6 @@ use core::{
     ops::{Index, IndexMut},
 };
 
-use miden_crypto::field::PrimeField64;
-pub use miden_utils_indexing::{IndexVec, IndexedVecError};
 use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -56,11 +54,15 @@ pub use node::{
 };
 
 use crate::{
-    AdviceMap, AssemblyOp, Decorator, Felt, Idx, LexicographicWord, Word,
-    utils::{
+    Felt, LexicographicWord, Word,
+    advice::AdviceMap,
+    field::PrimeField64,
+    operations::{AssemblyOp, Decorator},
+    serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
-        SliceReader, hash_string_to_word,
+        SliceReader,
     },
+    utils::{Idx, IndexVec, hash_string_to_word},
 };
 
 mod debuginfo;
@@ -92,8 +94,8 @@ mod tests;
 
 /// Represents one or more procedures, represented as a collection of [`MastNode`]s.
 ///
-/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
-/// can be built from a [`MastForest`] to specify an entrypoint.
+/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
+/// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
 #[derive(Clone, Debug, Default)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
@@ -482,7 +484,7 @@ impl MastForest {
     /// # Example
     ///
     /// ```
-    /// use miden_core::{mast::MastForest, utils::Serializable};
+    /// use miden_core::{mast::MastForest, serde::Serializable};
     ///
     /// let forest = MastForest::new();
     ///
@@ -1227,7 +1229,7 @@ impl serde::Serialize for MastForest {
         S: serde::Serializer,
     {
         // Use the existing miden-crypto serialization which already handles linked decorators
-        let bytes = crate::utils::Serializable::to_bytes(self);
+        let bytes = Serializable::to_bytes(self);
         serializer.serialize_bytes(&bytes)
     }
 }
@@ -1240,8 +1242,8 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     {
         // Deserialize bytes, then use miden-crypto Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = miden_crypto::utils::SliceReader::new(&bytes);
-        crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+        let mut slice_reader = SliceReader::new(&bytes);
+        Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
     }
 }
 

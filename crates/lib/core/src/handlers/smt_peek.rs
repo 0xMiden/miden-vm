@@ -7,10 +7,11 @@
 use alloc::{format, string::String, vec, vec::Vec};
 
 use miden_core::{
-    EventName, Felt, WORD_SIZE, Word,
+    Felt, WORD_SIZE, Word,
     crypto::merkle::{EmptySubtreeRoots, SMT_DEPTH, Smt},
+    events::EventName,
 };
-use miden_processor::{AdviceMutation, EventError, ProcessorState};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 /// Event name for the smt_peek operation.
 pub const SMT_PEEK_EVENT_NAME: EventName =

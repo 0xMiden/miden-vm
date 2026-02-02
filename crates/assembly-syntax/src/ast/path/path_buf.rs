@@ -5,7 +5,7 @@ use core::{
     str::{self, FromStr},
 };
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 

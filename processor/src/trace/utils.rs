@@ -4,7 +4,7 @@ use core::slice;
 use miden_air::trace::{MainTrace, RowIndex};
 use miden_core::field::ExtensionField;
 #[cfg(test)]
-use miden_core::{Operation, utils::ToElements};
+use miden_core::{operations::Operation, utils::ToElements};
 
 use crate::{Felt, chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
 
@@ -218,7 +218,7 @@ impl ChipletsLengths {
 
 /// Defines a builder responsible for building a single column in an auxiliary segment of the
 /// execution trace.
-pub trait AuxColumnBuilder<E: ExtensionField<Felt>> {
+pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 

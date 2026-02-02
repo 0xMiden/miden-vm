@@ -1,13 +1,13 @@
 #![allow(deprecated)]
 
-use miden_air::trace::RowIndex;
-use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing, stack::StackInputs};
+use miden_core::assert_matches;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, OperationError, Program, fast::FastProcessor,
+    ContextId, DefaultHost, ExecutionError, Felt, ONE, Program, StackInputs, Word, ZERO,
+    fast::FastProcessor, field::PrimeCharacteristicRing, operation::OperationError,
+    trace::RowIndex,
 };
 use miden_utils_testing::{
-    AdviceStackBuilder, Felt, ONE, ZERO, build_expected_hash, build_expected_perm,
-    felt_slice_to_ints,
+    AdviceStackBuilder, build_expected_hash, build_expected_perm, felt_slice_to_ints,
 };
 
 #[test]

@@ -4,17 +4,16 @@ use alloc::vec;
 
 use miden_crypto::{
     field::BinomialExtensionField,
+    hash::keccak::{Keccak256Hash, KeccakF, VECTOR_LEN},
     stark::{
         StarkConfig,
         challenger::{HashChallenger, SerializingChallenger64},
+        commit::{ExtensionMmcs, MerkleTreeMmcs},
+        dft::Radix2DitParallel,
+        pcs::{FriParameters, TwoAdicFriPcs},
         symmetric::{CompressionFunctionFromHasher, PaddingFreeSponge, SerializingHasher},
     },
 };
-use p3_commit::ExtensionMmcs;
-use p3_dft::Radix2DitParallel;
-use p3_keccak::{Keccak256Hash, KeccakF};
-use p3_merkle_tree::MerkleTreeMmcs;
-use p3_miden_fri::{FriParameters, TwoAdicFriPcs};
 
 use crate::Felt;
 
@@ -34,13 +33,7 @@ pub type FieldHash = SerializingHasher<U64Hash>;
 pub type MyCompress = CompressionFunctionFromHasher<U64Hash, 2, 4>;
 
 /// Merkle tree commitment scheme over base field using Keccak
-pub type ValMmcs = MerkleTreeMmcs<
-    [Felt; p3_keccak::VECTOR_LEN],
-    [u64; p3_keccak::VECTOR_LEN],
-    FieldHash,
-    MyCompress,
-    4,
->;
+pub type ValMmcs = MerkleTreeMmcs<[Felt; VECTOR_LEN], [u64; VECTOR_LEN], FieldHash, MyCompress, 4>;
 
 /// Merkle tree commitment scheme over extension field
 pub type ChallengeMmcs = ExtensionMmcs<Felt, Challenge, ValMmcs>;
