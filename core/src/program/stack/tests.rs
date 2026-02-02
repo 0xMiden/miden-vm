@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
 
 use crate::{
-    StackInputs, StackOutputs,
-    utils::{Deserializable, Serializable},
+    program::{StackInputs, StackOutputs},
+    serde::{Deserializable, Serializable},
 };
 
 // SERDE INPUTS TESTS

@@ -16,8 +16,9 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    Felt, ONE, OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT, ZERO,
+    Felt, ONE, ZERO,
     field::{ExtensionField, PrimeCharacteristicRing},
+    operations::{OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT},
     utils::range,
 };
 

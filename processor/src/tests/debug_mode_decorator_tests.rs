@@ -1,15 +1,17 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Decorator, Operation,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    stack::StackInputs,
+    operations::{DebugOptions, Decorator, Operation},
+    program::StackInputs,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::{
-    AdviceInputs, AdviceMutation, DebugError, EventError, FutureMaybeSend, Host, ProcessorState,
-    Program, TraceError, Word, fast::FastProcessor,
+    DebugError, FutureMaybeSend, Host, ProcessorState, Program, TraceError, Word,
+    advice::{AdviceInputs, AdviceMutation},
+    event::EventError,
+    fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
 };
 
@@ -82,7 +84,7 @@ fn test_decorators_only_execute_in_debug_mode() {
         fn on_debug(
             &mut self,
             _process: &mut ProcessorState,
-            _options: &miden_core::DebugOptions,
+            _options: &DebugOptions,
         ) -> Result<(), DebugError> {
             Ok(())
         }

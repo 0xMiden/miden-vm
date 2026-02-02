@@ -3,7 +3,7 @@ use core::fmt;
 
 use miden_core::{
     field::PrimeCharacteristicRing,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 #[cfg(feature = "serde")]

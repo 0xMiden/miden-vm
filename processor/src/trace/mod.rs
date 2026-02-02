@@ -7,18 +7,18 @@ use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     PublicInputs,
     trace::{
-        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        AuxTraceBuilder, CHIPLETS_WIDTH, DECODER_TRACE_OFFSET, MainTrace, RANGE_CHECK_TRACE_WIDTH,
+        STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
 use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    stack::MIN_STACK_DEPTH,
-    utils::ColMatrix,
+    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
+    utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
 
 use super::{
     AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
@@ -26,13 +26,21 @@ use super::{
     range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::{fast::ExecutionOutput, row_major_adapter};
+use crate::fast::ExecutionOutput;
 
 mod utils;
-pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
+pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
+
+mod row_major_adapter;
 
 #[cfg(test)]
 mod tests;
+
+// RE-EXPORTS
+// ================================================================================================
+
+pub use miden_air::trace::RowIndex;
+pub use utils::{ChipletsLengths, TraceLenSummary};
 
 // VM EXECUTION TRACE
 // ================================================================================================
@@ -43,6 +51,16 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: StackAuxTraceBuilder,
     pub(crate) range: RangeCheckerAuxTraceBuilder,
     pub(crate) chiplets: ChipletsAuxTraceBuilder,
+}
+
+pub struct RangeCheckTrace {
+    pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
+    pub(crate) aux_builder: RangeCheckerAuxTraceBuilder,
+}
+
+pub struct ChipletsTrace {
+    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) aux_builder: ChipletsAuxTraceBuilder,
 }
 
 /// Execution trace which is generated when a program is executed on the VM.
@@ -251,9 +269,6 @@ impl ExecutionTrace {
         Some(ColMatrix::new(aux_columns))
     }
 }
-
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
 
 // AUX TRACE BUILDERS
 // ================================================================================================

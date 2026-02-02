@@ -4,8 +4,10 @@ use proptest::prelude::*;
 pub(super) use super::arbitrary::op_non_control_sequence_strategy;
 use super::*;
 use crate::{
-    Decorator, Felt, ONE, Word,
+    Felt, ONE, Word,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, MastNodeExt},
+    operations::Decorator,
+    utils::IndexVec,
 };
 
 #[test]
@@ -789,10 +791,10 @@ fn test_basic_block_fingerprint_uses_forced_digest() {
         .with_digest(forced_digest);
 
     let fingerprint1 = builder1
-        .fingerprint_for_node(&forest, &crate::IndexVec::new())
+        .fingerprint_for_node(&forest, &IndexVec::new())
         .expect("Failed to compute fingerprint1");
     let fingerprint2 = builder2
-        .fingerprint_for_node(&forest, &crate::IndexVec::new())
+        .fingerprint_for_node(&forest, &IndexVec::new())
         .expect("Failed to compute fingerprint2");
 
     assert_ne!(

@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use miden_assembly::{Library, utils::Deserializable};
+use miden_assembly::{Library, serde::Deserializable};
 use miden_core_lib::CoreLibrary;
 
 fn deserialize_core_lib(c: &mut Criterion) {

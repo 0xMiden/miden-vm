@@ -1,16 +1,10 @@
-use miden_crypto::field::PrimeField64;
-
-use super::{
-    Felt,
-    errors::{InputError, OutputError},
-};
-use crate::utils::{ByteWriter, Serializable};
+use crate::{Felt, field::PrimeField64};
 
 mod inputs;
-pub use inputs::StackInputs;
+pub use inputs::{InputError, StackInputs};
 
 mod outputs;
-pub use outputs::StackOutputs;
+pub use outputs::{OutputError, StackOutputs};
 
 #[cfg(test)]
 mod tests;

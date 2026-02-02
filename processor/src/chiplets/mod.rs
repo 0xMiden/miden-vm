@@ -1,13 +1,17 @@
 use alloc::vec::Vec;
 
-use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
+use miden_air::trace::{CHIPLETS_WIDTH, chiplets::hasher::HasherState};
 use miden_core::{
-    Kernel, field::PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+    field::PrimeCharacteristicRing, mast::OpBatch, precompile::PrecompileTranscriptState,
+    program::Kernel,
 };
 
 use super::{
-    CHIPLETS_WIDTH, ChipletsTrace, EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word, ZERO,
-    crypto::MerklePath, utils,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
+    crypto::merkle::MerklePath,
+    range::RangeChecker,
+    trace::{ChipletsTrace, RowIndex, TraceFragment},
+    utils,
 };
 
 mod bitwise;

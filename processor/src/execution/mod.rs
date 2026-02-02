@@ -2,8 +2,9 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_core::{
-    Kernel, Word,
+    Word,
     mast::{MastForest, MastNode, MastNodeId},
+    program::Kernel,
 };
 
 use crate::{

@@ -10,8 +10,8 @@ use super::{
     string_table::{StringTable, StringTableBuilder},
 };
 use crate::{
-    DebugOptions, Decorator,
-    utils::{
+    operations::{DebugOptions, Decorator},
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };

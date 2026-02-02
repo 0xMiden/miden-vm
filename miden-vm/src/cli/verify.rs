@@ -6,7 +6,7 @@ use miden_assembly::{
     diagnostics::{IntoDiagnostic, Report, Result, WrapErr},
 };
 use miden_mast_package::{MastArtifact, Package};
-use miden_prover::utils::Deserializable;
+use miden_prover::serde::Deserializable;
 use miden_vm::{Kernel, ProgramInfo, internal::InputFile};
 
 use super::data::{OutputFile, ProgramHash, ProofFile};

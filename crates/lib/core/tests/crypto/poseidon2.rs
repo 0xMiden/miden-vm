@@ -1,5 +1,4 @@
-use miden_core::field::PrimeField64;
-use miden_processor::{ExecutionError, OperationError, ZERO};
+use miden_processor::{ExecutionError, ZERO, field::PrimeField64, operation::OperationError};
 use miden_utils_testing::{build_expected_hash, build_expected_perm, expect_exec_error_matches};
 
 #[test]

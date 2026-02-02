@@ -2,12 +2,17 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
-    mast::MastForest, precompile::PrecompileRequest,
+    Felt, Word,
+    advice::AdviceMap,
+    crypto::merkle::InnerNodeInfo,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, EventError, ProcessorState, TraceError};
+use crate::{DebugError, ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -16,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::DebugHandler;
+use handlers::{DebugHandler, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};

@@ -1,4 +1,4 @@
-use alloc::{string::ToString, sync::Arc};
+use alloc::{string::ToString, sync::Arc, vec::Vec};
 
 use miden_assembly::{
     Assembler, DefaultSourceManager, PathBuf,
@@ -6,10 +6,8 @@ use miden_assembly::{
     testing::{TestContext, assert_diagnostic_lines, regex, source_file},
 };
 use miden_core::{
-    AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    stack::StackInputs,
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{
@@ -18,8 +16,13 @@ use miden_utils_testing::{
 };
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
-use super::*;
-use crate::fast::FastProcessor;
+use crate::{
+    DefaultHost, Kernel, ONE, Program, StackInputs, Word, ZERO,
+    advice::{AdviceInputs, AdviceMap},
+    fast::FastProcessor,
+    field::PrimeField64,
+    operation::Operation,
+};
 
 mod debug;
 mod debug_mode_decorator_tests;

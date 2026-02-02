@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, ZERO,
     field::PrimeCharacteristicRing,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
 

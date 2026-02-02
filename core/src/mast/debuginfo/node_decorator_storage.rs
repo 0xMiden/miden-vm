@@ -1,10 +1,13 @@
 use alloc::string::String;
 
-use miden_utils_indexing::{CsrMatrix, CsrValidationError, Idx};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{DecoratorId, MastNodeId};
+use crate::{
+    mast::{DecoratorId, MastNodeId},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{CsrMatrix, CsrValidationError, Idx},
+};
 
 /// A CSR (Compressed Sparse Row) representation for storing node-level decorators (before_enter and
 /// after_exit).
@@ -138,29 +141,23 @@ impl NodeToDecoratorIds {
     // --------------------------------------------------------------------------------------------
 
     /// Write this CSR structure to a target.
-    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
-        use crate::utils::Serializable;
-
+    pub(super) fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.before_enter.write_into(target);
         self.after_exit.write_into(target);
     }
 
     /// Read this CSR structure from a source, validating decorator IDs against decorator_count.
-    pub(super) fn read_from<R: crate::utils::ByteReader>(
+    pub(super) fn read_from<R: ByteReader>(
         source: &mut R,
         decorator_count: usize,
-    ) -> Result<Self, crate::utils::DeserializationError> {
-        use crate::utils::Deserializable;
-
+    ) -> Result<Self, DeserializationError> {
         let before_enter: CsrMatrix<MastNodeId, DecoratorId> = Deserializable::read_from(source)?;
         let after_exit: CsrMatrix<MastNodeId, DecoratorId> = Deserializable::read_from(source)?;
 
         let result = Self::from_matrices(before_enter, after_exit);
 
         result.validate_csr(decorator_count).map_err(|e| {
-            crate::utils::DeserializationError::InvalidValue(format!(
-                "NodeToDecoratorIds validation failed: {e}"
-            ))
+            DeserializationError::InvalidValue(format!("NodeToDecoratorIds validation failed: {e}"))
         })?;
 
         Ok(result)

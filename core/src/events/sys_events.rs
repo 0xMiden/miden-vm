@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{EventId, EventName};
+use super::{EventId, EventName};
 
 // SYSTEM EVENTS
 // ================================================================================================

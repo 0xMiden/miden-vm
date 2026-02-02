@@ -13,9 +13,9 @@ use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
-    Operation,
     mast::{BasicBlockNode, OP_GROUP_SIZE},
-    utils::{ByteReader, DeserializationError, Serializable, SliceReader},
+    operations::Operation,
+    serde::{ByteReader, DeserializationError, Serializable, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER

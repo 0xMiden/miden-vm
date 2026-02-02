@@ -55,7 +55,7 @@ pub const STACK_TRACE_WIDTH: usize = 19;
 pub const STACK_TRACE_RANGE: Range<usize> = range(STACK_TRACE_OFFSET, STACK_TRACE_WIDTH);
 
 /// Label for log_precompile transcript state messages on the virtual table bus.
-pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::OPCODE_LOGPRECOMPILE;
+pub const LOG_PRECOMPILE_LABEL: u8 = miden_core::operations::OPCODE_LOGPRECOMPILE;
 
 pub mod log_precompile {
     use core::ops::Range;

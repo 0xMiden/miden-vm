@@ -7,9 +7,11 @@ extern crate alloc;
 
 use alloc::{sync::Arc, vec, vec::Vec};
 
-use miden_assembly::{Library, mast::MastForest, utils::Deserializable};
-use miden_core::{EventName, precompile::PrecompileVerifierRegistry};
-use miden_processor::{EventHandler, HostLibrary};
+use miden_assembly::{Library, mast::MastForest};
+use miden_core::{
+    events::EventName, precompile::PrecompileVerifierRegistry, serde::Deserializable,
+};
+use miden_processor::{HostLibrary, event::EventHandler};
 use miden_utils_sync::LazyLock;
 
 use crate::handlers::{

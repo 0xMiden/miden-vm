@@ -4,9 +4,9 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
 use miden_core::{
-    Operation::*,
+    events::SystemEvent,
     field::{Field, PrimeCharacteristicRing, PrimeField64},
-    sys_events::SystemEvent,
+    operations::Operation::*,
 };
 
 use super::BasicBlockBuilder;

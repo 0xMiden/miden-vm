@@ -1,7 +1,11 @@
 use miden_air::trace::RowIndex;
 use miden_core::{
-    OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
-    OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL, Word, ZERO, field::ExtensionField,
+    Word, ZERO,
+    field::ExtensionField,
+    operations::{
+        OPCODE_CALL, OPCODE_DYN, OPCODE_DYNCALL, OPCODE_END, OPCODE_HALT, OPCODE_JOIN, OPCODE_LOOP,
+        OPCODE_REPEAT, OPCODE_SPLIT, OPCODE_SYSCALL,
+    },
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};

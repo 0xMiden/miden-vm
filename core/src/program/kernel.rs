@@ -4,10 +4,7 @@ use miden_crypto::Word;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    errors::KernelError,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-};
+use crate::serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable};
 
 // KERNEL
 // ================================================================================================
@@ -80,4 +77,15 @@ impl Deserializable for Kernel {
         let kernel = source.read_many_iter::<Word>(len)?.collect::<Result<_, _>>()?;
         Ok(Self(kernel))
     }
+}
+
+// KERNEL ERROR
+// ================================================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum KernelError {
+    #[error("kernel cannot have duplicated procedures")]
+    DuplicatedProcedures,
+    #[error("kernel can have at most {0} procedures, received {1}")]
+    TooManyProcedures(usize, usize),
 }

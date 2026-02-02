@@ -3,13 +3,16 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "arbitrary")]
 use proptest::prelude::*;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::mast::{DecoratedOpLink, DecoratorId, MastNodeId};
+use crate::{
+    mast::{DecoratedOpLink, DecoratorId, MastNodeId},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{Idx, IndexVec},
+};
 
 /// A two-level compressed sparse row (CSR) representation for indexing decorator IDs per
 /// operation per node.
@@ -324,21 +327,17 @@ impl OpToDecoratorIds {
     }
 
     /// Serialize this OpToDecoratorIds into the target writer.
-    pub(super) fn write_into<W: crate::utils::ByteWriter>(&self, target: &mut W) {
-        use crate::utils::Serializable;
-
+    pub(super) fn write_into<W: ByteWriter>(&self, target: &mut W) {
         self.decorator_ids.write_into(target);
         self.op_indptr_for_dec_ids.write_into(target);
         self.node_indptr_for_op_idx.write_into(target);
     }
 
     /// Deserialize OpToDecoratorIds from the source reader.
-    pub(super) fn read_from<R: crate::utils::ByteReader>(
+    pub(super) fn read_from<R: ByteReader>(
         source: &mut R,
         decorator_count: usize,
-    ) -> Result<Self, crate::utils::DeserializationError> {
-        use crate::utils::{Deserializable, DeserializationError};
-
+    ) -> Result<Self, DeserializationError> {
         let decorator_ids: Vec<DecoratorId> = Deserializable::read_from(source)?;
         let op_indptr_for_dec_ids: Vec<usize> = Deserializable::read_from(source)?;
         let node_indptr_for_op_idx: IndexVec<MastNodeId, usize> =

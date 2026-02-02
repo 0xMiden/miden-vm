@@ -6,9 +6,12 @@ use alloc::{
 };
 use core::{error::Error, fmt, fmt::Debug};
 
-use miden_core::{DebugOptions, EventId, EventName, sys_events::SystemEvent};
+use miden_core::{
+    events::{EventId, EventName, SystemEvent},
+    operations::DebugOptions,
+};
 
-use crate::{AdviceMutation, ExecutionError, ProcessorState};
+use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
 
 // EVENT HANDLER TRAIT
 // ================================================================================================

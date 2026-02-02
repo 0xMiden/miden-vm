@@ -9,11 +9,12 @@ use miden_core::{
     crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{
-    AdviceError, ContextId,
+    ContextId,
+    advice::AdviceError,
     chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
     errors::OperationError,

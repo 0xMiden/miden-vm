@@ -7,10 +7,11 @@ use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
-    Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, WORD_SIZE, Word, ZERO,
     mast::{MastForest, MastNodeExt, MastNodeId},
+    operations::Decorator,
     precompile::PrecompileTranscript,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{Kernel, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 use tracing::instrument;
@@ -48,6 +49,8 @@ pub mod trace_state;
 mod basic_block;
 mod call_and_dyn;
 mod external;
+
+pub use basic_block::SystemEventError;
 
 #[cfg(test)]
 mod tests;

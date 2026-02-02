@@ -1,10 +1,11 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Decorator, Felt, Operation,
+    Felt,
     field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
-    stack::StackInputs,
+    operations::{Decorator, Operation},
+    program::StackInputs,
 };
 
 use crate::{

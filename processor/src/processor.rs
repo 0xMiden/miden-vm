@@ -11,7 +11,8 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceError, ContextId, ExecutionError, Host, MemoryError,
+    ContextId, ExecutionError, Host, MemoryError,
+    advice::AdviceError,
     errors::{AceEvalError, OperationError},
     fast::step::BreakReason,
     tracer::Tracer,

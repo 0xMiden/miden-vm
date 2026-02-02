@@ -11,19 +11,21 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    EMPTY_WORD, EventName, Felt, Kernel, ONE, Operation, Program, WORD_SIZE, ZERO,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
+    events::EventName,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
-    stack::StackInputs,
+    operations::Operation,
+    program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, NoopEventHandler, PrimeField64,
-    fast::FastProcessor, parallel::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, PrimeField64,
+    event::NoopEventHandler, fast::FastProcessor, parallel::build_trace,
 };
 
 // CONSTANTS
@@ -629,8 +631,6 @@ fn test_split_node_false_decoding() {
 
 #[test]
 fn test_loop_node_decoding() {
-    use miden_core::{Operation, Word};
-
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -734,8 +734,6 @@ fn test_loop_node_skip_decoding() {
 
 #[test]
 fn test_loop_node_repeat_decoding() {
-    use miden_core::{Operation, Word};
-
     let (loop_body, program) = {
         let mut mast_forest = MastForest::new();
 
@@ -817,8 +815,7 @@ fn test_loop_node_repeat_decoding() {
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
 fn test_call_decoding() {
-    use miden_core::{Operation, Word};
-
+    
     // build a program which looks like this:
     //
     // pub proc foo
@@ -1112,7 +1109,6 @@ fn test_call_decoding() {
 #[rustfmt::skip]
 #[expect(clippy::needless_range_loop)]
 fn test_syscall_decoding() {
-    use miden_core::{Operation, Word};
 
     // build a program which looks like this:
     //
@@ -1404,8 +1400,6 @@ fn test_syscall_decoding() {
 
 #[test]
 fn test_dyn_node_decoding() {
-    use miden_core::{Operation, Word};
-
     // Equivalent masm:
     //
     // proc foo
@@ -1690,7 +1684,7 @@ fn check_op_decoding(
     trace: &DecoderTrace,
     row_idx: usize,
     addr: Felt,
-    op: miden_core::Operation,
+    op: Operation,
     group_count: u64,
     op_idx: u64,
     in_span: u64,
@@ -1707,13 +1701,12 @@ fn check_op_decoding(
     );
     assert_eq!(trace[OP_INDEX_COL_IDX][row_idx], Felt::new(op_idx), "op index mismatch");
 
-    let expected_batch_flags =
-        if op == miden_core::Operation::Span || op == miden_core::Operation::Respan {
-            let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
-            build_op_batch_flags(num_groups)
-        } else {
-            [ZERO, ZERO, ZERO]
-        };
+    let expected_batch_flags = if op == Operation::Span || op == Operation::Respan {
+        let num_groups = core::cmp::min(OP_BATCH_SIZE, group_count as usize);
+        build_op_batch_flags(num_groups)
+    } else {
+        [ZERO, ZERO, ZERO]
+    };
 
     for (i, flag_value) in OP_BATCH_FLAGS_RANGE.zip(expected_batch_flags) {
         assert_eq!(trace[i][row_idx], flag_value, "op batch flag mismatch at column {}", i);
@@ -1767,7 +1760,7 @@ fn check_op_decoding_with_imm(
     );
 }
 
-fn contains_op(trace: &DecoderTrace, row_idx: usize, op: miden_core::Operation) -> bool {
+fn contains_op(trace: &DecoderTrace, row_idx: usize, op: Operation) -> bool {
     op.op_code() == read_opcode(trace, row_idx)
 }
 

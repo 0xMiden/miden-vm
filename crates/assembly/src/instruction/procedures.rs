@@ -6,8 +6,8 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::{
-    Operation,
     mast::{MastNodeExt, MastNodeId},
+    operations::Operation,
 };
 use smallvec::SmallVec;
 

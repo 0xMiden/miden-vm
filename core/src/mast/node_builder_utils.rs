@@ -1,12 +1,12 @@
 use alloc::vec::Vec;
 
 use crate::{
-    LookupByIdx,
     mast::{
         BasicBlockNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, MastForest,
         MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeId,
         node::MastNodeExt,
     },
+    utils::LookupByIdx,
 };
 
 /// Builds a node builder with remapped children and decorators using the provided mappings.

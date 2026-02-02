@@ -11,13 +11,15 @@ use miden_air::trace::{
     },
 };
 use miden_core::{
-    Felt, ONE, Program, Word, ZERO,
+    Felt, ONE, Word, ZERO,
     field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    stack::StackInputs,
+    program::{Program, StackInputs},
 };
 
-use crate::{AdviceInputs, DefaultHost, ExecutionOptions, Kernel, Operation, fast::FastProcessor};
+use crate::{
+    AdviceInputs, DefaultHost, ExecutionOptions, Kernel, fast::FastProcessor, operation::Operation,
+};
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 

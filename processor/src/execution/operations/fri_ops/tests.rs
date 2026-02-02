@@ -1,7 +1,7 @@
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
-    stack::StackInputs,
+    program::StackInputs,
 };
 use proptest::prelude::*;
 

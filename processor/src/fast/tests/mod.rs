@@ -3,19 +3,20 @@ use alloc::{string::ToString, sync::Arc, vec};
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    ONE, Operation, assert_matches,
+    ONE, assert_matches,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
     },
-    stack::StackInputs,
+    operations::Operation,
+    program::StackInputs,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, OperationError};
+use crate::{AdviceInputs, DefaultHost, operation::OperationError};
 
 mod advice_provider;
 mod all_ops;
@@ -131,14 +132,12 @@ fn test_syscall_fail() {
 /// number of allowed cycles.
 #[test]
 fn test_cycle_limit_exceeded() {
-    use crate::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions};
-
     let mut host = DefaultHost::default();
 
     let options = ExecutionOptions::new(
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
-        DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
         false,
     )

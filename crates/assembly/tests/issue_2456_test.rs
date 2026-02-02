@@ -5,7 +5,7 @@
 /// statically linked libraries, causing decorator IDs from the source forest to
 /// be used in the target forest where they don't exist.
 use miden_assembly::Assembler;
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, StackInputs};
+use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs};
 
 #[test]
 fn test_issue_2456_statically_linked_library_call() {

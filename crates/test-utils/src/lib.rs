@@ -20,19 +20,25 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    stack::MIN_STACK_DEPTH,
+    program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{
+    chiplets::hasher::apply_permutation,
+    events::{EventName, SystemEvent},
+    program::ProgramInfo,
+};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
-    ProcessorState,
+    ContextId, ExecutionError, ProcessorState,
+    advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, EventHandler, Program,
+    DefaultDebugHandler, DefaultHost, Program,
+    event::EventHandler,
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
     parallel::build_trace,
 };
@@ -53,11 +59,7 @@ pub mod math {
     };
 }
 
-pub mod serde {
-    pub use miden_core::utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    };
-}
+pub use miden_core::serde;
 
 pub mod crypto;
 
@@ -66,7 +68,6 @@ pub mod rand;
 
 mod test_builders;
 
-use miden_core::sys_events::SystemEvent;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
 // CONSTANTS

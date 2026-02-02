@@ -4,9 +4,9 @@ use miden_core::{
     field::{Field, PrimeField64},
 };
 
+use super::utils::assert_binary;
 use crate::{
-    OperationError,
-    operations::utils::assert_binary,
+    operation::OperationError,
     processor::{OperationHelperRegisters, Processor, StackInterface},
     tracer::Tracer,
 };

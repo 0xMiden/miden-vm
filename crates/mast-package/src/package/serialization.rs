@@ -33,8 +33,9 @@ use miden_assembly_syntax::{
     library::{FunctionTypeDeserializer, FunctionTypeSerializer},
 };
 use miden_core::{
-    Program, Word,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    Word,
+    program::Program,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 use super::{ConstantExport, PackageKind, ProcedureExport, TypeExport};

@@ -48,13 +48,3 @@ pub(crate) fn validate_dual_word_stream_addrs(
 
     Ok(())
 }
-
-/// Asserts that the given value is a binary value (0 or 1).
-#[inline(always)]
-pub fn assert_binary(value: Felt) -> Result<(), crate::OperationError> {
-    if value != ZERO && value != ONE {
-        Err(crate::OperationError::NotBinaryValue { value })
-    } else {
-        Ok(())
-    }
-}

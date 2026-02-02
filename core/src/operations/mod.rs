@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
-use opcode_constants::*;
+pub use opcode_constants::*;
 
 use crate::{
     Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // OPERATIONS OP CODES
@@ -27,7 +27,7 @@ use crate::{
 /// - 11xxx--: operations where constraint degree can be up to 5. These include control flow
 ///   operations and some other operations requiring very high degree constraints.
 #[rustfmt::skip]
-pub(super) mod opcode_constants {
+mod opcode_constants {
     pub const OPCODE_NOOP: u8           = 0b0000_0000;
     pub const OPCODE_EQZ: u8            = 0b0000_0001;
     pub const OPCODE_NEG: u8            = 0b0000_0010;

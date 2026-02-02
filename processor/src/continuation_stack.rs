@@ -1,8 +1,8 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_core::{
-    Program,
     mast::{MastForest, MastNodeId},
+    program::Program,
 };
 
 /// A hint for the initial size of the continuation stack.

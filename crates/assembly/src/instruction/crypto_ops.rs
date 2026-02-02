@@ -1,5 +1,5 @@
 use miden_core::{
-    Felt, Operation::*, ZERO, field::PrimeCharacteristicRing, sys_events::SystemEvent,
+    Felt, ZERO, events::SystemEvent, field::PrimeCharacteristicRing, operations::Operation::*,
 };
 
 use super::BasicBlockBuilder;

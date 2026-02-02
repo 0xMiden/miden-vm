@@ -12,106 +12,79 @@ use core::{
     ops::ControlFlow,
 };
 
-pub use miden_air::trace::RowIndex;
-use miden_air::trace::{CHIPLETS_WIDTH, RANGE_CHECK_TRACE_WIDTH};
-
+mod chiplets;
+mod continuation_stack;
+mod debug;
+mod decoder;
+mod errors;
+mod execution;
 mod execution_options;
-pub use execution_options::{
-    DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions, ExecutionOptionsError,
-};
-pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, StackInputs,
-    StackOutputs, WORD_SIZE, Word, ZERO,
-    crypto::merkle::SMT_DEPTH,
-    errors::InputError,
-    field::{PrimeField64, QuadFelt},
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::{PrecompileRequest, PrecompileTranscriptState},
-    sys_events::SystemEvent,
-    utils::DeserializationError,
-};
-
-pub(crate) mod continuation_stack;
-pub(crate) mod execution;
+mod host;
+mod range;
+mod stack;
+mod system;
 
 pub mod fast;
 pub mod parallel;
 pub mod processor;
-
-mod operations;
-
-pub(crate) mod row_major_adapter;
-
-mod system;
-pub use system::ContextId;
-
+pub mod trace;
 pub mod tracer;
+pub mod utils;
+
+use crate::{
+    advice::{AdviceInputs, AdviceProvider},
+    fast::{FastProcessor, step::BreakReason},
+    field::PrimeField64,
+    processor::{Processor, SystemInterface},
+    trace::{ExecutionTrace, RowIndex},
+};
 
 #[cfg(test)]
 mod test_utils;
 
-pub(crate) mod decoder;
-
-mod stack;
-
-mod range;
-use range::RangeChecker;
-
-mod host;
-
-pub use host::{
-    AdviceMutation, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
-    advice::{AdviceError, AdviceInputs, AdviceProvider, AdviceStackBuilder},
-    debug::DefaultDebugHandler,
-    default::{DefaultHost, HostLibrary},
-    handlers::{
-        DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
-        TraceError,
-    },
-};
-
-mod chiplets;
-pub use chiplets::MemoryError;
-
-mod trace;
-use trace::TraceFragment;
-pub use trace::{ChipletsLengths, ExecutionTrace, TraceLenSummary};
-
-mod errors;
-pub use errors::{
-    ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx, OperationError,
-};
-
-pub mod utils;
-
 #[cfg(test)]
 mod tests;
-
-mod debug;
-
-use crate::{
-    continuation_stack::Continuation,
-    fast::{FastProcessor, step::BreakReason},
-    parallel::build_trace,
-    processor::{Processor, SystemInterface},
-};
 
 // RE-EXPORTS
 // ================================================================================================
 
-pub mod math {
-    pub use miden_core::Felt;
+pub use chiplets::MemoryError;
+pub use errors::{ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx};
+pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use host::{
+    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    debug::DefaultDebugHandler,
+    default::{DefaultHost, HostLibrary},
+    handlers::{DebugError, DebugHandler, TraceError},
+};
+pub use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
+    program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
+    serde,
+};
+pub use system::ContextId;
+
+pub mod advice {
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
+
+    pub use super::host::{
+        AdviceMutation,
+        advice::{AdviceError, AdviceProvider},
+    };
 }
 
-pub mod crypto {
-    pub use miden_core::crypto::{
-        hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-        merkle::{
-            MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
-            SimpleSmt,
-        },
-        random::{RpoRandomCoin, RpxRandomCoin},
+pub mod event {
+    pub use miden_core::events::*;
+
+    pub use crate::host::handlers::{
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
     };
+}
+
+pub mod operation {
+    pub use miden_core::operations::*;
+
+    pub use crate::errors::OperationError;
 }
 
 // TYPE ALIASES
@@ -160,16 +133,6 @@ impl core::ops::Add<u32> for MemoryAddress {
     }
 }
 
-pub struct RangeCheckTrace {
-    trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    aux_builder: range::AuxTraceBuilder,
-}
-
-pub struct ChipletsTrace {
-    trace: [Vec<Felt>; CHIPLETS_WIDTH],
-    aux_builder: chiplets::AuxTraceBuilder,
-}
-
 // EXECUTORS
 // ================================================================================================
 
@@ -195,7 +158,7 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = build_trace(
+    let trace = parallel::build_trace(
         execution_output,
         trace_generation_context,
         program.hash(),
@@ -378,6 +341,6 @@ pub trait Stopper {
     fn should_stop(
         &self,
         processor: &Self::Processor,
-        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+        continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
     ) -> ControlFlow<BreakReason>;
 }

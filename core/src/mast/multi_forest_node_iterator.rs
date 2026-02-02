@@ -3,11 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::Idx;
-
 use crate::{
     Word,
     mast::{MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
+    utils::Idx,
 };
 
 type ForestIndex = usize;
@@ -310,11 +309,12 @@ mod tests {
 
     use super::*;
     use crate::{
-        Operation, Word,
+        Word,
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
             MastForestContributor, SplitNodeBuilder,
         },
+        operations::Operation,
     };
 
     fn random_digest() -> Word {

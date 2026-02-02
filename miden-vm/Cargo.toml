@@ -51,7 +51,7 @@ path = "tests/integration/main.rs"
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
+executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -70,6 +70,7 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
@@ -78,10 +79,8 @@ miden-core-lib.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies
-blake3.workspace = true
 clap = { version = "4.5", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
-rustyline = { version = "17.0", default-features = false, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true

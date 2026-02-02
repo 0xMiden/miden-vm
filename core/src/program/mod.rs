@@ -1,20 +1,23 @@
 use alloc::{sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{
-    Felt, WORD_SIZE, Word,
-    field::PrimeCharacteristicRing,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
-};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::Kernel;
 use crate::{
-    AdviceMap,
+    Felt, WORD_SIZE, Word,
+    advice::AdviceMap,
+    field::PrimeCharacteristicRing,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::ToElements,
 };
+
+mod kernel;
+pub use kernel::{Kernel, KernelError};
+
+mod stack;
+pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutputs};
 
 // PROGRAM
 // ===============================================================================================

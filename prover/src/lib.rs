@@ -5,8 +5,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::string::ToString;
+use alloc::{string::ToString, vec::Vec};
 
+use ::serde::Serialize;
 use miden_processor::{Program, fast::FastProcessor, parallel::build_trace};
 use tracing::instrument;
 
@@ -17,16 +18,12 @@ mod proving_options;
 
 // EXPORTS
 // ================================================================================================
-
 pub use miden_air::{DeserializationError, ProcessorAir, config};
-pub use miden_core::{ExecutionProof, HashFunction};
-pub use miden_crypto::{
-    stark,
-    stark::{Commitments, OpenedValues, Proof},
-};
+pub use miden_core::proof::{ExecutionProof, HashFunction};
+use miden_crypto::stark;
 pub use miden_processor::{
-    AdviceInputs, ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, crypto, math,
-    utils,
+    ExecutionError, Host, InputError, StackInputs, StackOutputs, Word, advice::AdviceInputs,
+    crypto, field, serde, utils,
 };
 pub use proving_options::ProvingOptions;
 pub use trace_adapter::{aux_trace_to_row_major, execution_trace_to_row_major};
@@ -165,6 +162,6 @@ pub fn prove_sync(
 // ================================================================================================
 
 /// Serializes a proof to bytes, converting serialization errors to ExecutionError.
-fn serialize_proof<T: serde::Serialize>(proof: &T) -> Result<alloc::vec::Vec<u8>, ExecutionError> {
+fn serialize_proof<T: Serialize>(proof: &T) -> Result<Vec<u8>, ExecutionError> {
     bincode::serialize(proof).map_err(|e| ExecutionError::ProofSerializationError(e.to_string()))
 }
