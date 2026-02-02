@@ -19,8 +19,7 @@ use miden_core::{
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
     },
     operations::Operation,
-    program::{Kernel, Program},
-    stack::StackInputs,
+    program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::rand::rand_value;
 

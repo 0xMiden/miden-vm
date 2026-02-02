@@ -12,8 +12,7 @@ use miden_core::{
     field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
     operations::Operation,
-    program::Program,
-    stack::StackInputs,
+    program::{Program, StackInputs},
     utils::{Deserializable, Serializable},
 };
 use miden_mast_package::{

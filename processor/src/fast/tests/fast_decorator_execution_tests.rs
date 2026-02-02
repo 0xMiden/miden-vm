@@ -5,7 +5,7 @@ use miden_core::{
     field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
     operations::{Decorator, Operation},
-    stack::StackInputs,
+    program::StackInputs,
 };
 
 use crate::{

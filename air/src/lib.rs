@@ -12,8 +12,7 @@ use core::borrow::Borrow;
 use miden_core::{
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
-    program::ProgramInfo,
-    stack::{StackInputs, StackOutputs},
+    program::{ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
 

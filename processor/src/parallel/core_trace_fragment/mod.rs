@@ -14,7 +14,7 @@ use miden_core::{
     mast::{BasicBlockNode, MastForest, MastNode, MastNodeExt, MastNodeId, OpBatch},
     operations::{OPCODE_PUSH, Operation},
     precompile::PrecompileTranscriptState,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
     utils::range,
 };
 

@@ -10,7 +10,7 @@ use miden_core::{
         MastForestContributor,
     },
     operations::Operation,
-    stack::StackInputs,
+    program::StackInputs,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;

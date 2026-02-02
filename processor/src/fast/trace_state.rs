@@ -9,7 +9,7 @@ use miden_core::{
     crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeId, OpBatch},
     precompile::PrecompileTranscriptState,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{

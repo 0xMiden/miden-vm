@@ -1,5 +1,5 @@
 use miden_air::trace::RowIndex;
-use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing, stack::StackInputs};
+use miden_core::{Word, assert_matches, field::PrimeCharacteristicRing, program::StackInputs};
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, OperationError, Program, fast::FastProcessor,
 };

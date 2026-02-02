@@ -27,8 +27,7 @@ pub use miden_core::{
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     operations::{AssemblyOp, Operation},
     precompile::{PrecompileRequest, PrecompileTranscriptState},
-    program::{Kernel, Program, ProgramInfo},
-    stack::{InputError, StackInputs, StackOutputs},
+    program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
     utils::DeserializationError,
 };
 

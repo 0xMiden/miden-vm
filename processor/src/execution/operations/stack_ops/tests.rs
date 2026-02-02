@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ONE, ZERO,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 
 use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};

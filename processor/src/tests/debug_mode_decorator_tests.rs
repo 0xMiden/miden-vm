@@ -3,7 +3,7 @@ use alloc::{sync::Arc, vec::Vec};
 use miden_core::{
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
     operations::{DebugOptions, Decorator, Operation},
-    stack::StackInputs,
+    program::StackInputs,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 

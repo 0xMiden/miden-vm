@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, ONE, ZERO,
     field::{BasedVectorSpace, Field, QuadFelt},
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 use miden_utils_testing::rand::rand_value;
 

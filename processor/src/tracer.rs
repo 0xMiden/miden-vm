@@ -185,8 +185,9 @@ pub trait Tracer {
 
     /// Signals that the stack depth is decremented as a result of popping an element off the stack.
     ///
-    /// Note that if the stack depth is already [miden_core::stack::MIN_STACK_DEPTH], then the stack
-    /// depth is unchanged; the top element is popped off, and a ZERO is shifted in at the bottom.
+    /// Note that if the stack depth is already [miden_core::program::MIN_STACK_DEPTH], then the
+    /// stack depth is unchanged; the top element is popped off, and a ZERO is shifted in at the
+    /// bottom.
     fn decrement_stack_size(&mut self);
 
     /// Signals the start of a new execution context, as a result of a CALL, SYSCALL or DYNCALL

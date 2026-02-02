@@ -4,7 +4,7 @@ use crate::{
     Felt, Word,
     crypto::merkle::MerkleStore,
     field::QuotientMap,
-    stack::InputError,
+    program::InputError,
     utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 

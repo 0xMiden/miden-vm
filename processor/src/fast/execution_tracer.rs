@@ -13,7 +13,7 @@ use miden_core::{
         SplitNode,
     },
     precompile::PrecompileTranscript,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{

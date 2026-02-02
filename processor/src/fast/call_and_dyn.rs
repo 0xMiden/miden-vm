@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::{ZERO, stack::MIN_STACK_DEPTH, utils::range};
+use miden_core::{ZERO, program::MIN_STACK_DEPTH, utils::range};
 
 use crate::{
     errors::OperationError,

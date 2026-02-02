@@ -9,8 +9,7 @@ use miden_core::{
         SplitNodeBuilder,
     },
     operations::Operation,
-    program::{Kernel, Program},
-    stack::StackInputs,
+    program::{Kernel, Program, StackInputs},
 };
 use miden_utils_testing::get_column_name;
 use pretty_assertions::assert_eq;

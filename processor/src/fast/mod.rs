@@ -11,8 +11,7 @@ use miden_core::{
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
-    program::{Kernel, Program},
-    stack::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
+    program::{Kernel, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 use tracing::instrument;

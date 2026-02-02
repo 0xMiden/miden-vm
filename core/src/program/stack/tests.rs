@@ -1,7 +1,7 @@
 use alloc::vec::Vec;
 
 use crate::{
-    stack::{StackInputs, StackOutputs},
+    program::{StackInputs, StackOutputs},
     utils::{Deserializable, Serializable},
 };
 

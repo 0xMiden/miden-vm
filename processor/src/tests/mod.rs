@@ -9,7 +9,7 @@ use miden_core::{
     advice::AdviceMap,
     crypto::merkle::{MerkleStore, MerkleTree},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    stack::StackInputs,
+    program::StackInputs,
 };
 use miden_debug_types::{SourceContent, SourceLanguage, SourceManager, Uri};
 use miden_utils_testing::{

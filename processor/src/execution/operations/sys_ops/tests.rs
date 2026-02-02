@@ -3,7 +3,7 @@ use alloc::vec;
 use miden_core::{
     Felt, ONE, ZERO,
     mast::MastForest,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 
 use super::{op_assert, op_clk, op_sdepth};

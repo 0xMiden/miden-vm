@@ -8,7 +8,7 @@ use miden_core::{
     events::{EventId, EventName},
     field::QuadFelt,
     mast::{MastForest, MastNodeId},
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
     utils::to_hex,
 };
 use miden_debug_types::{SourceFile, SourceSpan};

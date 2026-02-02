@@ -65,7 +65,6 @@ pub mod operations;
 pub mod precompile;
 pub mod program;
 pub mod proof;
-pub mod stack;
 pub mod utils;
 
 pub mod field {

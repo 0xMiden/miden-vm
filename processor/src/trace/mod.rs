@@ -15,8 +15,7 @@ use miden_core::{
     Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    program::{Kernel, ProgramInfo},
-    stack::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
+    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 

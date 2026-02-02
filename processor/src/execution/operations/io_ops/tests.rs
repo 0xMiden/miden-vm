@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_core::{
     Felt, Word, ZERO,
     field::PrimeField64,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 
 use super::{

@@ -1,6 +1,6 @@
 use core::ops::Range;
 
-use miden_core::{stack::MIN_STACK_DEPTH, utils::range};
+use miden_core::{program::MIN_STACK_DEPTH, utils::range};
 
 // CONSTANTS
 // ================================================================================================

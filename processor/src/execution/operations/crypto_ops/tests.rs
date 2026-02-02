@@ -6,7 +6,7 @@ use miden_core::{
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{BasedVectorSpace, QuadFelt},
     mast::MastForest,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;
 

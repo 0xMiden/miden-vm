@@ -19,9 +19,8 @@ mod exports {
             PrecompileTranscriptDigest, PrecompileTranscriptState, PrecompileVerificationError,
             PrecompileVerifierRegistry,
         },
-        program::{Kernel, ProgramInfo},
+        program::{Kernel, ProgramInfo, StackInputs, StackOutputs},
         proof::{ExecutionProof, HashFunction},
-        stack::{StackInputs, StackOutputs},
     };
     pub mod math {
         pub use miden_core::Felt;

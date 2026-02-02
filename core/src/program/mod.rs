@@ -17,6 +17,9 @@ use crate::{
 mod kernel;
 pub use kernel::{Kernel, KernelError};
 
+mod stack;
+pub use stack::{InputError, MIN_STACK_DEPTH, OutputError, StackInputs, StackOutputs};
+
 // PROGRAM
 // ===============================================================================================
 
