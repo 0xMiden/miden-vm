@@ -89,6 +89,23 @@ impl<'a> SymbolResolver<'a> {
                 log::debug!(target: "name-resolver::invoke", "resolving {target}");
                 match self.graph.get_procedure_index_by_digest(mast_root) {
                     None => Ok(SymbolResolution::MastRoot(*mast_root)),
+                    Some(gid) if context.in_syscall() => {
+                        if self.graph.kernel_index.is_some_and(|k| k == gid.module) {
+                            Ok(SymbolResolution::Exact {
+                                gid,
+                                path: Span::new(mast_root.span(), self.item_path(gid)),
+                            })
+                        } else {
+                            Err(LinkerError::InvalidSysCallTarget {
+                                span: context.span,
+                                source_file: self
+                                    .source_manager()
+                                    .get(context.span.source_id())
+                                    .ok(),
+                                callee: self.item_path(gid),
+                            })
+                        }
+                    },
                     Some(gid) => Ok(SymbolResolution::Exact {
                         gid,
                         path: Span::new(mast_root.span(), self.item_path(gid)),
@@ -97,7 +114,20 @@ impl<'a> SymbolResolver<'a> {
             },
             InvocationTarget::Symbol(symbol) => {
                 let path = Path::from_ident(symbol);
-                match self.resolve_path(context, Span::new(symbol.span(), path.as_ref()))? {
+                let mut context = context.clone();
+                // Force the resolution context for a syscall target to be the kernel module
+                if context.in_syscall() {
+                    if let Some(kernel) = self.graph.kernel_index {
+                        context.module = kernel;
+                    } else {
+                        return Err(LinkerError::InvalidSysCallTarget {
+                            span: context.span,
+                            source_file: self.source_manager().get(context.span.source_id()).ok(),
+                            callee: Path::from_ident(symbol).into_owned().into(),
+                        });
+                    }
+                }
+                match self.resolve_path(&context, Span::new(symbol.span(), path.as_ref()))? {
                     SymbolResolution::Module { id: _, path: module_path } => {
                         Err(LinkerError::InvalidInvokeTarget {
                             span: symbol.span(),
@@ -120,6 +150,46 @@ impl<'a> SymbolResolver<'a> {
                         path: module_path.into_inner(),
                     })
                 },
+                SymbolResolution::Exact { gid, path } if context.in_syscall() => {
+                    if self.graph.kernel_index.is_some_and(|k| k == gid.module) {
+                        Ok(SymbolResolution::Exact { gid, path })
+                    } else {
+                        Err(LinkerError::InvalidSysCallTarget {
+                            span: context.span,
+                            source_file: self.source_manager().get(context.span.source_id()).ok(),
+                            callee: path.into_inner(),
+                        })
+                    }
+                },
+                SymbolResolution::MastRoot(mast_root) => {
+                    match self.graph.get_procedure_index_by_digest(&mast_root) {
+                        None => Ok(SymbolResolution::MastRoot(mast_root)),
+                        Some(gid) if context.in_syscall() => {
+                            if self.graph.kernel_index.is_some_and(|k| k == gid.module) {
+                                Ok(SymbolResolution::Exact {
+                                    gid,
+                                    path: Span::new(mast_root.span(), self.item_path(gid)),
+                                })
+                            } else {
+                                Err(LinkerError::InvalidSysCallTarget {
+                                    span: context.span,
+                                    source_file: self
+                                        .source_manager()
+                                        .get(context.span.source_id())
+                                        .ok(),
+                                    callee: self.item_path(gid),
+                                })
+                            }
+                        },
+                        Some(gid) => Ok(SymbolResolution::Exact {
+                            gid,
+                            path: Span::new(mast_root.span(), self.item_path(gid)),
+                        }),
+                    }
+                },
+                // NOTE: If we're in a syscall here, we can't validate syscall targets that are not
+                // fully resolved - but such targets will be revisited later at which point they
+                // will be checked
                 resolution => Ok(resolution),
             },
         }
