@@ -82,7 +82,7 @@ impl Stopper for StepStopper {
 /// Checks if the maximum cycle count has been exceeded, returning a `BreakReason::Err` if so.
 #[inline(always)]
 fn check_if_max_cycles_exceeded(processor: &FastProcessor) -> ControlFlow<BreakReason> {
-    if processor.clk >= processor.options.max_cycles() as usize {
+    if processor.clk > processor.options.max_cycles() as usize {
         ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
             processor.options.max_cycles(),
         )))
