@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use alloc::vec;
 
 use miden_core::{

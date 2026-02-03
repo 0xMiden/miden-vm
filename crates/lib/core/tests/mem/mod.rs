@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use miden_core::assert_matches;
 use miden_processor::{
     ContextId, DefaultHost, ExecutionError, Felt, ONE, Program, StackInputs, Word, ZERO,

@@ -1,5 +1,3 @@
-#![allow(deprecated)]
-
 use miden_core::{
     Felt,
     field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt, TwoAdicField},
