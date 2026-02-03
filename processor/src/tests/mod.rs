@@ -746,7 +746,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -804,7 +807,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_loop() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -865,7 +871,10 @@ fn test_diagnostic_no_mast_forest_with_procedure_split() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,
@@ -1089,7 +1098,10 @@ fn test_diagnostic_syscall_target_not_in_kernel() {
 
     let mut host = DefaultHost::default().with_source_manager(source_manager);
 
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
     assert_diagnostic_lines!(
         err,

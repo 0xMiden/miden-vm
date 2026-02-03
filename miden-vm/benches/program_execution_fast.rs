@@ -56,10 +56,8 @@ fn program_execution_fast(c: &mut Criterion) {
                                 .with_library(&CoreLibrary::default())
                                 .unwrap();
 
-                            let processor = FastProcessor::new_with_advice_inputs(
-                                stack_inputs,
-                                advice_inputs.clone(),
-                            );
+                            let processor =
+                                FastProcessor::new(stack_inputs).with_advice(advice_inputs.clone());
 
                             (host, program.clone(), processor)
                         },

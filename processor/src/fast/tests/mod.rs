@@ -454,7 +454,10 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);

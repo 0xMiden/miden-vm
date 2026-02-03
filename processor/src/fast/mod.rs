@@ -160,29 +160,57 @@ impl FastProcessor {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
-    /// Creates a new `FastProcessor` instance with the given stack inputs, where debug and tracing
-    /// are disabled.
+    /// Creates a new `FastProcessor` instance with the given stack inputs.
+    ///
+    /// By default, advice inputs are empty and execution options use their defaults
+    /// (debugging and tracing disabled).
+    ///
+    /// # Example
+    /// ```ignore
+    /// use miden_processor::fast::FastProcessor;
+    ///
+    /// let processor = FastProcessor::new(stack_inputs)
+    ///     .with_advice(advice_inputs)
+    ///     .with_debugging(true)
+    ///     .with_tracing(true);
+    /// ```
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where debug
-    /// and tracing are disabled.
-    pub fn new_with_advice_inputs(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
-        Self::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+    /// Sets the advice inputs for the processor.
+    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Self {
+        self.advice = advice_inputs.into();
+        self
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where
-    /// debugging and tracing are enabled.
-    pub fn new_debug(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
-        Self::new_with_options(
-            stack_inputs,
-            advice_inputs,
-            ExecutionOptions::default().with_debugging(true).with_tracing(true),
-        )
+    /// Sets the execution options for the processor.
+    ///
+    /// This will override any previously set debugging or tracing settings.
+    pub fn with_options(mut self, options: ExecutionOptions) -> Self {
+        self.options = options;
+        self
     }
 
-    /// Most general constructor unifying all the other ones.
+    /// Enables or disables debugging mode.
+    ///
+    /// When debugging is enabled, debug decorators will be executed during program execution.
+    pub fn with_debugging(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_debugging(enabled);
+        self
+    }
+
+    /// Enables or disables tracing mode.
+    ///
+    /// When tracing is enabled, trace decorators will be executed during program execution.
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_tracing(enabled);
+        self
+    }
+
+    /// Constructor for creating a `FastProcessor` with all options specified at once.
+    ///
+    /// For a more fluent API, consider using `FastProcessor::new()` with builder methods.
     pub fn new_with_options(
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
