@@ -39,10 +39,10 @@ impl MasmGenerator {
         code.push_str("    # Synthetic transaction kernel\n");
         code.push_str("    # Total cycles: ");
         code.push_str(&self.profile.transaction_kernel.total_cycles.to_string());
-        code.push_str("\n");
+        code.push('\n');
         code.push_str("    # Instruction mix: ");
         code.push_str(&format!("{:?}\n", self.profile.transaction_kernel.instruction_mix));
-        code.push_str("\n");
+        code.push('\n');
 
         // Generate each phase
         for (phase_name, phase) in &self.profile.transaction_kernel.phases {
@@ -277,7 +277,7 @@ impl MasmGenerator {
         let iterations = count / 5; // Each iteration ~5 cycles
         if iterations > 10 {
             let body = ["push.1", "if.true", "    push.2", "else", "    push.3", "end", "drop"];
-            push_repeat_block(&mut code, iterations.min(100) as u64, "    ", &body);
+            push_repeat_block(&mut code, iterations.min(100), "    ", &body);
         } else {
             for _ in 0..iterations {
                 code.push_str("    push.1\n");
@@ -307,13 +307,9 @@ impl MasmGenerator {
             "falcon512_verify" => {
                 code.push_str("use miden::core::crypto::dsa::falcon512poseidon2\n\n");
                 code.push_str("begin\n");
-                code.push_str("    # Set up public key commitment and message on stack\n");
+                code.push_str("    # Stack must contain PK commitment and message inputs\n");
                 code.push_str("    # Stack: [PK_COMMITMENT (4 elements), MSG (4 elements)]\n");
                 let body = [
-                    "# Push public key commitment (4 field elements)",
-                    "push.0 push.0 push.0 push.0",
-                    "# Push message (4 field elements)",
-                    "push.1 push.2 push.3 push.4",
                     "# Execute verification",
                     "exec.falcon512poseidon2::verify",
                     "drop",
@@ -384,6 +380,10 @@ fn push_repeat_block(code: &mut String, count: u64, indent: &str, body_lines: &[
     if count == 0 {
         return;
     }
+    if count <= MAX_REPEAT {
+        push_single_repeat_block(code, count, indent, body_lines);
+        return;
+    }
 
     let block_size = MAX_REPEAT * MAX_REPEAT;
     let mut remaining = count;
@@ -437,6 +437,7 @@ fn push_nested_repeat_block(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_generator::Falcon512Generator;
     use crate::profile::{
         InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile, VmProfile,
     };
@@ -530,6 +531,36 @@ mod tests {
                 .block_on(async { processor.execute(&program, &mut host).await })
                 .expect("failed to execute benchmark");
         }
+    }
+
+    #[test]
+    fn falcon512_component_benchmark_execute() {
+        let generator = test_generator();
+        let source = generator
+            .generate_component_benchmark("falcon512_verify", 1)
+            .expect("failed to generate benchmark");
+        let program = Assembler::default()
+            .with_dynamic_library(CoreLibrary::default())
+            .expect("failed to load core library")
+            .assemble_program(&source)
+            .expect("failed to assemble benchmark");
+
+        let verify_data =
+            Falcon512Generator::generate_verify_data().expect("failed to generate verify data");
+        let stack_inputs = verify_data
+            .to_stack_inputs()
+            .expect("failed to build stack inputs");
+        let advice_inputs = AdviceInputs::default().with_stack(verify_data.signature);
+
+        let mut host = DefaultHost::default();
+        host.load_library(&CoreLibrary::default())
+            .expect("failed to load core library");
+        let processor = FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs);
+        let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
+
+        runtime
+            .block_on(async { processor.execute(&program, &mut host).await })
+            .expect("failed to execute benchmark");
     }
 
     #[test]

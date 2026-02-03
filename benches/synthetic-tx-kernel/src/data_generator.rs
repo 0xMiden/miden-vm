@@ -135,7 +135,7 @@ impl MerkleGenerator {
 
         while current_level.len() > 1 {
             // Find sibling
-            let sibling_index = if index % 2 == 0 { index + 1 } else { index - 1 };
+            let sibling_index = if index.is_multiple_of(2) { index + 1 } else { index - 1 };
             if sibling_index < current_level.len() {
                 path.push(current_level[sibling_index]);
             }
