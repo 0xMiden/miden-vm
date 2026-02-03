@@ -20,18 +20,19 @@ use crate::{
 
 /// Executes a Dyn node from the start.
 #[inline(always)]
-pub(super) fn start_dyn_node<P, S>(
+pub(super) fn start_dyn_node<P, S, T>(
     processor: &mut P,
     current_node_id: MastNodeId,
     current_forest: &mut Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -134,18 +135,19 @@ where
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
 /// documentation of that enum variant for more details.
-pub fn finish_load_mast_forest_from_dyn_start<P, S>(
+pub fn finish_load_mast_forest_from_dyn_start<P, S, T>(
     root_id: MastNodeId,
     new_forest: Arc<MastForest>,
     processor: &mut P,
     current_forest: &mut Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.record_mast_forest_resolution(root_id, &new_forest);
 
@@ -164,18 +166,19 @@ where
 
 /// Executes the finish phase of a Dyn node.
 #[inline(always)]
-pub(super) fn finish_dyn_node<P, S>(
+pub(super) fn finish_dyn_node<P, S, T>(
     processor: &mut P,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,

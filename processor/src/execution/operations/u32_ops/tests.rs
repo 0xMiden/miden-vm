@@ -11,7 +11,7 @@ use super::{
     op_u32add, op_u32add3, op_u32and, op_u32assert2, op_u32div, op_u32madd, op_u32mul, op_u32split,
     op_u32sub, op_u32xor,
 };
-use crate::{fast::FastProcessor, tracer::NoopTracer};
+use crate::fast::{FastProcessor, NoopTracer};
 
 // CASTING OPERATIONS
 // --------------------------------------------------------------------------------------------

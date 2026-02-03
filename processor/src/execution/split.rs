@@ -18,19 +18,20 @@ use crate::{
 
 /// Executes a Split node from the start.
 #[inline(always)]
-pub(super) fn start_split_node<P, S>(
+pub(super) fn start_split_node<P, S, T>(
     processor: &mut P,
     split_node: &SplitNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -68,18 +69,19 @@ where
 
 /// Executes the finish phase of a Split node.
 #[inline(always)]
-pub(super) fn finish_split_node<P, S>(
+pub(super) fn finish_split_node<P, S, T>(
     processor: &mut P,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,

@@ -89,7 +89,7 @@ pub struct SystemState {
 
 impl SystemState {
     /// Convenience constructor that creates a new `SystemState` from a `Processor`.
-    pub fn from_processor<P: Processor>(processor: &P) -> Self {
+    pub(crate) fn from_processor<P: Processor>(processor: &P) -> Self {
         Self {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),
@@ -117,17 +117,24 @@ impl DecoderState {
     /// current node in the block stack. Hence, the `current_addr` is set to the (replayed) address
     /// of the current node, and the `parent_addr` is set to the (replayed) address of the parent
     /// node (i.e. the node previously on top of the block stack).
-    pub fn replay_node_start(&mut self, replay: &mut ExecutionReplay) {
-        self.current_addr = replay.block_address.replay_block_address();
-        self.parent_addr = replay.block_stack.replay_node_start_parent_addr();
+    pub fn replay_node_start(
+        &mut self,
+        block_address_replay: &mut BlockAddressReplay,
+        block_stack_replay: &mut BlockStackReplay,
+    ) {
+        self.current_addr = block_address_replay.replay_block_address();
+        self.parent_addr = block_stack_replay.replay_node_start_parent_addr();
     }
 
     /// This function is called when we hit an `END` operation, signaling the end of execution for a
     /// node. It updates the decoder state to point to the previous node in the block stack (which
     /// could be renamed to "node stack"), and returns the address of the node that just ended,
     /// along with any flags associated with it.
-    pub fn replay_node_end(&mut self, replay: &mut ExecutionReplay) -> (Felt, NodeFlags) {
-        let node_end_data = replay.block_stack.replay_node_end();
+    pub fn replay_node_end(
+        &mut self,
+        block_stack_replay: &mut BlockStackReplay,
+    ) -> (Felt, NodeFlags) {
+        let node_end_data = block_stack_replay.replay_node_end();
 
         self.current_addr = node_end_data.prev_addr;
         self.parent_addr = node_end_data.prev_parent_addr;
@@ -191,7 +198,7 @@ impl StackState {
     }
 
     /// Returns the overflow address (b1 helper column) using the stack overflow replay
-    pub fn overflow_addr(&mut self) -> Felt {
+    pub fn overflow_addr(&self) -> Felt {
         self.last_overflow_addr
     }
 
@@ -237,21 +244,14 @@ impl StackState {
         Felt::new(denominator as u64)
     }
 
-    /// Starts a new execution context for this stack and returns a tuple consisting of the current
-    /// stack depth and the address of the overflow table row prior to starting the new context.
+    /// Starts a new execution context for this stack, resetting the stack depth to its minimum
+    /// value, and last overflow address to 0.
     ///
-    /// This has the effect of hiding the contents of the overflow table such that it appears as
-    /// if the overflow table in the new context is empty.
-    pub fn start_context(&mut self) -> (usize, Felt) {
-        // Return the current stack depth and overflow address at the start of a new context
-        let current_depth = self.stack_depth;
-        let current_overflow_addr = self.last_overflow_addr;
-
-        // Reset stack depth to minimum (parallel to Process Stack behavior)
+    /// This has the effect of hiding the contents of the overflow table such that it appears as if
+    /// the overflow table in the new context is empty.
+    pub fn start_context(&mut self) {
         self.stack_depth = MIN_STACK_DEPTH;
         self.last_overflow_addr = ZERO;
-
-        (current_depth, current_overflow_addr)
     }
 
     /// Restores the prior context for this stack.
@@ -1120,6 +1120,12 @@ impl StackOverflowReplay {
 
     // ACCESSORS
     // --------------------------------------------------------------------------------
+
+    /// Peeks at the next recorded pop_overflow operation, returning the previously recorded value
+    /// and `new_overflow_addr` without removing it from the queue.
+    pub fn peek_replay_pop_overflow(&self) -> Option<&(Felt, Felt)> {
+        self.overflow_values.front()
+    }
 
     /// Replays a pop_overflow operation, returning the previously recorded value and
     /// `new_overflow_addr`.

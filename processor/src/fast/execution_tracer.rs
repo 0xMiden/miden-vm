@@ -19,18 +19,21 @@ use miden_core::{
 use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
-    fast::trace_state::{
-        AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
-        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
-        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+    fast::{
+        FastProcessor,
+        trace_state::{
+            AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+            CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+            ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+            KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
+            NodeFlags, RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+        },
     },
     processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
     system::ContextId,
     trace::chiplets::CircuitEvaluation,
-    tracer::Tracer,
+    tracer::{OperationHelperRegisters, Tracer},
     utils::split_u32_into_u16,
 };
 
@@ -427,11 +430,13 @@ impl ExecutionTracer {
 }
 
 impl Tracer for ExecutionTracer {
+    type Processor = FastProcessor;
+
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
-    fn start_clock_cycle<P: Processor>(
+    fn start_clock_cycle(
         &mut self,
-        processor: &P,
+        processor: &FastProcessor,
         continuation: Continuation,
         continuation_stack: &ContinuationStack,
         current_forest: &Arc<MastForest>,
@@ -441,8 +446,7 @@ impl Tracer for ExecutionTracer {
             self.start_new_fragment_context(
                 SystemState::from_processor(processor),
                 processor
-                    .stack()
-                    .top()
+                    .stack_top()
                     .try_into()
                     .expect("stack_top expected to be MIN_STACK_DEPTH elements"),
                 continuation_stack.clone(),
@@ -487,7 +491,7 @@ impl Tracer for ExecutionTracer {
                 self.block_stack.peek_mut().addr += HASH_CYCLE_LEN_FELT;
             },
             Continuation::FinishLoop { node_id: _, was_entered }
-                if was_entered && processor.stack().get(0) == ONE =>
+                if was_entered && processor.stack_get(0) == ONE =>
             {
                 // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
             },
@@ -626,12 +630,16 @@ impl Tracer for ExecutionTracer {
         self.ace.record_circuit_evaluation(clk, circuit_eval);
     }
 
-    fn finalize_clock_cycle(&mut self) {
+    fn finalize_clock_cycle(
+        &mut self,
+        _processor: &FastProcessor,
+        _op_helper_registers: OperationHelperRegisters,
+    ) {
         // do nothing
     }
 
-    fn increment_stack_size<P: Processor>(&mut self, processor: &P) {
-        let new_overflow_value = processor.stack().get(15);
+    fn increment_stack_size(&mut self, processor: &FastProcessor) {
+        let new_overflow_value = processor.stack_get(15);
         self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 

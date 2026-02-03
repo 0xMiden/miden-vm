@@ -7,45 +7,67 @@ use miden_core::{
     field::PrimeField64,
     mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
-    program::MIN_STACK_DEPTH,
+    program::{Kernel, MIN_STACK_DEPTH},
     utils::range,
 };
 
 use crate::{
     ContextId, ExecutionError, Host, Stopper,
-    continuation_stack::Continuation,
+    continuation_stack::{Continuation, ContinuationStack},
     errors::{AceEvalError, OperationError},
+    execution::{
+        InternalBreakReason, execute_impl, finish_emit_op_execution,
+        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
+    },
     fast::{
         step::BreakReason,
         trace_state::{
-            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MemoryReadsReplay,
-            StackOverflowReplay, StackState, SystemState,
+            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+            MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
         },
     },
+    host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
-    trace::parallel::core_trace_fragment::{TraceGenerationHelpers, eval_circuit_parallel_},
+    trace::parallel::core_trace_fragment::eval_circuit_parallel_,
     tracer::Tracer,
 };
 
 // REPLAY PROCESSOR
 // ================================================================================================
 
-// TODO(plafer): document
+/// A processor implementation used in conjunction with the [`CoreTraceGenerationTracer`] in
+/// [`super::build_trace`] to replay the execution of a fragment of execution for a predetermined
+/// number of clock cycles.
+///
+/// This processor uses various "replay" structures to provide the necessary state during execution,
+/// such as stack overflows, memory reads, advice provider values, hasher responses, execution
+/// contexts, and MAST forest resolutions. The processor executes until it reaches the specified
+/// maximum clock cycle, at which point it stops execution (due to the [`ReplayStopper`]).
+///
+/// The replay structures and initial system and stack state are built by the
+/// [`crate::fast::execution_tracer::ExecutionTracer`] in conjunction with
+/// [`crate::fast::FastProcessor::execute_for_trace`].
 #[derive(Debug)]
-pub struct ReplayProcessor {
-    system: SystemState,
-    stack: StackState,
-    stack_overflow_replay: StackOverflowReplay,
-    execution_context_replay: ExecutionContextReplay,
-    advice_replay: AdviceReplay,
-    memory_reads_replay: MemoryReadsReplay,
-    hasher_response_replay: HasherResponseReplay,
+pub(crate) struct ReplayProcessor {
+    pub system: SystemState,
+    pub stack: StackState,
+    pub stack_overflow_replay: StackOverflowReplay,
+    pub execution_context_replay: ExecutionContextReplay,
+    pub advice_replay: AdviceReplay,
+    pub memory_reads_replay: MemoryReadsReplay,
+    pub hasher_response_replay: HasherResponseReplay,
+    pub mast_forest_resolution_replay: MastForestResolutionReplay,
 
-    // TODO(plafer): document
-    maximum_clock: RowIndex,
+    /// The maximum clock cycle at which this processor should stop execution.
+    pub maximum_clock: RowIndex,
 }
 
 impl ReplayProcessor {
+    /// Creates a new instance of the [`ReplayProcessor`].
+    ///
+    /// The parameters are expected to be built by the
+    /// [`crate::fast::execution_tracer::ExecutionTracer`] when used in conjunction with
+    /// [`crate::fast::FastProcessor::execute_for_trace`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,
@@ -54,6 +76,7 @@ impl ReplayProcessor {
         advice_replay: AdviceReplay,
         memory_reads_replay: MemoryReadsReplay,
         hasher_response_replay: HasherResponseReplay,
+        mast_forest_resolution_replay: MastForestResolutionReplay,
         num_clocks_to_execute: RowIndex,
     ) -> Self {
         let maximum_clock = initial_system.clk + num_clocks_to_execute.as_usize();
@@ -66,8 +89,115 @@ impl ReplayProcessor {
             advice_replay,
             memory_reads_replay,
             hasher_response_replay,
+            mast_forest_resolution_replay,
             maximum_clock,
         }
+    }
+
+    /// Executes the processor until it reaches the end of the fragment, or until an error occurs.
+    pub fn execute<T>(
+        &mut self,
+        continuation_stack: &mut ContinuationStack,
+        current_forest: &mut Arc<MastForest>,
+        kernel: &Kernel,
+        tracer: &mut T,
+    ) -> Result<(), ExecutionError>
+    where
+        T: Tracer<Processor = Self>,
+    {
+        match self.execute_impl(continuation_stack, current_forest, kernel, tracer) {
+            ControlFlow::Continue(_) => {
+                // End of program reached - i.e. the execution loop exited without the end of
+                // fragment being reached (and thus the stopper breaking).
+                Ok(())
+            },
+            ControlFlow::Break(break_reason) => match break_reason {
+                BreakReason::Err(err) => Err(err),
+                BreakReason::Stopped(_continuation) => {
+                    // Our ReplayStopper stopped us because we reached the end of the fragment.
+                    // Hence, this is expected, and we can just return Ok.
+                    Ok(())
+                },
+            },
+        }
+    }
+
+    /// Core execution loop implementation for the replay processor.
+    ///
+    /// This method uses the [`crate::execution::execute_impl`] function to perform the core
+    /// execution loop. See its documentation for more details.
+    fn execute_impl<T>(
+        &mut self,
+        continuation_stack: &mut ContinuationStack,
+        current_forest: &mut Arc<MastForest>,
+        kernel: &Kernel,
+        tracer: &mut T,
+    ) -> ControlFlow<BreakReason>
+    where
+        T: Tracer<Processor = Self>,
+    {
+        let host = &mut NoopHost;
+        let stopper = &ReplayStopper;
+
+        while let ControlFlow::Break(internal_break_reason) =
+            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
+        {
+            match internal_break_reason {
+                InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
+                InternalBreakReason::Emit { basic_block_node_id: _, continuation } => {
+                    // do nothing - in replay processor we don't need to emit anything
+
+                    // Call `finish_emit_op_execution()`, as per the sans-IO contract.
+                    finish_emit_op_execution(
+                        continuation,
+                        self,
+                        continuation_stack,
+                        tracer,
+                        stopper,
+                    )?;
+                },
+                InternalBreakReason::LoadMastForestFromDyn { .. } => {
+                    // load mast forest from replay
+                    let (root_id, new_forest) =
+                        self.mast_forest_resolution_replay.replay_resolution();
+
+                    // Finish loading the MAST forest from the Dyn node, as per the sans-IO
+                    // contract.
+                    finish_load_mast_forest_from_dyn_start(
+                        root_id,
+                        new_forest,
+                        self,
+                        current_forest,
+                        continuation_stack,
+                        tracer,
+                        stopper,
+                    )?;
+                },
+                InternalBreakReason::LoadMastForestFromExternal {
+                    external_node_id,
+                    procedure_hash: _,
+                } => {
+                    // load mast forest from replay
+                    let (root_id, new_forest) =
+                        self.mast_forest_resolution_replay.replay_resolution();
+
+                    // Finish loading the MAST forest from the External node, as per the sans-IO
+                    // contract.
+                    finish_load_mast_forest_from_external(
+                        root_id,
+                        new_forest,
+                        external_node_id,
+                        current_forest,
+                        continuation_stack,
+                        host,
+                        tracer,
+                    )?;
+                },
+            }
+        }
+
+        // End of program reached (since loop exited without the stopper breaking)
+        ControlFlow::Continue(())
     }
 }
 
@@ -98,6 +228,8 @@ impl SystemInterface for ReplayProcessor {
 }
 
 impl StackInterface for ReplayProcessor {
+    type Processor = Self;
+
     fn top(&self) -> &[Felt] {
         &self.stack.stack_top
     }
@@ -192,7 +324,10 @@ impl StackInterface for ReplayProcessor {
         self.stack.stack_top[rotation_bot_index] = new_stack_bot_element;
     }
 
-    fn increment_size(&mut self, _tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+    fn increment_size<T>(&mut self, _tracer: &mut T) -> Result<(), ExecutionError>
+    where
+        T: Tracer<Processor = Self>,
+    {
         const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
@@ -214,7 +349,10 @@ impl StackInterface for ReplayProcessor {
         Ok(())
     }
 
-    fn decrement_size(&mut self, _tracer: &mut impl Tracer) {
+    fn decrement_size<T>(&mut self, _tracer: &mut T)
+    where
+        T: Tracer<Processor = Self>,
+    {
         // Shift all other elements up
         for write_idx in 0..(MIN_STACK_DEPTH - 1) {
             let read_idx = write_idx + 1;
@@ -233,7 +371,6 @@ impl StackInterface for ReplayProcessor {
 }
 
 impl Processor for ReplayProcessor {
-    type HelperRegisters = TraceGenerationHelpers;
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceReplay;
@@ -264,10 +401,6 @@ impl Processor for ReplayProcessor {
         &mut self.advice_replay
     }
 
-    fn memory(&self) -> &Self::Memory {
-        &self.memory_reads_replay
-    }
-
     fn memory_mut(&mut self) -> &mut Self::Memory {
         &mut self.memory_reads_replay
     }
@@ -277,7 +410,7 @@ impl Processor for ReplayProcessor {
     }
 
     fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
-        let _ = self.stack.start_context();
+        self.stack.start_context();
         tracer.start_context();
     }
 
@@ -370,10 +503,10 @@ impl Processor for ReplayProcessor {
 // REPLAY STOPPER
 // ================================================================================================
 
-// TODO(plafer): check off by 1 and document (including making sure enough is documented so that off
-// by 1 is clear)
+/// A stopper implementation used with the [`ReplayProcessor`] to stop execution when the end of the
+/// fragment is reached.
 #[derive(Debug)]
-pub struct ReplayStopper;
+pub(crate) struct ReplayStopper;
 
 impl Stopper for ReplayStopper {
     type Processor = ReplayProcessor;

@@ -1409,7 +1409,7 @@ fn test_dyn_node_decoding() {
     // begin
     //   # stack: [40, DIGEST]
     //   mstorew
-    //   push.42
+    //   push.40
     //   dynexec
     // end
 

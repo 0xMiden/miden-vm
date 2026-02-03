@@ -6,7 +6,7 @@ use crate::{
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
     },
-    tracer::Tracer,
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
@@ -17,17 +17,21 @@ mod tests;
 /// # Errors
 /// Returns an error if the advice stack is empty.
 #[inline(always)]
-pub(super) fn op_advpop<P: Processor>(
+pub(super) fn op_advpop<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let value = processor.advice_provider_mut().pop_stack()?;
     tracer.record_advice_pop_stack(value);
 
     processor.stack_mut().increment_size(tracer)?;
     processor.stack_mut().set(0, value);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops a word (4 elements) from the advice stack and overwrites the top word on the operand
@@ -36,17 +40,21 @@ pub(super) fn op_advpop<P: Processor>(
 /// # Errors
 /// Returns an error if the advice stack contains fewer than four elements.
 #[inline(always)]
-pub(super) fn op_advpopw<P: Processor>(
+pub(super) fn op_advpopw<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let word = processor.advice_provider_mut().pop_stack_word()?;
     tracer.record_advice_pop_stack_word(word);
 
     // Set word on stack (word[0] at top).
     processor.stack_mut().set_word(0, &word);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Loads a word (4 elements) starting at the specified memory address onto the stack.
@@ -63,10 +71,14 @@ pub(super) fn op_advpopw<P: Processor>(
 /// # Errors
 /// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
-pub(super) fn op_mloadw<P: Processor>(
+pub(super) fn op_mloadw<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let addr = processor.stack().get(0);
     let ctx = processor.system().ctx();
     let clk = processor.system().clock();
@@ -84,7 +96,7 @@ pub(super) fn op_mloadw<P: Processor>(
     // Set word on stack (word[0] at top).
     processor.stack_mut().set_word(0, &word);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Stores a word (4 elements) from the stack into the specified memory address.
@@ -99,10 +111,14 @@ pub(super) fn op_mloadw<P: Processor>(
 /// # Errors
 /// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
-pub(super) fn op_mstorew<P: Processor>(
+pub(super) fn op_mstorew<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let addr = processor.stack().get(0);
     // Address is at position 0, so word starts at position 1
     let word = [
@@ -125,7 +141,7 @@ pub(super) fn op_mstorew<P: Processor>(
         processor.system().clock(),
     );
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Loads the element from the specified memory address onto the stack.
@@ -137,10 +153,10 @@ pub(super) fn op_mstorew<P: Processor>(
 ///   element is returned.
 /// - The element retrieved from memory is pushed to the top of the stack.
 #[inline(always)]
-pub(super) fn op_mload<P: Processor>(
+pub(super) fn op_mload<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError> {
     let ctx = processor.system().ctx();
     let addr = processor.stack().get(0);
 
@@ -154,7 +170,7 @@ pub(super) fn op_mload<P: Processor>(
 
     processor.stack_mut().set(0, element);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Stores an element from the stack into the first slot at the specified memory address.
@@ -166,10 +182,14 @@ pub(super) fn op_mload<P: Processor>(
 ///
 /// Thus, the net result of the operation is that the stack is shifted left by one item.
 #[inline(always)]
-pub(super) fn op_mstore<P: Processor>(
+pub(super) fn op_mstore<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let addr = processor.stack().get(0);
     let value = processor.stack().get(1);
     let ctx = processor.system().ctx();
@@ -184,7 +204,7 @@ pub(super) fn op_mstore<P: Processor>(
         processor.system().clock(),
     );
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Loads two words from memory and replaces the top 8 elements of the stack with their
@@ -201,10 +221,10 @@ pub(super) fn op_mstore<P: Processor>(
 /// # Errors
 /// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
-pub(super) fn op_mstream<P: Processor>(
+pub(super) fn op_mstream<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError> {
     // The stack index where the memory address to load the words from is stored.
     const MEM_ADDR_STACK_IDX: usize = 12;
 
@@ -245,7 +265,7 @@ pub(super) fn op_mstream<P: Processor>(
         .stack_mut()
         .set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Moves 8 elements from the advice stack to the memory, via the operand stack.
@@ -262,10 +282,10 @@ pub(super) fn op_mstream<P: Processor>(
 /// # Errors
 /// - Returns an error if the address is not aligned to a word boundary.
 #[inline(always)]
-pub(super) fn op_pipe<P: Processor>(
+pub(super) fn op_pipe<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), IoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, IoError> {
     /// WORD_SIZE, but as a `Felt`.
     const WORD_SIZE_FELT: Felt = Felt::new(4);
     /// The size of a double-word.
@@ -310,5 +330,5 @@ pub(super) fn op_pipe<P: Processor>(
         .stack_mut()
         .set(MEM_ADDR_STACK_IDX, addr_first_word + DOUBLE_WORD_SIZE);
 
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
