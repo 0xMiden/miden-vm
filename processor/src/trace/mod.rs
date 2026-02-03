@@ -66,20 +66,20 @@ pub struct ChipletsTrace {
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Auxiliary Co-Processor
-///   components.
-/// - Hints used during auxiliary trace segment construction.
-/// - Metadata needed by the STARK prover.
+/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
+/// - Auxiliary trace builders.
+/// - Information about the program (program hash and the kernel).
+/// - Information about execution outputs (stack state, advice provider, and precompile transcript).
+/// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
-    meta: Vec<u8>,
     main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     advice: AdviceProvider,
-    trace_len_summary: TraceLenSummary,
     final_pc_transcript: PrecompileTranscript,
+    trace_len_summary: TraceLenSummary,
 }
 
 impl ExecutionTrace {
@@ -97,14 +97,13 @@ impl ExecutionTrace {
         let program_info = ProgramInfo::new(program_hash, kernel);
 
         Self {
-            meta: Vec::new(),
-            aux_trace_builders,
             main_trace,
+            aux_trace_builders,
             program_info,
             stack_outputs: execution_output.stack,
             advice: execution_output.advice,
-            trace_len_summary,
             final_pc_transcript: execution_output.final_pc_transcript,
+            trace_len_summary,
         }
     }
 
@@ -217,11 +216,6 @@ impl ExecutionTrace {
     /// Returns the final advice provider state.
     pub fn advice_provider(&self) -> &AdviceProvider {
         &self.advice
-    }
-
-    /// Returns the trace meta data.
-    pub fn meta(&self) -> &[u8] {
-        &self.meta
     }
 
     /// Destructures this execution trace into the process’s final stack and advice states.
