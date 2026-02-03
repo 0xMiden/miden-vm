@@ -1,5 +1,5 @@
 ---
-source: processor/src/parallel/tests.rs
+source: processor/src/trace/parallel/tests.rs
 assertion_line: 389
 expression: trace_from_fragments
 ---
