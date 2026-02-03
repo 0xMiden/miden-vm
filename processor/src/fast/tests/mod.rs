@@ -172,8 +172,8 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     let program = simple_program_with_ops(vec![Operation::Noop; NUM_OPS]);
 
     let options = ExecutionOptions::new(
-        Some(MIN_TRACE_LEN as u32),
-        MIN_TRACE_LEN as u32,
+        Some(2048),
+        2048,
         ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
         false,
