@@ -64,6 +64,11 @@
 - [BREAKING] `Host::on_debug()` and `Host::on_trace()` now take immutable references to `ProcessorState` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
 - [BREAKING] Removed unused `meta` field from `ExecutionTrace` and changed the constructor to take `ProgramInfo` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
 
+## 0.20.5 (2026-02-02)
+
+- Fixed issue with deserialization of Paths due to lifetime restrictions [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+- Implemented path canonicalization and modified Path/PathBuf APIs to canonicalize paths during construction. This also addressed some issues uncovered during testing where some APIs were not canonicalizing paths, or path-related functions were inconsistent in their behavior due to special-casing that was previously needed [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+
 ## 0.20.4 (2026-01-30)
 
 - Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)

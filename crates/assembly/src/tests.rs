@@ -4587,3 +4587,94 @@ fn test_cross_module_constant_resolution() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn test_cross_module_quoted_identifier_resolution() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::\"module::a\"",
+        source_file!(
+            &context,
+            r#"
+            # Checks local path resolution
+            pub proc "$item::<T>::fun"
+                exec."$item::<T>::get"
+            end
+
+            # Checks absolute path resolution to a local item
+            proc "$item::<T>::get"
+                exec.::cycle::"module::a"::"$item::<T>::get_impl"
+            end
+
+            proc "$item::<T>::get_impl"
+                push.1
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module::b",
+        source_file!(
+            &context,
+            r#"
+            # Checks that import resolution with quoted path components works
+            use cycle::"module::a"->a
+
+            # Checks that link-time cross-module resolution with quoted path components works
+            pub proc b_proc
+                exec.a::"$item::<T>::fun"
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_kernel_linking_against_its_own_library() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        proc internal_proc
+            caller
+            drop
+            exec.$kernel::lib::lib_proc
+        end
+
+        pub proc kernel_proc
+            exec.internal_proc
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "$kernel::lib",
+        source_file!(
+            &context,
+            r#"
+            pub proc lib_proc
+                swap
+            end
+            "#
+        ),
+    )?;
+
+    let mut assembler = Assembler::new(context.source_manager());
+
+    assembler.compile_and_statically_link(lib)?;
+
+    let _ = assembler.assemble_kernel(kernel)?;
+
+    Ok(())
+}

@@ -9,7 +9,7 @@ use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 
-use super::{Path, PathError};
+use super::{Path, PathComponent, PathError};
 use crate::ast::Ident;
 
 // ITEM PATH
@@ -84,14 +84,18 @@ impl PathBuf {
 
         let validated = Path::validate(source)?;
 
-        // Ensure we canonicalize paths that are de-facto absolute to use the root prefix
-        let mut buf = PathBuf::with_capacity(validated.byte_len());
-        if validated.is_absolute() && !validated.as_str().starts_with("::") {
-            buf.inner.push_str("::");
-        }
-        buf.inner.push_str(validated.as_str());
+        validated.canonicalize()
+    }
 
-        Ok(buf)
+    /// Extends this [PathBuf] from a collection of possibly-invalid path components
+    pub(super) fn extend_with_components<'a>(
+        &mut self,
+        components: impl IntoIterator<Item = Result<PathComponent<'a>, PathError>>,
+    ) -> Result<(), PathError> {
+        for component in components {
+            self.push_component(component?.as_str());
+        }
+        Ok(())
     }
 
     /// Create an absolute [Path] from a pre-validated string
@@ -145,14 +149,8 @@ impl PathBuf {
         let parent = parent.as_ref();
         match self.split_last() {
             Some((last, _)) => {
-                let parent = parent.as_str();
-                let mut buf = String::with_capacity(last.len() + parent.len() + 2);
-                if !parent.is_empty() {
-                    buf.push_str(parent);
-                    buf.push_str("::");
-                }
-                buf.push_str(last);
-                self.inner = buf;
+                let reparented = parent.join(last);
+                let _ = core::mem::replace(self, reparented);
             },
             None => {
                 self.inner.clear();
@@ -165,37 +163,15 @@ impl PathBuf {
     ///
     /// If `path` is absolute, it replaces the current path.
     ///
-    /// This function ensures that the joined path correctly delimits each path component.
+    /// This function ensures that the joined path correctly delimits each path component, and that
+    /// each component is in canonical form.
     pub fn push<P>(&mut self, path: &P)
     where
         P: AsRef<Path> + ?Sized,
     {
         let path = path.as_ref();
 
-        if path.is_empty() {
-            return;
-        }
-
-        if path.is_absolute() {
-            self.inner.clear();
-            // Handle special symbols which are de-facto absolute by making the root prefix explicit
-            if !path.as_str().starts_with("::") {
-                self.inner.push_str("::");
-            }
-            self.inner.push_str(path.as_str());
-            return;
-        }
-
-        if self.is_empty() {
-            self.inner.push_str(path.as_str());
-            return;
-        }
-
-        for component in path.components() {
-            self.inner.push_str("::");
-            let component = component.unwrap();
-            self.inner.push_str(component.as_str());
-        }
+        self.extend_with_components(path.components()).expect("invalid path");
     }
 
     /// Extends `self` with `component`.
@@ -203,6 +179,12 @@ impl PathBuf {
     /// Unlike [`Self::push`], which appends another `Path` to the buffer - this method appends the
     /// given string as a single path component, ensuring that the content is quoted properly if
     /// needed.
+    ///
+    /// If `::` is pushed, it is treated as a literal root component (i.e. it makes the path
+    /// absolute). On a non-empty [PathBuf], this has the effect of clearing the path, similar to
+    /// what happens if you call [`PathBuf::push`] with an absolute path.
+    ///
+    /// Pushing components using this method guarantees they are in canonical form.
     pub fn push_component<S>(&mut self, component: &S)
     where
         S: AsRef<str> + ?Sized,
@@ -213,39 +195,37 @@ impl PathBuf {
             "::" if self.inner.is_empty() => {
                 self.inner.push_str("::");
             },
+            "::" => {
+                // Pushing the root component on a non-empty path, resets it to an empty absolute
+                // path
+                self.inner.clear();
+                self.inner.push_str("::");
+            },
             component => {
+                // Add a delimiter if the path is non-empty
                 if !self.is_empty() {
                     self.inner.push_str("::");
                 }
 
-                if component.starts_with('"') && component.ends_with('"') {
+                let is_quoted = component.starts_with('"') && component.ends_with('"');
+                let is_special = component == Path::KERNEL_PATH || component == Path::EXEC_PATH;
+                let requires_quoting = !is_special && Ident::requires_quoting(component);
+
+                if is_special && self.inner.is_empty() {
+                    // Special namespaces are always absolute
+                    self.inner.push_str("::");
                     self.inner.push_str(component);
+                } else if requires_quoting && !is_quoted {
+                    // Quote when necessary
+                    self.inner.push('"');
+                    self.inner.push_str(component);
+                    self.inner.push('"');
+                } else if !requires_quoting && is_quoted {
+                    // Unquote unnecessary quoting
+                    self.inner.push_str(&component[1..(component.len() - 1)]);
                 } else {
-                    match Ident::validate(component) {
-                        // If the component is a valid MASM identifier, and does not contain `::`,
-                        // it does not need quoting
-                        Ok(_) if !component.contains("::") => {
-                            self.inner.push_str(component);
-                        },
-                        // If either of these validation occurs, the component requires quoting
-                        Ok(_)
-                        | Err(
-                            crate::ast::IdentError::Casing(_)
-                            | crate::ast::IdentError::InvalidChars { .. },
-                        ) => {
-                            self.inner.push('"');
-                            self.inner.push_str(component);
-                            self.inner.push('"');
-                        },
-                        // These two variants are unreachable because:
-                        //
-                        // 1. Length is not checked by Ident::validate
-                        // 2. We've already checked that the component is non-empty
-                        Err(
-                            crate::ast::IdentError::InvalidLength { .. }
-                            | crate::ast::IdentError::Empty,
-                        ) => unreachable!(),
-                    }
+                    // No quoting required, or already quoted
+                    self.inner.push_str(component);
                 }
             },
         }
@@ -274,19 +254,19 @@ impl<'a> core::ops::AddAssign<&'a Path> for PathBuf {
 
 impl<'a> core::ops::AddAssign<&'a str> for PathBuf {
     fn add_assign(&mut self, rhs: &'a str) {
-        self.push(rhs);
+        self.push_component(rhs);
     }
 }
 
 impl<'a> core::ops::AddAssign<&'a Ident> for PathBuf {
     fn add_assign(&mut self, rhs: &'a Ident) {
-        self.push(rhs.as_str());
+        self.push_component(rhs.as_str());
     }
 }
 
 impl<'a> core::ops::AddAssign<&'a crate::ast::ProcedureName> for PathBuf {
     fn add_assign(&mut self, rhs: &'a crate::ast::ProcedureName) {
-        self.push(rhs.as_str());
+        self.push_component(rhs.as_str());
     }
 }
 
@@ -309,7 +289,9 @@ impl TryFrom<String> for PathBuf {
 
 impl From<Ident> for PathBuf {
     fn from(component: Ident) -> Self {
-        PathBuf { inner: component.as_str().to_string() }
+        let mut buf = PathBuf::with_capacity(component.as_str().len());
+        buf.push_component(component.as_str());
+        buf
     }
 }
 
@@ -359,7 +341,11 @@ impl Deserializable for PathBuf {
         let path = source.read_slice(len)?;
         let path =
             str::from_utf8(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-        Self::new(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))
+        Path::validate(path).map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
+        // We deserialize like this due to our deserialization tests expecting round-trips to be
+        // identical to what was serialized, though ideally we'd like to canonicalize paths that
+        // were deserialized. We should probably change how these tests work in the future.
+        Ok(PathBuf { inner: path.to_string() })
     }
 }
 
@@ -379,9 +365,43 @@ impl<'de> serde::Deserialize<'de> for PathBuf {
     where
         D: serde::Deserializer<'de>,
     {
-        let inner = <&'de str as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        use serde::de::Visitor;
 
-        PathBuf::new(inner).map_err(serde::de::Error::custom)
+        struct PathVisitor;
+
+        impl<'de> Visitor<'de> for PathVisitor {
+            type Value = PathBuf;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a valid Path/PathBuf")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Path::validate(v).map_err(serde::de::Error::custom)?;
+                // We deserialize like this due to our deserialization tests expecting round-trips
+                // to be identical to what was serialized, though ideally we'd like
+                // to canonicalize paths that were deserialized. We should probably
+                // change how these tests work in the future.
+                Ok(PathBuf { inner: v.to_string() })
+            }
+
+            fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Path::validate(&v).map_err(serde::de::Error::custom)?;
+                // We deserialize like this due to our deserialization tests expecting round-trips
+                // to be identical to what was serialized, though ideally we'd like
+                // to canonicalize paths that were deserialized. We should probably
+                // change how these tests work in the future.
+                Ok(PathBuf { inner: v })
+            }
+        }
+
+        deserializer.deserialize_any(PathVisitor)
     }
 }
 
@@ -433,30 +453,30 @@ mod tests {
 
     #[test]
     fn single_quoted_component() {
-        let path = PathBuf::new("\"miden:base/account@0.1.0\"").unwrap();
+        let path = PathBuf::new("\"miden::base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 1);
-        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
-        assert_eq!(path.first(), Some("\"miden:base/account@0.1.0\""));
+        assert_eq!(path.last(), Some("miden::base/account@0.1.0"));
+        assert_eq!(path.first(), Some("miden::base/account@0.1.0"));
     }
 
     #[test]
     fn trailing_quoted_component() {
-        let path = PathBuf::new("foo::\"miden:base/account@0.1.0\"").unwrap();
+        let path = PathBuf::new("foo::\"miden::base/account@0.1.0\"").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 2);
-        assert_eq!(path.last(), Some("\"miden:base/account@0.1.0\""));
+        assert_eq!(path.last(), Some("miden::base/account@0.1.0"));
         assert_eq!(path.first(), Some("foo"));
     }
 
     #[test]
     fn interspersed_quoted_component() {
-        let path = PathBuf::new("foo::\"miden:base/account@0.1.0\"::item").unwrap();
+        let path = PathBuf::new("foo::\"miden::base/account@0.1.0\"::item").unwrap();
         assert!(!path.is_absolute());
         assert_eq!(path.components().count(), 3);
         assert_eq!(path.last(), Some("item"));
         assert_eq!(path.first(), Some("foo"));
-        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::\"miden:base/account@0.1.0\""));
+        assert_eq!(path.parent().map(|p| p.as_str()), Some("foo::\"miden::base/account@0.1.0\""));
     }
 
     #[test]
@@ -487,7 +507,7 @@ mod tests {
         let p1component = p1components.next().unwrap().unwrap();
         let p2component = p2components.next().unwrap().unwrap();
 
-        assert_eq!(p1component, PathComponent::Normal("root_ns:root@1.0.0"));
+        assert_eq!(p1component, PathComponent::Normal("\"root_ns:root@1.0.0\""));
         assert_eq!(p1component, p2component);
 
         let p1module = p1components.next().unwrap().unwrap();
@@ -522,7 +542,7 @@ mod tests {
         let p1component = p1components.next_back().unwrap().unwrap();
         let p2component = p2components.next_back().unwrap().unwrap();
 
-        assert_eq!(p1component, PathComponent::Normal("root_ns:root@1.0.0"));
+        assert_eq!(p1component, PathComponent::Normal("\"root_ns:root@1.0.0\""));
         assert_eq!(p1component, p2component);
 
         let p1root = p1components.next_back().unwrap().unwrap();
@@ -533,19 +553,25 @@ mod tests {
 
         assert!(p1.is_absolute());
         assert_eq!(p1.components().count(), 4);
-        assert_eq!(p1.last(), Some(quoted_function));
+        assert_eq!(p1.last(), Some(function));
         assert_eq!(p1.first(), Some("root_ns:root@1.0.0"));
         let parent = p1.parent().unwrap();
-        assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::root_ns:root@1.0.0"));
+        assert_eq!(
+            parent.as_str(),
+            "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
+        );
+        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
 
         assert!(p2.is_absolute());
         assert_eq!(p2.components().count(), 4);
-        assert_eq!(p2.last(), Some(quoted_function));
+        assert_eq!(p2.last(), Some(function));
         assert_eq!(p2.first(), Some("root_ns:root@1.0.0"));
         let parent = p2.parent().unwrap();
-        assert_eq!(parent.as_str(), "::root_ns:root@1.0.0::abi_transform_tx_kernel_get_inputs_4");
-        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::root_ns:root@1.0.0"));
+        assert_eq!(
+            parent.as_str(),
+            "::\"root_ns:root@1.0.0\"::abi_transform_tx_kernel_get_inputs_4"
+        );
+        assert_eq!(parent.parent().map(|p| p.as_str()), Some("::\"root_ns:root@1.0.0\""));
     }
 
     #[test]

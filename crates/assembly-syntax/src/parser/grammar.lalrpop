@@ -386,7 +386,7 @@ TypeExpr: TypeExpr = {
     <PointerType> => TypeExpr::Ptr(<>),
     <ArrayType> => TypeExpr::Array(<>),
     <StructType> => TypeExpr::Struct(<>),
-    <path:MaybeQualifiedTypePath> => {
+    <path:MaybeQualifiedProcedureOrTypePath> => {
         // If we have a single identifier in the path, check if the identifier is a known built-in
         // primitive type. If we don't recognize it, treat it as a reference to a type assumed to
         // be defined in the same module
@@ -1928,9 +1928,9 @@ Felt: Felt = {
 // SYMBOLS
 // ================================================================================================
 
+#[inline]
 ProcedureName: ProcedureName = {
-    <BareIdent> => ProcedureName::from_raw_parts(<>),
-    <QuotedIdent> => ProcedureName::from_raw_parts(<>),
+    <Ident> => ProcedureName::from_raw_parts(<>),
 }
 
 
@@ -1940,7 +1940,7 @@ InvocationTarget: InvocationTarget = {
         if let Some(name) = path.as_ident() {
             InvocationTarget::Symbol(name.with_span(path.span()))
         } else {
-            InvocationTarget::Path(path.map(|p| p.into()))
+            InvocationTarget::Path(path)
         }
     },
     <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
@@ -1950,12 +1950,13 @@ InvocationTarget: InvocationTarget = {
 
 AliasTarget: AliasTarget = {
     <MastRoot> =>  AliasTarget::MastRoot(<>),
-    <path:QualifiedItemPath> =>  AliasTarget::Path(path.map(|p| p.into())),
+    <path:QualifiedItemPath> =>  AliasTarget::Path(path),
     <l:@L> <_invalid:hex_value> <r:@R> =>? Err(ParseError::User {
         error: ParsingError::InvalidMastRoot { span: span!(source_id, l, r) },
     }),
 }
 
+#[inline]
 QualifiedItemPath: Span<Arc<Path>> = {
     <path:MaybeQualifiedItemPath> =>? {
         if path.as_ident().is_some() {
@@ -1972,10 +1973,9 @@ MaybeQualifiedItemPath: Span<Arc<Path>> = {
     MaybeQualifiedProcedureOrTypePath,
 }
 
-
 #[inline]
 MaybeQualifiedProcedureOrTypePath: Span<Arc<Path>> = {
-    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:Ident> <r:@R> =>? {
+    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<PathComponent> "::")*> <name:PathComponent> <r:@R> =>? {
         let span = span!(source_id, l, r);
         if is_absolute && namespace.is_empty() {
             return Err(ParseError::User {
@@ -1985,34 +1985,9 @@ MaybeQualifiedProcedureOrTypePath: Span<Arc<Path>> = {
 
         let mut path = PathBuf::default();
         for component in namespace.iter() {
-            path.push(component);
+            path.push_component(component);
         }
-        path.push(&name);
-
-        let path = if is_absolute {
-            path.to_absolute().into_owned()
-        } else {
-            path
-        };
-
-        Ok(Span::new(span, path.into()))
-    },
-}
-
-MaybeQualifiedTypePath: Span<Arc<Path>> = {
-    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:TypeIdent> <r:@R> =>? {
-        let span = span!(source_id, l, r);
-        if is_absolute && namespace.is_empty() {
-            return Err(ParseError::User {
-                error: ParsingError::UnqualifiedImport { span },
-            });
-        }
-
-        let mut path = PathBuf::default();
-        for component in namespace.iter() {
-            path.push(component);
-        }
-        path.push(&name);
+        path.push_component(&name);
 
         let path = if is_absolute {
             path.to_absolute().into_owned()
@@ -2026,7 +2001,7 @@ MaybeQualifiedTypePath: Span<Arc<Path>> = {
 
 #[inline]
 MaybeQualifiedConstantPath: Span<Arc<Path>> = {
-    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<BareIdent> "::")*> <name:ConstantName> <r:@R> =>? {
+    <l:@L> <is_absolute:MaybeAbsolute> <namespace:(<PathComponent> "::")*> <name:ConstantName> <r:@R> =>? {
         let span = span!(source_id, l, r);
 
         if is_absolute && namespace.is_empty() {
@@ -2037,9 +2012,9 @@ MaybeQualifiedConstantPath: Span<Arc<Path>> = {
 
         let mut path = PathBuf::default();
         for component in namespace.iter() {
-            path.push(component);
+            path.push_component(component);
         }
-        path.push(&name);
+        path.push_component(&name);
 
         let path = if is_absolute {
             path.to_absolute().into_owned()
@@ -2057,37 +2032,25 @@ MaybeAbsolute: bool = {
     => false,
 }
 
-#[inline]
 Ident: Ident = {
     BareIdent,
     QuotedIdent,
 }
 
-TypeIdent: Ident = {
+PathComponent: &'input str = {
     <l:@L> <name:bare_ident> <r:@R> =>? {
-        let name = interned.get(name).cloned().unwrap_or_else(|| {
-            let name = Arc::<str>::from(name.to_string().into_boxed_str());
-            interned.insert(name.clone());
-            name
-        });
         let span = span!(source_id, l, r);
-        Ident::validate(&name)
+        Ident::validate(name)
             .map_err(|error| ParseError::User {
                 error: ParsingError::InvalidIdentifier { error, span },
             })?;
-        Ok(Ident::from_raw_parts(Span::new(span, name)))
+
+        Ok(name)
     },
 
-    TypeId,
+    quoted_ident,
 
-    <l:@L> <name:Opcode> <r:@R> => {
-        let name = interned.get(name).cloned().unwrap_or_else(|| {
-            let name = Arc::<str>::from(name.to_string().into_boxed_str());
-            interned.insert(name.clone());
-            name
-        });
-        Ident::from_raw_parts(Span::new(span!(source_id, l, r), name))
-    },
+    KeywordStr,
 }
 
 BareIdent: Ident = {
