@@ -59,6 +59,8 @@
 - [BREAKING] Separate AsmOp storage from Debug/Trace decorators. ([#2606](https://github.com/0xMiden/miden-vm/pull/2606)).
 - [BREAKING] Abstract away program execution using the sans-IO pattern ([#2615](https://github.com/0xMiden/miden-vm/pull/2615)).
 - [BREAKING] Removed `PushMany` trait and `new_array_vec()` from `miden-core` ([#2630](https://github.com/0xMiden/miden-vm/pull/2630)).
+- [BREAKING] `Host::on_debug()` and `Host::on_trace()` now take immutable references to `ProcessorState` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
+- [BREAKING] Removed unused `meta` field from `ExecutionTrace` and changed the constructor to take `ProgramInfo` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
 
 ## 0.20.4 (2026-01-30)
 
