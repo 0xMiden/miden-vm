@@ -2224,7 +2224,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#a52fe0af59762178b4d077d3a8376d8a9819afa4"
+source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#50f60e62844f3142516a1a5fb1acade1ff3f649f"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2234,7 +2234,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-fri"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#a52fe0af59762178b4d077d3a8376d8a9819afa4"
+source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#50f60e62844f3142516a1a5fb1acade1ff3f649f"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2253,7 +2253,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#a52fe0af59762178b4d077d3a8376d8a9819afa4"
+source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#50f60e62844f3142516a1a5fb1acade1ff3f649f"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2273,7 +2273,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#a52fe0af59762178b4d077d3a8376d8a9819afa4"
+source = "git+https://github.com/0xMiden/p3-miden?branch=al-updates#50f60e62844f3142516a1a5fb1acade1ff3f649f"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",

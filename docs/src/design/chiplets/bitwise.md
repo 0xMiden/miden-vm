@@ -59,14 +59,18 @@ The Bitwise chiplet supports two operations with the following operation selecto
 - `U32AND`: $s = 0$
 - `U32XOR`: $s = 1$
 
+Let $fb = s_0 \cdot (1 - s_1)$ be the bitwise chiplet selector flag derived from the chiplet
+selectors. All constraints below are multiplied by $fb$ so they only apply on bitwise rows.
+Degrees shown below are the effective degrees, including the $fb$ gate and periodic columns.
+
 The constraints must require that the selectors be binary and stay the same throughout the cycle:
 
 > $$
-> s^2 - s = 0 \text{ | degree} = 2
+> s \cdot (s - 1) = 0 \text{ | degree} = 4
 > $$
 
 > $$
-> k_1 \cdot (s' - s) = 0 \text{ | degree} = 2
+> k_1 \cdot (s' - s) = 0 \text{ | degree} = 4
 > $$
 
 ### Input decomposition
@@ -74,21 +78,21 @@ The constraints must require that the selectors be binary and stay the same thro
 We need to make sure that inputs $a$ and $b$ are decomposed correctly into their individual bits. To do this, first, we need to make sure that columns $a_0$, $a_1$, $a_2$, $a_3$, $b_0$, $b_1$, $b_2$, $b_3$, can contain only binary values ($0$ or $1$). This can be accomplished with the following constraints (for $i$ ranging between $0$ and $3$):
 
 > $$
-> a_i^2 - a_i = 0 \text{ | degree} = 2
+> a_i \cdot (a_i - 1) = 0 \text{ | degree} = 4
 > $$
 
 > $$
-> b_i^2 - b_i = 0 \text{ | degree} = 2
+> b_i \cdot (b_i - 1) = 0 \text{ | degree} = 4
 > $$
 
 Then, we need to make sure that on the first row of every 8-row cycle, the values in the columns $a$ and $b$ are exactly equal to the aggregation of binary values contained in the individual bit columns $a_i$, and $b_i$. This can be enforced with the following constraints:
 
 > $$
-> k_0 \cdot \left(a - \sum_{i=0}^3(2^i \cdot a_i)\right) = 0 \text{ | degree} = 2
+> k_0 \cdot \left(a - \sum_{i=0}^3(2^i \cdot a_i)\right) = 0 \text{ | degree} = 4
 > $$
 
 > $$
-> k_0 \cdot \left(b - \sum_{i=0}^3(2^i \cdot b_i)\right) = 0 \text{ | degree} = 2
+> k_0 \cdot \left(b - \sum_{i=0}^3(2^i \cdot b_i)\right) = 0 \text{ | degree} = 4
 > $$
 
 The above constraints enforce that when $k_0 = 1$, $a = \sum_{i=0}^3(2^i \cdot a_i)$ and $b = \sum_{i=0}^3(2^i \cdot b_i)$.
@@ -96,11 +100,11 @@ The above constraints enforce that when $k_0 = 1$, $a = \sum_{i=0}^3(2^i \cdot a
 Lastly, we need to make sure that for all rows in an 8-row cycle except for the last one, the values in $a$ and $b$ columns are increased by the values contained in the individual bit columns $a_i$ and $b_i$. Denoting $a$ as the value of column $a$ in the current row, and $a'$ as the value of column $a$ in the next row, we can enforce these conditions as follows:
 
 > $$
-> k_1 \cdot \left(a' - \left(a \cdot 16 + \sum_{i=0}^3(2^i \cdot a'_i)\right)\right) = 0 \text{ | degree} = 2
+> k_1 \cdot \left(a' - \left(a \cdot 16 + \sum_{i=0}^3(2^i \cdot a'_i)\right)\right) = 0 \text{ | degree} = 4
 > $$
 
 > $$
-> k_1 \cdot \left(b' - \left(b \cdot 16 + \sum_{i=0}^3(2^i \cdot b'_i)\right)\right) = 0 \text{ | degree} = 2
+> k_1 \cdot \left(b' - \left(b \cdot 16 + \sum_{i=0}^3(2^i \cdot b'_i)\right)\right) = 0 \text{ | degree} = 4
 > $$
 
 The above constraints enforce that when $k_1 = 1$ , $a' = 16 \cdot a + \sum_{i=0}^3(2^i \cdot a'_i)$ and $b' = 16 \cdot b + \sum_{i=0}^3(2^i \cdot b'_i)$.
@@ -109,26 +113,24 @@ The above constraints enforce that when $k_1 = 1$ , $a' = 16 \cdot a + \sum_{i=0
 
 To ensure correct aggregation of operations over individual bits, first we need to ensure that in the first row, the aggregated output value of the previous row should be 0.
 > $$
-> k_0 \cdot z_p = 0 \text{ | degree} = 2
+> k_0 \cdot z_p = 0 \text{ | degree} = 4
 > $$
 
 Next, we need to ensure that for each row except the last, the aggregated output value must equal the previous aggregated output value in the next row.
 > $$
-> k_1 \cdot \left(z - z'_p\right) = 0 \text{ | degree} = 2
+> k_1 \cdot \left(z - z'_p\right) = 0 \text{ | degree} = 4
 > $$
 
 Lastly, we need to ensure that for all rows the value in the $z$ column is computed by multiplying the previous output value (from the $z_p$ column in the current row) by 16 and then adding it to the bitwise operation applied to the row's set of bits of $a$ and $b$. The entire constraint must also be multiplied by the operation selector flag to ensure it is only applied for the appropriate operation.
 
-For `U32AND`, this is enforced with the following constraint:
+Let
+$$
+a_{\text{and}} = \sum_{i=0}^3 2^i \cdot (a_i \cdot b_i), \qquad
+a_{\text{xor}} = \sum_{i=0}^3 2^i \cdot (a_i + b_i - 2 \cdot a_i \cdot b_i).
+$$
 
 > $$
-> (1 - s) \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot a_i \cdot b_i))\right) = 0 \text{ | degree} = 3
-> $$
-
-For `U32XOR`, this is enforced with the following constraint:
-
-> $$
-> s \cdot \left(z -(z_p \cdot 16 + \sum_{i=0}^3(2^i \cdot (a_i + b_i - 2 \cdot a_i \cdot b_i)))\right) = 0 \text{ | degree} = 3
+> z - \left(z_p \cdot 16 + a_{\text{and}} + s \cdot (a_{\text{xor}} - a_{\text{and}})\right) = 0 \text{ | degree} = 5
 > $$
 
 ## Chiplets bus constraints
@@ -145,22 +147,17 @@ The request side of the constraint for the bitwise operation is described in the
 
 To provide the results of bitwise operations to the chiplets bus, we want to include values of $a$, $b$ and $z$ at the last row of the cycle.
 
-First, we'll define another intermediate variable $v_i$. It will include $u$ into the product when $k_1 = 0$. ($u_i$ represents the value of $u$ for row $i$ of the trace.)
+Setting $m_i = fb_i \cdot (1 - k_{1,i})$, we can compute the permutation product from the
+bitwise chiplet as follows:
 
 $$
-v_i = (1-k_1) \cdot u_i
+\prod_{i=0}^n (u_i \cdot m_i + 1 - m_i)
 $$
 
-Then, setting $m = 1 - k_1$, we can compute the permutation product from the bitwise chiplet as follows:
-
-$$
-\prod_{i=0}^n (v_i \cdot m_i + 1 - m_i)
-$$
-
-The above ensures that when $1 - k_1 = 0$ (which is true for all rows in the 8-row cycle except for the last one), the product does not change. Otherwise, $v_i$ gets included into the product.
+The above ensures that when $1 - k_1 = 0$ (which is true for all rows in the 8-row cycle except for the last one), the product does not change. Otherwise, $u_i$ gets included into the product.
 
 The response side of the bus communication can be enforced with the following constraint:
 
 > $$
-> b'_{chip} = b_{chip} \cdot (v_i \cdot m_i + 1 - m_i) \text{ | degree} = 4
+> b'_{chip} = b_{chip} \cdot (u_i \cdot m_i + 1 - m_i) \text{ | degree} = 5
 > $$

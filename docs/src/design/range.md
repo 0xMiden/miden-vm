@@ -169,9 +169,9 @@ To describe the complete transition constraint for the bus, we'll define the fol
 
 As previously mentioned, constraints cannot include divisions, so the actual constraint which is applied will be the equivalent expression in which all denominators have been multiplied through, which is degree 9.
 
-If $b_{range}$ is initialized to $1$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 1$.
+If $b_{range}$ is initialized to $0$ and the values sent to the bus by other VM components match those that are range-checked in the trace, then at the end of the trace we should end up with $b_{range} = 0$.
 
 Therefore, in addition to the transition constraint described above, we also need to enforce the following boundary constraints:
 
-- The value of $b_{range}$ in the first row $1$.
-- The value of $b_{range}$ in the last row $1$.
+- The value of $b_{range}$ in the first row $0$.
+- The value of $b_{range}$ in the last row $0$.

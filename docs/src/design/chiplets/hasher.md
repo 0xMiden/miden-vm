@@ -22,7 +22,7 @@ The chiplet can be thought of as having a small instruction set of $11$ instruct
 | `MP` | Initiates Merkle path verification computation | Multiples of $32$ | Start of computation | Concurrent with `HR` |
 | `MV` | Initiates Merkle path verification for the "old" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
 | `MU` | Initiates Merkle path verification for the "new" node value | Multiples of $32$ | Merkle root update | Concurrent with `HR` |
-| `HOUT` | Returns the "output" portion of the hasher state (indices $[4,8)$) | $32n-1$ ($31$, $63$, $95$...) | End of computation | |
+| `HOUT` | Returns the "output" portion of the hasher state (indices $[0,4)$) | $32n-1$ ($31$, $63$, $95$...) | End of computation | |
 | `SOUT` | Returns entire hasher state | $32n-1$ ($31$, $63$, $95$...) | End of computation | Only after `BP` |
 | `ABP` | Absorbs a new set of elements into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Linear hash (multi-block) | Only after `BP` |
 | `MPA` | Absorbs the next Merkle path node into the hasher state | $32n-1$ ($31$, $63$, $95$...) | Merkle path verification | Only after `MP` |
@@ -40,8 +40,8 @@ The meaning of the columns is as follows:
 - Three periodic columns $k_0$, $k_1$, and $k_2$ are used to help select the instruction executed at a given row. All of these columns contain patterns which repeat every $32$ rows. For $k_0$ the pattern is $31$ zeros followed by $1$ one, helping us identify the last row in the cycle. For $k_1$ the pattern is $30$ zeros, $1$ one, and $1$ zero, which can be used to identify the second-to-last row in a cycle. For $k_2$ the pattern is $1$ one followed by $31$ zeros, which can identify the first row in the cycle.
 - Three selector columns $s_0$, $s_1$, and $s_2$. These columns can contain only binary values (ones or zeros), and they are also used to help select the instruction to execute at a given row.
 - Twelve hasher state columns $h_0, ..., h_{11}$. These columns are used to hold the hasher state for each round of the hash function permutation. The state is laid out as follows:
-  - The first four columns ($h_0, ..., h_3$) are reserved for capacity elements of the state. When the state is initialized for hash computations, $h_0$ should be set to $0$ if the number of elements to be hashed is a multiple of the rate width ($8$). Otherwise, $h_0$ should be set to $1$. $h_1$ should be set to the domain value if a domain has been provided (as in the case of [control block hashing](../programs.md#program-hash-computation)). All other capacity elements should be set to $0$'s.
-  - The next eight columns ($h_4, ..., h_{11}$) are reserved for the rate elements of the state. These are used to absorb the values to be hashed. Once the permutation is complete, hash output is located in the first four rate columns ($h_4, ..., h_7$).
+  - The first eight columns ($h_0, ..., h_7$) are reserved for the rate elements of the state, arranged as two 4-element words (RATE0, RATE1). Once the permutation is complete, the hash output is located in the first rate word ($h_0, ..., h_3$).
+  - The last four columns ($h_8, ..., h_{11}$) are reserved for capacity elements of the state. When the state is initialized for hash computations, $h_8$ should be set to $0$ if the number of elements to be hashed is a multiple of the rate width ($8$). Otherwise, $h_8$ should be set to $1$. $h_9$ should be set to the domain value if a domain has been provided (as in the case of [control block hashing](../programs.md#program-hash-computation)). The remaining capacity lanes ($h_{10}$, $h_{11}$) are set to $0$.
 - One index column $i$. This column is used to help with Merkle path verification and Merkle root update computations.
 
 In addition to the columns described above, the chiplet relies on two running product columns which are used to facilitate multiset checks (similar to the ones described [here](https://hackmd.io/@relgabizon/ByFgSDA7D)). These columns are:
@@ -113,7 +113,7 @@ Computing a 2-to-1 hash involves the following steps:
 
 1. Initialize hasher state with $8$ field elements, setting the second capacity element to $domain$ if the domain is provided (as in the case of [control block hashing](../programs.md#program-hash-computation)) or else $0$, and the remaining capacity elements to $0$.
 2. Apply Poseidon2 permutation.
-3. Return elements $[4, 8)$ of the hasher state as output.
+3. Return elements $[0, 4)$ of the hasher state as output.
 
 The chiplet accomplishes the above by executing the following instructions:
 
@@ -143,7 +143,7 @@ Computing a linear hash of $n$ elements consists of the following steps:
 2. Apply Poseidon2 permutation.
 3. Absorb the next set of elements into the state (up to $8$ elements), while keeping capacity elements unchanged.
 4. Repeat steps 2 and 3 until all $n$ elements have been absorbed.
-5. Return elements $[4, 8)$ of the hasher state as output.
+5. Return elements $[0, 4)$ of the hasher state as output.
 
 The chiplet accomplishes the above by executing the following instructions (for hashing $16$ elements):
 
@@ -163,7 +163,9 @@ Execution trace for this computation would look as illustrated below.
 
 ![hash_linear_hash_n](../../img/design/chiplets/hasher/hash_linear_hash_n.png)
 
-In the above, the value absorbed into hasher state between rows $31$ and $32$ is the delta between values $t_i$ and $s_i$. Thus, if we define $b_i = t_i - s_i$ for $i \in [0, 8)$, the above computes the following:
+In the above, the value absorbed into hasher state between rows $31$ and $32$ is the next batch of
+$8$ input elements, which overwrite the rate lanes. Thus, if we define these elements as $b_i$ for
+$i \in [0, 8)$, the above computes the following:
 
 $$
 \{r_0, r_1, r_2, r_3\} \leftarrow hash(a_0, ..., a_7, b_0, ..., b_7)
@@ -180,7 +182,7 @@ Verifying a Merkle path involves the following steps:
 3. Copy the result of the hash to the next row, and absorb the next node of the Merkle path into the hasher state.
    a. Remove a single bit from the index, and use it to determine how to place the copied result and absorbed node in the state.
 4. Repeat steps 2 and 3 until all nodes of the Merkle path have been absorbed.
-5. Return elements $[4, 8)$ of the hasher state as output.
+5. Return elements $[0, 4)$ of the hasher state as output.
    a. Also, make sure the index value has been reduced to $0$.
 
 The chiplet accomplishes the above by executing the following instructions (for Merkle tree of depth $3$):
@@ -339,16 +341,16 @@ Hasher state columns $h_0, ..., h_{11}$ should behave as follows:
 - For the first $31$ rows of every $32$-row cycle (i.e., when $k_0=0$), we need to apply [Poseidon2](https://eprint.iacr.org/2023/323) round constraints to the hasher state. For brevity, we omit these constraints from this note.
 - On the $32$nd row of every $32$-row cycle, we apply the constraints based on which transition flag is set as described in the table below.
 
-Specifically, when absorbing the next set of elements into the state during linear hash computation (i.e., $f_{abp} = 1$), the first $4$ elements (the capacity portion) are carried over to the next row. For $j \in [0, 4)$ this can be described as follows:
+Specifically, when absorbing the next set of elements into the state during linear hash computation (i.e., $f_{abp} = 1$), the last $4$ elements (the capacity portion) are carried over to the next row. For $j \in [0, 4)$ this can be described as follows:
 
 $$
-f_{abp} \cdot (h'_j - h_j) = 0 \text{ | degree} = 5
+f_{abp} \cdot (h'_{j+8} - h_{j+8}) = 0 \text{ | degree} = 5
 $$
 
-When absorbing the next node during Merkle path computation (i.e., $f_{mp} + f_{mv} + f_{mu}=1$), the result of the previous hash ($h_4, ..., h_7$) are copied over either to $(h_4', ..., h_7')$ or to $(h_8', ..., h_{11}')$ depending on the value of $b$, which is defined in the same way as in the previous section. For $j \in [0, 4)$ this can be described as follows:
+When absorbing the next node during Merkle path computation (i.e., $f_{mp} + f_{mv} + f_{mu}=1$), the result of the previous hash ($h_0, ..., h_3$) is copied over either to $(h_0', ..., h_3')$ or to $(h_4', ..., h_7')$ depending on the value of $b$, which is defined in the same way as in the previous section. For $j \in [0, 4)$ this can be described as follows:
 
 $$
-(f_{mp} + f_{mv} + f_{mu}) \cdot ((1 - b) \cdot (h_{j +4}' - h_{j+4}) + b \cdot (h_{j + 8}' - h_{j + 4})) = 0 \text{ | degree} = 6
+(f_{mp} + f_{mv} + f_{mu}) \cdot ((1 - b) \cdot (h_{j}' - h_{j}) + b \cdot (h_{j + 4}' - h_{j})) = 0 \text{ | degree} = 6
 $$
 
 Note, that when a computation is completed (i.e., $f_{out}=1$), the next hasher state is unconstrained.
@@ -360,20 +362,28 @@ In this sections we describe constraints which enforce updates for [multiset che
 To simplify description of the constraints, we define the following variables. Below, we denote random values sent by the verifier after the prover commits to the main execution trace as $\alpha_0$, $\alpha_1$, $\alpha_2$ etc.
 
 $$
-m = op_{label} + 2^4 \cdot k_0 + 2^5 \cdot k_2
+m = op_{label} + 2^4 \cdot k_2 + 2^5 \cdot k_0
 v_h = \alpha_0 + \alpha_1 \cdot m + \alpha_2 \cdot (clk + 1) + \alpha_3 \cdot i
 v_a = \sum_{j=0}^{3}(\alpha_{j+4} \cdot h_j)
-v_b = \sum_{j=4}^{7}(\alpha_{j+4} \cdot h_j)
-v_c = \sum_{j=8}^{11}(\alpha_{j+4} \cdot h_j)
-v_d = \sum_{j=8}^{11}(\alpha_j \cdot h_j)
+v_b = \sum_{j=0}^{3}(\alpha_{j+8} \cdot h_{j+4})
+v_c = \sum_{j=0}^{3}(\alpha_{j+12} \cdot h_{j+8})
+v_d = \sum_{j=0}^{3}(\alpha_{j+8} \cdot h_j)
+v_e = \sum_{j=0}^{3}(\alpha_{j+12} \cdot h_{j+4})
 $$
+
+Message slot layout is fixed: slots $0..3$ use $\alpha_{4..7}$, slots $4..7$ use
+$\alpha_{8..11}$, and slots $8..11$ use $\alpha_{12..15}$. For partial messages
+(leaf/output/ABP), we place the payload into slots $4..11$; thus $v_d$ and $v_e$
+are rate0/rate1 encoded into slots $4..7$ and $8..11$ respectively.
 
 In the above:
 
 - $m$ is a _transition label_, composed of the [operation label](./index.md#operation-labels) and the periodic columns that uniquely identify each transition function. The values in the $k_0$ and $k_2$ periodic columns are included to identify the row in the hash cycle where the operation occurs. They serve to differentiate between operations that share selectors but occur at different rows in the cycle, such as `BP`, which uses $op_{linhash}$ at the first row in the cycle to initiate a linear hash, and `ABP`, which uses $op_{linhash}$ at the last row in the cycle to absorb new elements.
 - $v_h$ is a _common header_ which is a combination of the transition label, a unique row address, and the node index. For the unique row address, the `clk` column from the system component is used, but we add $1$, because the system's `clk` column starts at $0$.
-- $v_a$, $v_b$, $v_c$ are the first, second, and third words (4 elements) of the hasher state.
-- $v_d$ is the third word of the hasher state but computed using the same $\alpha$ values as used for the second word. This is needed for computing the value of $v_{leaf}$ below to ensure that the same $\alpha$ values are used for the leaf node regardless of which part of the state the node comes from.
+- $v_a$, $v_b$, $v_c$ are the rate0, rate1, and capacity words (4 elements each).
+- $v_d$ reuses the rate1 alpha slice on the rate0 word; $v_e$ reuses the capacity alpha slice on
+  the rate1 word. These are used for Merkle leaf/sibling encoding.
+  For next-row values, $v_d'$ and $v_e'$ are defined the same way using $h'$.
 
 #### Chiplets bus constraints
 
@@ -390,19 +400,19 @@ $$
 When starting a Merkle path computation (i.e., $f_{mp} + f_{mv} + f_{mu} = 1$), we include the leaf of the path into $b_{chip}$. The leaf is selected from the state based on value of $b$ (defined as in the previous section):
 
 $$
-v_{leaf} = v_h + (1-b) \cdot v_b + b \cdot v_d
+v_{leaf} = v_h + (1-b) \cdot v_d + b \cdot v_b
 $$
 
-When absorbing a new set of elements into the state while computing a linear hash (i.e., $f_{abp}=1$), we include deltas between the last $8$ elements of the hasher state (the rate) into $b_{chip}$:
+When absorbing a new set of elements into the state while computing a linear hash (i.e., $f_{abp}=1$), we include the next rate (the last $8$ elements of the hasher state) into $b_{chip}$:
 
 $$
-v_{abp} = v_h + v'_b + v'_c - (v_b + v_c)
+v_{abp} = v_h + v_d' + v_e'
 $$
 
 When a computation is complete (i.e., $f_{hout}=1$), we include the second word of the hasher state (the result) into $b_{chip}$:
 
 $$
-v_{res} = v_h + v_b
+v_{res} = v_h + v_d
 $$
 
 Using the above values, we can describe the constraints for updating column $b_{chip}$ as follows.
@@ -439,7 +449,11 @@ As mentioned previously, the sibling table (represented by running column $p_1$)
 To simplify the description of the constraints, we use variables $v_b$ and $v_c$ defined above and define the value representing an entry in the sibling table as follows:
 
 $$
-v_{sibling} = \alpha_0 + \alpha_3 \cdot i + b \cdot v_b + (1-b) \cdot v_c
+v_{sib0} = \alpha_0 + \alpha_3 \cdot i + v_e
+
+v_{sib1} = \alpha_0 + \alpha_3 \cdot i + v_d
+
+v_{sibling} = (1-b) \cdot v_{sib0} + b \cdot v_{sib1}
 $$
 
 Using the above value, we can define the constraint for updating $p_1$ as follows:

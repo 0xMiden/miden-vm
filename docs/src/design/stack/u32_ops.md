@@ -83,11 +83,11 @@ The effect of this operation on the rest of the stack is:
 * **Right shift** starting from position $1$.
 
 ## U32ASSERT2
-Assume $a$ and $b$ are the elements at the top of the stack. The `U32ASSERT2` verifies that both $a$ and $b$ are smaller than $2^{32}$. The diagram below illustrates this graphically.
+Assume $a$ (top) and $b$ (next) are the elements at the top of the stack. The `U32ASSERT2` verifies that both $a$ and $b$ are smaller than $2^{32}$. The diagram below illustrates this graphically.
 
 ![u32assert2](../../img/design/stack/u32_operations/U32ASSERT2.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to low and high 16-bit limbs of $a$, and values in $h_2$ and $h_3$ to to low and high 16-bit limbs of $b$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_2$ and $h_3$ to low and high 16-bit limbs of $a$, and values in $h_0$ and $h_1$ to low and high 16-bit limbs of $b$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
@@ -127,7 +127,10 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32ADD3
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD3` operation computes $(d, e) \leftarrow a + b + c$, where $d$ contains the low 32-bits of the result and $e$ contains the carry. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
+Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than
+$2^{32}$. The `U32ADD3` operation computes $(\mathsf{sum}, \mathsf{carry}) \leftarrow a + b + c$,
+where $\mathsf{sum}$ contains the low 32 bits of the result and $\mathsf{carry}$ contains the
+high 32 bits. The diagram below illustrates this graphically.
 
 ![u32add3](../../img/design/stack/u32_operations/U32ADD3.png)
 
@@ -151,14 +154,14 @@ The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $3$.
 
 ## U32SUB
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32SUB` operation computes $(c, d) \leftarrow a - b$, where $c$ contains the 32-bit result in two's complement, and $d$ is the borrow bit. The diagram below illustrates this graphically.
+Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32SUB` operation computes $(\text{borrow}, \text{diff}) \leftarrow b - a$, where `diff` contains the 32-bit result in two's complement, and `borrow` is the borrow bit. The diagram below illustrates this graphically.
 
 ![u32sub](../../img/design/stack/u32_operations/U32SUB.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and the high 16-bit limbs of $a-b$ respectively. Values in $h_2$ and $h_3$ are set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and the high 16-bit limbs of $b-a$ respectively. Values in $h_2$ and $h_3$ are set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
-s_1 = s_0 + s_1' + 2^{32} \cdot s_0' \text{ | degree} = 1
+s_1 = s_0 + s_1' - 2^{32} \cdot s_0' \text{ | degree} = 1
 $$
 
 $$
@@ -199,7 +202,10 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32MADD
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MADD` operation computes $(d, e) \leftarrow a + b \cdot c$, where $d$ and $e$ contain the low and the high 32-bits of $a + b \cdot c$ respectively. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
+Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than
+$2^{32}$. The `U32MADD` operation computes $(\mathsf{lo}, \mathsf{hi}) \leftarrow a \cdot b + c$,
+where $\mathsf{lo}$ and $\mathsf{hi}$ contain the low and the high 32 bits of the result. The
+diagram below illustrates this graphically.
 
 ![u32madd](../../img/design/stack/u32_operations/U32MADD.png)
 
@@ -225,11 +231,15 @@ The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $3$.
 
 ## U32DIV
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32DIV` operation computes $(d, c) \leftarrow a / b$, where $d$ contains the remainder and $c$ contains the quotient. The output stack is `[d, c, ...]` with remainder on top. The diagram below illustrates this graphically.
+Assume the divisor $a$ is at the top of the stack and the dividend $b$ is below it, and both are
+smaller than $2^{32}$. The `U32DIV` operation computes $(r, q) \leftarrow b / a$, where $r$ is
+the remainder and $q$ is the quotient. The diagram below illustrates this graphically.
 
 ![u32div](../../img/design/stack/u32_operations/U32DIV.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to 16-bit limbs of $a - c$, and values in $h_2$ and $h_3$ to 16-bit limbs of $b - d - 1$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and high
+16-bit limbs of $(b - q)$, and values in $h_2$ and $h_3$ to the low and high 16-bit limbs of
+$(a - r - 1)$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_1 = s_0 \cdot s_1' + s_0' \text{ | degree} = 2
@@ -243,7 +253,8 @@ $$
 s_0 - s_0' - 1= 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
-The second constraint enforces that $s_1' \leq s_1$, while the third constraint enforces that $s_0' < s_0$.
+The second constraint enforces that $q \leq b$ (equivalently $s_1' \leq s_1$), while the third
+constraint enforces that $r < a$ (equivalently $s_0' < s_0$).
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.

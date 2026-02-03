@@ -79,7 +79,7 @@ If an operation adds data to the stack, we say that the operation caused a right
 
 Here, we pushed value $v_{17}$ onto the stack. All other values on the stack are shifted by one slot to the right and the stack depth increases by $1$. There is not enough space at the top of the stack for all $17$ values, thus, $v_1$ needs to be moved to the overflow table.
 
-To do this, we need to rely on another column: $k_0$. This is a system column which keeps track of the current VM cycle. The value in this column is simply incremented by $1$ with every step.
+To do this, we need to rely on another column: $clk$. This is a system column which keeps track of the current VM cycle. The value in this column is simply incremented by $1$ with every step.
 
 The row we want to add to the overflow table is defined by tuple $(clk, v1, 0)$, and after it is added, the table would look like so:
 
@@ -101,8 +101,8 @@ Overall, during a right shift we do the following:
 
 * Increment stack depth by $1$.
 * Shift stack columns $s_0, ..., s_{14}$ right by $1$ slot.
-* Add a row to the overflow table described by tuple $(k_0, s_{15}, b_0)$.
-* Set the next value of $b_1$ to the current value of $k_0$.
+* Add a row to the overflow table described by tuple $(clk, s_{15}, b_0)$.
+* Set the next value of $b_1$ to the current value of $clk$.
 
 Also, as mentioned previously, the prover sets values in $h_0$ non-deterministically to $\frac{1}{b_0 - 16}$.
 
@@ -165,9 +165,10 @@ To make sure stack depth column $b_0$ is updated correctly, we need to impose th
 | --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
 | $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
 | $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
+| $f_{call} + f_{syscall} + f_{dyncall} = 1$ | $b'_0 = 16$ | When entering a new execution context, the stack is truncated to depth 16.                                         |
 | otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
 
-We can combine the above constraints into a single expression as follows:
+We can combine the first three cases above (excluding context changes) into a single expression as follows:
 
 $$
 b'_0 - b_0 + f_{shl} \cdot f_{ov} - f_{shr} = 0 \text{ | degree} = 7
@@ -175,10 +176,10 @@ $$
 
 ### Overflow table constraints
 
-When the stack is shifted to the right, a tuple $(k_0, s_{15}, b_1)$ should be added to the overflow table. We will denote value of the row to be added to the table as follows:
+When the stack is shifted to the right, a tuple $(clk, s_{15}, b_1)$ should be added to the overflow table. We will denote value of the row to be added to the table as follows:
 
 $$
-v = \alpha_0 + \alpha_1 \cdot k_0 + \alpha_2 \cdot s_{15} + \alpha_3 \cdot b_1
+v = \alpha_0 + \alpha_1 \cdot clk + \alpha_2 \cdot s_{15} + \alpha_3 \cdot b_1
 $$
 
 When the stack is shifted to the left, a tuple $(b_1, s'_{15}, b'_1)$ should be removed from the overflow table. We will denote value of the row to be removed from the table as follows.
@@ -204,10 +205,10 @@ The above constraint reduces to the following under various flag conditions:
 
 Notice that in the case of the left shift, the constraint forces the prover to set the next values of $s_{15}$ and $b_1$ to values $t_1$ and $t_2$ of the row removed from the overflow table.
 
-In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $k_0$. This can be done with the following constraint:
+In case of a right shift, we also need to make sure that the next value of $b_1$ is set to the current value of $clk$. This can be done with the following constraint:
 
 $$
-f_{shr} \cdot (b'_1 - k_0) = 0 \text{ | degree} = 7
+f_{shr} \cdot (b'_1 - clk) = 0 \text{ | degree} = 7
 $$
 
 In case of a left shift, when the overflow table is empty, we need to make sure that a $0$ is "shifted in" from the right (i.e., $s_{15}$ is set to $0$). This can be done with the following constraint:
@@ -221,3 +222,4 @@ In addition to the constraints described above, we also need to enforce the foll
 * $b_0 = 16$ at the first and at the last row of execution trace.
 * $b_1 = 0$ at the first and at the last row of execution trace.
 * $p_1 = 1$ at the first and at the last row of execution trace.
+The context-change case ($f_{call} + f_{syscall} + f_{dyncall} = 1$) is enforced separately.

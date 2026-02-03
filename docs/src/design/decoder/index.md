@@ -33,6 +33,7 @@ Managing control flow in the VM is accomplished by executing control flow operat
 | `SPAN`    | Initiates processing of a new [Basic block](../programs.md#basic-block). (historically called "span block") |
 | `RESPAN`  | Initiates processing of a new operation batch within a basic block. (historically called "span block") |
 | `DYN`     | Initiates processing of a new [Dyn block](../programs.md#dyn-block).         |
+| `DYNCALL` | Initiates processing of a new [Dyncall block](../programs.md#dyncall-block). |
 | `CALL`    | Initiates processing of a new [Call block](../programs.md#call-block).       |
 | `SYSCALL` | Initiates processing ofa new  [Syscall block](../programs.md#syscall-block). |
 | `END`     | Marks the end of a program block.                                            |

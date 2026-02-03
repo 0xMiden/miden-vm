@@ -1,12 +1,12 @@
 //! U32 operations constraints.
 //!
-//! This module contains the 15 constraints for U32 arithmetic operations:
+//! This module contains the 16 constraints for U32 arithmetic operations:
 //! - Element validity check (1 constraint)
 //! - Limb aggregation for output values (2 constraints)
 //! - U32SPLIT: split 64-bit value into two 32-bit limbs (1 constraint)
 //! - U32ADD: add two 32-bit values (1 constraint)
 //! - U32ADD3: add three 32-bit values (1 constraint)
-//! - U32SUB: subtract two 32-bit values (2 constraints)
+//! - U32SUB: subtract two 32-bit values (3 constraints)
 //! - U32MUL: multiply two 32-bit values (1 constraint)
 //! - U32MADD: multiply-add three 32-bit values (1 constraint)
 //! - U32DIV: divide two 32-bit values (3 constraints)
@@ -41,7 +41,7 @@ pub mod tests;
 
 /// Number of U32 operations constraints.
 #[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 15;
+pub const NUM_CONSTRAINTS: usize = 16;
 
 /// 2^48 coefficient for the most significant 16-bit limb in 64-bit aggregation.
 const TWO_48: u64 = 1u64 << 48;
@@ -60,7 +60,7 @@ pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
     7, // U32SPLIT
     7, // U32ADD
     7, // U32ADD3
-    7, 8, // U32SUB (2 constraints)
+    7, 7, 8, // U32SUB (3 constraints)
     8, // U32MUL
     8, // U32MADD
     8, 7, 7, // U32DIV (3 constraints)
@@ -86,7 +86,7 @@ pub fn enforce_main<AB>(
     enforce_u32split_constraint(builder, local, op_flags, &limbs);
     enforce_u32add_constraint(builder, local, op_flags, &limbs);
     enforce_u32add3_constraint(builder, local, op_flags, &limbs);
-    enforce_u32sub_constraints(builder, local, next, op_flags);
+    enforce_u32sub_constraints(builder, local, next, op_flags, &limbs);
     enforce_u32mul_constraint(builder, local, op_flags, &limbs);
     enforce_u32madd_constraint(builder, local, op_flags, &limbs);
     enforce_u32div_constraints(builder, local, next, op_flags, &limbs);
@@ -218,14 +218,16 @@ fn enforce_u32add3_constraint<AB>(
 /// U32SUB computes b - a where a is on top (subtrahend) and b is below (minuend).
 /// Output: [borrow, diff] where borrow is on top.
 ///
-/// Two constraints:
+/// Three constraints:
 /// 1. b = a + diff - 2^32 * borrow
 /// 2. borrow is binary
+/// 3. diff matches the low limb aggregation (v_lo)
 fn enforce_u32sub_constraints<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
     op_flags: &OpFlags<AB::Expr>,
+    limbs: &LimbCompositions<AB>,
 ) where
     AB: MidenAirBuilder,
 {
@@ -237,15 +239,18 @@ fn enforce_u32sub_constraints<AB>(
     let two_32: AB::Expr = AB::Expr::from_u64(TWO_32);
 
     // Constraint 1: b = a + diff - 2^32 * borrow
-    let sub_aggregation = a + diff - two_32 * borrow.clone();
+    let sub_aggregation = a + diff.clone() - two_32 * borrow.clone();
     let constraint1 = b - sub_aggregation;
 
     // Constraint 2: borrow is binary (0 or 1)
     let binary_check = borrow.clone() * (borrow - AB::Expr::ONE);
 
-    // Use a combined gate to share `is_transition * u32sub_flag` across both constraints.
+    // Constraint 3: diff matches the low limb aggregation (v_lo)
+    let diff_check = diff - limbs.v_lo();
+
+    // Use a combined gate to share `is_transition * u32sub_flag` across all constraints.
     let gate = builder.is_transition() * op_flags.u32sub();
-    builder.when(gate).assert_zeros([constraint1, binary_check]);
+    builder.when(gate).assert_zeros([constraint1, binary_check, diff_check]);
 }
 
 /// Enforces U32MUL constraint.

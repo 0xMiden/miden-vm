@@ -169,6 +169,7 @@ fn test_u32sub_no_borrow() {
     current.stack[1] = Felt::new(b as u64); // minuend below
     next.stack[0] = Felt::new(borrow as u64); // borrow on top
     next.stack[1] = Felt::new(diff as u64); // diff below
+    set_helper_limbs(&mut current, diff as u64, 0);
 
     let op_flags = OpFlags::new(&current);
 
@@ -185,6 +186,17 @@ fn test_u32sub_no_borrow() {
     // Constraint 2: borrow is binary
     let binary_check = next.stack[0] * (next.stack[0] - ONE);
     assert_eq!(op_flags.u32sub() * binary_check, ZERO, "U32SUB borrow should be binary");
+
+    // Constraint 3: diff matches v_lo
+    let h0 = current.decoder[USER_OP_HELPERS_OFFSET];
+    let h1 = current.decoder[USER_OP_HELPERS_OFFSET + 1];
+    let v_lo = Felt::new(1 << 16) * h1 + h0;
+    let diff_check = next.stack[1] - v_lo;
+    assert_eq!(
+        op_flags.u32sub() * diff_check,
+        ZERO,
+        "U32SUB diff limb aggregation should be zero"
+    );
 }
 
 #[test]
@@ -201,6 +213,7 @@ fn test_u32sub_with_borrow() {
     current.stack[1] = Felt::new(b as u64);
     next.stack[0] = Felt::new(borrow as u64);
     next.stack[1] = Felt::new(diff as u64);
+    set_helper_limbs(&mut current, diff as u64, 0);
 
     let op_flags = OpFlags::new(&current);
 
@@ -215,6 +228,16 @@ fn test_u32sub_with_borrow() {
 
     let binary_check = next.stack[0] * (next.stack[0] - ONE);
     assert_eq!(op_flags.u32sub() * binary_check, ZERO, "U32SUB borrow should be binary (1)");
+
+    let h0 = current.decoder[USER_OP_HELPERS_OFFSET];
+    let h1 = current.decoder[USER_OP_HELPERS_OFFSET + 1];
+    let v_lo = Felt::new(1 << 16) * h1 + h0;
+    let diff_check = next.stack[1] - v_lo;
+    assert_eq!(
+        op_flags.u32sub() * diff_check,
+        ZERO,
+        "U32SUB diff limb aggregation should be zero (borrow)"
+    );
 }
 
 // U32MUL TESTS
@@ -338,5 +361,5 @@ fn test_u32div_with_remainder() {
 
 #[test]
 fn test_array_sizes() {
-    assert_eq!(NUM_CONSTRAINTS, 15);
+    assert_eq!(NUM_CONSTRAINTS, 16);
 }
