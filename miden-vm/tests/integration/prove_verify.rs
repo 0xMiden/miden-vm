@@ -204,7 +204,7 @@ mod fast_parallel {
     use miden_crypto::stark;
     use miden_processor::{
         ExecutionOptions, StackInputs, advice::AdviceInputs, fast::FastProcessor,
-        parallel::build_trace,
+        trace::build_trace,
     };
     use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
     use miden_verifier::verify;
@@ -248,8 +248,7 @@ mod fast_parallel {
         let fast_stack_outputs = execution_output.stack;
 
         // Build trace using parallel trace generation
-        let trace =
-            build_trace(execution_output, trace_context, program.hash(), program.kernel().clone());
+        let trace = build_trace(execution_output, trace_context, program.to_info());
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);

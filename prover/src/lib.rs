@@ -8,7 +8,7 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_processor::{Program, fast::FastProcessor, parallel::build_trace};
+use miden_processor::{Program, fast::FastProcessor, trace::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -58,12 +58,7 @@ pub async fn prove(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
     tracing::event!(
         tracing::Level::INFO,

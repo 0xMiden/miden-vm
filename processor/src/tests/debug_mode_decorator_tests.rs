@@ -83,17 +83,13 @@ fn test_decorators_only_execute_in_debug_mode() {
 
         fn on_debug(
             &mut self,
-            _process: &mut ProcessorState,
+            _process: &ProcessorState,
             _options: &DebugOptions,
         ) -> Result<(), DebugError> {
             Ok(())
         }
 
-        fn on_trace(
-            &mut self,
-            _process: &mut ProcessorState,
-            trace_id: u32,
-        ) -> Result<(), TraceError> {
+        fn on_trace(&mut self, _process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
             if trace_id == 999 {
                 self.decorator_executed = true;
             }

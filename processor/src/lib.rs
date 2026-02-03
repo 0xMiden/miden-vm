@@ -12,7 +12,6 @@ use core::{
     ops::ControlFlow,
 };
 
-mod chiplets;
 mod continuation_stack;
 mod debug;
 mod decoder;
@@ -20,12 +19,10 @@ mod errors;
 mod execution;
 mod execution_options;
 mod host;
-mod range;
 mod stack;
 mod system;
 
 pub mod fast;
-pub mod parallel;
 pub mod processor;
 pub mod trace;
 pub mod tracer;
@@ -48,7 +45,6 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use chiplets::MemoryError;
 pub use errors::{ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use host::{
@@ -63,6 +59,7 @@ pub use miden_core::{
     serde,
 };
 pub use system::ContextId;
+pub use trace::chiplets::MemoryError;
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
@@ -158,12 +155,7 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = parallel::build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info());
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)

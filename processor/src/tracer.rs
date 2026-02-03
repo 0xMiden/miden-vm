@@ -8,10 +8,10 @@ use miden_core::{
 };
 
 use crate::{
-    chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
     processor::Processor,
     system::ContextId,
+    trace::chiplets::CircuitEvaluation,
 };
 
 // TRACER TRAIT

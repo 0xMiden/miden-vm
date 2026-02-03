@@ -18,6 +18,7 @@
 - Added missing `as_canonical_u64()` method to `IntValue` in `miden-assembly-syntax`, fixing compilation errors in the generated grammar code ([#2589](https://github.com/0xMiden/miden-vm/pull/2589)).
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
+- Fixed off-by-one error in cycle limit check that caused programs using exactly `max_cycles` cycles to fail ([#2635](https://github.com/0xMiden/miden-vm/pull/2635)).
 
 #### Changes
 
@@ -60,6 +61,8 @@
 - [BREAKING] Separate AsmOp storage from Debug/Trace decorators. ([#2606](https://github.com/0xMiden/miden-vm/pull/2606)).
 - [BREAKING] Abstract away program execution using the sans-IO pattern ([#2615](https://github.com/0xMiden/miden-vm/pull/2615)).
 - [BREAKING] Removed `PushMany` trait and `new_array_vec()` from `miden-core` ([#2630](https://github.com/0xMiden/miden-vm/pull/2630)).
+- [BREAKING] `Host::on_debug()` and `Host::on_trace()` now take immutable references to `ProcessorState` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
+- [BREAKING] Removed unused `meta` field from `ExecutionTrace` and changed the constructor to take `ProgramInfo` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
 
 ## 0.20.4 (2026-01-30)
 

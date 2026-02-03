@@ -169,13 +169,13 @@ where
 
     fn on_debug(
         &mut self,
-        process: &mut ProcessorState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 
