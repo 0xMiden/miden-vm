@@ -266,17 +266,17 @@ impl<'a> SymbolResolver<'a> {
                 // A relative path can be expressed in four forms:
                 //
                 // 1. A reference to a symbol in the current module (possibly imported)
-                // 1. A reference to a symbol relative to an imported module, e.g. `push.mod::CONST`
-                // 2. A reference to a symbol relative to an imported module, e.g.
+                // 2. A reference to a symbol relative to an imported module, e.g. `push.mod::CONST`
+                // 3. A reference to a nested symbol relative to an imported module, e.g.
                 //    `push.mod::submod::CONST`
-                // 3. An absolute path expressed relatively, e.g. `push.root::mod::submod::CONST`,
+                // 4. An absolute path expressed relatively, e.g. `push.root::mod::submod::CONST`,
                 //    which should have been expressed as `push.::root::mod::submod::CONST`, but the
                 //    `::` prefix was omitted/forgotten.
                 //
-                // 1 and 3 are easy to handle (3 is technically a degenerate edge case of 2, but has
+                // 1 and 4 are easy to handle (4 is technically a degenerate edge case of 3, but has
                 // an easy fallback path).
                 //
-                // 2 is where all the complexity of relative paths comes in, because it requires us
+                // 3 is where all the complexity of relative paths comes in, because it requires us
                 // to recursively expand paths until we cannot do so any longer, and then resolve
                 // the originally referenced symbol relative to that expanded path (which may
                 // require further recursive expansion).

@@ -380,6 +380,12 @@ impl Path {
     }
 
     /// Returns true if the current path, sans root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first non-root
+    /// component of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -390,6 +396,12 @@ impl Path {
     }
 
     /// Returns true if the current path, including root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first component
+    /// of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with_exactly<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -407,6 +419,14 @@ impl Path {
     pub fn strip_prefix<'a>(&'a self, prefix: &Self) -> Option<&'a Self> {
         let mut components = self.components();
         for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
             let prefix_component = prefix_component.expect("invalid prefix path");
             match (components.next(), prefix_component) {
                 (Some(Ok(PathComponent::Root)), PathComponent::Root) => (),
@@ -499,6 +519,14 @@ impl StartsWith<Path> for Path {
     fn starts_with_exactly(&self, prefix: &Path) -> bool {
         let mut components = self.components();
         for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
             let prefix_component = prefix_component.expect("invalid prefix path");
             match (components.next(), prefix_component) {
                 (Some(Ok(PathComponent::Root)), PathComponent::Root) => continue,

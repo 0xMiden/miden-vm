@@ -57,6 +57,17 @@ pub enum NamespaceError {
 }
 
 /// This trait abstracts over the concept of matching a prefix pattern against a path
+///
+/// To understand the semantics of how a given prefix pattern matches against a path, you must check
+/// the implementation for the type, but all of the provided implementations are broken down into
+/// two categories:
+///
+/// 1. The prefix is a `Path` or `PathBuf`, in which case each component of the prefix is matched
+///    against each component of `self` until the entire prefix has been visited, or a mismatch is
+///    identified.
+/// 2. The prefix is a `str` or something that derefs to `str`, in which case the prefix is matched
+///    against the first component of `self` (which component of `self` is considered "first" is
+///    dependent on whether the match must be exact or not).
 pub trait StartsWith<Prefix: ?Sized> {
     /// Returns true if the current path, sans root component, starts with `prefix`
     fn starts_with(&self, prefix: &Prefix) -> bool;
