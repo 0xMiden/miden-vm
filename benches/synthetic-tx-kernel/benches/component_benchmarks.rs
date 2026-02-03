@@ -2,7 +2,7 @@
 
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use miden_core::{Felt, Word};
-use miden_core_lib::{CoreLibrary, dsa::falcon512_poseidon2};
+use miden_core_lib::{dsa::falcon512_poseidon2, CoreLibrary};
 use miden_processor::fast::FastProcessor;
 use miden_processor::AdviceInputs;
 use miden_vm::{Assembler, DefaultHost, StackInputs};
@@ -23,10 +23,8 @@ fn bench_program(
                     host.load_library(&CoreLibrary::default())
                         .expect("Failed to load core library");
                 }
-                let processor = FastProcessor::new_with_advice_inputs(
-                    stack_inputs,
-                    advice_inputs.clone(),
-                );
+                let processor =
+                    FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs.clone());
                 (host, processor)
             },
             |(mut host, processor)| async move {
@@ -58,15 +56,10 @@ fn benchmark_signature_verification(c: &mut Criterion) {
             .expect("Failed to assemble");
 
         let secret_key = falcon512_poseidon2::SecretKey::new();
-        let message = Word::new([
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-        ]);
+        let message = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
         let public_key = secret_key.public_key().to_commitment();
-        let signature = falcon512_poseidon2::sign(&secret_key, message)
-            .expect("Failed to generate signature");
+        let signature =
+            falcon512_poseidon2::sign(&secret_key, message).expect("Failed to generate signature");
 
         let mut stack = Vec::with_capacity(8);
         stack.extend_from_slice(public_key.as_slice());
@@ -93,13 +86,7 @@ fn benchmark_hashing(c: &mut Criterion) {
         "#;
 
         let program = Assembler::default().assemble_program(source).expect("Failed to assemble");
-        bench_program(
-            b,
-            &program,
-            StackInputs::default(),
-            AdviceInputs::default(),
-            false,
-        );
+        bench_program(b, &program, StackInputs::default(), AdviceInputs::default(), false);
     });
 
     group.finish();
@@ -112,6 +99,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
         let source = r#"
             begin
                 repeat.100
+                    push.1 push.2 push.3 push.4
                     push.0 mem_storew_be
                     push.0 mem_loadw_be
                     dropw
@@ -120,13 +108,7 @@ fn benchmark_memory_operations(c: &mut Criterion) {
         "#;
 
         let program = Assembler::default().assemble_program(source).expect("Failed to assemble");
-        bench_program(
-            b,
-            &program,
-            StackInputs::default(),
-            AdviceInputs::default(),
-            false,
-        );
+        bench_program(b, &program, StackInputs::default(), AdviceInputs::default(), false);
     });
 
     group.finish();

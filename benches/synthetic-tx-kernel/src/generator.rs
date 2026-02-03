@@ -9,6 +9,7 @@ pub const CYCLES_PER_HPERM: u64 = 1;
 pub const CYCLES_PER_HMERGE: u64 = 16;
 pub const CYCLES_PER_FALCON512_VERIFY: u64 = 59859;
 pub const CYCLES_PER_LOAD_STORE: u64 = 10; // Approximate for push+store+load+drop
+const MAX_REPEAT: u64 = 1000;
 
 /// Generates masm code for a synthetic transaction kernel
 pub struct MasmGenerator {
@@ -89,11 +90,21 @@ impl MasmGenerator {
         };
 
         // Calculate how many of each operation to generate based on instruction mix
-        let sig_verify_count = ((phase_cycles as f64 * mix.signature_verify) / CYCLES_PER_FALCON512_VERIFY as f64 / scale_factor).max(1.0) as u64;
-        let hperm_count = ((phase_cycles as f64 * mix.hashing) / CYCLES_PER_HPERM as f64 / scale_factor).max(10.0) as u64;
-        let load_store_count = ((phase_cycles as f64 * mix.memory) / CYCLES_PER_LOAD_STORE as f64 / scale_factor).max(5.0) as u64;
-        let arithmetic_count = ((phase_cycles as f64 * mix.arithmetic) / scale_factor).max(10.0) as u64;
-        let control_count = ((phase_cycles as f64 * mix.control_flow) / 5.0 / scale_factor).max(5.0) as u64;
+        let sig_verify_count = ((phase_cycles as f64 * mix.signature_verify)
+            / CYCLES_PER_FALCON512_VERIFY as f64
+            / scale_factor)
+            .max(1.0) as u64;
+        let hperm_count = ((phase_cycles as f64 * mix.hashing)
+            / CYCLES_PER_HPERM as f64
+            / scale_factor)
+            .max(10.0) as u64;
+        let load_store_count =
+            ((phase_cycles as f64 * mix.memory) / CYCLES_PER_LOAD_STORE as f64 / scale_factor)
+                .max(5.0) as u64;
+        let arithmetic_count =
+            ((phase_cycles as f64 * mix.arithmetic) / scale_factor).max(10.0) as u64;
+        let control_count =
+            ((phase_cycles as f64 * mix.control_flow) / 5.0 / scale_factor).max(5.0) as u64;
 
         // Generate signature verifications (most expensive operation)
         if mix.signature_verify > 0.0 {
@@ -143,9 +154,7 @@ impl MasmGenerator {
 
         // Generate hperm operations in a loop
         if count > 100 {
-            code.push_str(&format!("    repeat.{}\n", count));
-            code.push_str("        hperm\n");
-            code.push_str("    end\n");
+            push_repeat_block(&mut code, count, "    ", &["hperm"]);
         } else {
             for _ in 0..count {
                 code.push_str("    hperm\n");
@@ -161,26 +170,19 @@ impl MasmGenerator {
         let mut code = String::new();
         code.push_str(&format!("    # {} hmerge operations\n", count));
 
-        // Set up two words to merge
-        code.push_str("    # Initialize words for merging\n");
-        code.push_str("    push.1 push.2 push.3 push.4\n");
-        code.push_str("    push.5 push.6 push.7 push.8\n");
-
-        // Generate hmerge operations
+        // Generate hmerge operations with balanced stack per iteration
+        let hmerge_body =
+            ["push.1 push.2 push.3 push.4", "push.5 push.6 push.7 push.8", "hmerge", "dropw"];
         if count > 100 {
-            code.push_str(&format!("    repeat.{}\n", count));
-            code.push_str("        hmerge\n");
-            code.push_str("        # Set up next word\n");
-            code.push_str("        movup.4 drop push.1\n");
-            code.push_str("    end\n");
+            push_repeat_block(&mut code, count, "    ", &hmerge_body);
         } else {
             for _ in 0..count {
+                code.push_str("    push.1 push.2 push.3 push.4\n");
+                code.push_str("    push.5 push.6 push.7 push.8\n");
                 code.push_str("    hmerge\n");
+                code.push_str("    dropw\n");
             }
         }
-
-        // Clean up
-        code.push_str("    dropw\n");
         Ok(code)
     }
 
@@ -200,7 +202,10 @@ impl MasmGenerator {
     fn generate_falcon_verify_block(&self, count: u64) -> Result<String> {
         let mut code = String::new();
         code.push_str(&format!("    # {} Falcon512 signature verifications\n", count));
-        code.push_str(&format!("    # Each verification is ~{} cycles\n", CYCLES_PER_FALCON512_VERIFY));
+        code.push_str(&format!(
+            "    # Each verification is ~{} cycles\n",
+            CYCLES_PER_FALCON512_VERIFY
+        ));
 
         // For synthetic benchmarks, we simulate the cycle cost without actually
         // executing the verification (which requires advice inputs).
@@ -228,13 +233,16 @@ impl MasmGenerator {
         code.push_str(&format!("    # {} load/store operations\n", count));
 
         if count > 100 {
-            code.push_str(&format!("    repeat.{}\n", count));
-            code.push_str("        push.0 mem_storew_be\n");
-            code.push_str("        push.0 mem_loadw_be\n");
-            code.push_str("        dropw\n");
-            code.push_str("    end\n");
+            let body = [
+                "push.1 push.2 push.3 push.4",
+                "push.0 mem_storew_be",
+                "push.0 mem_loadw_be",
+                "dropw",
+            ];
+            push_repeat_block(&mut code, count, "    ", &body);
         } else {
             for _ in 0..count {
+                code.push_str("    push.1 push.2 push.3 push.4\n");
                 code.push_str("    push.0 mem_storew_be\n");
                 code.push_str("    push.0 mem_loadw_be\n");
                 code.push_str("    dropw\n");
@@ -251,9 +259,7 @@ impl MasmGenerator {
         // Use balanced operations that don't accumulate on the stack
         // Each iteration: push two values, add them, drop the result
         if count > 100 {
-            code.push_str(&format!("    repeat.{}\n", count));
-            code.push_str("        push.1 push.2 add drop\n");
-            code.push_str("    end\n");
+            push_repeat_block(&mut code, count, "    ", &["push.1 push.2 add drop"]);
         } else {
             for _ in 0..count {
                 code.push_str("    push.1 push.2 add drop\n");
@@ -270,15 +276,8 @@ impl MasmGenerator {
         // Simple control flow with if/else
         let iterations = count / 5; // Each iteration ~5 cycles
         if iterations > 10 {
-            code.push_str(&format!("    repeat.{}\n", iterations.min(100)));
-            code.push_str("        push.1\n");
-            code.push_str("        if.true\n");
-            code.push_str("            push.2\n");
-            code.push_str("        else\n");
-            code.push_str("            push.3\n");
-            code.push_str("        end\n");
-            code.push_str("        drop\n");
-            code.push_str("    end\n");
+            let body = ["push.1", "if.true", "    push.2", "else", "    push.3", "end", "drop"];
+            push_repeat_block(&mut code, iterations.min(100) as u64, "    ", &body);
         } else {
             for _ in 0..iterations {
                 code.push_str("    push.1\n");
@@ -310,85 +309,129 @@ impl MasmGenerator {
                 code.push_str("begin\n");
                 code.push_str("    # Set up public key commitment and message on stack\n");
                 code.push_str("    # Stack: [PK_COMMITMENT (4 elements), MSG (4 elements)]\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        # Push public key commitment (4 field elements)\n");
-                code.push_str("        push.0 push.0 push.0 push.0\n");
-                code.push_str("        # Push message (4 field elements)\n");
-                code.push_str("        push.1 push.2 push.3 push.4\n");
-                code.push_str("        # Execute verification\n");
-                code.push_str("        exec.falcon512poseidon2::verify\n");
-                code.push_str("    end\n");
+                let body = [
+                    "# Push public key commitment (4 field elements)",
+                    "push.0 push.0 push.0 push.0",
+                    "# Push message (4 field elements)",
+                    "push.1 push.2 push.3 push.4",
+                    "# Execute verification",
+                    "exec.falcon512poseidon2::verify",
+                    "drop",
+                ];
+                push_repeat_block(&mut code, iterations as u64, "    ", &body);
                 code.push_str("end\n");
-            }
+            },
             "hperm" => {
                 code.push_str("begin\n");
                 code.push_str("    # Initialize hash state (12 elements)\n");
                 code.push_str("    padw padw padw\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        hperm\n");
-                code.push_str("    end\n");
+                push_repeat_block(&mut code, iterations as u64, "    ", &["hperm"]);
                 code.push_str("    # Clean up\n");
                 code.push_str("    dropw dropw dropw\n");
                 code.push_str("end\n");
-            }
+            },
             "hmerge" => {
                 code.push_str("begin\n");
-                code.push_str("    # Initialize two words for merging\n");
-                code.push_str("    push.1 push.2 push.3 push.4\n");
-                code.push_str("    push.5 push.6 push.7 push.8\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        hmerge\n");
-                code.push_str("        # Set up next word\n");
-                code.push_str("        movup.4 drop push.1\n");
-                code.push_str("    end\n");
-                code.push_str("    dropw\n");
+                let body = [
+                    "push.1 push.2 push.3 push.4",
+                    "push.5 push.6 push.7 push.8",
+                    "hmerge",
+                    "dropw",
+                ];
+                push_repeat_block(&mut code, iterations as u64, "    ", &body);
                 code.push_str("end\n");
-            }
+            },
             "load_store" => {
                 code.push_str("begin\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        push.0 mem_storew_be\n");
-                code.push_str("        push.0 mem_loadw_be\n");
-                code.push_str("        dropw\n");
-                code.push_str("    end\n");
+                let body = [
+                    "push.1 push.2 push.3 push.4",
+                    "push.0 mem_storew_be",
+                    "push.0 mem_loadw_be",
+                    "dropw",
+                ];
+                push_repeat_block(&mut code, iterations as u64, "    ", &body);
                 code.push_str("end\n");
-            }
+            },
             "arithmetic" => {
                 code.push_str("begin\n");
-                code.push_str("    push.1 push.2\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        add\n");
-                code.push_str("        dup\n");
-                code.push_str("        push.1\n");
-                code.push_str("    end\n");
-                code.push_str("    drop drop\n");
+                push_repeat_block(
+                    &mut code,
+                    iterations as u64,
+                    "    ",
+                    &["push.1 push.2 add drop"],
+                );
                 code.push_str("end\n");
-            }
+            },
             "control_flow" => {
                 code.push_str("begin\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        push.1\n");
-                code.push_str("        if.true\n");
-                code.push_str("            push.2\n");
-                code.push_str("        else\n");
-                code.push_str("            push.3\n");
-                code.push_str("        end\n");
-                code.push_str("        drop\n");
-                code.push_str("    end\n");
+                let body = ["push.1", "if.true", "    push.2", "else", "    push.3", "end", "drop"];
+                push_repeat_block(&mut code, iterations as u64, "    ", &body);
                 code.push_str("end\n");
-            }
+            },
             _ => {
                 code.push_str(&format!("# {} operation (unimplemented)\n", operation));
                 code.push_str("begin\n");
-                code.push_str(&format!("    repeat.{}\n", iterations));
-                code.push_str("        nop\n");
-                code.push_str("    end\n");
+                push_repeat_block(&mut code, iterations as u64, "    ", &["nop"]);
                 code.push_str("end\n");
-            }
+            },
         }
 
         Ok(code)
     }
+}
+
+fn push_repeat_block(code: &mut String, count: u64, indent: &str, body_lines: &[&str]) {
+    if count == 0 {
+        return;
+    }
+
+    let block_size = MAX_REPEAT * MAX_REPEAT;
+    let mut remaining = count;
+
+    while remaining >= block_size {
+        push_nested_repeat_block(code, MAX_REPEAT, MAX_REPEAT, indent, body_lines);
+        remaining -= block_size;
+    }
+
+    if remaining >= MAX_REPEAT {
+        let outer = remaining / MAX_REPEAT;
+        push_nested_repeat_block(code, outer, MAX_REPEAT, indent, body_lines);
+        remaining %= MAX_REPEAT;
+    }
+
+    if remaining > 0 {
+        push_single_repeat_block(code, remaining, indent, body_lines);
+    }
+}
+
+fn push_single_repeat_block(code: &mut String, count: u64, indent: &str, body_lines: &[&str]) {
+    code.push_str(&format!("{indent}repeat.{count}\n"));
+    for line in body_lines {
+        code.push_str(indent);
+        code.push_str("    ");
+        code.push_str(line);
+        code.push('\n');
+    }
+    code.push_str(&format!("{indent}end\n"));
+}
+
+fn push_nested_repeat_block(
+    code: &mut String,
+    outer: u64,
+    inner: u64,
+    indent: &str,
+    body_lines: &[&str],
+) {
+    code.push_str(&format!("{indent}repeat.{outer}\n"));
+    code.push_str(&format!("{indent}    repeat.{inner}\n"));
+    for line in body_lines {
+        code.push_str(indent);
+        code.push_str("        ");
+        code.push_str(line);
+        code.push('\n');
+    }
+    code.push_str(&format!("{indent}    end\n"));
+    code.push_str(&format!("{indent}end\n"));
 }
 
 #[cfg(test)]
@@ -398,7 +441,8 @@ mod tests {
         InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile, VmProfile,
     };
     use miden_core_lib::CoreLibrary;
-    use miden_vm::Assembler;
+    use miden_processor::{fast::FastProcessor, AdviceInputs};
+    use miden_vm::{Assembler, DefaultHost, StackInputs};
     use std::collections::BTreeMap;
 
     fn test_generator() -> MasmGenerator {
@@ -411,10 +455,7 @@ mod tests {
                 total_cycles: 0,
                 phases: BTreeMap::from([(
                     "prologue".to_string(),
-                    PhaseProfile {
-                        cycles: 0,
-                        operations: BTreeMap::new(),
-                    },
+                    PhaseProfile { cycles: 0, operations: BTreeMap::new() },
                 )]),
                 instruction_mix: InstructionMix {
                     arithmetic: 0.2,
@@ -438,7 +479,14 @@ mod tests {
     #[test]
     fn component_benchmarks_assemble() {
         let generator = test_generator();
-        let operations = ["falcon512_verify", "hperm", "hmerge", "load_store"];
+        let operations = [
+            "falcon512_verify",
+            "hperm",
+            "hmerge",
+            "load_store",
+            "arithmetic",
+            "control_flow",
+        ];
 
         for operation in operations {
             let source = generator
@@ -453,9 +501,34 @@ mod tests {
                 Assembler::default()
             };
 
-            assembler
+            assembler.assemble_program(&source).expect("failed to assemble benchmark");
+        }
+    }
+
+    #[test]
+    fn component_benchmarks_execute() {
+        let generator = test_generator();
+        let operations = ["hperm", "hmerge", "load_store", "arithmetic", "control_flow"];
+
+        for operation in operations {
+            let source = generator
+                .generate_component_benchmark(operation, 3)
+                .expect("failed to generate benchmark");
+
+            let program = Assembler::default()
                 .assemble_program(&source)
                 .expect("failed to assemble benchmark");
+
+            let mut host = DefaultHost::default();
+            let processor = FastProcessor::new_with_advice_inputs(
+                StackInputs::default(),
+                AdviceInputs::default(),
+            );
+            let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
+
+            runtime
+                .block_on(async { processor.execute(&program, &mut host).await })
+                .expect("failed to execute benchmark");
         }
     }
 

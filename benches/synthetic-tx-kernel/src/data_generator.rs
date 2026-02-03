@@ -19,12 +19,7 @@ impl Falcon512Generator {
         let public_key_commitment = public_key.to_commitment();
 
         // Create a realistic message (4 field elements)
-        let message = Word::new([
-            Felt::new(1),
-            Felt::new(2),
-            Felt::new(3),
-            Felt::new(4),
-        ]);
+        let message = Word::new([Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)]);
 
         // Sign the message
         let signature = falcon512_poseidon2::sign(&secret_key, message)
@@ -111,7 +106,14 @@ impl MerkleGenerator {
     pub fn generate_merkle_path() -> MerklePathData {
         // Create leaf nodes (8 leaves for a 3-level tree)
         let leaves: Vec<Word> = (0..8)
-            .map(|i| Word::new([Felt::new(i * 4), Felt::new(i * 4 + 1), Felt::new(i * 4 + 2), Felt::new(i * 4 + 3)]))
+            .map(|i| {
+                Word::new([
+                    Felt::new(i * 4),
+                    Felt::new(i * 4 + 1),
+                    Felt::new(i * 4 + 2),
+                    Felt::new(i * 4 + 3),
+                ])
+            })
             .collect();
 
         // Compute sibling path for leaf 0
@@ -175,8 +177,8 @@ mod tests {
 
     #[test]
     fn falcon512_generator_produces_valid_data() {
-        let data = Falcon512Generator::generate_verify_data()
-            .expect("Failed to generate Falcon512 data");
+        let data =
+            Falcon512Generator::generate_verify_data().expect("Failed to generate Falcon512 data");
 
         // Verify the data has correct structure (Word is [Felt; 4])
         assert_eq!(data.public_key_commitment.as_slice().len(), 4);
@@ -185,11 +187,10 @@ mod tests {
 
     #[test]
     fn falcon512_stack_inputs_builds_correctly() {
-        let data = Falcon512Generator::generate_verify_data()
-            .expect("Failed to generate Falcon512 data");
+        let data =
+            Falcon512Generator::generate_verify_data().expect("Failed to generate Falcon512 data");
 
-        let stack_inputs = data.to_stack_inputs()
-            .expect("Failed to build stack inputs");
+        let stack_inputs = data.to_stack_inputs().expect("Failed to build stack inputs");
 
         // StackInputs always has MIN_STACK_DEPTH (16) elements
         // First 8 should be our inputs (4 for PK commitment + 4 for message)
@@ -197,8 +198,9 @@ mod tests {
         let inputs: Vec<_> = stack_inputs.iter().copied().collect();
         assert_eq!(inputs.len(), 16);
 
-        // Check first 8 are non-zero (our actual inputs)
-        assert!(inputs[..8].iter().all(|f| *f != Felt::ZERO));
+        // Check first 8 match our actual inputs
+        assert_eq!(&inputs[..4], data.public_key_commitment.as_slice());
+        assert_eq!(&inputs[4..8], data.message.as_slice());
 
         // Check last 8 are zeros (padding)
         assert!(inputs[8..].iter().all(|f| *f == Felt::ZERO));
