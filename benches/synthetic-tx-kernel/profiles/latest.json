@@ -1,41 +1,90 @@
 {
-  "_comment": "This file is a copy of miden-base-v0.20.0.json. Update this when the reference profile changes.",
   "profile_version": "1.0",
   "source": "miden-base/bin/bench-transaction",
-  "timestamp": "2025-01-31T12:00:00Z",
-  "miden_vm_version": "0.20.0",
+  "timestamp": "2026-02-03T00:17:10.646329+00:00",
+  "miden_vm_version": "0.1.0",
   "transaction_kernel": {
-    "total_cycles": 73123,
+    "total_cycles": 69490,
     "phases": {
       "prologue": {
-        "cycles": 3173,
-        "operations": {}
-      },
-      "notes_processing": {
-        "cycles": 1714,
-        "operations": {}
-      },
-      "tx_script_processing": {
-        "cycles": 42,
+        "cycles": 2995,
         "operations": {}
       },
       "epilogue": {
-        "cycles": 63977,
+        "cycles": 64243,
+        "operations": {}
+      },
+      "notes_processing": {
+        "cycles": 1725,
+        "operations": {}
+      },
+      "tx_script_processing": {
+        "cycles": 527,
         "operations": {}
       }
     },
     "instruction_mix": {
-      "arithmetic": 0.05,
-      "hashing": 0.45,
-      "memory": 0.08,
-      "control_flow": 0.05,
-      "signature_verify": 0.37
+      "arithmetic": 0.009715066916103033,
+      "hashing": 0.04857533458051516,
+      "memory": 0.019430133832206067,
+      "control_flow": 0.019430133832206067,
+      "signature_verify": 0.9028493308389697
     },
     "key_procedures": [
       {
         "name": "auth_procedure",
-        "cycles": 62667,
+        "cycles": 62739,
         "invocations": 1
+      }
+    ],
+    "operation_details": [
+      {
+        "op_type": "falcon512_verify",
+        "input_sizes": [
+          64,
+          32
+        ],
+        "iterations": 1,
+        "cycle_cost": 59859
+      },
+      {
+        "op_type": "hperm",
+        "input_sizes": [
+          48
+        ],
+        "iterations": 2700,
+        "cycle_cost": 1
+      },
+      {
+        "op_type": "hmerge",
+        "input_sizes": [
+          32,
+          32
+        ],
+        "iterations": 42,
+        "cycle_cost": 16
+      },
+      {
+        "op_type": "load_store",
+        "input_sizes": [
+          32
+        ],
+        "iterations": 135,
+        "cycle_cost": 10
+      },
+      {
+        "op_type": "arithmetic",
+        "input_sizes": [
+          8
+        ],
+        "iterations": 675,
+        "cycle_cost": 1
+      },
+      {
+        "op_type": "control_flow",
+        "input_sizes": [],
+        "iterations": 270,
+        "cycle_cost": 5
       }
     ]
   }

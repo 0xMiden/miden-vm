@@ -172,8 +172,9 @@ pub struct MerklePathData {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miden_core::field::PrimeCharacteristicRing;
+
+    use super::*;
 
     #[test]
     fn falcon512_generator_produces_valid_data() {
