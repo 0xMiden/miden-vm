@@ -50,14 +50,14 @@ impl Host for TestHost {
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessorState,
+        _process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(&mut self, _process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, _process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.trace_handler.push(trace_id);
         Ok(())
     }

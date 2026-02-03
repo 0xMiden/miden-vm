@@ -163,18 +163,18 @@ where
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessorState,
+        _process: &ProcessorState,
         _options: &DebugOptions,
     ) -> Result<(), DebugError> {
         Ok(())
     }
 
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
         // Also collect process state snapshot for consistency checking
-        let snapshot = ProcessorStateSnapshot::from(&*process);
+        let snapshot = ProcessorStateSnapshot::from(process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())

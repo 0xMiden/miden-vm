@@ -17,7 +17,6 @@ use miden_core::{
 };
 
 use crate::{
-    chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::trace_state::{
@@ -30,6 +29,7 @@ use crate::{
     processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
     system::ContextId,
+    trace::chiplets::CircuitEvaluation,
     tracer::Tracer,
     utils::split_u32_into_u16,
 };

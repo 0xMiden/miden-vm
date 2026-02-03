@@ -124,6 +124,11 @@ impl Program {
     pub fn num_procedures(&self) -> u32 {
         self.mast_forest.num_procedures()
     }
+
+    /// Returns basic information about this program (i.e., program hash and kernel).
+    pub fn to_info(&self) -> ProgramInfo {
+        ProgramInfo::new(self.hash(), self.kernel().clone())
+    }
 }
 
 // ------------------------------------------------------------------------------------------------

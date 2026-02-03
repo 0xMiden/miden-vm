@@ -4,23 +4,20 @@ use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, STATE_WIDTH},
 };
-use miden_core::{
-    Felt, ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
-    mast::{MastForest, MastNodeId, OpBatch},
-    precompile::PrecompileTranscriptState,
-    program::MIN_STACK_DEPTH,
-};
+use miden_core::program::MIN_STACK_DEPTH;
 
 use crate::{
-    ContextId,
+    ContextId, Felt, ONE, Word, ZERO,
     advice::AdviceError,
-    chiplets::CircuitEvaluation,
     continuation_stack::ContinuationStack,
+    crypto::merkle::MerklePath,
     errors::OperationError,
+    mast::{MastForest, MastNodeId, OpBatch},
+    precompile::PrecompileTranscriptState,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
     },
+    trace::chiplets::CircuitEvaluation,
 };
 
 // TRACE FRAGMENT CONTEXT

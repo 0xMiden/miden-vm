@@ -4,8 +4,9 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, fast::FastProcessor, parallel::build_trace,
-    trace::ExecutionTrace,
+    DefaultHost, ExecutionOptions,
+    fast::FastProcessor,
+    trace::{ExecutionTrace, build_trace},
 };
 use miden_vm::internal::InputFile;
 use tracing::instrument;
@@ -153,12 +154,7 @@ fn run_masp_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
-    let trace = build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
     Ok((trace, program_hash))
 }
@@ -219,12 +215,7 @@ fn run_masm_program(params: &RunCmd) -> Result<(ExecutionTrace, [u8; 32]), Repor
         .execute_for_trace_sync(&program, &mut host)
         .wrap_err("Failed to execute program")?;
 
-    let trace = build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
     Ok((trace, program_hash))
 }

@@ -16,13 +16,13 @@ use miden_core::{
 use super::step::BreakReason;
 use crate::{
     AdviceProvider, ContextId, ExecutionError, Host,
-    chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
     processor::{
         HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
         SystemInterface,
     },
+    trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
 };
 
 impl Processor for FastProcessor {

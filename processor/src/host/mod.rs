@@ -104,7 +104,7 @@ pub trait Host {
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
-        process: &mut ProcessorState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = debug::DefaultDebugHandler::default();
@@ -112,7 +112,7 @@ pub trait Host {
     }
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }
