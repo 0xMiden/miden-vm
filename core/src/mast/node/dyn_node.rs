@@ -14,6 +14,8 @@ use crate::{
     prettier::{Document, PrettyPrint, const_text, nl},
     utils::LookupByIdx,
 };
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 
 // DYN NODE
 // ================================================================================================

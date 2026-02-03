@@ -18,6 +18,8 @@ use crate::{
     operations::{OPCODE_CALL, OPCODE_SYSCALL},
     utils::{Idx, LookupByIdx},
 };
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 
 // CALL NODE
 // ================================================================================================

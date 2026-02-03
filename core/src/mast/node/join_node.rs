@@ -15,6 +15,8 @@ use crate::{
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 
 // JOIN NODE
 // ================================================================================================
