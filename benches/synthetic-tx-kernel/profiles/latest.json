@@ -5,6 +5,8 @@
   "miden_vm_version": "0.1.0",
   "transaction_kernel": {
     "total_cycles": 69454,
+    "trace_main_len": 68897,
+    "trace_padded_len": 131072,
     "phases": {
       "epilogue": {
         "cycles": 64243,

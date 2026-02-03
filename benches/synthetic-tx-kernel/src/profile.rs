@@ -21,6 +21,10 @@ pub struct VmProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactionKernelProfile {
     pub total_cycles: u64,
+    #[serde(default)]
+    pub trace_main_len: Option<u64>,
+    #[serde(default)]
+    pub trace_padded_len: Option<u64>,
     /// Phase names are expected to be from a fixed set:
     /// "prologue", "notes_processing", "tx_script_processing", "epilogue"
     pub phases: BTreeMap<String, PhaseProfile>,
@@ -147,6 +151,8 @@ mod tests {
             miden_vm_version: "0.20.0".to_string(),
             transaction_kernel: TransactionKernelProfile {
                 total_cycles: 73123,
+                trace_main_len: None,
+                trace_padded_len: None,
                 phases,
                 instruction_mix: create_valid_instruction_mix(),
                 key_procedures: vec![ProcedureProfile {
@@ -304,6 +310,8 @@ mod tests {
             miden_vm_version: "0.20.0".to_string(),
             transaction_kernel: TransactionKernelProfile {
                 total_cycles: 0,
+                trace_main_len: None,
+                trace_padded_len: None,
                 phases: BTreeMap::new(),
                 instruction_mix: InstructionMix {
                     arithmetic: 0.2,
@@ -339,6 +347,8 @@ mod tests {
             miden_vm_version: "0.20.0".to_string(),
             transaction_kernel: TransactionKernelProfile {
                 total_cycles: 0,
+                trace_main_len: None,
+                trace_padded_len: None,
                 phases,
                 instruction_mix: InstructionMix {
                     arithmetic: 0.2,

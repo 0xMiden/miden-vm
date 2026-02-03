@@ -18,6 +18,24 @@ impl ProfileValidator {
         // Validate instruction mix sums to ~1.0
         profile.transaction_kernel.instruction_mix.validate()?;
 
+        if let Some(main_len) = profile.transaction_kernel.trace_main_len {
+            if main_len == 0 {
+                bail!("Trace main length is zero");
+            }
+        }
+        if let Some(padded_len) = profile.transaction_kernel.trace_padded_len {
+            if padded_len == 0 {
+                bail!("Trace padded length is zero");
+            }
+            if let Some(main_len) = profile.transaction_kernel.trace_main_len {
+                if padded_len < main_len {
+                    bail!(
+                        "Trace padded length ({padded_len}) is smaller than main length ({main_len})"
+                    );
+                }
+            }
+        }
+
         // Check that total cycles matches sum of phases
         let phase_total: u64 = profile.transaction_kernel.phases.values().map(|p| p.cycles).sum();
 
@@ -135,6 +153,8 @@ mod tests {
             miden_vm_version: "0.20.0".to_string(),
             transaction_kernel: TransactionKernelProfile {
                 total_cycles,
+                trace_main_len: None,
+                trace_padded_len: None,
                 phases,
                 instruction_mix: InstructionMix {
                     arithmetic: 0.2,

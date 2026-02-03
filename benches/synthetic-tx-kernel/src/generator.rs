@@ -16,11 +16,21 @@ const MAX_REPEAT: u64 = 1000;
 /// Generates masm code for a synthetic transaction kernel
 pub struct MasmGenerator {
     profile: VmProfile,
+    trace_scale: f64,
 }
 
 impl MasmGenerator {
     pub fn new(profile: VmProfile) -> Self {
-        Self { profile }
+        Self { profile, trace_scale: 1.0 }
+    }
+
+    pub fn with_trace_scale(mut self, trace_scale: f64) -> Self {
+        self.trace_scale = if trace_scale.is_finite() && trace_scale > 0.0 {
+            trace_scale
+        } else {
+            1.0
+        };
+        self
     }
 
     /// Generate the complete synthetic kernel program
@@ -59,7 +69,8 @@ impl MasmGenerator {
         // If phase has specific operations defined, use those
         if !phase.operations.is_empty() {
             for (op_name, count) in &phase.operations {
-                code.push_str(&self.generate_operation(op_name, *count)?);
+                let scaled = self.scale_count(*count);
+                code.push_str(&self.generate_operation(op_name, scaled)?);
             }
         } else {
             // Otherwise, generate operations based on instruction mix
@@ -85,7 +96,7 @@ impl MasmGenerator {
             phase_cycles as f64 / 5000.0 // Scale to ~5000 cycles
         } else {
             1.0
-        };
+        } * self.trace_scale;
 
         // Calculate how many of each operation to generate based on instruction mix
         let sig_verify_count = ((phase_cycles as f64 * mix.signature_verify)
@@ -130,6 +141,10 @@ impl MasmGenerator {
         }
 
         Ok(code)
+    }
+
+    fn scale_count(&self, count: u64) -> u64 {
+        ((count as f64) / self.trace_scale).max(1.0) as u64
     }
 
     fn generate_operation(&self, op_name: &str, count: u64) -> Result<String> {
@@ -210,17 +225,15 @@ impl MasmGenerator {
         // We use a loop of nop operations that approximates the cycle count.
         // Each loop iteration costs ~1 cycle (the nop itself + loop overhead).
 
+        let scaled_cycles =
+            ((CYCLES_PER_FALCON512_VERIFY as f64) / self.trace_scale).max(1.0) as u64;
+
         for _ in 0..count {
-            // Simulate ~59859 cycles
-            // Using a single loop with nop - each iteration is ~1 cycle
-            code.push_str("    # Simulating falcon512_verify cycle count (~60000 cycles)\n");
-            // Note: We can't use repeat.60000 directly as it would exceed max loop iterations
-            // Use nested loops: 60 * 1000 = 60000
-            code.push_str("    repeat.60\n");
-            code.push_str("        repeat.1000\n");
-            code.push_str("            nop\n");
-            code.push_str("        end\n");
-            code.push_str("    end\n");
+            code.push_str(&format!(
+                "    # Simulating falcon512_verify cycle count (~{} cycles)\n",
+                scaled_cycles
+            ));
+            push_repeat_block(&mut code, scaled_cycles, "    ", &["nop"]);
         }
 
         Ok(code)
@@ -446,6 +459,8 @@ mod tests {
             miden_vm_version: "0.1.0".to_string(),
             transaction_kernel: TransactionKernelProfile {
                 total_cycles: 0,
+                trace_main_len: None,
+                trace_padded_len: None,
                 phases: BTreeMap::from([(
                     "prologue".to_string(),
                     PhaseProfile { cycles: 0, operations: BTreeMap::new() },
