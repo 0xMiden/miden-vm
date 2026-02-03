@@ -163,6 +163,9 @@ fn test_cycle_limit_exactly_max_cycles_succeeds() {
     let mut host = DefaultHost::default();
 
     // With 2018 Noop operations, the program uses exactly MIN_TRACE_LEN (2048) cycles.
+    // 2018 operations result in 29 operation batches, and this requires executing 28 `RESPAN`
+    // operations. So, we get 2018 + 28 = 2046. All of these operations are executed in a single
+    // basic block, and we need 2 more operations for block start (`SPAN`) and block end (`END`).
     // Before the fix (clk >= max_cycles): this failed because 2048 >= 2048 is true.
     // After the fix (clk > max_cycles): this succeeds because 2048 > 2048 is false.
     const NUM_OPS: usize = 2018;
