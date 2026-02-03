@@ -13,7 +13,7 @@ use std::time::Duration;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, SamplingMode};
 use miden_core_lib::CoreLibrary;
 use miden_processor::fast::FastProcessor;
-use miden_vm::{Assembler, DefaultHost, StackInputs};
+use miden_vm::{Assembler, DefaultHost, ProvingOptions, StackInputs, prove_sync};
 use synthetic_tx_kernel::{generator::MasmGenerator, load_profile};
 
 fn synthetic_transaction_kernel(c: &mut Criterion) {
@@ -95,6 +95,32 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
             },
             |(mut host, program, processor)| async move {
                 black_box(processor.execute(&program, &mut host).await.unwrap());
+            },
+            criterion::BatchSize::SmallInput,
+        );
+    });
+
+    group.bench_function("execute_and_prove", |b| {
+        b.iter_batched(
+            || {
+                let host = DefaultHost::default()
+                    .with_library(&core_lib)
+                    .expect("Failed to initialize host with core library");
+                let stack_inputs = StackInputs::default();
+                let advice_inputs = miden_processor::advice::AdviceInputs::default();
+                (host, program.clone(), stack_inputs, advice_inputs)
+            },
+            |(mut host, program, stack_inputs, advice_inputs)| {
+                black_box(
+                    prove_sync(
+                        &program,
+                        stack_inputs,
+                        advice_inputs,
+                        &mut host,
+                        ProvingOptions::default(),
+                    )
+                    .unwrap(),
+                );
             },
             criterion::BatchSize::SmallInput,
         );
