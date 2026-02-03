@@ -427,7 +427,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use miden_core_lib::CoreLibrary;
-    use miden_processor::{fast::FastProcessor, AdviceInputs};
+    use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
     use miden_vm::{Assembler, DefaultHost, StackInputs};
 
     use super::*;

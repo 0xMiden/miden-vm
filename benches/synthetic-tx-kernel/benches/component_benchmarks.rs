@@ -3,7 +3,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use miden_core::{Felt, Word};
 use miden_core_lib::{dsa::falcon512_poseidon2, CoreLibrary};
-use miden_processor::{fast::FastProcessor, AdviceInputs};
+use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
 use miden_vm::{Assembler, DefaultHost, StackInputs};
 
 /// Helper function to execute a benchmark with the given program

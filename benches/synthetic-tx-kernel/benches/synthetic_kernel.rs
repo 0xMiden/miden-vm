@@ -65,7 +65,7 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
         .expect("Failed to initialize test host");
     let test_processor = FastProcessor::new_with_advice_inputs(
         StackInputs::default(),
-        miden_processor::AdviceInputs::default(),
+        miden_processor::advice::AdviceInputs::default(),
     );
     let test_result = tokio::runtime::Runtime::new()
         .expect("Failed to create runtime for smoke test")
@@ -89,7 +89,7 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
                     .expect("Failed to initialize host with core library");
                 let processor = FastProcessor::new_with_advice_inputs(
                     StackInputs::default(),
-                    miden_processor::AdviceInputs::default(),
+                    miden_processor::advice::AdviceInputs::default(),
                 );
                 (host, program.clone(), processor)
             },
