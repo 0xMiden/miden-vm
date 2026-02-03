@@ -185,22 +185,22 @@ impl Chiplets {
             + 1
     }
 
-    /// Returns the index of the first row of [Bitwise] execution trace.
+    /// Returns the index of the first row of `Bitwise` execution trace.
     pub fn bitwise_start(&self) -> RowIndex {
         self.hasher.trace_len().into()
     }
 
-    /// Returns the index of the first row of the [Memory] execution trace.
+    /// Returns the index of the first row of the `Memory` execution trace.
     pub fn memory_start(&self) -> RowIndex {
         self.bitwise_start() + self.bitwise.trace_len()
     }
 
-    /// Returns the index of the first row of [KernelRom] execution trace.
+    /// Returns the index of the first row of `KernelRom` execution trace.
     pub fn ace_start(&self) -> RowIndex {
         self.memory_start() + self.memory.trace_len()
     }
 
-    /// Returns the index of the first row of [KernelRom] execution trace.
+    /// Returns the index of the first row of `KernelRom` execution trace.
     pub fn kernel_rom_start(&self) -> RowIndex {
         self.ace_start() + self.ace.trace_len()
     }
