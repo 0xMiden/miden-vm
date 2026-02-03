@@ -18,6 +18,7 @@ use miden_core::{
     utils::range,
 };
 
+use super::CORE_TRACE_WIDTH;
 use crate::{
     ContextId, ExecutionError, Host,
     chiplets::CircuitEvaluation,
@@ -35,7 +36,6 @@ use crate::{
     },
     host::default::NoopHost,
     operation::OperationError,
-    parallel::CORE_TRACE_WIDTH,
     processor::{OperationHelperRegisters, Processor, StackInterface, SystemInterface},
     tracer::{NoopTracer, Tracer},
     utils::split_u32_into_u16,

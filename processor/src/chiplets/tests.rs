@@ -142,7 +142,7 @@ fn build_trace(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(&program, &mut host).unwrap();
     let trace =
-        crate::parallel::build_trace(execution_output, trace_generation_context, program.to_info());
+        crate::trace::build_trace(execution_output, trace_generation_context, program.to_info());
 
     let trace_len = trace.get_trace_len();
 

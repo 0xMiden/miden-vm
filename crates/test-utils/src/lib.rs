@@ -40,7 +40,7 @@ use miden_processor::{
     DefaultDebugHandler, DefaultHost, Program,
     event::EventHandler,
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
-    parallel::build_trace,
+    trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;

@@ -204,7 +204,7 @@ mod fast_parallel {
     use miden_crypto::stark;
     use miden_processor::{
         ExecutionOptions, StackInputs, advice::AdviceInputs, fast::FastProcessor,
-        parallel::build_trace,
+        trace::build_trace,
     };
     use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
     use miden_verifier::verify;

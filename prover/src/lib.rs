@@ -8,7 +8,7 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_processor::{Program, fast::FastProcessor, parallel::build_trace};
+use miden_processor::{Program, fast::FastProcessor, trace::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities

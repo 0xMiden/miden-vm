@@ -25,7 +25,7 @@ use miden_utils_testing::rand::rand_value;
 
 use crate::{
     AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, PrimeField64,
-    event::NoopEventHandler, fast::FastProcessor, parallel::build_trace,
+    event::NoopEventHandler, fast::FastProcessor, trace::build_trace,
 };
 
 // CONSTANTS

@@ -34,6 +34,8 @@ mod row_major_adapter;
 
 pub mod range;
 
+mod parallel;
+
 #[cfg(test)]
 mod tests;
 
@@ -41,6 +43,7 @@ mod tests;
 // ================================================================================================
 
 pub use miden_air::trace::RowIndex;
+pub use parallel::{CORE_TRACE_WIDTH, build_trace};
 pub use utils::{ChipletsLengths, TraceLenSummary};
 
 // VM EXECUTION TRACE

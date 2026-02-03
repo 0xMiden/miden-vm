@@ -22,11 +22,8 @@ use miden_core::{
     operations::Operation,
 };
 
-use super::CoreTraceFragmentFiller;
-use crate::{
-    decoder::block_stack::ExecutionContextInfo, parallel::core_trace_fragment::BasicBlockContext,
-    processor::StackInterface,
-};
+use super::{BasicBlockContext, CoreTraceFragmentFiller};
+use crate::{decoder::block_stack::ExecutionContextInfo, processor::StackInterface};
 
 // DECODER ROW
 // ================================================================================================

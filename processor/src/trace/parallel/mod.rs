@@ -37,7 +37,6 @@ use crate::{
             HasherRequestReplay, KernelReplay, MemoryWritesReplay,
         },
     },
-    parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::{
         AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary, range::RangeChecker,
@@ -47,6 +46,7 @@ use crate::{
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
 pub(crate) mod core_trace_fragment;
+use core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller};
 
 #[cfg(test)]
 mod tests;

@@ -1,12 +1,9 @@
 use core::ops::ControlFlow;
 
-use miden_core::{
+use super::{BasicBlockContext, CoreTraceFragmentFiller};
+use crate::{
     ONE, ZERO,
     mast::{BasicBlockNode, CallNode, DynNode, MastForest, MastNodeExt, MastNodeId},
-};
-
-use crate::{
-    parallel::core_trace_fragment::{BasicBlockContext, CoreTraceFragmentFiller},
     processor::StackInterface,
     tracer::NoopTracer,
 };
