@@ -38,9 +38,10 @@ use crate::{
         },
     },
     parallel::core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller},
-    range::RangeChecker,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
-    trace::{AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary},
+    trace::{
+        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary, range::RangeChecker,
+    },
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;

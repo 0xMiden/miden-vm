@@ -1,16 +1,23 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use super::{
-    Felt, ZERO,
-    trace::{RangeCheckTrace, RowIndex},
-};
-use crate::utils::uninit_vector;
+use miden_air::trace::RANGE_CHECK_TRACE_WIDTH;
+
+use super::RowIndex;
+use crate::{Felt, ZERO, utils::uninit_vector};
 
 mod aux_trace;
 pub use aux_trace::AuxTraceBuilder;
 
 #[cfg(test)]
 mod tests;
+
+// TRACE
+// ================================================================================================
+
+pub struct RangeCheckTrace {
+    pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
+    pub(crate) aux_builder: AuxTraceBuilder,
+}
 
 // RANGE CHECKER
 // ================================================================================================

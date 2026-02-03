@@ -4,10 +4,8 @@ use miden_air::trace::{
     MainTrace, RowIndex,
     range::{M_COL_IDX, V_COL_IDX},
 };
-use miden_core::{ZERO, field::ExtensionField};
 
-use super::{Felt, uninit_vector};
-use crate::PrimeField64;
+use crate::{Felt, PrimeField64, ZERO, field::ExtensionField, utils::uninit_vector};
 
 // AUXILIARY TRACE BUILDER
 // ================================================================================================

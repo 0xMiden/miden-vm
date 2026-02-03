@@ -1,10 +1,12 @@
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use miden_core::utils::ToElements;
 use miden_utils_testing::rand::rand_array;
 
-use super::{Felt, RangeChecker, ZERO};
-use crate::{PrimeField64, trace::RangeCheckTrace};
+use super::{RangeCheckTrace, RangeChecker};
+use crate::{Felt, PrimeField64, ZERO, utils::ToElements};
+
+// TESTS
+// ================================================================================================
 
 #[test]
 fn range_checks() {

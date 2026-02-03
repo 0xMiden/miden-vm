@@ -20,7 +20,6 @@ mod errors;
 mod execution;
 mod execution_options;
 mod host;
-mod range;
 mod stack;
 mod system;
 

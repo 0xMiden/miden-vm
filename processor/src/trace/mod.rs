@@ -7,8 +7,7 @@ use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     PublicInputs,
     trace::{
-        AuxTraceBuilder, CHIPLETS_WIDTH, DECODER_TRACE_OFFSET, MainTrace, RANGE_CHECK_TRACE_WIDTH,
-        STACK_TRACE_OFFSET,
+        AuxTraceBuilder, CHIPLETS_WIDTH, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -19,11 +18,11 @@ use miden_core::{
     program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
+use range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder;
 
 use super::{
     AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
-    range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
 use crate::fast::ExecutionOutput;
@@ -32,6 +31,8 @@ mod utils;
 pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
 
 mod row_major_adapter;
+
+pub mod range;
 
 #[cfg(test)]
 mod tests;
@@ -44,24 +45,6 @@ pub use utils::{ChipletsLengths, TraceLenSummary};
 
 // VM EXECUTION TRACE
 // ================================================================================================
-
-#[derive(Debug, Clone)]
-pub struct AuxTraceBuilders {
-    pub(crate) decoder: DecoderAuxTraceBuilder,
-    pub(crate) stack: StackAuxTraceBuilder,
-    pub(crate) range: RangeCheckerAuxTraceBuilder,
-    pub(crate) chiplets: ChipletsAuxTraceBuilder,
-}
-
-pub struct RangeCheckTrace {
-    pub(crate) trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    pub(crate) aux_builder: RangeCheckerAuxTraceBuilder,
-}
-
-pub struct ChipletsTrace {
-    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
-    pub(crate) aux_builder: ChipletsAuxTraceBuilder,
-}
 
 /// Execution trace which is generated when a program is executed on the VM.
 ///
@@ -263,6 +246,19 @@ impl ExecutionTrace {
 
 // AUX TRACE BUILDERS
 // ================================================================================================
+
+#[derive(Debug, Clone)]
+pub struct AuxTraceBuilders {
+    pub(crate) decoder: DecoderAuxTraceBuilder,
+    pub(crate) stack: StackAuxTraceBuilder,
+    pub(crate) range: RangeCheckerAuxTraceBuilder,
+    pub(crate) chiplets: ChipletsAuxTraceBuilder,
+}
+
+pub struct ChipletsTrace {
+    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) aux_builder: ChipletsAuxTraceBuilder,
+}
 
 impl AuxTraceBuilders {
     /// Builds auxiliary columns for all trace segments given the main trace and challenges.

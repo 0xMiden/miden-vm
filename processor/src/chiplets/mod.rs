@@ -9,8 +9,7 @@ use miden_core::{
 use super::{
     EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    range::RangeChecker,
-    trace::{ChipletsTrace, RowIndex, TraceFragment},
+    trace::{ChipletsTrace, RowIndex, TraceFragment, range::RangeChecker},
     utils,
 };
 
