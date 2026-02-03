@@ -19,8 +19,9 @@ use crate::{
 
 /// A proof of correct execution of Miden VM.
 ///
-/// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
-/// proof. However, the proof does not contain public inputs needed to verify the proof.
+/// The proof contains the STARK proof, the hash function used during proof generation, and a set
+/// of precompile requests deferred during proof generation. However, the proof does not contain
+/// public inputs needed to verify the proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
@@ -33,8 +34,8 @@ impl ExecutionProof {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash
-    /// function, and list of all deferred [PrecompileRequest]s.
+    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
+    /// and list of all deferred [PrecompileRequest]s.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
@@ -207,4 +208,21 @@ impl Deserializable for ExecutionProof {
 )]
 pub struct InvalidHashFunctionError {
     pub hash_function: String,
+}
+
+// TESTING UTILS
+// ================================================================================================
+
+#[cfg(any(test, feature = "testing"))]
+impl ExecutionProof {
+    /// Creates a dummy `ExecutionProof` for testing purposes only.
+    ///
+    /// A proof created in this way will not be verifiable against any verifier.
+    pub fn new_dummy() -> Self {
+        ExecutionProof {
+            proof: Vec::new(),
+            hash_fn: HashFunction::Blake3_256,
+            pc_requests: Vec::new(),
+        }
+    }
 }
