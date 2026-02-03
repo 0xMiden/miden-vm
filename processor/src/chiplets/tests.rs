@@ -136,17 +136,13 @@ fn build_trace(
             .unwrap();
         mast_forest.make_root(basic_block_id);
 
-        Program::new(mast_forest.into(), basic_block_id)
+        Program::with_kernel(mast_forest.into(), basic_block_id, kernel)
     };
 
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(&program, &mut host).unwrap();
-    let trace = crate::parallel::build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        kernel,
-    );
+    let trace =
+        crate::parallel::build_trace(execution_output, trace_generation_context, program.to_info());
 
     let trace_len = trace.get_trace_len();
 

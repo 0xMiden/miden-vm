@@ -327,12 +327,7 @@ fn test_trace_generation_at_fragment_boundaries(
         let (execution_output, trace_fragment_contexts) =
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-        build_trace(
-            execution_output,
-            trace_fragment_contexts,
-            program.hash(),
-            program.kernel().clone(),
-        )
+        build_trace(execution_output, trace_fragment_contexts, program.to_info())
     };
 
     let trace_from_single_fragment = {
@@ -349,12 +344,7 @@ fn test_trace_generation_at_fragment_boundaries(
             processor.execute_for_trace_sync(&program, &mut host).unwrap();
         assert!(trace_fragment_contexts.core_trace_contexts.len() == 1);
 
-        build_trace(
-            execution_output,
-            trace_fragment_contexts,
-            program.hash(),
-            program.kernel().clone(),
-        )
+        build_trace(execution_output, trace_fragment_contexts, program.to_info())
     };
 
     // Ensure that the trace generated from multiple fragments is identical to the one generated

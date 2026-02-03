@@ -83,8 +83,7 @@ fn build_trace(c: &mut Criterion) {
                             let trace = parallel::build_trace(
                                 execution_output,
                                 trace_generation_context,
-                                program.hash(),
-                                program.kernel().clone(),
+                                program.to_info(),
                             );
                             black_box(trace);
                         },

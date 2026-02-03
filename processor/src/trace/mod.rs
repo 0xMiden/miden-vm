@@ -16,7 +16,7 @@ use miden_core::{
     Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
+    program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
 
@@ -87,15 +87,12 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
 
     pub fn new_from_parts(
-        program_hash: Word,
-        kernel: Kernel,
+        program_info: ProgramInfo,
         execution_output: ExecutionOutput,
         main_trace: MainTrace,
         aux_trace_builders: AuxTraceBuilders,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
-        let program_info = ProgramInfo::new(program_hash, kernel);
-
         Self {
             main_trace,
             aux_trace_builders,

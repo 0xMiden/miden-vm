@@ -886,7 +886,7 @@ fn test_call_decoding() {
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
     let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program, kernel);
+        build_call_trace_helper(&program);
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -1188,7 +1188,7 @@ fn test_syscall_decoding() {
     let program = Program::with_kernel(mast_forest.into(), program_root_node_id, kernel.clone());
 
     let (sys_trace, dec_trace, trace_len) =
-        build_call_trace_helper(&program, kernel);
+        build_call_trace_helper(&program);
 
     let mut row_idx = 0;
     // --- check block address, op_bits, group count, op_index, and in_span columns ---------------
@@ -1610,12 +1610,7 @@ fn build_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTrace,
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    let trace = build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();
@@ -1633,10 +1628,7 @@ fn build_dyn_trace_helper(stack_inputs: &[u64], program: &Program) -> (DecoderTr
 }
 
 /// Builds both system and decoder traces for CALL/SYSCALL operations.
-fn build_call_trace_helper(
-    program: &Program,
-    kernel: Kernel,
-) -> (SystemTrace, DecoderTrace, usize) {
+fn build_call_trace_helper(program: &Program) -> (SystemTrace, DecoderTrace, usize) {
     let processor = FastProcessor::new_with_options(
         StackInputs::default(),
         AdviceInputs::default(),
@@ -1649,7 +1641,7 @@ fn build_call_trace_helper(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    let trace = build_trace(execution_output, trace_generation_context, program.hash(), kernel);
+    let trace = build_trace(execution_output, trace_generation_context, program.to_info());
 
     // The trace_len_summary().main_trace_len() is the actual program row count (before padding)
     let trace_len = trace.trace_len_summary().main_trace_len();

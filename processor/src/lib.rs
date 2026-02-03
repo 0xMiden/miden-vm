@@ -158,12 +158,8 @@ pub async fn execute(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace(program, host).await?;
 
-    let trace = parallel::build_trace(
-        execution_output,
-        trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
-    );
+    let trace =
+        parallel::build_trace(execution_output, trace_generation_context, program.to_info());
 
     assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
     Ok(trace)

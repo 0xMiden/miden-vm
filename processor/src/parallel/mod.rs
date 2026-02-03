@@ -19,7 +19,7 @@ use miden_core::{
     ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
     operations::Operation,
-    program::{Kernel, MIN_STACK_DEPTH},
+    program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
     utils::{ColMatrix, uninit_vector},
 };
 use rayon::prelude::*;
@@ -58,8 +58,7 @@ mod tests;
 pub fn build_trace(
     execution_output: ExecutionOutput,
     trace_generation_context: TraceGenerationContext,
-    program_hash: Word,
-    kernel: Kernel,
+    program_info: ProgramInfo,
 ) -> ExecutionTrace {
     let TraceGenerationContext {
         core_trace_contexts,
@@ -74,7 +73,7 @@ pub fn build_trace(
     } = trace_generation_context;
 
     let chiplets = initialize_chiplets(
-        kernel.clone(),
+        program_info.kernel().clone(),
         &core_trace_contexts,
         memory_writes,
         bitwise,
@@ -137,8 +136,7 @@ pub fn build_trace(
     };
 
     ExecutionTrace::new_from_parts(
-        program_hash,
-        kernel,
+        program_info,
         execution_output,
         main_trace,
         aux_trace_builders,
