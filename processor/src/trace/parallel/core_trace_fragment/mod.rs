@@ -21,7 +21,6 @@ use miden_core::{
 use super::CORE_TRACE_WIDTH;
 use crate::{
     ContextId, ExecutionError, Host,
-    chiplets::CircuitEvaluation,
     continuation_stack::Continuation,
     decoder::block_stack::ExecutionContextInfo,
     errors::AceEvalError,
@@ -43,6 +42,8 @@ use crate::{
 
 mod execution;
 mod trace_row;
+
+use super::super::chiplets::CircuitEvaluation;
 
 #[cfg(test)]
 mod tests;

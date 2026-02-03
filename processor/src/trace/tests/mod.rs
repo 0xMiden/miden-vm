@@ -7,10 +7,11 @@ use miden_core::{
 };
 use miden_utils_testing::rand::rand_array;
 
-use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt};
+use super::{ExecutionTrace, Felt};
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs, fast::FastProcessor,
-    trace::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs,
+    fast::FastProcessor,
+    trace::{build_trace, chiplets::init_state_from_words},
 };
 
 mod chiplets;

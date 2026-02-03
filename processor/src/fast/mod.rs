@@ -19,7 +19,6 @@ use tracing::instrument;
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
     ProcessorState, Stopper,
-    chiplets::Ace,
     continuation_stack::ContinuationStack,
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     execution::{
@@ -31,6 +30,7 @@ use crate::{
         external::maybe_use_caller_error_context,
         step::{BreakReason, NeverStopper, StepStopper},
     },
+    trace::chiplets::Ace,
     tracer::{NoopTracer, Tracer},
 };
 

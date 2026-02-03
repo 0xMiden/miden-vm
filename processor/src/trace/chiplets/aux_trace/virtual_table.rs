@@ -13,9 +13,8 @@ use miden_core::{
 use super::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 use crate::{
     PrimeField64,
-    chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
-    trace::AuxColumnBuilder,
+    trace::{AuxColumnBuilder, chiplets::aux_trace::build_value},
 };
 
 // CHIPLETS VIRTUAL TABLE

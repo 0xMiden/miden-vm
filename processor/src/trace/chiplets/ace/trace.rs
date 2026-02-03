@@ -14,14 +14,11 @@ use miden_core::{
     field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
 };
 
-use crate::{
-    ContextId,
-    chiplets::ace::{
-        MAX_NUM_ACE_WIRES,
-        instruction::{Op, decode_instruction},
-    },
-    errors::AceError,
+use super::{
+    MAX_NUM_ACE_WIRES,
+    instruction::{Op, decode_instruction},
 };
+use crate::{ContextId, errors::AceError};
 
 /// Number of LogUp fractions in the wiring bus for rows in the `READ` section.
 pub const NUM_ACE_LOGUP_FRACTIONS_READ: usize = 2;

@@ -12,7 +12,6 @@ use core::{
     ops::ControlFlow,
 };
 
-mod chiplets;
 mod continuation_stack;
 mod debug;
 mod decoder;
@@ -46,7 +45,6 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use chiplets::MemoryError;
 pub use errors::{ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use host::{
@@ -61,6 +59,7 @@ pub use miden_core::{
     serde,
 };
 pub use system::ContextId;
+pub use trace::chiplets::MemoryError;
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};

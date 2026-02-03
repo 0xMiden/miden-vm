@@ -8,6 +8,7 @@ use hasher::{
 };
 use kernel::{KernelRomMessage, build_kernel_chiplet_responses};
 use memory::{
+    build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
     build_hornerbase_eval_request, build_hornerext_eval_request, build_mem_mload_mstore_request,
     build_mem_mloadw_mstorew_request, build_memory_chiplet_responses, build_mstream_request,
     build_pipe_request,
@@ -38,9 +39,6 @@ use miden_core::{
 use super::Felt;
 use crate::{
     PrimeField64,
-    chiplets::aux_trace::bus::memory::{
-        build_dyn_dyncall_callee_hash_read_request, build_fmp_initialization_write_request,
-    },
     debug::{BusDebugger, BusMessage},
     trace::AuxColumnBuilder,
 };
@@ -51,9 +49,8 @@ mod hasher;
 mod kernel;
 mod memory;
 
+use kernel::build_kernel_init_requests;
 pub use memory::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
-
-use crate::chiplets::aux_trace::bus::kernel::build_kernel_init_requests;
 
 // BUS COLUMN BUILDER
 // ================================================================================================

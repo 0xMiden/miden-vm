@@ -10,16 +10,14 @@ use miden_air::trace::{
         MEMORY_WRITE, V_COL_RANGE, WORD_COL_IDX,
     },
 };
-use miden_core::{
-    WORD_SIZE, ZERO,
-    field::{Field, PrimeCharacteristicRing},
-};
 
-use super::{
-    EMPTY_WORD, Felt, ONE, RangeChecker, TraceFragment, Word,
+use super::{RangeChecker, TraceFragment};
+use crate::{
+    EMPTY_WORD, Felt, MemoryAddress, ONE, PrimeField64, WORD_SIZE, Word, ZERO,
+    field::{Field, PrimeCharacteristicRing},
+    system::ContextId,
     utils::{split_element_u32_into_u16, split_u32_into_u16},
 };
-use crate::{MemoryAddress, PrimeField64, system::ContextId};
 
 mod errors;
 pub use errors::MemoryError;

@@ -4,8 +4,8 @@ use miden_air::trace::{MainTrace, RowIndex, chiplets::ace::ACE_INIT_LABEL};
 use miden_core::{Felt, ONE, field::ExtensionField};
 
 use crate::{
-    chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
+    trace::chiplets::aux_trace::build_value,
 };
 
 // REQUESTS

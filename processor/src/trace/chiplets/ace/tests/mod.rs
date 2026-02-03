@@ -17,12 +17,12 @@ use miden_core::{
 
 use crate::{
     ContextId, PrimeField64,
-    chiplets::ace::{
+    fast::{Memory, eval_circuit_fast_},
+    trace::chiplets::ace::{
         instruction::{Op, decode_instruction},
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },
-    fast::{Memory, eval_circuit_fast_},
     tracer::NoopTracer,
 };
 

@@ -2,12 +2,13 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
+use chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
     PublicInputs,
     trace::{
-        AuxTraceBuilder, CHIPLETS_WIDTH, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
+        AuxTraceBuilder, DECODER_TRACE_OFFSET, MainTrace, STACK_TRACE_OFFSET,
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
@@ -21,8 +22,7 @@ use miden_core::{
 use range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder;
 
 use super::{
-    AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    AdviceProvider, Felt, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
 use crate::fast::ExecutionOutput;
@@ -32,6 +32,7 @@ pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
 
 mod row_major_adapter;
 
+pub mod chiplets;
 pub mod range;
 
 mod parallel;
@@ -256,11 +257,6 @@ pub struct AuxTraceBuilders {
     pub(crate) stack: StackAuxTraceBuilder,
     pub(crate) range: RangeCheckerAuxTraceBuilder,
     pub(crate) chiplets: ChipletsAuxTraceBuilder,
-}
-
-pub struct ChipletsTrace {
-    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
-    pub(crate) aux_builder: ChipletsAuxTraceBuilder,
 }
 
 impl AuxTraceBuilders {

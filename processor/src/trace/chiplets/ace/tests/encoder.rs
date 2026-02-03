@@ -1,9 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ZERO, crypto::hash::Poseidon2, field::PrimeCharacteristicRing};
-
-use super::*;
-use crate::chiplets::ace::instruction::{ID_BITS, MAX_ID};
+use super::{
+    super::instruction::{ID_BITS, MAX_ID},
+    *,
+};
+use crate::{Felt, ZERO, crypto::hash::Poseidon2, field::PrimeCharacteristicRing};
 
 #[derive(Debug)]
 pub enum EncodingError {

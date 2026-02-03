@@ -17,8 +17,8 @@ use miden_core::{
 };
 
 use crate::{
-    chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
+    trace::chiplets::aux_trace::build_value,
 };
 
 // CONSTANTS

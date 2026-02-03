@@ -7,8 +7,8 @@ use miden_air::trace::{
 use miden_core::{Felt, Word, field::ExtensionField};
 
 use crate::{
-    chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
+    trace::chiplets::aux_trace::build_value,
 };
 
 // REQUESTS

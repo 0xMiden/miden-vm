@@ -4,7 +4,8 @@ use miden_air::trace::MainTrace;
 use miden_core::{field::ExtensionField, precompile::PrecompileTranscriptState, program::Kernel};
 use wiring_bus::WiringBusBuilder;
 
-use super::{super::trace::AuxColumnBuilder, Felt, ace::AceHints};
+use super::{Felt, ace::AceHints};
+use crate::trace::AuxColumnBuilder;
 
 mod bus;
 pub use bus::{

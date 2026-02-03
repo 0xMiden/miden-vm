@@ -6,7 +6,8 @@ use miden_core::field::ExtensionField;
 #[cfg(test)]
 use miden_core::{operations::Operation, utils::ToElements};
 
-use crate::{Felt, chiplets::Chiplets, debug::BusDebugger, utils::uninit_vector};
+use super::chiplets::Chiplets;
+use crate::{Felt, debug::BusDebugger, utils::uninit_vector};
 
 // TRACE FRAGMENT
 // ================================================================================================

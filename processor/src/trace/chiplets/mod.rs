@@ -6,11 +6,10 @@ use miden_core::{
     program::Kernel,
 };
 
-use super::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
+use crate::{
+    Felt, ONE, Word, ZERO,
     crypto::merkle::MerklePath,
-    trace::{ChipletsTrace, RowIndex, TraceFragment, range::RangeChecker},
-    utils,
+    trace::{RowIndex, TraceFragment, range::RangeChecker},
 };
 
 mod bitwise;
@@ -34,10 +33,18 @@ use kernel_rom::KernelRom;
 
 mod aux_trace;
 
-pub(crate) use aux_trace::AuxTraceBuilder;
+pub use aux_trace::AuxTraceBuilder;
 
 #[cfg(test)]
 mod tests;
+
+// TRACE
+// ================================================================================================
+
+pub struct ChipletsTrace {
+    pub(crate) trace: [Vec<Felt>; CHIPLETS_WIDTH],
+    pub(crate) aux_builder: AuxTraceBuilder,
+}
 
 // CHIPLETS MODULE OF HASHER, BITWISE, MEMORY, ACE, AND KERNEL ROM CHIPLETS
 // ================================================================================================

@@ -7,8 +7,8 @@ use miden_core::{Felt, ONE, ZERO, field::ExtensionField};
 
 use super::get_op_label;
 use crate::{
-    chiplets::aux_trace::build_value,
     debug::{BusDebugger, BusMessage},
+    trace::chiplets::aux_trace::build_value,
 };
 
 // REQUESTS

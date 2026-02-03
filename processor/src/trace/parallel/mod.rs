@@ -27,7 +27,6 @@ use tracing::instrument;
 
 use crate::{
     ContextId,
-    chiplets::Chiplets,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
@@ -47,6 +46,8 @@ pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STAC
 
 pub(crate) mod core_trace_fragment;
 use core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller};
+
+use super::chiplets::Chiplets;
 
 #[cfg(test)]
 mod tests;
