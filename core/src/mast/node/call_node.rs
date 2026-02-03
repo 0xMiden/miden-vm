@@ -13,8 +13,7 @@ use crate::{
     Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
-        MastNodeId,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeFingerprint, MastNodeId,
     },
     operations::{OPCODE_CALL, OPCODE_SYSCALL},
     utils::{Idx, LookupByIdx},
