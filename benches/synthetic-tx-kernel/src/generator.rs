@@ -1,5 +1,7 @@
 //! Generates Miden assembly from VM profiles
 
+use std::fmt::Write;
+
 use anyhow::Result;
 
 use crate::profile::VmProfile;
@@ -24,33 +26,29 @@ impl MasmGenerator {
     /// Generate the complete synthetic kernel program
     pub fn generate_kernel(&self) -> Result<String> {
         let mut code = String::new();
+        let kernel = &self.profile.transaction_kernel;
 
         // Header
-        code.push_str("# Synthetic Transaction Kernel\n");
-        code.push_str(&format!("# Generated from: {}\n", self.profile.source));
-        code.push_str(&format!("# Version: {}\n\n", self.profile.miden_vm_version));
+        writeln!(code, "# Synthetic Transaction Kernel")?;
+        writeln!(code, "# Generated from: {}", self.profile.source)?;
+        writeln!(code, "# Version: {}\n", self.profile.miden_vm_version)?;
 
         // Use core library for crypto operations
-        code.push_str("use miden::core::crypto::dsa::falcon512poseidon2\n");
-        code.push_str("use miden::core::crypto::hashes::poseidon2\n\n");
+        writeln!(code, "use miden::core::crypto::dsa::falcon512poseidon2")?;
+        writeln!(code, "use miden::core::crypto::hashes::poseidon2\n")?;
 
         // Main program
-        code.push_str("begin\n");
-        code.push_str("    # Synthetic transaction kernel\n");
-        code.push_str("    # Total cycles: ");
-        code.push_str(&self.profile.transaction_kernel.total_cycles.to_string());
-        code.push('\n');
-        code.push_str("    # Instruction mix: ");
-        code.push_str(&format!("{:?}\n", self.profile.transaction_kernel.instruction_mix));
-        code.push('\n');
+        writeln!(code, "begin")?;
+        writeln!(code, "    # Synthetic transaction kernel")?;
+        writeln!(code, "    # Total cycles: {}", kernel.total_cycles)?;
+        writeln!(code, "    # Instruction mix: {:?}\n", kernel.instruction_mix)?;
 
         // Generate each phase
-        for (phase_name, phase) in &self.profile.transaction_kernel.phases {
+        for (phase_name, phase) in &kernel.phases {
             code.push_str(&self.generate_phase(phase_name, phase)?);
         }
 
-        code.push_str("end\n");
-
+        writeln!(code, "end")?;
         Ok(code)
     }
 
@@ -301,33 +299,29 @@ impl MasmGenerator {
     ) -> Result<String> {
         let mut code = String::new();
 
-        code.push_str(&format!("# Component Benchmark: {}\n", operation));
+        writeln!(code, "# Component Benchmark: {}", operation)?;
 
         match operation {
             "falcon512_verify" => {
-                code.push_str("use miden::core::crypto::dsa::falcon512poseidon2\n\n");
-                code.push_str("begin\n");
-                code.push_str("    # Stack must contain PK commitment and message inputs\n");
-                code.push_str("    # Stack: [PK_COMMITMENT (4 elements), MSG (4 elements)]\n");
-                let body = [
-                    "# Execute verification",
-                    "exec.falcon512poseidon2::verify",
-                    "drop",
-                ];
+                writeln!(code, "use miden::core::crypto::dsa::falcon512poseidon2\n")?;
+                writeln!(code, "begin")?;
+                writeln!(code, "    # Stack must contain PK commitment and message inputs")?;
+                writeln!(code, "    # Stack: [PK_COMMITMENT (4 elements), MSG (4 elements)]")?;
+                let body = ["# Execute verification", "exec.falcon512poseidon2::verify", "drop"];
                 push_repeat_block(&mut code, iterations as u64, "    ", &body);
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
             "hperm" => {
-                code.push_str("begin\n");
-                code.push_str("    # Initialize hash state (12 elements)\n");
-                code.push_str("    padw padw padw\n");
+                writeln!(code, "begin")?;
+                writeln!(code, "    # Initialize hash state (12 elements)")?;
+                writeln!(code, "    padw padw padw")?;
                 push_repeat_block(&mut code, iterations as u64, "    ", &["hperm"]);
-                code.push_str("    # Clean up\n");
-                code.push_str("    dropw dropw dropw\n");
-                code.push_str("end\n");
+                writeln!(code, "    # Clean up")?;
+                writeln!(code, "    dropw dropw dropw")?;
+                writeln!(code, "end")?;
             },
             "hmerge" => {
-                code.push_str("begin\n");
+                writeln!(code, "begin")?;
                 let body = [
                     "push.1 push.2 push.3 push.4",
                     "push.5 push.6 push.7 push.8",
@@ -335,10 +329,10 @@ impl MasmGenerator {
                     "dropw",
                 ];
                 push_repeat_block(&mut code, iterations as u64, "    ", &body);
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
             "load_store" => {
-                code.push_str("begin\n");
+                writeln!(code, "begin")?;
                 let body = [
                     "push.1 push.2 push.3 push.4",
                     "push.0 mem_storew_be",
@@ -346,29 +340,29 @@ impl MasmGenerator {
                     "dropw",
                 ];
                 push_repeat_block(&mut code, iterations as u64, "    ", &body);
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
             "arithmetic" => {
-                code.push_str("begin\n");
+                writeln!(code, "begin")?;
                 push_repeat_block(
                     &mut code,
                     iterations as u64,
                     "    ",
                     &["push.1 push.2 add drop"],
                 );
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
             "control_flow" => {
-                code.push_str("begin\n");
+                writeln!(code, "begin")?;
                 let body = ["push.1", "if.true", "    push.2", "else", "    push.3", "end", "drop"];
                 push_repeat_block(&mut code, iterations as u64, "    ", &body);
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
             _ => {
-                code.push_str(&format!("# {} operation (unimplemented)\n", operation));
-                code.push_str("begin\n");
+                writeln!(code, "# {} operation (unimplemented)", operation)?;
+                writeln!(code, "begin")?;
                 push_repeat_block(&mut code, iterations as u64, "    ", &["nop"]);
-                code.push_str("end\n");
+                writeln!(code, "end")?;
             },
         }
 
@@ -405,14 +399,11 @@ fn push_repeat_block(code: &mut String, count: u64, indent: &str, body_lines: &[
 }
 
 fn push_single_repeat_block(code: &mut String, count: u64, indent: &str, body_lines: &[&str]) {
-    code.push_str(&format!("{indent}repeat.{count}\n"));
+    writeln!(code, "{indent}repeat.{count}").unwrap();
     for line in body_lines {
-        code.push_str(indent);
-        code.push_str("    ");
-        code.push_str(line);
-        code.push('\n');
+        writeln!(code, "{indent}    {line}").unwrap();
     }
-    code.push_str(&format!("{indent}end\n"));
+    writeln!(code, "{indent}end").unwrap();
 }
 
 fn push_nested_repeat_block(
@@ -422,29 +413,30 @@ fn push_nested_repeat_block(
     indent: &str,
     body_lines: &[&str],
 ) {
-    code.push_str(&format!("{indent}repeat.{outer}\n"));
-    code.push_str(&format!("{indent}    repeat.{inner}\n"));
+    writeln!(code, "{indent}repeat.{outer}").unwrap();
+    writeln!(code, "{indent}    repeat.{inner}").unwrap();
     for line in body_lines {
-        code.push_str(indent);
-        code.push_str("        ");
-        code.push_str(line);
-        code.push('\n');
+        writeln!(code, "{indent}        {line}").unwrap();
     }
-    code.push_str(&format!("{indent}    end\n"));
-    code.push_str(&format!("{indent}end\n"));
+    writeln!(code, "{indent}    end").unwrap();
+    writeln!(code, "{indent}end").unwrap();
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::data_generator::Falcon512Generator;
-    use crate::profile::{
-        InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile, VmProfile,
-    };
+    use std::collections::BTreeMap;
+
     use miden_core_lib::CoreLibrary;
     use miden_processor::{fast::FastProcessor, AdviceInputs};
     use miden_vm::{Assembler, DefaultHost, StackInputs};
-    use std::collections::BTreeMap;
+
+    use super::*;
+    use crate::{
+        data_generator::Falcon512Generator,
+        profile::{
+            InstructionMix, PhaseProfile, ProcedureProfile, TransactionKernelProfile, VmProfile,
+        },
+    };
 
     fn test_generator() -> MasmGenerator {
         let profile = VmProfile {
@@ -547,14 +539,11 @@ mod tests {
 
         let verify_data =
             Falcon512Generator::generate_verify_data().expect("failed to generate verify data");
-        let stack_inputs = verify_data
-            .to_stack_inputs()
-            .expect("failed to build stack inputs");
+        let stack_inputs = verify_data.to_stack_inputs().expect("failed to build stack inputs");
         let advice_inputs = AdviceInputs::default().with_stack(verify_data.signature);
 
         let mut host = DefaultHost::default();
-        host.load_library(&CoreLibrary::default())
-            .expect("failed to load core library");
+        host.load_library(&CoreLibrary::default()).expect("failed to load core library");
         let processor = FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs);
         let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
