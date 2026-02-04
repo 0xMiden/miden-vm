@@ -1,9 +1,10 @@
 use alloc::sync::Arc;
 
-use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH};
+use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USER_OP_HELPERS};
 use miden_core::{
-    Felt, Word,
+    Felt, Word, ZERO,
     crypto::merkle::MerklePath,
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
     mast::{MastForest, MastNodeId},
 };
 
@@ -12,6 +13,7 @@ use crate::{
     processor::Processor,
     system::ContextId,
     trace::chiplets::CircuitEvaluation,
+    utils::split_u32_into_u16,
 };
 
 // TRACER TRAIT
@@ -362,5 +364,233 @@ impl Tracer for NoopTracer {
     #[inline(always)]
     fn restore_context(&mut self) {
         // do nothing
+    }
+}
+
+// OPERATION HELPER REGISTERS
+// ================================================================================================
+
+// TODO(plafer): Rename
+/// An enum representation of `OperationHelperRegisters`, where each variant corresponds to a method
+/// on the trait, and the variant fields correspond to the method parameters.
+#[derive(Debug, Clone)]
+pub enum OperationHelperRegistersEnum {
+    Eq {
+        stack_second: Felt,
+        stack_first: Felt,
+    },
+    U32Split {
+        lo: Felt,
+        hi: Felt,
+    },
+    Eqz {
+        top: Felt,
+    },
+    Expacc {
+        acc_update_val: Felt,
+    },
+    FriExt2Fold4 {
+        ev: QuadFelt,
+        es: QuadFelt,
+        x: Felt,
+        x_inv: Felt,
+    },
+    U32Add {
+        sum: Felt,
+        carry: Felt,
+    },
+    U32Add3 {
+        sum: Felt,
+        carry: Felt,
+    },
+    U32Sub {
+        second_new: Felt,
+    },
+    U32Mul {
+        lo: Felt,
+        hi: Felt,
+    },
+    U32Madd {
+        lo: Felt,
+        hi: Felt,
+    },
+    U32Div {
+        lo: Felt,
+        hi: Felt,
+    },
+    U32Assert2 {
+        first: Felt,
+        second: Felt,
+    },
+    HPerm {
+        addr: Felt,
+    },
+    MerklePath {
+        addr: Felt,
+    },
+    HornerEvalBase {
+        alpha: QuadFelt,
+        tmp0: QuadFelt,
+        tmp1: QuadFelt,
+    },
+    HornerEvalExt {
+        alpha: QuadFelt,
+        k0: Felt,
+        k1: Felt,
+        acc_tmp: QuadFelt,
+    },
+    LogPrecompile {
+        addr: Felt,
+        cap_prev: Word,
+    },
+    Empty,
+}
+
+impl OperationHelperRegistersEnum {
+    pub fn to_user_op_helpers(&self) -> [Felt; NUM_USER_OP_HELPERS] {
+        match self {
+            Self::Eq { stack_second, stack_first } => {
+                let h0 = if stack_second == stack_first {
+                    ZERO
+                } else {
+                    (*stack_first - *stack_second).inverse()
+                };
+
+                [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
+            },
+            Self::U32Split { lo, hi } => {
+                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+                let m = (Felt::from_u32(u32::MAX) - *hi).try_inverse().unwrap_or(ZERO);
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    m,
+                    ZERO,
+                ]
+            },
+            Self::Eqz { top } => {
+                let h0 = top.try_inverse().unwrap_or(ZERO);
+
+                [h0, ZERO, ZERO, ZERO, ZERO, ZERO]
+            },
+            Self::Expacc { acc_update_val } => [*acc_update_val, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::FriExt2Fold4 { ev, es, x, x_inv } => {
+                let ev_felts = ev.as_basis_coefficients_slice();
+                let es_felts = es.as_basis_coefficients_slice();
+
+                [ev_felts[0], ev_felts[1], es_felts[0], es_felts[1], *x, *x_inv]
+            },
+            Self::U32Add { sum, carry } => {
+                let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    ZERO,
+                    ZERO,
+                ]
+            },
+            Self::U32Add3 { sum, carry } => {
+                let (t1, t0) = split_u32_into_u16(sum.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(carry.as_canonical_u64());
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    ZERO,
+                    ZERO,
+                ]
+            },
+            Self::U32Sub { second_new } => {
+                let (t1, t0) = split_u32_into_u16(second_new.as_canonical_u64());
+
+                [Felt::from_u16(t0), Felt::from_u16(t1), ZERO, ZERO, ZERO, ZERO]
+            },
+            Self::U32Mul { lo, hi } => {
+                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+                let m = (Felt::from_u32(u32::MAX) - *hi).try_inverse().unwrap_or(ZERO);
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    m,
+                    ZERO,
+                ]
+            },
+            Self::U32Madd { lo, hi } => {
+                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+                let m = (Felt::from_u32(u32::MAX) - *hi).try_inverse().unwrap_or(ZERO);
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    m,
+                    ZERO,
+                ]
+            },
+            Self::U32Div { lo, hi } => {
+                let (t1, t0) = split_u32_into_u16(lo.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(hi.as_canonical_u64());
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    ZERO,
+                    ZERO,
+                ]
+            },
+            Self::U32Assert2 { first, second } => {
+                let (t1, t0) = split_u32_into_u16(second.as_canonical_u64());
+                let (t3, t2) = split_u32_into_u16(first.as_canonical_u64());
+
+                [
+                    Felt::from_u16(t0),
+                    Felt::from_u16(t1),
+                    Felt::from_u16(t2),
+                    Felt::from_u16(t3),
+                    ZERO,
+                    ZERO,
+                ]
+            },
+            Self::HPerm { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::MerklePath { addr } => [*addr, ZERO, ZERO, ZERO, ZERO, ZERO],
+            Self::HornerEvalBase { alpha, tmp0, tmp1 } => [
+                alpha.as_basis_coefficients_slice()[0],
+                alpha.as_basis_coefficients_slice()[1],
+                tmp1.as_basis_coefficients_slice()[0],
+                tmp1.as_basis_coefficients_slice()[1],
+                tmp0.as_basis_coefficients_slice()[0],
+                tmp0.as_basis_coefficients_slice()[1],
+            ],
+            Self::HornerEvalExt { alpha, k0, k1, acc_tmp } => [
+                alpha.as_basis_coefficients_slice()[0],
+                alpha.as_basis_coefficients_slice()[1],
+                *k0,
+                *k1,
+                acc_tmp.as_basis_coefficients_slice()[0],
+                acc_tmp.as_basis_coefficients_slice()[1],
+            ],
+            Self::LogPrecompile { addr, cap_prev } => {
+                [*addr, cap_prev[0], cap_prev[1], cap_prev[2], cap_prev[3], ZERO]
+            },
+            Self::Empty => [ZERO; NUM_USER_OP_HELPERS],
+        }
     }
 }
