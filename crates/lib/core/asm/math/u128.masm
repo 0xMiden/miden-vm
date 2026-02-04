@@ -919,146 +919,184 @@ end
 #!
 #! This implementation correctly handles cross-limb bit transfers for arbitrary shift amounts.
 pub proc shr(n: u32, a: u128) -> u128
-    # Input: [n, a0, a1, a2, a3, ...]
-    # Output: [c0, c1, c2, c3, ...]
+    # Stack: [n, a0, a1, a2, a3, ...] (5 elements + padding)
+    # Output: [c0, c1, c2, c3, ...] (4 elements + padding)
+    #
+    # Algorithm: k = n / 32 (limb shift), m = n % 32 (bit shift)
+    # For each c_i = (a_{i+k} >> m) | (a_{i+k+1} << (32-m))
 
     # Handle n == 0: no shift needed
     dup eq.0
     if.true
-        # n == 0: [n, a0, a1, a2, a3, ...] -> [a0, a1, a2, a3, ...]
-        drop
+        drop            # [a0, a1, a2, a3, ...]
     else
-        # n > 0: determine which range n falls into
-        dup push.96 u32gte
+        # Compute k = n / 32 and m = n % 32
+        # Stack: [n, a0, a1, a2, a3, ...]
+        dup push.31 u32and      # [m, n, a0, a1, a2, a3, ...]
+        swap push.5 u32shr      # [k, m, a0, a1, a2, a3, ...]
+
+        # Branch based on k (0, 1, 2, 3, or >=4)
+        dup push.4 u32lt
         if.true
-            # n >= 96: only a3 contributes, result is [a3 >> (n-96), 0, 0, 0]
-            # Stack: [n, a0, a1, a2, a3, ...]
-            push.96 u32wrapping_sub     # [m, a0, a1, a2, a3, ...]
-            swap drop                   # [m, a1, a2, a3, ...]
-            swap drop                   # [m, a2, a3, ...]
-            swap drop                   # [m, a3, ...]
-            # Now compute a3 >> m
+            # k < 4: compute shifted result
             dup eq.0
             if.true
-                drop                    # [a3, ...]
+                # k=0: n in [1, 31], shift by m bits within limbs
+                drop        # [m, a0, a1, a2, a3, ...]
+                exec.shr_k0
             else
-                pow2 swap u32div        # [a3 >> m, ...]
-            end
-            # Stack: [c0, ...], need [c0, 0, 0, 0, ...]
-            push.0 push.0 push.0        # [0, 0, 0, c0, ...]
-            movup.3                     # [c0, 0, 0, 0, ...]
-        else
-            dup push.64 u32gte
-            if.true
-                # 64 <= n < 96: a2 and a3 contribute
-                # c0 = (a2 >> m) | (a3 << (32-m)), c1 = a3 >> m, c2 = 0, c3 = 0
-                # Stack: [n, a0, a1, a2, a3, ...]
-                push.64 u32wrapping_sub # [m, a0, a1, a2, a3, ...]
-                swap drop               # [m, a1, a2, a3, ...]
-                swap drop               # [m, a2, a3, ...]
-                dup eq.0
+                dup eq.1
                 if.true
-                    # m == 0: result is [a2, a3, 0, 0]
-                    drop                # [a2, a3, ...]
-                    push.0 push.0       # [0, 0, a2, a3, ...]
-                    movup.3             # [a3, 0, 0, a2, ...]
-                    movup.3             # [a2, a3, 0, 0, ...]
+                    # k=1: n in [32, 63]
+                    drop    # [m, a0, a1, a2, a3, ...]
+                    exec.shr_k1
                 else
-                    # m > 0: cross-limb transfer
-                    # Stack: [m, a2, a3, ...]
-                    dup                 # [m, m, a2, a3, ...]
-                    push.32 swap u32wrapping_sub  # [32-m, m, a2, a3, ...]
-                    pow2                # [2^(32-m), m, a2, a3, ...]
-                    dup.3               # [a3, 2^(32-m), m, a2, a3, ...]
-                    u32wrapping_mul     # [a3<<(32-m), m, a2, a3, ...]
-                    movdn.3             # [m, a2, a3, a3<<, ...]
-                    pow2                # [2^m, a2, a3, a3<<, ...]
-                    dup movup.3         # [a3, 2^m, 2^m, a2, a3<<, ...]
-                    swap u32div         # [c1, 2^m, a2, a3<<, ...]
-                    swap movup.2        # [a2, 2^m, c1, a3<<, ...]
-                    swap u32div         # [a2>>m, c1, a3<<, ...]
-                    movup.2 u32or       # [c0, c1, ...]
-                    push.0 push.0       # [0, 0, c0, c1, ...]
-                    movup.3             # [c1, 0, 0, c0, ...]
-                    movup.3             # [c0, c1, 0, 0, ...]
-                end
-            else
-                dup push.32 u32gte
-                if.true
-                    # 32 <= n < 64: a1, a2, a3 contribute
-                    # c0 = (a1>>m)|(a2<<(32-m)), c1 = (a2>>m)|(a3<<(32-m)), c2 = a3>>m, c3 = 0
-                    # Stack: [n, a0, a1, a2, a3, ...]
-                    push.32 u32wrapping_sub # [m, a0, a1, a2, a3, ...]
-                    swap drop               # [m, a1, a2, a3, ...]
-                    dup eq.0
+                    dup eq.2
                     if.true
-                        # m == 0: result is [a1, a2, a3, 0]
-                        drop                # [a1, a2, a3, ...]
-                        push.0 movdn.3      # [a1, a2, a3, 0, ...]
+                        # k=2: n in [64, 95]
+                        drop    # [m, a0, a1, a2, a3, ...]
+                        exec.shr_k2
                     else
-                        # m > 0: cross-limb transfer
-                        # Stack: [m, a1, a2, a3, ...]
-                        dup                 # [m, m, a1, a2, a3, ...]
-                        push.32 swap u32wrapping_sub  # [32-m, m, a1, a2, a3, ...]
-                        pow2                # [2^(32-m), m, a1, a2, a3, ...]
-                        # Compute shifted values
-                        dup dup.5           # [a3, 2^(32-m), 2^(32-m), m, a1, a2, a3, ...]
-                        u32wrapping_mul     # [a3<<, 2^(32-m), m, a1, a2, a3, ...]
-                        swap dup.4          # [a2, 2^(32-m), a3<<, m, a1, a2, a3, ...]
-                        u32wrapping_mul     # [a2<<, a3<<, m, a1, a2, a3, ...]
-                        # Compute 2^m
-                        movup.2 pow2        # [2^m, a2<<, a3<<, a1, a2, a3, ...]
-                        # c2 = a3 >> m
-                        dup movup.6         # [a3, 2^m, 2^m, a2<<, a3<<, a1, a2, ...]
-                        swap u32div         # [c2, 2^m, a2<<, a3<<, a1, a2, ...]
-                        # c1 = (a2 >> m) | (a3 << (32-m))
-                        swap dup movup.6    # [a2, 2^m, 2^m, c2, a2<<, a3<<, a1, ...]
-                        swap u32div         # [a2>>m, 2^m, c2, a2<<, a3<<, a1, ...]
-                        movup.4             # [a3<<, a2>>m, 2^m, c2, a2<<, a1, ...]
-                        u32or               # [c1, 2^m, c2, a2<<, a1, ...]
-                        # c0 = (a1 >> m) | (a2 << (32-m))
-                        swap movup.4        # [a1, 2^m, c1, c2, a2<<, ...]
-                        swap u32div         # [a1>>m, c1, c2, a2<<, ...]
-                        movup.3 u32or       # [c0, c1, c2, ...]
-                        push.0 movdn.3      # [c0, c1, c2, 0, ...]
+                        # k=3: n in [96, 127]
+                        drop    # [m, a0, a1, a2, a3, ...]
+                        exec.shr_k3
                     end
-                else
-                    # 0 < n < 32: all four limbs contribute
-                    # Stack: [n, a0, a1, a2, a3, ...]
-                    dup                     # [n, n, a0, a1, a2, a3, ...]
-                    push.32 swap u32wrapping_sub  # [32-n, n, a0, a1, a2, a3, ...]
-                    pow2                    # [2^(32-n), n, a0, a1, a2, a3, ...]
-                    # Compute shifted values: a1<<(32-n), a2<<(32-n), a3<<(32-n)
-                    dup dup.6               # [a3, 2^(32-n), 2^(32-n), n, a0, a1, a2, a3, ...]
-                    u32wrapping_mul         # [a3<<, 2^(32-n), n, a0, a1, a2, a3, ...]
-                    swap dup dup.6          # [a2, 2^(32-n), 2^(32-n), a3<<, n, a0, a1, a2, a3, ...]
-                    u32wrapping_mul         # [a2<<, 2^(32-n), a3<<, n, a0, a1, a2, a3, ...]
-                    swap dup.5              # [a1, 2^(32-n), a2<<, a3<<, n, a0, a1, a2, a3, ...]
-                    u32wrapping_mul         # [a1<<, a2<<, a3<<, n, a0, a1, a2, a3, ...]
-                    # Stack: [a1<<, a2<<, a3<<, n, a0, a1, a2, a3, ...]
-                    movup.3 pow2            # [2^n, a1<<, a2<<, a3<<, a0, a1, a2, a3, ...]
-                    # c3 = a3 >> n
-                    dup movup.8             # [a3, 2^n, 2^n, a1<<, a2<<, a3<<, a0, a1, a2, ...]
-                    swap u32div             # [c3, 2^n, a1<<, a2<<, a3<<, a0, a1, a2, ...]
-                    # c2 = (a2 >> n) | (a3 << (32-n))
-                    swap dup movup.8        # [a2, 2^n, 2^n, c3, a1<<, a2<<, a3<<, a0, a1, ...]
-                    swap u32div             # [a2>>n, 2^n, c3, a1<<, a2<<, a3<<, a0, a1, ...]
-                    movup.5                 # [a3<<, a2>>n, 2^n, c3, a1<<, a2<<, a0, a1, ...]
-                    u32or                   # [c2, 2^n, c3, a1<<, a2<<, a0, a1, ...]
-                    # c1 = (a1 >> n) | (a2 << (32-n))
-                    swap dup movup.7        # [a1, 2^n, 2^n, c2, c3, a1<<, a2<<, a0, ...]
-                    swap u32div             # [a1>>n, 2^n, c2, c3, a1<<, a2<<, a0, ...]
-                    movup.5                 # [a2<<, a1>>n, 2^n, c2, c3, a1<<, a0, ...]
-                    u32or                   # [c1, 2^n, c2, c3, a1<<, a0, ...]
-                    # c0 = (a0 >> n) | (a1 << (32-n))
-                    swap movup.5            # [a0, 2^n, c1, c2, c3, a1<<, ...]
-                    swap u32div             # [a0>>n, c1, c2, c3, a1<<, ...]
-                    movup.4                 # [a1<<, a0>>n, c1, c2, c3, ...]
-                    u32or                   # [c0, c1, c2, c3, ...]
                 end
             end
+        else
+            # k >= 4: result is all zeros (n >= 128)
+            drop drop       # [a0, a1, a2, a3, ...]
+            drop drop drop drop
+            push.0 push.0 push.0 push.0
         end
     end
+end
+
+#! Helper for shr with k=0 (shift by m bits, 0 < m < 32)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...]
+#! c_i = (a_i >> m) | (a_{i+1} << (32-m)), c3 = a3 >> m
+proc shr_k0
+    # Compute 2^(32-m) for left shift operations
+    push.32 dup.1 u32wrapping_sub pow2
+    # Stack: [2^(32-m), m, a0, a1, a2, a3, ...]
+    # Index:  0         1   2   3   4   5
+
+    # Compute c3 = a3 >> m
+    dup.5 dup.2 u32shr          # [c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0    1         2   3   4   5   6
+
+    # Compute c2 = (a2 >> m) | (a3 << (32-m))
+    dup.5 dup.3 u32shr          # [a2>>m, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0      1   2         3   4   5   6   7
+    dup.7 dup.3 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    u32or                       # [c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0    1   2         3   4   5   6   7
+
+    # Compute c1 = (a1 >> m) | (a2 << (32-m))
+    dup.5 dup.4 u32shr          # [a1>>m, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0      1   2   3         4   5   6   7   8
+    dup.7 dup.4 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    u32or                       # [c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0    1   2   3         4   5   6   7   8
+
+    # Compute c0 = (a0 >> m) | (a1 << (32-m))
+    dup.5 dup.5 u32shr          # [a0>>m, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0      1   2   3   4         5   6   7   8   9
+    dup.7 dup.5 u32widening_mul swap drop  # u32widening_mul: [lo, hi], swap drop keeps lo
+    u32or                       # [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    #                             0    1   2   3   4         5   6   7   8   9
+
+    # Clean up: move c values to final position, drop temporaries
+    # Stack: [c0, c1, c2, c3, 2^(32-m), m, a0, a1, a2, a3, ...]
+    movdn.9 movdn.9 movdn.9 movdn.9
+    # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, c2, c3, ...]
+    drop drop drop drop drop drop
+    # Stack: [c0, c1, c2, c3, ...]
+end
+
+#! Helper for shr with k=1 (shift by 32+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (32+m)
+#! c0 = (a1 >> m) | (a2 << (32-m))
+#! c1 = (a2 >> m) | (a3 << (32-m))
+#! c2 = a3 >> m
+#! c3 = 0
+proc shr_k1
+    # Handle m=0 case (shift by exactly 32)
+    dup eq.0
+    if.true
+        drop                    # [a0, a1, a2, a3, ...]
+        drop                    # [a1, a2, a3, ...]
+        # c0=a1, c1=a2, c2=a3, c3=0 (from padding)
+    else
+        # Compute 2^(32-m) for left shift operations
+        push.32 dup.1 u32wrapping_sub pow2
+        # Stack: [2^(32-m), m, a0, a1, a2, a3, ...]
+
+        # c2 = a3 >> m
+        dup.5 dup.2 u32shr
+
+        # c1 = (a2 >> m) | (a3 << (32-m))
+        dup.5 dup.3 u32shr
+        dup.7 dup.3 u32widening_mul swap drop
+        u32or
+
+        # c0 = (a1 >> m) | (a2 << (32-m))
+        dup.5 dup.4 u32shr
+        dup.7 dup.4 u32widening_mul swap drop
+        u32or
+
+        # Clean up
+        movdn.8 movdn.8 movdn.8
+        drop drop drop drop drop drop
+        # c0, c1, c2, c3=0 (from padding)
+    end
+end
+
+#! Helper for shr with k=2 (shift by 64+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (64+m)
+#! c0 = (a2 >> m) | (a3 << (32-m))
+#! c1 = a3 >> m
+#! c2 = 0, c3 = 0
+proc shr_k2
+    # Handle m=0 case (shift by exactly 64)
+    dup eq.0
+    if.true
+        drop                    # [a0, a1, a2, a3, ...]
+        drop drop               # [a2, a3, ...]
+        # c0=a2, c1=a3, c2=c3=0 (from padding)
+    else
+        # Compute 2^(32-m) for left shift operations
+        push.32 dup.1 u32wrapping_sub pow2
+
+        # c1 = a3 >> m
+        dup.5 dup.2 u32shr
+
+        # c0 = (a2 >> m) | (a3 << (32-m))
+        dup.5 dup.3 u32shr
+        dup.7 dup.3 u32widening_mul swap drop
+        u32or
+
+        # Clean up
+        movdn.7 movdn.7
+        drop drop drop drop drop drop
+        # c0, c1, c2=c3=0 (from padding)
+    end
+end
+
+#! Helper for shr with k=3 (shift by 96+m bits)
+#! Input: [m, a0, a1, a2, a3, ...]
+#! Output: [c0, c1, c2, c3, ...] where c = a >> (96+m)
+#! c0 = a3 >> m
+#! c1 = 0, c2 = 0, c3 = 0
+proc shr_k3
+    # c0 = a3 >> m
+    movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
+    # Clean up: drop a0, a1, a2
+    swap drop swap drop swap drop
+    # c0, c1=c2=c3=0 (from padding)
 end
 
 #! Performs left rotation of one unsigned 128-bit integer.
@@ -1068,6 +1106,7 @@ end
 #! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a <<< n (rotate left).
 #!
 #! rotl(n, a) = (a << n) | (a >> (128-n))
+@locals(4)
 pub proc rotl(n: u32, a: u128) -> u128
     # Handle n == 0: no rotation needed, value unchanged
     dup eq.0
@@ -1081,23 +1120,27 @@ pub proc rotl(n: u32, a: u128) -> u128
         movup.5         # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
         exec.shl        # [shl0, shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
 
-        # Now compute a >> (128-n)
-        movup.4         # [n, shl0, shl1, shl2, shl3, a0, a1, a2, a3, ...]
-        push.128 swap u32wrapping_sub   # [128-n, shl0, shl1, shl2, shl3, a0, a1, a2, a3, ...]
-        # Move a0,a1,a2,a3 from positions 5-8 to top. Each movup changes positions,
-        # so we use movup.8 repeatedly (position 8 always has the next a limb to move).
-        movup.8 movup.8 movup.8 movup.8 # [a0, a1, a2, a3, 128-n, shl0, shl1, shl2, shl3, ...]
-        movup.4         # [128-n, a0, a1, a2, a3, shl0, shl1, shl2, shl3, ...]
-        exec.shr        # [shr0, shr1, shr2, shr3, shl0, shl1, shl2, shl3, ...]
+        # Save shl values to local memory so shr can use proper stack padding
+        loc_store.0     # store shl0, [shl1, shl2, shl3, n, a0, a1, a2, a3, ...]
+        loc_store.1     # store shl1, [shl2, shl3, n, a0, a1, a2, a3, ...]
+        loc_store.2     # store shl2, [shl3, n, a0, a1, a2, a3, ...]
+        loc_store.3     # store shl3, [n, a0, a1, a2, a3, ...]
 
-        # OR the two results
-        movup.4 u32or   # [c0, shr1, shr2, shr3, shl1, shl2, shl3, ...]
-        swap movup.4 u32or  # [c1, c0, shr2, shr3, shl2, shl3, ...]
-        swap            # [c0, c1, shr2, shr3, shl2, shl3, ...]
-        movup.2 movup.4 u32or   # [c2, c0, c1, shr3, shl3, ...]
-        movdn.2         # [c0, c1, c2, shr3, shl3, ...]
-        movup.3 movup.4 u32or   # [c3, c0, c1, c2, ...]
-        movdn.3         # [c0, c1, c2, c3, ...]
+        # Now compute a >> (128-n)
+        push.128 swap u32wrapping_sub   # [128-n, a0, a1, a2, a3, ...]
+        exec.shr        # [shr0, shr1, shr2, shr3, ...]
+
+        # OR with shl values from local memory
+        loc_load.0 u32or   # [c0, shr1, shr2, shr3, ...]
+        swap
+        loc_load.1 u32or   # [c1, c0, shr2, shr3, ...]
+        swap               # [c0, c1, shr2, shr3, ...]
+        movup.2
+        loc_load.2 u32or   # [c2, c0, c1, shr3, ...]
+        movdn.2            # [c0, c1, c2, shr3, ...]
+        movup.3
+        loc_load.3 u32or   # [c3, c0, c1, c2, ...]
+        movdn.3            # [c0, c1, c2, c3, ...]
     end
 end
 
@@ -1108,6 +1151,7 @@ end
 #! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = a >>> n (rotate right).
 #!
 #! rotr(n, a) = (a >> n) | (a << (128-n))
+@locals(5)
 pub proc rotr(n: u32, a: u128) -> u128
     # Handle n == 0: no rotation needed, value unchanged
     dup eq.0
@@ -1115,19 +1159,26 @@ pub proc rotr(n: u32, a: u128) -> u128
         drop        # [a0, a1, a2, a3, ...]
     else
         # For rotation, we need: (a >> n) | (a << (128-n))
-        # Duplicate inputs for both shifts
-        dup             # [n, n, a0, a1, a2, a3, ...]
-        dup.5 dup.5 dup.5 dup.5     # [a0, a1, a2, a3, n, n, a0, a1, a2, a3, ...]
-        movup.5         # [n, a0, a1, a2, a3, n, a0, a1, a2, a3, ...]
-        exec.shr        # [shr0, shr1, shr2, shr3, n, a0, a1, a2, a3, ...]
+        # Save n and a to local memory for later shl computation
+        dup loc_store.0      # save n
+        dup.1 loc_store.1    # save a0
+        dup.2 loc_store.2    # save a1
+        dup.3 loc_store.3    # save a2
+        dup.4 loc_store.4    # save a3
+        # Stack unchanged: [n, a0, a1, a2, a3, ...]
 
-        # Now compute a << (128-n)
-        movup.4         # [n, shr0, shr1, shr2, shr3, a0, a1, a2, a3, ...]
-        push.128 swap u32wrapping_sub   # [128-n, shr0, shr1, shr2, shr3, a0, a1, a2, a3, ...]
-        # Move a0,a1,a2,a3 from positions 5-8 to top. Each movup changes positions,
-        # so we use movup.8 repeatedly (position 8 always has the next a limb to move).
-        movup.8 movup.8 movup.8 movup.8 # [a0, a1, a2, a3, 128-n, shr0, shr1, shr2, shr3, ...]
+        # Compute shr(n, a) - now stack has proper padding below
+        exec.shr        # [shr0, shr1, shr2, shr3, ...]
+
+        # Compute 128-n and prepare for shl
+        loc_load.0 push.128 swap u32wrapping_sub  # [128-n, shr0, shr1, shr2, shr3, ...]
+
+        # Load a from memory (in reverse order so they end up in correct position)
+        loc_load.4 loc_load.3 loc_load.2 loc_load.1
+        # Stack: [a0, a1, a2, a3, 128-n, shr0, shr1, shr2, shr3, ...]
         movup.4         # [128-n, a0, a1, a2, a3, shr0, shr1, shr2, shr3, ...]
+
+        # Compute shl(128-n, a)
         exec.shl        # [shl0, shl1, shl2, shl3, shr0, shr1, shr2, shr3, ...]
 
         # OR the two results
