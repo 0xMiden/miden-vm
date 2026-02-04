@@ -53,7 +53,7 @@ winter-prover.workspace = true
 itertools.workspace = true
 
 [dev-dependencies]
-miden-assembly.workspace = true
+miden-assembly = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { version = "1.4" }

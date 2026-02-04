@@ -72,7 +72,7 @@ trait, allowing for some flexibility in how they are managed. The core library
 referenced above implements this trait, so if we wanted to make use of the Miden
 core library in our own program, we would add it like so:
 
-```rust
+```rust,ignore
 # use miden_assembly::Assembler;
 # use miden_assembly_syntax::debuginfo::DefaultSourceManager;
 # use miden_core_lib::CoreLibrary;
@@ -88,7 +88,7 @@ core library procedures by importing them from the namespace of
 the library, as shown next:
 
 ```masm
-use std::math::u64
+use core::math::u64
 
 begin
     push.1.0
@@ -190,7 +190,6 @@ together, let's look at one last example:
 ```rust
 use miden_assembly::Assembler;
 use miden_assembly_syntax::debuginfo::DefaultSourceManager;
-use miden_core_lib::CoreLibrary;
 use std::sync::Arc;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -205,8 +204,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .assemble_kernel(kernel)?;
 
     // Instantiate the assembler with multiple options at once
-    let assembler = Assembler::with_kernel(source_manager, kernel_lib)
-        .with_dynamic_library(&CoreLibrary::default())?;
+    let assembler = Assembler::with_kernel(source_manager, kernel_lib);
+    // If you wanted to link against the core library, you'd extend the above
+    // with: `.with_dynamic_library(&miden_core_lib::CoreLibrary::default())?;`
 
     // Assemble our program
     let program = assembler.assemble_program("
