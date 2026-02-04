@@ -5,6 +5,8 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -15,8 +17,6 @@ use crate::{
     prettier::PrettyPrint,
     utils::{Idx, LookupByIdx},
 };
-#[cfg(debug_assertions)]
-use crate::mast::MastNode;
 
 // LOOP NODE
 // ================================================================================================

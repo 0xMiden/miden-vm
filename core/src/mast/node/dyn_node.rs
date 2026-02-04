@@ -5,6 +5,8 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     mast::{
@@ -14,8 +16,6 @@ use crate::{
     prettier::{Document, PrettyPrint, const_text, nl},
     utils::LookupByIdx,
 };
-#[cfg(debug_assertions)]
-use crate::mast::MastNode;
 
 // DYN NODE
 // ================================================================================================

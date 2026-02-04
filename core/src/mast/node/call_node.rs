@@ -9,6 +9,8 @@ use miden_formatting::{
 use serde::{Deserialize, Serialize};
 
 use super::{MastForestContributor, MastNodeExt};
+#[cfg(debug_assertions)]
+use crate::mast::MastNode;
 use crate::{
     Felt, Word,
     chiplets::hasher,
@@ -18,8 +20,6 @@ use crate::{
     operations::{OPCODE_CALL, OPCODE_SYSCALL},
     utils::{Idx, LookupByIdx},
 };
-#[cfg(debug_assertions)]
-use crate::mast::MastNode;
 
 // CALL NODE
 // ================================================================================================

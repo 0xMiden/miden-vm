@@ -440,7 +440,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use miden_core_lib::CoreLibrary;
-    use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
+    use miden_processor::{advice::AdviceInputs, fast::FastProcessor, ExecutionOptions};
     use miden_vm::{Assembler, DefaultHost, StackInputs};
 
     use super::*;
@@ -528,9 +528,10 @@ mod tests {
                 .expect("failed to assemble benchmark");
 
             let mut host = DefaultHost::default();
-            let processor = FastProcessor::new_with_advice_inputs(
+            let processor = FastProcessor::new_with_options(
                 StackInputs::default(),
                 AdviceInputs::default(),
+                ExecutionOptions::default(),
             );
             let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
@@ -559,7 +560,11 @@ mod tests {
 
         let mut host = DefaultHost::default();
         host.load_library(&CoreLibrary::default()).expect("failed to load core library");
-        let processor = FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs);
+        let processor = FastProcessor::new_with_options(
+            stack_inputs,
+            advice_inputs,
+            ExecutionOptions::default(),
+        );
         let runtime = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
         runtime

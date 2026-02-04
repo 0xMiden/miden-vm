@@ -3,7 +3,7 @@
 use criterion::{black_box, criterion_group, criterion_main, BatchSize, Criterion};
 use miden_core::{Felt, Word};
 use miden_core_lib::{dsa::falcon512_poseidon2, CoreLibrary};
-use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
+use miden_processor::{advice::AdviceInputs, fast::FastProcessor, ExecutionOptions};
 use miden_vm::{Assembler, DefaultHost, StackInputs};
 
 /// Helper function to execute a benchmark with the given program
@@ -22,8 +22,11 @@ fn bench_program(
                     host.load_library(&CoreLibrary::default())
                         .expect("Failed to load core library");
                 }
-                let processor =
-                    FastProcessor::new_with_advice_inputs(stack_inputs, advice_inputs.clone());
+                let processor = FastProcessor::new_with_options(
+                    stack_inputs,
+                    advice_inputs.clone(),
+                    ExecutionOptions::default(),
+                );
                 (host, processor)
             },
             |(mut host, processor)| async move {

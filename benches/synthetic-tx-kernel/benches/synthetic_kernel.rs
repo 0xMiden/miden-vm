@@ -12,7 +12,8 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, SamplingMode};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{fast::FastProcessor, parallel::build_trace, ExecutionOptions};
+use miden_processor::parallel::build_trace;
+use miden_processor::{fast::FastProcessor, ExecutionOptions};
 use miden_vm::{prove_sync, Assembler, DefaultHost, ProvingOptions, StackInputs};
 use synthetic_tx_kernel::{generator::MasmGenerator, load_profile};
 
@@ -111,9 +112,10 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
     let mut test_host = DefaultHost::default()
         .with_library(&core_lib)
         .expect("Failed to initialize test host");
-    let test_processor = FastProcessor::new_with_advice_inputs(
+    let test_processor = FastProcessor::new_with_options(
         StackInputs::default(),
         miden_processor::advice::AdviceInputs::default(),
+        ExecutionOptions::default(),
     );
     let test_result = tokio::runtime::Runtime::new()
         .expect("Failed to create runtime for smoke test")
@@ -135,9 +137,10 @@ fn synthetic_transaction_kernel(c: &mut Criterion) {
                 let host = DefaultHost::default()
                     .with_library(&core_lib)
                     .expect("Failed to initialize host with core library");
-                let processor = FastProcessor::new_with_advice_inputs(
+                let processor = FastProcessor::new_with_options(
                     StackInputs::default(),
                     miden_processor::advice::AdviceInputs::default(),
+                    ExecutionOptions::default(),
                 );
                 (host, program.clone(), processor)
             },
