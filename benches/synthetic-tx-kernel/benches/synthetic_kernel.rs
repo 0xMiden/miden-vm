@@ -12,8 +12,7 @@ use std::time::Duration;
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion, SamplingMode};
 use miden_core_lib::CoreLibrary;
-use miden_processor::parallel::build_trace;
-use miden_processor::{fast::FastProcessor, ExecutionOptions};
+use miden_processor::{fast::FastProcessor, trace::build_trace, ExecutionOptions};
 use miden_vm::{prove_sync, Assembler, DefaultHost, ProvingOptions, StackInputs};
 use synthetic_tx_kernel::{generator::MasmGenerator, load_profile};
 
@@ -32,8 +31,7 @@ fn measure_trace_len(program: &miden_vm::Program, core_lib: &CoreLibrary) -> (u6
     let trace = build_trace(
         execution_output,
         trace_generation_context,
-        program.hash(),
-        program.kernel().clone(),
+        miden_processor::ProgramInfo::from(program.clone()),
     );
     let summary = trace.trace_len_summary();
     (summary.main_trace_len() as u64, summary.padded_trace_len() as u64)
