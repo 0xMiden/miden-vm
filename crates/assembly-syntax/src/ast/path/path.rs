@@ -213,6 +213,19 @@ impl Path {
     pub fn to_path_buf(&self) -> PathBuf {
         PathBuf { inner: self.inner.to_string() }
     }
+
+    /// Convert an [Ident] to an equivalent [Path] or [PathBuf], depending on whether the identifier
+    /// would require quoting as a path.
+    pub fn from_ident(ident: &Ident) -> Cow<'_, Path> {
+        let ident = ident.as_str();
+        if Ident::requires_quoting(ident) {
+            let mut buf = PathBuf::with_capacity(ident.len() + 2);
+            buf.push_component(ident);
+            Cow::Owned(buf)
+        } else {
+            Cow::Borrowed(Path::new(ident))
+        }
+    }
 }
 
 /// Accesssors
@@ -367,6 +380,12 @@ impl Path {
     }
 
     /// Returns true if the current path, sans root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first non-root
+    /// component of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -377,6 +396,12 @@ impl Path {
     }
 
     /// Returns true if the current path, including root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first component
+    /// of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with_exactly<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -384,6 +409,36 @@ impl Path {
         Self: StartsWith<Prefix>,
     {
         <Self as StartsWith<Prefix>>::starts_with_exactly(self, prefix)
+    }
+
+    /// Strips `prefix` from `self`, or returns `None` if `self` does not start with `prefix`.
+    ///
+    /// NOTE: Prefixes must be exact, i.e. if you call `path.strip_prefix(prefix)` and `path` is
+    /// relative but `prefix` is absolute, then this will return `None`. The same is true if `path`
+    /// is absolute and `prefix` is relative.
+    pub fn strip_prefix<'a>(&'a self, prefix: &Self) -> Option<&'a Self> {
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => (),
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return None;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return None,
+            }
+        }
+        Some(components.as_path())
     }
 
     /// Create an owned [PathBuf] with `path` adjoined to `self`.
@@ -424,33 +479,66 @@ impl Path {
 
 impl StartsWith<str> for Path {
     fn starts_with(&self, prefix: &str) -> bool {
-        if prefix.is_empty() {
-            return true;
-        }
-        if prefix.starts_with("::") {
-            self.inner.starts_with(prefix)
-        } else {
-            match self.inner.strip_prefix("::") {
-                Some(rest) => rest.starts_with(prefix),
-                None => self.inner.starts_with(prefix),
-            }
-        }
+        let this = self.to_relative();
+        <Path as StartsWith<str>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &str) -> bool {
-        self.inner.starts_with(prefix)
+        match prefix {
+            "" => true,
+            "::" => self.is_absolute(),
+            prefix => {
+                let mut components = self.components();
+                let prefix = if let Some(prefix) = prefix.strip_prefix("::") {
+                    let is_absolute =
+                        components.next().is_some_and(|c| matches!(c, Ok(PathComponent::Root)));
+                    if !is_absolute {
+                        return false;
+                    }
+                    prefix
+                } else {
+                    prefix
+                };
+                components.next().is_some_and(
+                    |c| matches!(c, Ok(c @ PathComponent::Normal(_)) if c.as_str() == prefix),
+                )
+            },
+        }
     }
 }
 
 impl StartsWith<Path> for Path {
     fn starts_with(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with(self, prefix.as_str())
+        let this = self.to_relative();
+        let prefix = prefix.to_relative();
+        <Path as StartsWith<Path>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with_exactly(self, prefix.as_str())
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => continue,
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return false;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return false,
+            }
+        }
+        true
     }
 }
 

@@ -10,7 +10,8 @@ use miden_core::Felt;
 use crate::{
     ModuleIndex, SourceFile, SourceSpan, Span, Spanned,
     ast::{
-        self, AliasTarget, InvocationTarget, Invoke, InvokeKind, Procedure, SymbolResolution,
+        self, Alias, AliasTarget, InvocationTarget, Invoke, InvokeKind, Procedure,
+        SymbolResolution,
         constants::ConstEnvironment,
         visit::{self, VisitMut},
     },
@@ -133,27 +134,27 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
     ) -> ControlFlow<LinkerError> {
         self.rewrite_target(InvokeKind::Exec, target)
     }
-    fn visit_mut_alias_target(&mut self, target: &mut AliasTarget) -> ControlFlow<LinkerError> {
-        match &*target {
+    fn visit_mut_alias(&mut self, alias: &mut Alias) -> ControlFlow<LinkerError> {
+        match alias.target() {
             AliasTarget::MastRoot(_) => return ControlFlow::Continue(()),
             AliasTarget::Path(path) if path.is_absolute() => return ControlFlow::Continue(()),
             AliasTarget::Path(_) => (),
         }
-        log::debug!(target: "linker", "    * rewriting alias target {target}");
-        let span = target.span();
+        log::debug!(target: "linker", "    * rewriting alias target {}", alias.target());
+        let span = alias.target().span();
         let context = SymbolResolutionContext { span, module: self.module_id, kind: None };
-        match self.resolver.resolve_alias_target(&context, target) {
+        match self.resolver.resolve_alias_target(&context, &*alias) {
             Err(err) => {
-                log::error!(target: "linker", "    | failed to resolve target {target}");
+                log::error!(target: "linker", "    | failed to resolve target {}", alias.target());
                 return ControlFlow::Break(err);
             },
             Ok(SymbolResolution::Module { id, path }) => {
                 log::debug!(target: "linker", "    | target resolved to module '{path}' (id {id})");
-                *target = AliasTarget::Path(path.with_span(span));
+                *alias.target_mut() = AliasTarget::Path(path.with_span(span));
             },
             Ok(SymbolResolution::Exact { gid, path }) => {
                 log::debug!(target: "linker", "    | target resolved to item '{path}' (id {gid})");
-                *target = AliasTarget::Path(path.with_span(span));
+                *alias.target_mut() = AliasTarget::Path(path.with_span(span));
             },
             Ok(SymbolResolution::MastRoot(digest)) => {
                 log::warn!(target: "linker", "    | target resolved to mast root {digest}");
@@ -161,6 +162,9 @@ impl<'a, 'b: 'a> VisitMut<LinkerError> for ModuleRewriter<'a, 'b> {
             Ok(SymbolResolution::Local(_) | SymbolResolution::External(_)) => unreachable!(),
         }
         ControlFlow::Continue(())
+    }
+    fn visit_mut_alias_target(&mut self, _target: &mut AliasTarget) -> ControlFlow<LinkerError> {
+        unreachable!("expected all alias targets to be reached via an alias")
     }
     fn visit_mut_immediate_u8(&mut self, imm: &mut ast::Immediate<u8>) -> ControlFlow<LinkerError> {
         let mut visitor = ConstEvalVisitor::new(self);
