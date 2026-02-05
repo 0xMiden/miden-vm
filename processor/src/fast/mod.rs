@@ -551,6 +551,7 @@ impl FastProcessor {
                         continuation,
                         self,
                         continuation_stack,
+                        current_forest,
                         tracer,
                         stopper,
                     )?;
@@ -1177,6 +1178,7 @@ impl Tracer for NoopTracer {
         &mut self,
         _processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
+        _current_forest: &Arc<MastForest>,
     ) {
         // do nothing
     }

@@ -425,13 +425,14 @@ fn finalize_clock_cycle<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
+    current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None)
+    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None, current_forest)
 }
 
 /// This function marks the end of a clock cycle.
@@ -444,6 +445,7 @@ fn finalize_clock_cycle_with_continuation<P, S, T>(
     tracer: &mut T,
     stopper: &S,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
@@ -456,6 +458,7 @@ where
         stopper,
         continuation_after_stop,
         OperationHelperRegisters::Empty,
+        current_forest,
     )
 }
 
@@ -478,12 +481,14 @@ where
 /// operation within the basic block (i.e. the operation right after the one that was last executed
 /// before being stopped). No continuation is provided in case of error, since it is expected that
 /// execution will not be resumed.
+#[inline(always)]
 fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T>(
     processor: &mut P,
     tracer: &mut T,
     stopper: &S,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
     op_helper_registers: OperationHelperRegisters,
+    current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
@@ -491,7 +496,7 @@ where
     T: Tracer<Processor = P>,
 {
     // Signal the end of clock cycle to tracer (before incrementing processor clock).
-    tracer.finalize_clock_cycle(processor, op_helper_registers);
+    tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);
 
     // Increment the processor clock.
     processor.system_mut().increment_clock();

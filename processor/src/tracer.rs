@@ -64,10 +64,14 @@ pub trait Tracer {
     ///
     /// Implementations should use this method to finalize any tracing information related to the
     /// just-completed clock cycle.
+    ///
+    /// The `current_forest` parameter is guaranteed to be the same as the one passed to
+    /// [Tracer::start_clock_cycle] for the same clock cycle.
     fn finalize_clock_cycle(
         &mut self,
         processor: &Self::Processor,
         op_helper_registers: OperationHelperRegisters,
+        current_forest: &Arc<MastForest>,
     );
 
     /// Records and replays the resolutions of [crate::host::Host::get_mast_forest].

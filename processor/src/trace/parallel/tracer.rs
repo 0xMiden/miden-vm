@@ -73,9 +73,6 @@ pub(crate) struct CoreTraceGenerationTracer<'a> {
     /// [`start_clock_cycle`](Tracer::start_clock_cycle)), describing what is being executed at
     /// this cycle.
     continuation: Option<Continuation>,
-    /// The MAST forest that is current at the beginning of the clock cycle, captured in
-    /// [`start_clock_cycle`](Tracer::start_clock_cycle) for use when finalizing the cycle.
-    current_forest: Option<Arc<MastForest>>,
 }
 
 impl<'a> CoreTraceGenerationTracer<'a> {
@@ -97,7 +94,6 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             finish_loop_condition: None,
             dyn_callee_hash: None,
             continuation: None,
-            current_forest: None,
         }
     }
 
@@ -137,13 +133,13 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 
         // Store state for finalizing the clock cycle later.
         self.continuation = Some(continuation);
-        self.current_forest = Some(Arc::clone(current_forest));
     }
 
     fn finalize_clock_cycle(
         &mut self,
         processor: &ReplayProcessor,
         op_helper_registers: OperationHelperRegisters,
+        current_forest: &Arc<MastForest>,
     ) {
         use Continuation::*;
 
@@ -154,14 +150,14 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                     &mut self.block_stack_replay,
                 );
 
-                self.fill_start_row(*node_id, processor);
+                self.fill_start_row(*node_id, processor, current_forest);
             },
             FinishJoin(node_id) => {
-                let node = expect_node_in_forest(&self.current_forest, *node_id);
+                let node = expect_node_in_forest(current_forest, *node_id);
                 self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
             },
             FinishSplit(node_id) => {
-                let node = expect_node_in_forest(&self.current_forest, *node_id);
+                let node = expect_node_in_forest(current_forest, *node_id);
                 self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
             },
             FinishLoop { node_id, was_entered: _ } => {
@@ -171,11 +167,6 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 
                 if loop_condition {
                     // Loop body is about to be re-executed, so fill in a REPEAT row.
-                    let current_forest = self
-                        .current_forest
-                        .clone()
-                        .expect("current forest stored at start of clock cycle");
-
                     let loop_node = current_forest
                         .get_node_by_id(*node_id)
                         .expect("node not found in forest")
@@ -186,28 +177,24 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                         &processor.system,
                         &processor.stack,
                         loop_node,
-                        &current_forest,
+                        current_forest,
                         current_addr,
                     );
                 } else {
                     // Loop is finished, so fill in an END row.
-                    let node = expect_node_in_forest(&self.current_forest, *node_id);
+                    let node = expect_node_in_forest(current_forest, *node_id);
                     self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
                 }
             },
             FinishCall(node_id) => {
-                let node = expect_node_in_forest(&self.current_forest, *node_id);
+                let node = expect_node_in_forest(current_forest, *node_id);
                 self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
             },
             FinishDyn(node_id) => {
-                let node = expect_node_in_forest(&self.current_forest, *node_id);
+                let node = expect_node_in_forest(current_forest, *node_id);
                 self.fill_end_trace_row(&processor.system, &processor.stack, node.digest());
             },
             ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                let current_forest = self
-                    .current_forest
-                    .clone()
-                    .expect("current forest stored at start of clock cycle");
                 let basic_block_node = current_forest
                     .get_node_by_id(*node_id)
                     .expect("node not found in forest")
@@ -231,10 +218,6 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 );
             },
             Respan { node_id, batch_index } => {
-                let current_forest = self
-                    .current_forest
-                    .clone()
-                    .expect("current forest stored at start of clock cycle");
                 let basic_block_node = current_forest
                     .get_node_by_id(*node_id)
                     .expect("node not found in forest")
@@ -252,10 +235,6 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
                 );
             },
             FinishBasicBlock(node_id) => {
-                let current_forest = self
-                    .current_forest
-                    .clone()
-                    .expect("current forest stored at start of clock cycle");
                 let basic_block_node = current_forest
                     .get_node_by_id(*node_id)
                     .expect("node not found in forest")
@@ -404,11 +383,12 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
 /// Helpers
 impl<'a> CoreTraceGenerationTracer<'a> {
     /// Fills a trace row for a `StartNode` continuation based on the type of node being started.
-    fn fill_start_row(&mut self, node_id: MastNodeId, processor: &ReplayProcessor) {
-        let current_forest = self
-            .current_forest
-            .clone()
-            .expect("current forest stored at start of clock cycle");
+    fn fill_start_row(
+        &mut self,
+        node_id: MastNodeId,
+        processor: &ReplayProcessor,
+        current_forest: &Arc<MastForest>,
+    ) {
         let node = current_forest
             .get_node_by_id(node_id)
             .expect("invalid node ID stored in continuation");
@@ -426,7 +406,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.system,
                     &processor.stack,
                     join_node,
-                    &current_forest,
+                    current_forest,
                 );
             },
             MastNode::Split(split_node) => {
@@ -434,7 +414,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.system,
                     &processor.stack,
                     split_node,
-                    &current_forest,
+                    current_forest,
                 );
             },
             MastNode::Loop(loop_node) => {
@@ -442,7 +422,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.system,
                     &processor.stack,
                     loop_node,
-                    &current_forest,
+                    current_forest,
                 );
             },
             MastNode::Call(call_node) => {
@@ -450,7 +430,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
                     &processor.system,
                     &processor.stack,
                     call_node,
-                    &current_forest,
+                    current_forest,
                 );
             },
             MastNode::Dyn(dyn_node) => {
@@ -574,11 +554,9 @@ impl<'a> CoreTraceGenerationTracer<'a> {
 /// Returns a reference to the node with the given ID from the forest.
 ///
 /// # Panics
-/// - Panics if the forest is `None` or if the node ID is not found in the forest.
-fn expect_node_in_forest(forest: &Option<Arc<MastForest>>, node_id: MastNodeId) -> &MastNode {
+/// - Panics if the node ID is not found in the forest.
+fn expect_node_in_forest(forest: &MastForest, node_id: MastNodeId) -> &MastNode {
     forest
-        .as_ref()
-        .expect("current forest stored at start of clock cycle")
         .get_node_by_id(node_id)
         .unwrap_or_else(|| panic!("invalid node ID stored in continuation: {}", node_id))
 }

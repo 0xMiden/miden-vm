@@ -56,18 +56,24 @@ where
         continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle(processor, tracer, stopper)
+        finalize_clock_cycle(processor, tracer, stopper, current_forest)
     } else if condition == ZERO {
         // Start and exit the loop immediately - corresponding to adding a LOOP and END row
         // immediately since there is no body to execute.
 
         // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-            Some(Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: false,
-            })
-        })?;
+        finalize_clock_cycle_with_continuation(
+            processor,
+            tracer,
+            stopper,
+            || {
+                Some(Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: false,
+                })
+            },
+            current_forest,
+        )?;
 
         finish_loop_node(
             processor,
@@ -141,7 +147,7 @@ where
         continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
-        finalize_clock_cycle(processor, tracer, stopper)
+        finalize_clock_cycle(processor, tracer, stopper, current_forest)
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
         tracer.start_clock_cycle(
@@ -164,9 +170,13 @@ where
         }
 
         // Finalize the clock cycle corresponding to the END operation.
-        finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-            Some(Continuation::AfterExitDecorators(current_node_id))
-        })?;
+        finalize_clock_cycle_with_continuation(
+            processor,
+            tracer,
+            stopper,
+            || Some(Continuation::AfterExitDecorators(current_node_id)),
+            current_forest,
+        )?;
 
         processor.execute_after_exit_decorators(current_node_id, current_forest, host)
     } else {

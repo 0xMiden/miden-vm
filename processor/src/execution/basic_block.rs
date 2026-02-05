@@ -48,13 +48,19 @@ where
         .map_break(InternalBreakReason::from)?;
 
     // Finalize the clock cycle corresponding to the SPAN operation.
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-        Some(Continuation::ResumeBasicBlock {
-            node_id,
-            batch_index: 0,
-            op_idx_in_batch: 0,
-        })
-    })
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        || {
+            Some(Continuation::ResumeBasicBlock {
+                node_id,
+                batch_index: 0,
+                op_idx_in_batch: 0,
+            })
+        },
+        current_forest,
+    )
     .map_break(InternalBreakReason::from)?;
 
     // Execute the first batch separately, since `execute_basic_block_node_from_batch` executes
@@ -188,9 +194,19 @@ where
             // what happens *after* the clock is incremented. For example, if we were to put a
             // `Continuation::Respan` here instead, and execution was stopped after this RESPAN,
             // then the next call to `Processor::execute_impl()` would re-execute the RESPAN.
-            finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-                Some(Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch: 0 })
-            })
+            finalize_clock_cycle_with_continuation(
+                processor,
+                tracer,
+                stopper,
+                || {
+                    Some(Continuation::ResumeBasicBlock {
+                        node_id,
+                        batch_index,
+                        op_idx_in_batch: 0,
+                    })
+                },
+                current_forest,
+            )
             .map_break(InternalBreakReason::from)?;
         }
 
@@ -248,9 +264,13 @@ where
     );
 
     // Finalize the clock cycle corresponding to the END operation.
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-        Some(Continuation::AfterExitDecoratorsBasicBlock(node_id))
-    })?;
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        || Some(Continuation::AfterExitDecoratorsBasicBlock(node_id)),
+        current_forest,
+    )?;
 
     processor.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)?;
     processor.execute_after_exit_decorators(node_id, current_forest, host)
@@ -352,6 +372,7 @@ where
                 ))
             },
             operation_helpers,
+            current_forest,
         )
         .map_break(InternalBreakReason::from)?;
     }
@@ -402,6 +423,7 @@ pub fn finish_emit_op_execution<P, S, T>(
     post_emit_continuation: Continuation,
     processor: &mut P,
     continuation_stack: &mut ContinuationStack,
+    current_forest: &Arc<MastForest>,
     tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
@@ -423,10 +445,16 @@ where
     // `finalize_clock_cycle_with_continuation()` completes successfully do we need to push the
     // `post_emit_continuation` ourselves.
 
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, {
-        let post_emit_continuation = post_emit_continuation.clone();
-        || Some(post_emit_continuation)
-    })?;
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        {
+            let post_emit_continuation = post_emit_continuation.clone();
+            || Some(post_emit_continuation)
+        },
+        current_forest,
+    )?;
 
     continuation_stack.push_continuation(post_emit_continuation);
 

@@ -130,7 +130,8 @@ where
     }
 
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation.
-    finalize_clock_cycle(processor, tracer, stopper).map_break(InternalBreakReason::from)
+    finalize_clock_cycle(processor, tracer, stopper, current_forest)
+        .map_break(InternalBreakReason::from)
 }
 
 /// Function to be called after [`InternalBreakReason::LoadMastForestFromDyn`] is handled. See the
@@ -151,8 +152,11 @@ where
 {
     tracer.record_mast_forest_resolution(root_id, &new_forest);
 
+    // Save the old forest: the continuation from start_clock_cycle references nodes in it.
+    let old_forest = Arc::clone(current_forest);
+
     // Push current forest to the continuation stack so that we can return to it
-    continuation_stack.push_enter_forest(current_forest.clone());
+    continuation_stack.push_enter_forest(Arc::clone(current_forest));
 
     // Push the root node of the external MAST forest onto the continuation stack.
     continuation_stack.push_start_node(root_id);
@@ -160,8 +164,10 @@ where
     // Set the new MAST forest as current
     *current_forest = new_forest;
 
-    // Finalize the clock cycle corresponding to the DYN or DYNCALL operation.
-    finalize_clock_cycle(processor, tracer, stopper)
+    // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
+    // forest because the continuation was set during start_clock_cycle, which referenced the old
+    // forest.
+    finalize_clock_cycle(processor, tracer, stopper, &old_forest)
 }
 
 /// Executes the finish phase of a Dyn node.
@@ -196,9 +202,13 @@ where
     }
 
     // Finalize the clock cycle corresponding to the END operation.
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-        Some(Continuation::AfterExitDecorators(node_id))
-    })?;
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        || Some(Continuation::AfterExitDecorators(node_id)),
+        current_forest,
+    )?;
 
     processor.execute_after_exit_decorators(node_id, current_forest, host)
 }

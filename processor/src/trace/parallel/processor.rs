@@ -152,6 +152,7 @@ impl ReplayProcessor {
                         continuation,
                         self,
                         continuation_stack,
+                        current_forest,
                         tracer,
                         stopper,
                     )?;
