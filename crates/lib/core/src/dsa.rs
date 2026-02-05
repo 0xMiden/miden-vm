@@ -20,10 +20,7 @@ pub mod ecdsa_k256_keccak {
 
     use alloc::vec::Vec;
 
-    use miden_core::{
-        Felt, Word,
-        utils::{Serializable, bytes_to_packed_u32_elements},
-    };
+    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
     use miden_crypto::dsa::ecdsa_k256_keccak::{PublicKey, SecretKey, Signature};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the
@@ -67,10 +64,7 @@ pub mod eddsa_ed25519 {
 
     use alloc::vec::Vec;
 
-    use miden_core::{
-        Felt, Word,
-        utils::{Serializable, bytes_to_packed_u32_elements},
-    };
+    use miden_core::{Felt, Word, serde::Serializable, utils::bytes_to_packed_u32_elements};
     use miden_crypto::dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature};
 
     /// Signs the provided message with the supplied secret key and encodes this signature and the

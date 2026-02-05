@@ -1,13 +1,13 @@
 use alloc::{collections::BTreeMap, sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, Felt};
+use miden_core::{Felt, operations::DebugOptions};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
 
 use crate::{
-    AdviceMutation, DebugError, DebugHandler, EventError, FutureMaybeSend, Host, MastForest,
-    MastForestStore, MemMastForestStore, ProcessorState, TraceError, Word,
+    DebugError, DebugHandler, FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    ProcessorState, TraceError, Word, advice::AdviceMutation, event::EventError, mast::MastForest,
 };
 
 /// A snapshot of the processor state for consistency checking between processors.
@@ -23,7 +23,7 @@ pub struct ProcessorStateSnapshot {
 impl From<&ProcessorState<'_>> for ProcessorStateSnapshot {
     fn from(state: &ProcessorState) -> Self {
         ProcessorStateSnapshot {
-            clk: state.clk().into(),
+            clk: state.clock().into(),
             ctx: state.ctx().into(),
             stack_state: state.get_stack_state(),
             stack_words: [
@@ -69,7 +69,7 @@ impl DebugHandler for TraceCollector {
         *self.trace_counts.entry(trace_id).or_insert(0) += 1;
 
         // Record the execution order with clock cycle
-        self.execution_order.push((trace_id, process.clk().into()));
+        self.execution_order.push((trace_id, process.clock().into()));
 
         Ok(())
     }
@@ -163,18 +163,18 @@ where
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessorState,
+        _process: &ProcessorState,
         _options: &DebugOptions,
     ) -> Result<(), DebugError> {
         Ok(())
     }
 
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         // Forward to trace collector for counting
         self.trace_collector.on_trace(process, trace_id)?;
 
         // Also collect process state snapshot for consistency checking
-        let snapshot = ProcessorStateSnapshot::from(&*process);
+        let snapshot = ProcessorStateSnapshot::from(process);
         self.snapshots.entry(trace_id).or_default().push(snapshot);
 
         Ok(())

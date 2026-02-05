@@ -1,6 +1,6 @@
 use alloc::{string::String, sync::Arc};
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};

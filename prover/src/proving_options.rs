@@ -1,4 +1,4 @@
-use miden_core::HashFunction;
+use miden_core::proof::HashFunction;
 use miden_processor::ExecutionOptions;
 
 // PROVING OPTIONS

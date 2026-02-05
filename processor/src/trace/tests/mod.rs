@@ -1,15 +1,17 @@
 use alloc::vec::Vec;
 
 use miden_core::{
-    Kernel, Operation, Program,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
+    operations::Operation,
+    program::Program,
 };
 use miden_utils_testing::rand::rand_array;
 
-use super::{super::chiplets::init_state_from_words, ExecutionTrace, Felt};
+use super::{ExecutionTrace, Felt};
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs, fast::FastProcessor,
-    parallel::build_trace,
+    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs,
+    fast::FastProcessor,
+    trace::{build_trace, chiplets::init_state_from_words},
 };
 
 mod chiplets;
@@ -40,7 +42,7 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(program, &mut host).unwrap();
 
-    build_trace(execution_output, trace_generation_context, program.hash(), Kernel::default())
+    build_trace(execution_output, trace_generation_context, program.to_info())
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
@@ -84,5 +86,5 @@ pub fn build_trace_from_ops_with_inputs(
     let (execution_output, trace_generation_context) =
         processor.execute_for_trace_sync(&program, &mut host).unwrap();
 
-    build_trace(execution_output, trace_generation_context, program.hash(), Kernel::default())
+    build_trace(execution_output, trace_generation_context, program.to_info())
 }

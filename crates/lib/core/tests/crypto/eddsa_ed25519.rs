@@ -9,10 +9,12 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, Word,
+    Felt, Word,
+    events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable, bytes_to_packed_u32_elements},
+    serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,
@@ -20,11 +22,14 @@ use miden_core_lib::{
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
-    hash::poseidon2::Poseidon2,
+    hash::{poseidon2::Poseidon2, sha2::Sha512},
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 use rand::{SeedableRng, rngs::StdRng};
-use sha2::{Digest, Sha512};
 
 use crate::helpers::masm_store_felts;
 
@@ -316,15 +321,11 @@ fn generate_invalid_signature_data() -> EddsaTestData {
 }
 
 fn compute_k_digest_bytes(pk: &PublicKey, message: &[u8; 32], sig: &Signature) -> [u8; 64] {
-    let sig_bytes = sig.to_bytes();
-    let r_bytes = &sig_bytes[..32];
-    let pk_bytes = pk.to_bytes();
+    let mut bytes = sig.to_bytes()[..32].to_vec(); // extract r_bytes
+    bytes.append(&mut pk.to_bytes());
+    bytes.extend_from_slice(message);
 
-    let mut hasher = Sha512::new();
-    hasher.update(r_bytes);
-    hasher.update(pk_bytes);
-    hasher.update(message);
-    hasher.finalize().into()
+    Sha512::hash(&bytes).into()
 }
 
 // MASM GENERATION HELPERS

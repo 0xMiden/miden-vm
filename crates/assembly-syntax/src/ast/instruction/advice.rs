@@ -1,6 +1,6 @@
 use core::fmt;
 
-use miden_core::sys_events::SystemEvent;
+use miden_core::events::SystemEvent;
 
 // SYSTEM EVENT NODE
 // ================================================================================================

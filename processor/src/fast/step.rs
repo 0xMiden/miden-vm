@@ -1,12 +1,12 @@
-//! This module defines items relevant to controlling execution stopping conditions, through the
-//! `FastProcessor::step()` method.
+//! This module defines items relevant to controlling execution stopping conditions.
 
 use alloc::sync::Arc;
+use core::ops::ControlFlow;
 
-use miden_core::{Kernel, mast::MastForest};
+use miden_core::{mast::MastForest, program::Kernel};
 
 use crate::{
-    ExecutionError,
+    ExecutionError, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     fast::FastProcessor,
 };
@@ -40,29 +40,54 @@ impl ResumeContext {
     }
 }
 
-// STOPPER
+// STOPPERS
 // ===============================================================================================
 
-/// A trait for types that determine whether execution should be stopped at a given point.
-pub trait Stopper {
-    fn should_stop(&self, processor: &FastProcessor) -> bool;
-}
-
-/// A [`Stopper`] that never stops execution.
+/// A [`Stopper`] that never stops execution (except for returning an error when the maximum cycle
+/// count is exceeded).
 pub struct NeverStopper;
 
 impl Stopper for NeverStopper {
-    fn should_stop(&self, _processor: &FastProcessor) -> bool {
-        false
+    type Processor = FastProcessor;
+
+    #[inline(always)]
+    fn should_stop(
+        &self,
+        processor: &FastProcessor,
+        _continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason> {
+        check_if_max_cycles_exceeded(processor)
     }
 }
 
-/// A [`Stopper`] that always stops execution after each single step.
+/// A [`Stopper`] that always stops execution after each single step. An error is returned if the
+/// maximum cycle count is exceeded.
 pub struct StepStopper;
 
 impl Stopper for StepStopper {
-    fn should_stop(&self, _processor: &FastProcessor) -> bool {
-        true
+    type Processor = FastProcessor;
+
+    #[inline(always)]
+    fn should_stop(
+        &self,
+        processor: &FastProcessor,
+        continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    ) -> ControlFlow<BreakReason> {
+        check_if_max_cycles_exceeded(processor)?;
+
+        ControlFlow::Break(BreakReason::Stopped(continuation_after_stop()))
+    }
+}
+
+/// Checks if the maximum cycle count has been exceeded, returning a `BreakReason::Err` if so.
+#[inline(always)]
+fn check_if_max_cycles_exceeded(processor: &FastProcessor) -> ControlFlow<BreakReason> {
+    if processor.clk > processor.options.max_cycles() as usize {
+        ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
+            processor.options.max_cycles(),
+        )))
+    } else {
+        ControlFlow::Continue(())
     }
 }
 

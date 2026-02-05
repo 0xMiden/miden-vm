@@ -7,8 +7,8 @@ use super::{
     LoopNodeBuilder, SplitNodeBuilder,
 };
 use crate::{
-    LookupByIdx,
-    mast::{MastForest, MastForestError, MastNodeId},
+    mast::{DecoratorId, MastForest, MastForestError, MastNode, MastNodeFingerprint, MastNodeId},
+    utils::LookupByIdx,
 };
 
 pub trait MastForestContributor {
@@ -22,33 +22,30 @@ pub trait MastForestContributor {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError>;
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError>;
 
     /// Remap the node children to their new positions indicated by the given
     /// lookup.
     fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self;
 
     /// Adds decorators to be executed before this node.
-    fn with_before_enter(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
+    fn with_before_enter(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
 
     /// Adds decorators to be executed after this node.
-    fn with_after_exit(self, _decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self;
+    fn with_after_exit(self, _decorators: impl Into<Vec<DecoratorId>>) -> Self;
 
     /// Appends decorators to be executed before this node.
     ///
     /// Unlike `with_before_enter`, this method adds to the existing list of decorators
     /// rather than replacing them.
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    );
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
 
     /// Appends decorators to be executed after this node.
     ///
     /// Unlike `with_after_exit`, this method adds to the existing list of decorators
     /// rather than replacing them.
-    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = crate::mast::DecoratorId>);
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>);
 
     /// Sets a digest to be forced into the built node.
     ///
@@ -76,7 +73,7 @@ impl MastNodeBuilder {
     /// For nodes that depend on a MastForest (Call, Join, Loop, Split), the forest is required.
     /// For nodes that don't depend on a MastForest (BasicBlock, Dyn, External), the forest is
     /// ignored.
-    pub fn build(self, mast_forest: &MastForest) -> Result<crate::mast::MastNode, MastForestError> {
+    pub fn build(self, mast_forest: &MastForest) -> Result<MastNode, MastForestError> {
         match self {
             MastNodeBuilder::BasicBlock(builder) => Ok(builder.build()?.into()),
             MastNodeBuilder::Call(builder) => Ok(builder.build(mast_forest)?.into()),
@@ -138,11 +135,12 @@ mod fingerprint_invariant_tests {
     use proptest::prelude::*;
 
     use crate::{
-        Decorator, Felt, Operation,
+        Felt,
         mast::{
             BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor,
             arbitrary::op_non_control_strategy,
         },
+        operations::{Decorator, Operation},
     };
 
     /// Creates a decorator and returns its ID
@@ -362,11 +360,12 @@ mod round_trip_tests {
     use miden_crypto::Felt;
 
     use crate::{
-        Operation, Word,
+        Word,
         mast::{
             BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastNode, MastNodeBuilder,
             MastNodeExt, node::mast_forest_contributor::MastForestContributor,
         },
+        operations::Operation,
     };
 
     #[test]

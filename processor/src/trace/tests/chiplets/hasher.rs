@@ -15,11 +15,12 @@ use miden_air::trace::{
     decoder::{NUM_OP_BITS, OP_BITS_OFFSET},
 };
 use miden_core::{
-    Program, Word,
+    Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{Field, PrimeCharacteristicRing},
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
+    program::Program,
     utils::range,
 };
 use miden_utils_testing::stack;

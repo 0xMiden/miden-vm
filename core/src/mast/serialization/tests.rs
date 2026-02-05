@@ -1,17 +1,17 @@
 use std::string::ToString;
 
-use miden_crypto::{Felt, ONE, Word, field::PrimeCharacteristicRing};
-use miden_utils_indexing::Idx;
-
 use super::*;
 use crate::{
-    DebugOptions, Decorator,
+    Felt, ONE, Word,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
         SplitNodeBuilder, UntrustedMastForest,
     },
-    operations::Operation,
+    operations::{DebugOptions, Decorator, Operation},
+    serde::SliceReader,
+    utils::Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure
@@ -545,8 +545,6 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
 /// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
 #[test]
 fn mast_forest_deserialize_invalid_ops_offset_fails() {
-    use crate::utils::Serializable;
-
     let mut forest = MastForest::new();
     let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
         .add_to_forest(&mut forest)
@@ -554,8 +552,6 @@ fn mast_forest_deserialize_invalid_ops_offset_fails() {
     forest.make_root(block_id);
 
     let serialized = forest.to_bytes();
-
-    use crate::utils::SliceReader;
     let mut reader = SliceReader::new(&serialized);
 
     let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
@@ -1028,8 +1024,8 @@ mod proptests {
 
     use super::*;
     use crate::{
-        Decorator,
         mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
+        operations::Decorator,
     };
 
     proptest! {
@@ -1115,12 +1111,12 @@ mod proptests {
         fn proptest_multi_batch_roundtrip(
             ops in prop::collection::vec(
                 prop::sample::select(vec![
-                    crate::Operation::Add,
-                    crate::Operation::Mul,
-                    crate::Operation::Push(crate::Felt::new(42)),
-                    crate::Operation::Drop,
-                    crate::Operation::Dup0,
-                    crate::Operation::Swap,
+                    Operation::Add,
+                    Operation::Mul,
+                    Operation::Push(crate::Felt::new(42)),
+                    Operation::Drop,
+                    Operation::Dup0,
+                    Operation::Swap,
                 ]),
                 73..=150  // Generate 73-150 operations for multi-batch testing
             )
@@ -1191,11 +1187,11 @@ mod proptests {
             (ops, decorator_indices) in (
                 prop::collection::vec(
                     prop::sample::select(vec![
-                        crate::Operation::Add,
-                        crate::Operation::Mul,
-                        crate::Operation::Push(crate::Felt::new(99)),
-                        crate::Operation::Drop,
-                        crate::Operation::Dup0,
+                        Operation::Add,
+                        Operation::Mul,
+                        Operation::Push(Felt::new(99)),
+                        Operation::Drop,
+                        Operation::Dup0,
                     ]),
                     10..=50
                 )
@@ -1323,11 +1319,6 @@ mod proptests {
 /// Test DebugInfo serialization with empty decorators (no decorators at all)
 #[test]
 fn test_debuginfo_serialization_empty() {
-    use crate::{
-        Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     // Create forest with no decorators
     let mut forest = MastForest::new();
 
@@ -1349,11 +1340,6 @@ fn test_debuginfo_serialization_empty() {
 /// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
 #[test]
 fn test_debuginfo_serialization_sparse() {
-    use crate::{
-        Decorator, Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     let mut forest = MastForest::new();
 
     // Create 10 blocks, only 2 with decorators (20% sparse)
@@ -1392,11 +1378,6 @@ fn test_debuginfo_serialization_sparse() {
 /// Test DebugInfo serialization with dense decorators (80% of nodes have decorators)
 #[test]
 fn test_debuginfo_serialization_dense() {
-    use crate::{
-        Decorator, Operation,
-        mast::{BasicBlockNodeBuilder, MastForest},
-    };
-
     let mut forest = MastForest::new();
 
     // Create 10 blocks, 8 with decorators (80% dense)
@@ -1525,7 +1506,6 @@ fn test_untrusted_forest_detects_hash_mismatch() {
     //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
     //
     // First, determine where the node info section starts
-    use crate::utils::SliceReader;
     let mut reader = SliceReader::new(&bytes);
     let _header: [u8; 8] = reader.read_array().unwrap();
     let _node_count: usize = reader.read().unwrap();
@@ -1633,8 +1613,6 @@ fn test_untrusted_forest_validates_stripped() {
 /// Test that deserialization rejects node counts exceeding MAX_NODES.
 #[test]
 fn test_deserialization_rejects_excessive_node_count() {
-    use crate::utils::{ByteWriter, Serializable};
-
     // Craft a malicious payload with node_count exceeding MAX_NODES
     let mut bytes = Vec::new();
 

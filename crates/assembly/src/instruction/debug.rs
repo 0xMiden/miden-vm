@@ -10,9 +10,9 @@ use crate::{ProcedureContext, ast::DebugOptions, diagnostics::Report};
 pub fn compile_options(
     options: &DebugOptions,
     proc_ctx: &ProcedureContext,
-) -> Result<miden_core::DebugOptions, Report> {
+) -> Result<miden_core::operations::DebugOptions, Report> {
     type Ast = DebugOptions;
-    type Vm = miden_core::DebugOptions;
+    type Vm = miden_core::operations::DebugOptions;
 
     // Use word-aligned num_locals for address calculations (same alignment as frame pointer)
     let aligned_num_locals = proc_ctx.num_locals().next_multiple_of(WORD_SIZE as u16);

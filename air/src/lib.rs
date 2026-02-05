@@ -10,9 +10,11 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
+    field::ExtensionField,
     precompile::PrecompileTranscriptState,
+    program::{ProgramInfo, StackInputs, StackOutputs},
 };
+use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
 
 pub mod config;
 mod constraints;
@@ -25,9 +27,8 @@ use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
 mod export {
     pub use miden_core::{
         Felt,
-        utils::{
-            ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
-        },
+        serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+        utils::ToElements,
     };
     pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 }
@@ -174,9 +175,9 @@ where
 
     fn build_aux_trace(
         &self,
-        main: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
+    ) -> Option<RowMajorMatrix<Felt>> {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
         let builders = self.aux_builder.as_ref()?;
@@ -185,8 +186,6 @@ where
     }
 
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        use p3_matrix::Matrix;
-
         use crate::constraints;
 
         let main = builder.main();

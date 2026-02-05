@@ -52,13 +52,13 @@ use core::{
 
 use miden_assembly_syntax::{
     ast::{
-        self, AliasTarget, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
+        self, Alias, AttributeSet, GlobalItemIndex, InvocationTarget, InvokeKind, ItemIndex,
         Module, ModuleIndex, Path, SymbolResolution, Visibility, types,
     },
     debuginfo::{SourceManager, SourceSpan, Span, Spanned},
     library::{ItemInfo, ModuleInfo},
 };
-use miden_core::{AdviceMap, Kernel, Word};
+use miden_core::{Word, advice::AdviceMap, program::Kernel};
 use smallvec::{SmallVec, smallvec};
 
 pub use self::{
@@ -509,9 +509,8 @@ impl Linker {
                                 module: module_index,
                                 kind: None,
                             };
-                            if let Some(callee) = resolver
-                                .resolve_alias_target(&context, alias.target())?
-                                .into_global_id()
+                            if let Some(callee) =
+                                resolver.resolve_alias_target(&context, alias)?.into_global_id()
                             {
                                 log::debug!(
                                     target: "linker",
@@ -618,7 +617,7 @@ impl Linker {
     pub fn resolve_alias_target(
         &self,
         caller: &SymbolResolutionContext,
-        target: &AliasTarget,
+        target: &Alias,
     ) -> Result<SymbolResolution, LinkerError> {
         let resolver = SymbolResolver::new(self);
         resolver.resolve_alias_target(caller, target)
@@ -658,7 +657,7 @@ impl Linker {
                     module: gid.module,
                     kind: Some(InvokeKind::ProcRef),
                 };
-                let resolution = self.resolve_alias_target(&context, alias.target())?;
+                let resolution = self.resolve_alias_target(&context, alias)?;
                 match resolution {
                     // If we get back a MAST root resolution, it's a phantom digest
                     SymbolResolution::MastRoot(_) => Ok(None),
@@ -738,7 +737,7 @@ impl Linker {
                     module: gid.module,
                     kind: Some(InvokeKind::ProcRef),
                 };
-                let resolution = self.resolve_alias_target(&context, alias.target())?;
+                let resolution = self.resolve_alias_target(&context, alias)?;
                 match resolution {
                     SymbolResolution::MastRoot(_)
                     | SymbolResolution::Local(_)

@@ -1,6 +1,6 @@
 use alloc::string::String;
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 #[cfg(feature = "serde")]

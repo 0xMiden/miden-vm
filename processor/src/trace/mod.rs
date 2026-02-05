@@ -2,6 +2,7 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
+use chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
@@ -12,56 +13,60 @@ use miden_air::{
     },
 };
 use miden_core::{
-    Kernel, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    Word, ZERO,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    stack::MIN_STACK_DEPTH,
-    utils::ColMatrix,
+    program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
+    utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
-use p3_matrix::{Matrix, dense::RowMajorMatrix};
+use range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder;
 
 use super::{
-    AdviceProvider, Felt, chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
-    range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder,
+    AdviceProvider, Felt, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
 };
-use crate::{fast::ExecutionOutput, row_major_adapter};
+use crate::fast::ExecutionOutput;
 
 mod utils;
-pub use utils::{AuxColumnBuilder, ChipletsLengths, TraceFragment, TraceLenSummary};
+pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
+
+mod row_major_adapter;
+
+pub mod chiplets;
+pub mod range;
+
+mod parallel;
 
 #[cfg(test)]
 mod tests;
 
-// VM EXECUTION TRACE
+// RE-EXPORTS
 // ================================================================================================
 
-#[derive(Debug, Clone)]
-pub struct AuxTraceBuilders {
-    pub(crate) decoder: DecoderAuxTraceBuilder,
-    pub(crate) stack: StackAuxTraceBuilder,
-    pub(crate) range: RangeCheckerAuxTraceBuilder,
-    pub(crate) chiplets: ChipletsAuxTraceBuilder,
-}
+pub use miden_air::trace::RowIndex;
+pub use parallel::{CORE_TRACE_WIDTH, build_trace};
+pub use utils::{ChipletsLengths, TraceLenSummary};
+
+// VM EXECUTION TRACE
+// ================================================================================================
 
 /// Execution trace which is generated when a program is executed on the VM.
 ///
 /// The trace consists of the following components:
-/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Auxiliary Co-Processor
-///   components.
-/// - Hints used during auxiliary trace segment construction.
-/// - Metadata needed by the STARK prover.
+/// - Main traces of System, Decoder, Operand Stack, Range Checker, and Chiplets.
+/// - Auxiliary trace builders.
+/// - Information about the program (program hash and the kernel).
+/// - Information about execution outputs (stack state, advice provider, and precompile transcript).
+/// - Summary of trace lengths of the main trace components.
 #[derive(Debug)]
 pub struct ExecutionTrace {
-    meta: Vec<u8>,
     main_trace: MainTrace,
     aux_trace_builders: AuxTraceBuilders,
     program_info: ProgramInfo,
     stack_outputs: StackOutputs,
     advice: AdviceProvider,
-    trace_len_summary: TraceLenSummary,
     final_pc_transcript: PrecompileTranscript,
+    trace_len_summary: TraceLenSummary,
 }
 
 impl ExecutionTrace {
@@ -69,24 +74,20 @@ impl ExecutionTrace {
     // --------------------------------------------------------------------------------------------
 
     pub fn new_from_parts(
-        program_hash: Word,
-        kernel: Kernel,
+        program_info: ProgramInfo,
         execution_output: ExecutionOutput,
         main_trace: MainTrace,
         aux_trace_builders: AuxTraceBuilders,
         trace_len_summary: TraceLenSummary,
     ) -> Self {
-        let program_info = ProgramInfo::new(program_hash, kernel);
-
         Self {
-            meta: Vec::new(),
-            aux_trace_builders,
             main_trace,
+            aux_trace_builders,
             program_info,
             stack_outputs: execution_output.stack,
             advice: execution_output.advice,
-            trace_len_summary,
             final_pc_transcript: execution_output.final_pc_transcript,
+            trace_len_summary,
         }
     }
 
@@ -201,11 +202,6 @@ impl ExecutionTrace {
         &self.advice
     }
 
-    /// Returns the trace meta data.
-    pub fn meta(&self) -> &[u8] {
-        &self.meta
-    }
-
     /// Destructures this execution trace into the process’s final stack and advice states.
     pub fn into_outputs(self) -> (StackOutputs, AdviceProvider) {
         (self.stack_outputs, self.advice)
@@ -252,11 +248,16 @@ impl ExecutionTrace {
     }
 }
 
-// TRACE TRAIT IMPLEMENTATION
-// ================================================================================================
-
 // AUX TRACE BUILDERS
 // ================================================================================================
+
+#[derive(Debug, Clone)]
+pub struct AuxTraceBuilders {
+    pub(crate) decoder: DecoderAuxTraceBuilder,
+    pub(crate) stack: StackAuxTraceBuilder,
+    pub(crate) range: RangeCheckerAuxTraceBuilder,
+    pub(crate) chiplets: ChipletsAuxTraceBuilder,
+}
 
 impl AuxTraceBuilders {
     /// Builds auxiliary columns for all trace segments given the main trace and challenges.

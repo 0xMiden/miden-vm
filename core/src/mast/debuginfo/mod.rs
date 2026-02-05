@@ -51,13 +51,15 @@ use serde::{Deserialize, Serialize};
 
 use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
-    AssemblyOp, Idx, IndexVec, LexicographicWord, Word,
+    LexicographicWord, Word,
     mast::serialization::{
         StringTable,
         asm_op::{AsmOpDataBuilder, AsmOpInfo},
         decorator::{DecoratorDataBuilder, DecoratorInfo},
     },
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    operations::AssemblyOp,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{Idx, IndexVec},
 };
 
 mod asm_op_storage;

@@ -38,11 +38,9 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 
 # External dependencies
-sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-blake3.workspace = true
 criterion.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
@@ -56,8 +54,6 @@ rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rstest = { version = "0.26" }
 serde_json.workspace = true
-sha2 = { version = "0.10" }
-sha3 = { version = "0.10" }
 
 [build-dependencies]
 env_logger.workspace = true

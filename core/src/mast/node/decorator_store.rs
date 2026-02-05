@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    DecoratorList,
     mast::{DecoratorId, MastNodeId},
+    operations::DecoratorList,
 };
 
 /// A data structure for storing decorators for MAST nodes, including both

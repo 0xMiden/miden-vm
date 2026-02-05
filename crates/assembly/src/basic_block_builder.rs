@@ -11,9 +11,10 @@ use miden_assembly_syntax::{
     diagnostics::Report,
 };
 use miden_core::{
-    AssemblyOp, Decorator, DecoratorList, Felt, Operation,
+    Felt,
+    events::SystemEvent,
     mast::{DecoratorId, MastNodeId},
-    sys_events::SystemEvent,
+    operations::{AssemblyOp, Decorator, DecoratorList, Operation},
 };
 
 use crate::{ProcedureContext, assembler::BodyWrapper, mast_forest_builder::MastForestBuilder};

@@ -8,7 +8,7 @@ use std::println;
 use crate::{
     mast::{BasicBlockNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor},
     operations::Operation,
-    utils::Serializable,
+    serde::Serializable,
 };
 
 /// Generates seed corpus files for fuzzing.

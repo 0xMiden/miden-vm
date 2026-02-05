@@ -2,7 +2,7 @@ use miden_air::trace::{
     AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET,
     chiplets::hasher::{HASH_CYCLE_LEN, LAST_CYCLE_ROW},
 };
-use miden_core::{ONE, Operation, Word, ZERO};
+use miden_core::{ONE, Word, ZERO, operations::Operation};
 use miden_utils_testing::rand::rand_value;
 
 use super::{

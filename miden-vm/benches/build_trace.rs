@@ -2,7 +2,7 @@ use std::hint::black_box;
 
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{AdviceInputs, ExecutionOptions, fast::FastProcessor, parallel};
+use miden_processor::{ExecutionOptions, advice::AdviceInputs, fast::FastProcessor, trace};
 use miden_vm::{Assembler, DefaultHost, StackInputs, execute, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;
@@ -80,11 +80,10 @@ fn build_trace(c: &mut Criterion) {
                             let (execution_output, trace_generation_context) =
                                 processor.execute_for_trace(&program, &mut host).await.unwrap();
 
-                            let trace = parallel::build_trace(
+                            let trace = trace::build_trace(
                                 execution_output,
                                 trace_generation_context,
-                                program.hash(),
-                                program.kernel().clone(),
+                                program.to_info(),
                             );
                             black_box(trace);
                         },

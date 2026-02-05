@@ -3,19 +3,20 @@ use alloc::{string::ToString, sync::Arc, vec};
 use miden_air::trace::MIN_TRACE_LEN;
 use miden_assembly::{Assembler, DefaultSourceManager};
 use miden_core::{
-    ONE, Operation, assert_matches,
+    ONE, assert_matches,
     field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         MastForestContributor,
     },
-    stack::StackInputs,
+    operations::Operation,
+    program::StackInputs,
 };
 use miden_utils_testing::build_test;
 use rstest::rstest;
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, OperationError};
+use crate::{AdviceInputs, DefaultHost, operation::OperationError};
 
 mod advice_provider;
 mod all_ops;
@@ -131,14 +132,12 @@ fn test_syscall_fail() {
 /// number of allowed cycles.
 #[test]
 fn test_cycle_limit_exceeded() {
-    use crate::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, ExecutionOptions};
-
     let mut host = DefaultHost::default();
 
     let options = ExecutionOptions::new(
         Some(MIN_TRACE_LEN as u32),
         MIN_TRACE_LEN as u32,
-        DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
         false,
         false,
     )
@@ -153,6 +152,43 @@ fn test_cycle_limit_exceeded() {
     let err = processor.execute_sync(&program, &mut host).unwrap_err();
 
     assert_matches!(err, ExecutionError::CycleLimitExceeded(max_cycles) if max_cycles == MIN_TRACE_LEN as u32);
+}
+
+/// Tests that a program using exactly `max_cycles` cycles succeeds.
+///
+/// This is a regression test for the off-by-one error where the cycle limit check used `>=`
+/// instead of `>`, causing programs that used exactly `max_cycles` cycles to fail.
+#[test]
+fn test_cycle_limit_exactly_max_cycles_succeeds() {
+    let mut host = DefaultHost::default();
+
+    // With 2018 Noop operations, the program uses exactly MIN_TRACE_LEN (2048) cycles.
+    // 2018 operations result in 29 operation batches, and this requires executing 28 `RESPAN`
+    // operations. So, we get 2018 + 28 = 2046. All of these operations are executed in a single
+    // basic block, and we need 2 more operations for block start (`BEGIN`) and block end (`END`).
+    // Before the fix (clk >= max_cycles): this failed because 2048 >= 2048 is true.
+    // After the fix (clk > max_cycles): this succeeds because 2048 > 2048 is false.
+    const NUM_OPS: usize = 2018;
+    let program = simple_program_with_ops(vec![Operation::Noop; NUM_OPS]);
+
+    let options = ExecutionOptions::new(
+        Some(2048),
+        MIN_TRACE_LEN as u32,
+        ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+        false,
+        false,
+    )
+    .unwrap();
+
+    let processor =
+        FastProcessor::new_with_options(StackInputs::default(), AdviceInputs::default(), options);
+    let result = processor.execute_sync(&program, &mut host);
+
+    // The program should succeed since it uses exactly max_cycles cycles.
+    assert!(
+        result.is_ok(),
+        "Program using exactly max_cycles should succeed, but got: {result:?}"
+    );
 }
 
 #[test]
@@ -418,7 +454,10 @@ fn test_external_node_decorator_sequencing() {
         crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
             Arc::new(lib_forest),
         );
-    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
 
     let result = processor.execute_sync(&program, &mut host);
     assert!(result.is_ok(), "Execution failed: {:?}", result);

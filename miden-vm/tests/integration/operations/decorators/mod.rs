@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use miden_core::DebugOptions;
+use miden_core::operations::DebugOptions;
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 use miden_processor::{
-    AdviceMutation, DebugError, EventError, FutureMaybeSend, Host, MastForest, ProcessorState,
-    TraceError,
+    DebugError, FutureMaybeSend, Host, ProcessorState, TraceError, advice::AdviceMutation,
+    event::EventError, mast::MastForest,
 };
 use miden_prover::Word;
 use miden_utils_testing::PrimeField64;
@@ -50,14 +50,14 @@ impl Host for TestHost {
 
     fn on_debug(
         &mut self,
-        _process: &mut ProcessorState,
+        _process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-    fn on_trace(&mut self, _process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, _process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.trace_handler.push(trace_id);
         Ok(())
     }

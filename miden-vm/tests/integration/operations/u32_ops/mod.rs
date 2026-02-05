@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, OperationError};
+use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{Felt, U32_BOUND, build_op_test, expect_exec_error_matches, prop_randw};
 
 mod arithmetic_ops;

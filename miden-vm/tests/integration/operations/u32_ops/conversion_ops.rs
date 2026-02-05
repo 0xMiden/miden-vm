@@ -1,5 +1,4 @@
-use miden_core::field::PrimeField64;
-use miden_processor::{ExecutionError, OperationError};
+use miden_processor::{ExecutionError, field::PrimeField64, operation::OperationError};
 use miden_utils_testing::{
     Felt, U32_BOUND, WORD_SIZE, build_op_test, expect_exec_error_matches, proptest::prelude::*,
     rand::rand_value,

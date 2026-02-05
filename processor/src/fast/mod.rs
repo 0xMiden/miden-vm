@@ -7,24 +7,31 @@ use core::{cmp::min, ops::ControlFlow};
 
 use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
-    Decorator, EMPTY_WORD, Kernel, Program, StackOutputs, WORD_SIZE, Word, ZERO,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    mast::{MastForest, MastNodeExt, MastNodeId},
+    operations::Decorator,
     precompile::PrecompileTranscript,
-    stack::{MIN_STACK_DEPTH, StackInputs},
+    program::{Kernel, MIN_STACK_DEPTH, Program, StackInputs, StackOutputs},
     utils::range,
 };
 use tracing::instrument;
 
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
-    ProcessorState,
-    chiplets::Ace,
-    continuation_stack::{Continuation, ContinuationStack},
+    ProcessorState, Stopper,
+    continuation_stack::ContinuationStack,
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
+    execution::{
+        InternalBreakReason, execute_impl, finish_emit_op_execution,
+        finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
+    },
     fast::{
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
-        step::{BreakReason, NeverStopper, StepStopper, Stopper},
+        external::maybe_use_caller_error_context,
+        step::{BreakReason, NeverStopper, StepStopper},
     },
+    trace::chiplets::Ace,
+    tracer::{NoopTracer, Tracer},
 };
 
 pub mod execution_tracer;
@@ -38,18 +45,18 @@ pub(crate) mod step;
 pub use step::ResumeContext;
 
 pub mod trace_state;
-mod tracer;
-pub use tracer::{NoopTracer, Tracer};
 
 mod basic_block;
 mod call_and_dyn;
 mod external;
-mod join;
-mod r#loop;
-mod split;
+
+pub use basic_block::SystemEventError;
 
 #[cfg(test)]
 mod tests;
+
+// CONSTANTS
+// ================================================================================================
 
 /// The size of the stack buffer.
 ///
@@ -68,6 +75,9 @@ const STACK_BUFFER_SIZE: usize = 6850;
 /// 0's that were generated automatically to keep the stack depth at 16. In practice, if this
 /// occurs, it is most likely a bug.
 const INITIAL_STACK_TOP_IDX: usize = 250;
+
+// FAST PROCESSOR
+// ================================================================================================
 
 /// A fast processor which doesn't generate any trace.
 ///
@@ -103,30 +113,30 @@ const INITIAL_STACK_TOP_IDX: usize = 250;
 #[derive(Debug)]
 pub struct FastProcessor {
     /// The stack is stored in reverse order, so that the last element is at the top of the stack.
-    pub(super) stack: Box<[Felt; STACK_BUFFER_SIZE]>,
+    stack: Box<[Felt; STACK_BUFFER_SIZE]>,
     /// The index of the top of the stack.
     stack_top_idx: usize,
     /// The index of the bottom of the stack.
     stack_bot_idx: usize,
 
     /// The current clock cycle.
-    pub(super) clk: RowIndex,
+    clk: RowIndex,
 
     /// The current context ID.
-    pub(super) ctx: ContextId,
+    ctx: ContextId,
 
     /// The hash of the function that called into the current context, or `[ZERO, ZERO, ZERO,
     /// ZERO]` if we are in the first context (i.e. when `call_stack` is empty).
-    pub(super) caller_hash: Word,
+    caller_hash: Word,
 
     /// The advice provider to be used during execution.
-    pub(super) advice: AdviceProvider,
+    advice: AdviceProvider,
 
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
-    pub(super) memory: Memory,
+    memory: Memory,
 
     /// A map storing metadata per call to the ACE chiplet.
-    pub(super) ace: Ace,
+    ace: Ace,
 
     /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
     /// `dyncall`) to keep track of the information needed to return to the previous context upon
@@ -150,29 +160,57 @@ impl FastProcessor {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
 
-    /// Creates a new `FastProcessor` instance with the given stack inputs, where debug and tracing
-    /// are disabled.
+    /// Creates a new `FastProcessor` instance with the given stack inputs.
+    ///
+    /// By default, advice inputs are empty and execution options use their defaults
+    /// (debugging and tracing disabled).
+    ///
+    /// # Example
+    /// ```ignore
+    /// use miden_processor::fast::FastProcessor;
+    ///
+    /// let processor = FastProcessor::new(stack_inputs)
+    ///     .with_advice(advice_inputs)
+    ///     .with_debugging(true)
+    ///     .with_tracing(true);
+    /// ```
     pub fn new(stack_inputs: StackInputs) -> Self {
         Self::new_with_options(stack_inputs, AdviceInputs::default(), ExecutionOptions::default())
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where debug
-    /// and tracing are disabled.
-    pub fn new_with_advice_inputs(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
-        Self::new_with_options(stack_inputs, advice_inputs, ExecutionOptions::default())
+    /// Sets the advice inputs for the processor.
+    pub fn with_advice(mut self, advice_inputs: AdviceInputs) -> Self {
+        self.advice = advice_inputs.into();
+        self
     }
 
-    /// Creates a new `FastProcessor` instance with the given stack and advice inputs, where
-    /// debugging and tracing are enabled.
-    pub fn new_debug(stack_inputs: StackInputs, advice_inputs: AdviceInputs) -> Self {
-        Self::new_with_options(
-            stack_inputs,
-            advice_inputs,
-            ExecutionOptions::default().with_debugging(true).with_tracing(true),
-        )
+    /// Sets the execution options for the processor.
+    ///
+    /// This will override any previously set debugging or tracing settings.
+    pub fn with_options(mut self, options: ExecutionOptions) -> Self {
+        self.options = options;
+        self
     }
 
-    /// Most general constructor unifying all the other ones.
+    /// Enables or disables debugging mode.
+    ///
+    /// When debugging is enabled, debug decorators will be executed during program execution.
+    pub fn with_debugging(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_debugging(enabled);
+        self
+    }
+
+    /// Enables or disables tracing mode.
+    ///
+    /// When tracing is enabled, trace decorators will be executed during program execution.
+    pub fn with_tracing(mut self, enabled: bool) -> Self {
+        self.options = self.options.with_tracing(enabled);
+        self
+    }
+
+    /// Constructor for creating a `FastProcessor` with all options specified at once.
+    ///
+    /// For a more fluent API, consider using `FastProcessor::new()` with builder methods.
     pub fn new_with_options(
         stack_inputs: StackInputs,
         advice_inputs: AdviceInputs,
@@ -326,6 +364,12 @@ impl FastProcessor {
         &self.memory
     }
 
+    /// Returns a narrowed interface for reading and updating the processor state.
+    #[inline(always)]
+    pub fn state(&mut self) -> ProcessorState<'_> {
+        ProcessorState { processor: self }
+    }
+
     // MUTATORS
     // -------------------------------------------------------------------------------------------
 
@@ -474,203 +518,102 @@ impl FastProcessor {
     /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
     /// that the processor state may be accessed after execution. It is incorrect to execute a
     /// second program using the same processor. This is mainly meant to be used in tests.
-    async fn execute_impl(
+    async fn execute_impl<S>(
         &mut self,
         continuation_stack: &mut ContinuationStack,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl Host,
         tracer: &mut impl Tracer,
-        stopper: &impl Stopper,
-    ) -> ControlFlow<BreakReason, StackOutputs> {
-        while let Some(continuation) = continuation_stack.pop_continuation() {
-            match continuation {
-                Continuation::StartNode(node_id) => {
-                    let node = current_forest.get_node_by_id(node_id).unwrap();
+        stopper: &S,
+    ) -> ControlFlow<BreakReason, StackOutputs>
+    where
+        S: Stopper<Processor = Self>,
+    {
+        while let ControlFlow::Break(internal_break_reason) =
+            execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
+        {
+            match internal_break_reason {
+                InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
+                InternalBreakReason::Emit { basic_block_node_id, continuation } => {
+                    self.op_emit(host, current_forest, basic_block_node_id).await?;
 
-                    match node {
-                        MastNode::Block(basic_block_node) => {
-                            self.execute_basic_block_node_from_start(
-                                basic_block_node,
-                                node_id,
-                                host,
-                                continuation_stack,
-                                current_forest,
-                                tracer,
-                                stopper,
-                            )
-                            .await?
-                        },
-                        MastNode::Join(join_node) => self.start_join_node(
-                            join_node,
-                            node_id,
-                            current_forest,
-                            continuation_stack,
-                            host,
-                            tracer,
-                            stopper,
-                        )?,
-                        MastNode::Split(split_node) => self.start_split_node(
-                            split_node,
-                            node_id,
-                            current_forest,
-                            continuation_stack,
-                            host,
-                            tracer,
-                            stopper,
-                        )?,
-                        MastNode::Loop(loop_node) => self.start_loop_node(
-                            loop_node,
-                            node_id,
-                            current_forest,
-                            continuation_stack,
-                            host,
-                            tracer,
-                            stopper,
-                        )?,
-                        MastNode::Call(call_node) => self.start_call_node(
-                            call_node,
-                            node_id,
-                            kernel,
-                            current_forest,
-                            continuation_stack,
-                            host,
-                            tracer,
-                            stopper,
-                        )?,
-                        MastNode::Dyn(_) => {
-                            self.start_dyn_node(
-                                node_id,
-                                current_forest,
-                                continuation_stack,
-                                host,
-                                tracer,
-                                stopper,
-                            )
-                            .await?
-                        },
-                        MastNode::External(_external_node) => {
-                            self.execute_external_node(
-                                node_id,
-                                current_forest,
-                                continuation_stack,
-                                host,
-                                tracer,
-                            )
-                            .await?
-                        },
-                    }
-                },
-                Continuation::FinishJoin(node_id) => self.finish_join_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishSplit(node_id) => self.finish_split_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishLoop { node_id, was_entered } => self.finish_loop_node(
-                    was_entered,
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishCall(node_id) => self.finish_call_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishDyn(node_id) => self.finish_dyn_node(
-                    node_id,
-                    current_forest,
-                    continuation_stack,
-                    host,
-                    tracer,
-                    stopper,
-                )?,
-                Continuation::FinishExternal(node_id) => {
-                    // Execute after_exit decorators when returning from an external node
-                    // Note: current_forest should already be restored by EnterForest continuation
-                    self.execute_after_exit_decorators(node_id, current_forest, host)?;
-                },
-                Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
-                    let basic_block_node =
-                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-                    self.execute_basic_block_node_from_op_idx(
-                        basic_block_node,
-                        node_id,
-                        batch_index,
-                        op_idx_in_batch,
-                        host,
-                        continuation_stack,
-                        current_forest,
-                        tracer,
-                        stopper,
-                    )
-                    .await?
-                },
-                Continuation::Respan { node_id, batch_index } => {
-                    let basic_block_node =
-                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-
-                    self.execute_basic_block_node_from_batch(
-                        basic_block_node,
-                        node_id,
-                        batch_index,
-                        host,
-                        continuation_stack,
-                        current_forest,
-                        tracer,
-                        stopper,
-                    )
-                    .await?
-                },
-                Continuation::FinishBasicBlock(node_id) => {
-                    let basic_block_node =
-                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-
-                    self.finish_basic_block(
-                        basic_block_node,
-                        node_id,
-                        current_forest,
-                        host,
+                    // Call `finish_emit_op_execution()`, as per the sans-IO contract.
+                    finish_emit_op_execution(
+                        continuation,
+                        self,
                         continuation_stack,
                         tracer,
                         stopper,
-                    )?
-                },
-                Continuation::EnterForest(previous_forest) => {
-                    // Restore the previous forest
-                    *current_forest = previous_forest;
-                },
-                Continuation::AfterExitDecorators(node_id) => {
-                    self.execute_after_exit_decorators(node_id, current_forest, host)?
-                },
-                Continuation::AfterExitDecoratorsBasicBlock(node_id) => {
-                    let basic_block_node =
-                        current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
-
-                    self.execute_end_of_block_decorators(
-                        basic_block_node,
-                        node_id,
-                        current_forest,
-                        host,
                     )?;
-                    self.execute_after_exit_decorators(node_id, current_forest, host)?
+                },
+                InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
+                    // load mast forest asynchronously
+                    let (root_id, new_forest) = match self
+                        .load_mast_forest(
+                            callee_hash,
+                            host,
+                            |digest| OperationError::DynamicNodeNotFound { digest },
+                            current_forest,
+                            dyn_node_id,
+                        )
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => return ControlFlow::Break(BreakReason::Err(err)),
+                    };
+
+                    // Finish loading the MAST forest from the Dyn node, as per the sans-IO
+                    // contract.
+                    finish_load_mast_forest_from_dyn_start(
+                        root_id,
+                        new_forest,
+                        self,
+                        current_forest,
+                        continuation_stack,
+                        tracer,
+                        stopper,
+                    )?;
+                },
+                InternalBreakReason::LoadMastForestFromExternal {
+                    external_node_id,
+                    procedure_hash,
+                } => {
+                    // load mast forest asynchronously
+                    let (root_id, new_forest) = match self
+                        .load_mast_forest(
+                            procedure_hash,
+                            host,
+                            |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
+                            current_forest,
+                            external_node_id,
+                        )
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(err) => {
+                            let maybe_enriched_err = maybe_use_caller_error_context(
+                                err,
+                                current_forest,
+                                continuation_stack,
+                                host,
+                            );
+
+                            return ControlFlow::Break(BreakReason::Err(maybe_enriched_err));
+                        },
+                    };
+
+                    // Finish loading the MAST forest from the External node, as per the sans-IO
+                    // contract.
+                    finish_load_mast_forest_from_external(
+                        root_id,
+                        new_forest,
+                        external_node_id,
+                        current_forest,
+                        continuation_stack,
+                        host,
+                        tracer,
+                    )?;
                 },
             }
         }
@@ -775,42 +718,6 @@ impl FastProcessor {
 
     // HELPERS
     // ----------------------------------------------------------------------------------------------
-
-    /// Increments the clock by 1.
-    ///
-    /// To provide a continuation in case the execution is stopped, use
-    /// [Self::increment_clk_with_continuation()].
-    #[inline(always)]
-    pub(crate) fn increment_clk(
-        &mut self,
-        tracer: &mut impl Tracer,
-        stopper: &impl Stopper,
-    ) -> ControlFlow<BreakReason> {
-        self.increment_clk_with_continuation(tracer, stopper, || None)
-    }
-
-    /// Increments the clock by 1, and provides a closure to compute a continuation in case the
-    /// execution is stopped.
-    pub(crate) fn increment_clk_with_continuation(
-        &mut self,
-        tracer: &mut impl Tracer,
-        stopper: &impl Stopper,
-        continuation: impl FnOnce() -> Option<Continuation>,
-    ) -> ControlFlow<BreakReason> {
-        self.clk += 1_u32;
-
-        tracer.increment_clk();
-
-        if self.clk >= self.options.max_cycles() as usize {
-            ControlFlow::Break(BreakReason::Err(ExecutionError::CycleLimitExceeded(
-                self.options.max_cycles(),
-            )))
-        } else if stopper.should_stop(self) {
-            ControlFlow::Break(BreakReason::Stopped(continuation()))
-        } else {
-            ControlFlow::Continue(())
-        }
-    }
 
     async fn load_mast_forest(
         &mut self,
@@ -1094,17 +1001,6 @@ pub struct ExecutionOutput {
     pub advice: AdviceProvider,
     pub memory: Memory,
     pub final_pc_transcript: PrecompileTranscript,
-}
-
-// PROCESSOR STATE
-// ===============================================================================================
-
-/// Processor state accessor.
-impl FastProcessor {
-    #[inline(always)]
-    pub fn state(&mut self) -> ProcessorState<'_> {
-        ProcessorState { processor: self }
-    }
 }
 
 // EXECUTION CONTEXT INFO

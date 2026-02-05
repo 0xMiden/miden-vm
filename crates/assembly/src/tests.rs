@@ -7,16 +7,17 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    EventId, Felt, Operation, Program, StackInputs, Word, assert_matches,
+    Felt, Word, assert_matches,
+    events::EventId,
     field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
-    utils::{Deserializable, Serializable},
+    operations::Operation,
+    program::Program,
+    serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
 };
-#[cfg(test)]
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -1606,7 +1607,7 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         use lib::a::FOO
         begin
             push.FOO
-            exec.a::f
+            exec.lib::a::f
             add
         end"
     );
@@ -4196,58 +4197,6 @@ fn distinguish_grandchildren_correctly() {
     assert_ne!(join_node.first(), join_node.second());
 }
 
-/// Ensures that equal MAST nodes don't get added twice to a MAST forest
-///
-/// This test is disabled because with debug mode always enabled (issue #1821),
-/// nodes get unique debug decorators and are no longer de-duplicated.
-#[test]
-fn duplicate_nodes_with_debug_decorators() {
-    let context = TestContext::new();
-
-    let program_source = r#"
-    begin
-        if.true
-            mul
-        else
-            if.true add else mul end
-        end
-    end
-    "#;
-
-    let program = context.assemble(program_source).unwrap();
-    let mast_forest = program.mast_forest();
-
-    // With debug mode always enabled, we should have AssemblyOps in debug_info.
-    // Note: AssemblyOps are now stored separately in DebugInfo, not as Decorator::AsmOp.
-    assert!(
-        mast_forest.debug_info().num_asm_ops() > 0,
-        "Should have AssemblyOps with always-enabled debug mode"
-    );
-
-    // Count nodes - should have the expected structure
-    assert!(mast_forest.num_nodes() > 3, "Should have expected number of nodes");
-
-    // Verify the program can be executed (functional test)
-    let mut host = DefaultHost::default();
-    let result = miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    );
-    assert!(result.is_ok(), "Program should execute successfully");
-
-    // Check that we have the expected control flow structure
-    // With debug decorators enabled, the program should have more nodes due to less deduplication
-    let nodes = mast_forest.nodes();
-    let has_mul_operations = nodes.iter().any(|node| {
-        matches!(node, miden_core::mast::MastNode::Block(bb)
-            if bb.operations().any(|op| op == &Operation::Mul))
-    });
-    assert!(has_mul_operations, "Should contain mul operations in control flow");
-}
-
 #[test]
 fn explicit_fully_qualified_procedure_references() -> Result<(), Report> {
     const BAR_NAME: &str = "foo::bar";
@@ -4581,6 +4530,390 @@ fn test_cross_module_constant_resolution() -> TestResult {
     let assembler = Assembler::new(context.source_manager());
 
     let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            pub const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a::A_VAL
+            pub proc b_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+#[test]
+fn test_cross_module_quoted_identifier_resolution() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::\"module::a\"",
+        source_file!(
+            &context,
+            r#"
+            # Checks local path resolution
+            pub proc "$item::<T>::fun"
+                exec."$item::<T>::get"
+            end
+
+            # Checks absolute path resolution to a local item
+            proc "$item::<T>::get"
+                exec.::cycle::"module::a"::"$item::<T>::get_impl"
+            end
+
+            proc "$item::<T>::get_impl"
+                push.1
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module::b",
+        source_file!(
+            &context,
+            r#"
+            # Checks that import resolution with quoted path components works
+            use cycle::"module::a"->a
+
+            # Checks that link-time cross-module resolution with quoted path components works
+            pub proc b_proc
+                exec.a::"$item::<T>::fun"
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_kernel_linking_against_its_own_library() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        proc internal_proc
+            caller
+            drop
+            exec.$kernel::lib::lib_proc
+        end
+
+        pub proc kernel_proc
+            exec.internal_proc
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "$kernel::lib",
+        source_file!(
+            &context,
+            r#"
+            pub proc lib_proc
+                swap
+            end
+            "#
+        ),
+    )?;
+
+    let mut assembler = Assembler::new(context.source_manager());
+
+    assembler.compile_and_statically_link(lib)?;
+
+    let _ = assembler.assemble_kernel(kernel)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_syscall_resolution_uses_kernel_module() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        pub proc foo
+            caller
+            drop
+            push.1
+        end
+
+        pub proc bar
+            caller
+            drop
+            push.2
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "userspace",
+        source_file!(
+            &context,
+            r#"
+            pub proc bar
+                push.0
+            end
+            "#
+        ),
+    )?;
+
+    let source = source_file!(
+        &context,
+        r#"
+        use userspace::bar
+
+        proc foo
+            push.0
+        end
+
+        begin
+            syscall.foo
+            syscall.bar
+        end
+        "#
+    );
+
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
+    let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
+
+    let mut assembler = Assembler::with_kernel(context.source_manager(), kernel);
+    assembler.compile_and_statically_link(lib)?;
+    let program = assembler.assemble_program(source)?;
+
+    let mast = {
+        let entry = program.get_node_by_id(program.entrypoint()).unwrap();
+        format!("{}", entry.to_display(program.mast_forest()))
+    };
+
+    let expected = format!(
+        r#"join
+    join
+        basic_block push(2147483648) push(4294967294) mstore drop noop end
+        syscall.{kernel_foo_root}
+    end
+    syscall.{kernel_bar_root}
+end"#
+    );
+    assert_eq!(mast, expected);
+
+    Ok(())
+}
+
+#[test]
+fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        pub proc foo
+            caller
+            drop
+            push.1
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "userspace",
+        source_file!(
+            &context,
+            r#"
+            pub proc bar
+                push.0
+            end
+            "#
+        ),
+    )?;
+
+    let source = source_file!(
+        &context,
+        r#"
+        begin
+            syscall.userspace::bar
+        end
+        "#
+    );
+
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let lib = Assembler::new(context.source_manager()).assemble_library([lib])?;
+
+    let error = Assembler::with_kernel(context.source_manager(), kernel)
+        .with_static_library(lib)?
+        .assemble_program(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+
+    assert_diagnostic_lines!(
+        error,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid syscall: callee must be resolvable to kernel module",
+        regex!(r#",-\[test[\d]+:3:21\]"#),
+        "2 |         begin",
+        "3 |             syscall.userspace::bar",
+        "  :                     ^^^^^^^^^^^^^^",
+        "4 |         end",
+        "  `----"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
+    let context = TestContext::default();
+
+    // The name of this library is `lib::lib` on purpose
+    let lib = context.parse_module_with_path(
+        "lib::lib",
+        source_file!(
+            &context,
+            r#"
+        pub proc lib_proc
+            swap
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let lib = assembler.assemble_library([lib])?;
+
+    // This program triggers a pathological edge case in symbol resolution, caused by the
+    // import-relative reference `exec.lib::lib_proc`. This causes the following to occur:
+    //
+    // 1. We attempt to expand `lib` to an import, which succeeds, giving us a new relative path,
+    //    `lib::lib::lib_proc`.
+    // 2. Because imports can refer to other imported items, we attempt to resolve `lib` as an
+    //    import again, resulting in us expanding the path to `lib::lib::lib::lib::lib_proc`, and so
+    //    on until we blow the stack
+    //
+    // The fix for this is to disregard import expansions of the same import in the same module
+    // after the first time an import is expanded.
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.with_static_library(lib)?.assemble_program(
+        r#"
+        use lib::lib
+
+        begin
+            exec.lib::lib_proc
+        end
+        "#,
+    )?;
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
+fn test_linking_recursive_expansion() -> TestResult {
+    let context = TestContext::default();
+
+    let a_lib = context.parse_module_with_path(
+        "a",
+        source_file!(
+            &context,
+            r#"
+        pub use b::a
+        pub proc x
+            push.1
+        end
+        "#
+        ),
+    )?;
+
+    let b_lib = context.parse_module_with_path(
+        "b",
+        source_file!(
+            &context,
+            r#"
+        pub use a::a
+        pub proc foo
+            exec.a::x
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.assemble_library([a_lib, b_lib])?;
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
+fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
+    let context = TestContext::default();
+
+    let a_lib = context.parse_module_with_path(
+        "a::a",
+        source_file!(
+            &context,
+            r#"
+        pub use b::a2
+        pub proc x
+            push.1
+        end
+        "#
+        ),
+    )?;
+
+    let b_lib = context.parse_module_with_path(
+        "b",
+        source_file!(
+            &context,
+            r#"
+        pub use a::a->a2
+        pub proc foo
+            exec.a2::x
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.assemble_library([a_lib, b_lib])?;
 
     Ok(())
 }

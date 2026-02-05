@@ -3,7 +3,7 @@ use std::{path::PathBuf, time::Instant};
 use clap::Parser;
 use miden_assembly::diagnostics::{Report, WrapErr};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{DEFAULT_CORE_TRACE_FRAGMENT_SIZE, DefaultHost, ExecutionOptions};
+use miden_processor::{DefaultHost, ExecutionOptions};
 use miden_vm::{HashFunction, ProvingOptions, internal::InputFile};
 
 use super::{
@@ -73,7 +73,7 @@ impl ProveCmd {
         let exec_options = ExecutionOptions::new(
             Some(self.max_cycles),
             self.expected_cycles,
-            DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+            ExecutionOptions::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             self.trace,
             !self.release,
         )

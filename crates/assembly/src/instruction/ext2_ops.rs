@@ -1,4 +1,4 @@
-use miden_core::{Operation::*, sys_events::SystemEvent::Ext2Inv};
+use miden_core::{events::SystemEvent::Ext2Inv, operations::Operation::*};
 
 use super::BasicBlockBuilder;
 use crate::{Report, ZERO};

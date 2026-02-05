@@ -6,7 +6,7 @@ use crate::{
         MastForestContributor, MastNode, MastNodeId, Word,
         node::{MastNodeBuilder, MastNodeExt},
     },
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // MAST NODE INFO
