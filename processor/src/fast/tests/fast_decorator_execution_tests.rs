@@ -333,10 +333,7 @@ fn test_decorator_bypass_in_release_mode() {
 fn test_decorator_bypass_in_debug_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
-    let processor = FastProcessor::new(StackInputs::default())
-        .with_advice(AdviceInputs::default())
-        .with_debugging(true)
-        .with_tracing(true);
+    let processor = FastProcessor::new_debug(StackInputs::default(), AdviceInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
