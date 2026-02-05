@@ -73,6 +73,7 @@
 - Consolidated testing hosts by merging `TestHost` into `TestConsistencyHost` (kept `TestHost` as an alias) and reusing the unified host in tests ([#2601](https://github.com/0xMiden/miden-vm/issues/2601)).
 - Consolidated testing hosts by merging `TestHost` into `TestConsistencyHost` (kept `TestHost` as an alias) and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
 - Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
+## 0.20.6 (2026-02-04)
 
 - Fixed issue with link-time symbol resolution that prevented referencing an imported item as locally-defined, e.g. an import like `use some::module::CONST` used via something like `emit.CONST` would fail to resolve correctly. [#2637](https://github.com/0xMiden/miden-vm/pull/2637)
 
@@ -84,11 +85,6 @@
 ## 0.20.4 (2026-01-30)
 
 - Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)
-
-## 0.20.3 (2026-01-27)
-
-- [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
-- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
 
 ## 0.20.3 (2026-01-27)
 
