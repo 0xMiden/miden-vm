@@ -5,7 +5,7 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_core::{DebugOptions, Felt, field::PrimeField64};
+use miden_core::{Felt, field::PrimeField64, operations::DebugOptions};
 use miden_debug_types::{
     DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
 };
@@ -181,38 +181,14 @@ where
 
     fn on_debug(
         &mut self,
-<<<<<<< HEAD
-<<<<<<< HEAD
         _process: &ProcessorState,
-=======
-<<<<<<< HEAD
-        _process: &mut ProcessorState,
->>>>>>> f8f7f52d (refactor(processor): merge TestConsistencyHost and TestHost)
-        _options: &DebugOptions,
-=======
-        _process: &mut ProcessState,
-=======
-        _process: &mut ProcessorState,
->>>>>>> 9c648a8e (fix)
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.push(options.to_string());
         Ok(())
     }
 
-<<<<<<< HEAD
-<<<<<<< HEAD
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
-=======
-<<<<<<< HEAD
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
->>>>>>> f8f7f52d (refactor(processor): merge TestConsistencyHost and TestHost)
-        // Forward to trace collector for counting
-=======
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
-=======
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
->>>>>>> 9c648a8e (fix)
         // Forward to trace collector for counting and execution order tracking
         self.trace_collector.on_trace(process, trace_id)?;
 
