@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE, field::BasedVectorSpace, operations::Operation};
 
 use super::{
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
@@ -25,7 +26,7 @@ use crate::{
     },
     precompile::PrecompileTranscript,
     processor::{Processor, StackInterface, SystemInterface},
-    trace::chiplets::CircuitEvaluation,
+    trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -70,7 +71,7 @@ pub struct TraceGenerationContext {
 /// fragments of configurable length. This requires storing state at the very beginning of the
 /// fragment before any operations are executed, as well as recording the various values read during
 /// execution in the corresponding "replays" (e.g. values read from memory are recorded in
-/// `MemoryReadsReplay`, values read from the advice provider are recorded in `AdviceReplay``, etc).
+/// [MemoryReadsReplay], values read from the advice provider are recorded in [AdviceReplay], etc).
 ///
 /// Then, to generate a trace fragment, we initialize the state of the processor using the stored
 /// snapshot from the beginning of the fragment, and replay the recorded values as they are
@@ -87,32 +88,53 @@ pub struct ExecutionTracer {
     state_snapshot: Option<StateSnapshot>,
 
     // Replay data aggregated throughout the execution of a core trace fragment
-    overflow_table: OverflowTable,
-    overflow_replay: StackOverflowReplay,
+    pub overflow_table: OverflowTable,
+    pub overflow_replay: StackOverflowReplay,
 
-    block_stack: BlockStack,
-    block_stack_replay: BlockStackReplay,
-    execution_context_replay: ExecutionContextReplay,
+    pub block_stack: BlockStack,
+    pub block_stack_replay: BlockStackReplay,
+    pub execution_context_replay: ExecutionContextReplay,
 
-    hasher_chiplet_shim: HasherChipletShim,
-    memory_reads: MemoryReadsReplay,
-    advice: AdviceReplay,
-    external: MastForestResolutionReplay,
+    pub hasher_chiplet_shim: HasherChipletShim,
+    pub memory_reads: MemoryReadsReplay,
+    pub advice: AdviceReplay,
+    pub external: MastForestResolutionReplay,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
-    range_checker: RangeCheckerReplay,
-    memory_writes: MemoryWritesReplay,
-    bitwise: BitwiseReplay,
-    kernel: KernelReplay,
-    hasher_for_chiplet: HasherRequestReplay,
-    ace: AceReplay,
+    pub range_checker: RangeCheckerReplay,
+    pub memory_writes: MemoryWritesReplay,
+    pub bitwise: BitwiseReplay,
+    pub kernel: KernelReplay,
+    pub hasher_for_chiplet: HasherRequestReplay,
+    pub ace: AceReplay,
 
     // Output
     fragment_contexts: Vec<CoreTraceFragmentContext>,
 
     /// The number of rows per core trace fragment.
     fragment_size: usize,
+
+    /// The hasher input state captured in `start_clock_cycle` for HPERM and LOG_PRECOMPILE
+    /// operations, to be consumed in `finalize_clock_cycle`.
+    pending_hasher_input: Option<[Felt; STATE_WIDTH]>,
+
+    /// Tracks the operation being executed in the current clock cycle, for operations whose
+    /// recording requires pre-mutation state (u32 bitwise) or post-mutation stack reads (advice
+    /// pops). Captured in `start_clock_cycle`, consumed in `finalize_clock_cycle`.
+    pending_op: Option<PendingOp>,
+
+    /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall node starts, consumed in
+    /// `finalize_clock_cycle` to call `overflow_table.start_context()`. This is deferred to
+    /// `finalize_clock_cycle` because for Dyncall, `decrement_size` (which interacts with the
+    /// overflow table) is called between `start_clock_cycle` and the actual context start.
+    pending_start_context: bool,
+
+    /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
+    /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
+    /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
+    /// succeeds (i.e., the stack depth check passes).
+    pending_restore_context: bool,
 }
 
 impl ExecutionTracer {
@@ -137,6 +159,10 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
+            pending_hasher_input: None,
+            pending_op: None,
+            pending_start_context: false,
+            pending_restore_context: false,
         }
     }
 
@@ -222,6 +248,16 @@ impl ExecutionTracer {
         };
     }
 
+    /// Pops the overflow table and records the pop in the overflow replay, if the overflow table
+    /// has an element to pop.
+    // TODO(plafer): rename to `decrement_stack_size()` after we remove it from the `Tracer` trait
+    fn try_pop_overflow(&mut self) {
+        if let Some(popped_value) = self.overflow_table.pop() {
+            let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+            self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
+        }
+    }
+
     fn record_control_node_start<P: Processor>(
         &mut self,
         node: &MastNode,
@@ -298,6 +334,20 @@ impl ExecutionTracer {
                     node.digest(),
                 );
 
+                if node.is_syscall() {
+                    self.kernel.record_kernel_proc_access(callee_hash);
+                } else {
+                    // For non-syscall calls, record the FMP initialization write for the new
+                    // context. The new context ID is clock + 1.
+                    let new_ctx: ContextId = (processor.system().clock() + 1).into();
+                    self.memory_writes.record_write_element(
+                        FMP_INIT_VALUE,
+                        FMP_ADDR,
+                        new_ctx,
+                        processor.system().clock(),
+                    );
+                }
+
                 let exec_ctx = {
                     let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
                     ExecutionContextInfo::new(
@@ -324,6 +374,16 @@ impl ExecutionTracer {
                 );
 
                 if dyn_node.is_dyncall() {
+                    // Record the FMP initialization write for the new context.
+                    // The new context ID is clock + 1.
+                    let new_ctx: ContextId = (processor.system().clock() + 1).into();
+                    self.memory_writes.record_write_element(
+                        FMP_INIT_VALUE,
+                        FMP_ADDR,
+                        new_ctx,
+                        processor.system().clock(),
+                    );
+
                     let exec_ctx = {
                         let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
                         // Note: the stack depth to record is the `current_stack_depth - 1` due to
@@ -453,22 +513,213 @@ impl Tracer for ExecutionTracer {
             );
         }
 
+        // Capture hasher input state for HPERM/LogPrecompile operations, which will be
+        // consumed in `finalize_clock_cycle`. We do this before the block stack match because
+        // the processor state has not been mutated yet at this point.
+        if let Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } =
+            &continuation
+        {
+            let op = &current_forest[*node_id].unwrap_basic_block().op_batches()[*batch_index]
+                .ops()[*op_idx_in_batch];
+
+            match op {
+                Operation::HPerm => {
+                    self.pending_hasher_input =
+                        Some(core::array::from_fn(|i| processor.stack_get(i)));
+                },
+                Operation::LogPrecompile => {
+                    let cap_prev = processor.precompile_transcript_state();
+                    let mut input_state = [ZERO; STATE_WIDTH];
+                    for i in 0..8 {
+                        input_state[i] = processor.stack_get(i);
+                    }
+                    input_state[8] = cap_prev[0];
+                    input_state[9] = cap_prev[1];
+                    input_state[10] = cap_prev[2];
+                    input_state[11] = cap_prev[3];
+                    self.pending_hasher_input = Some(input_state);
+                },
+                Operation::U32and => {
+                    self.pending_op = Some(PendingOp::U32And {
+                        a: processor.stack_get(0),
+                        b: processor.stack_get(1),
+                    });
+                    self.try_pop_overflow();
+                },
+                Operation::U32xor => {
+                    self.pending_op = Some(PendingOp::U32Xor {
+                        a: processor.stack_get(0),
+                        b: processor.stack_get(1),
+                    });
+                    self.try_pop_overflow();
+                },
+                Operation::AdvPop => {
+                    self.pending_op = Some(PendingOp::AdvPop);
+                    self.overflow_table.push(processor.stack_get(15), processor.system().clock());
+                },
+                Operation::AdvPopW => {
+                    self.pending_op = Some(PendingOp::AdvPopW);
+                },
+                Operation::Pipe => {
+                    self.pending_op =
+                        Some(PendingOp::Pipe { addr_first_word: processor.stack_get(12) });
+                },
+                Operation::MStore => {
+                    // Record memory write element directly: addr is at stack[0], value at
+                    // stack[1]. The processor state has not been mutated yet.
+                    self.memory_writes.record_write_element(
+                        processor.stack_get(1),
+                        processor.stack_get(0),
+                        processor.system().ctx(),
+                        processor.system().clock(),
+                    );
+                    self.try_pop_overflow();
+                },
+                Operation::MStoreW => {
+                    // Record memory write word directly: addr is at stack[0], word at
+                    // stack[1..5]. The processor state has not been mutated yet.
+                    let word: Word = [
+                        processor.stack_get(1),
+                        processor.stack_get(2),
+                        processor.stack_get(3),
+                        processor.stack_get(4),
+                    ]
+                    .into();
+                    self.memory_writes.record_write_word(
+                        word,
+                        processor.stack_get(0),
+                        processor.system().ctx(),
+                        processor.system().clock(),
+                    );
+                    self.try_pop_overflow();
+                },
+                Operation::MLoad => {
+                    self.pending_op = Some(PendingOp::MLoad { addr: processor.stack_get(0) });
+                },
+                Operation::MLoadW => {
+                    self.pending_op = Some(PendingOp::MLoadW { addr: processor.stack_get(0) });
+                    self.try_pop_overflow();
+                },
+                Operation::MStream => {
+                    self.pending_op =
+                        Some(PendingOp::MStream { addr_first_word: processor.stack_get(12) });
+                },
+                Operation::MrUpdate => {
+                    self.pending_op =
+                        Some(PendingOp::MrUpdate { old_value: processor.stack_get_word(0) });
+                },
+                Operation::MpVerify(_) => {
+                    self.pending_op = Some(PendingOp::MpVerify);
+                },
+                // All operations that increment the stack size (except AdvPop which
+                // is handled above). The value at stack position 15 is what overflows,
+                // and it must be captured before any mutations occur (increment_size is
+                // always called before set()).
+                Operation::Push(_)
+                | Operation::Pad
+                | Operation::Dup0
+                | Operation::Dup1
+                | Operation::Dup2
+                | Operation::Dup3
+                | Operation::Dup4
+                | Operation::Dup5
+                | Operation::Dup6
+                | Operation::Dup7
+                | Operation::Dup9
+                | Operation::Dup11
+                | Operation::Dup13
+                | Operation::Dup15
+                | Operation::U32split
+                | Operation::SDepth
+                | Operation::Clk => {
+                    self.overflow_table.push(processor.stack_get(15), processor.system().clock());
+                },
+                Operation::CryptoStream => {
+                    self.pending_op = Some(PendingOp::CryptoStream {
+                        src_addr: processor.stack_get(12),
+                        dst_addr: processor.stack_get(13),
+                    });
+                },
+                Operation::EvalCircuit => {
+                    self.pending_op = Some(PendingOp::EvalCircuit);
+                },
+                // All operations that decrement the stack size which don't already
+                // have a match arm above.
+                Operation::Assert(_)
+                | Operation::Drop
+                | Operation::Add
+                | Operation::Mul
+                | Operation::And
+                | Operation::Or
+                | Operation::Eq
+                | Operation::U32add3
+                | Operation::U32madd
+                | Operation::CSwap
+                | Operation::CSwapW
+                | Operation::FriE2F4 => {
+                    self.try_pop_overflow();
+                },
+                _ => {},
+            }
+        }
+
         // Update block stack
         match continuation {
             Continuation::ResumeBasicBlock { .. } => {
                 // do nothing, since operations in a basic block don't update the block stack
             },
             Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
-                MastNode::Join(_)
-                | MastNode::Split(_)
-                | MastNode::Loop(_)
-                | MastNode::Dyn(_)
-                | MastNode::Call(_) => {
+                MastNode::Join(_) => {
                     self.record_control_node_start(
                         &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
+                },
+                MastNode::Split(_) | MastNode::Loop(_) => {
+                    // Split and Loop both drop the condition from the stack.
+                    self.try_pop_overflow();
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+                },
+                MastNode::Call(_) => {
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+                    // Defer overflow_table.start_context() to finalize_clock_cycle.
+                    self.pending_start_context = true;
+                },
+                MastNode::Dyn(dyn_node) => {
+                    // Record memory read for callee hash loaded from memory at stack[0].
+                    let mem_addr = processor.stack_get(0);
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    let word = processor
+                        .memory()
+                        .read_word(ctx, mem_addr, clk)
+                        .expect("dyn callee hash memory read should succeed");
+                    self.memory_reads.record_read_word(word, mem_addr, ctx, clk);
+
+                    // Dyn/Dyncall drops the memory address from the stack.
+                    self.try_pop_overflow();
+
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+
+                    if dyn_node.is_dyncall() {
+                        // Defer overflow_table.start_context() to finalize_clock_cycle,
+                        // because decrement_size (which interacts with the overflow table)
+                        // is called before start_context for dyncall.
+                        self.pending_start_context = true;
+                    }
                 },
                 MastNode::Block(basic_block_node) => {
                     self.hasher_for_chiplet.record_hash_basic_block(
@@ -491,7 +742,9 @@ impl Tracer for ExecutionTracer {
             Continuation::FinishLoop { node_id: _, was_entered }
                 if was_entered && processor.stack_get(0) == ONE =>
             {
-                // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
+                // This is a REPEAT operation; it drops the condition from the stack
+                // but doesn't affect the block stack.
+                self.try_pop_overflow();
             },
             Continuation::FinishJoin(_)
             | Continuation::FinishSplit(_)
@@ -499,6 +752,14 @@ impl Tracer for ExecutionTracer {
             | Continuation::FinishDyn(_)
             | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
             | Continuation::FinishBasicBlock(_) => {
+                // FinishLoop END drops the condition from the stack only if the loop
+                // was entered.
+                if let Continuation::FinishLoop { was_entered, .. } = &continuation {
+                    if *was_entered {
+                        self.try_pop_overflow();
+                    }
+                }
+
                 // This is an END operation; pop the block stack and record the node end
                 let block_info = self.block_stack.pop();
                 self.record_node_end(&block_info);
@@ -508,6 +769,11 @@ impl Tracer for ExecutionTracer {
                         parent_ctx: ctx_info.parent_ctx,
                         parent_fn_hash: ctx_info.parent_fn_hash,
                     });
+
+                    // Defer overflow_table.restore_context() to finalize_clock_cycle,
+                    // because finalize_clock_cycle is only called when the operation
+                    // succeeds (i.e., the stack depth check passes).
+                    self.pending_restore_context = true;
                 }
             },
             Continuation::FinishExternal(_)
@@ -527,140 +793,446 @@ impl Tracer for ExecutionTracer {
 
     fn record_hasher_permute(
         &mut self,
-        input_state: [Felt; STATE_WIDTH],
-        output_state: [Felt; STATE_WIDTH],
+        _input_state: [Felt; STATE_WIDTH],
+        _output_state: [Felt; STATE_WIDTH],
     ) {
-        self.hasher_for_chiplet.record_permute_input(input_state);
-        self.hasher_chiplet_shim.record_permute_output(output_state);
+        // no-op: hasher permutation recording is handled in `finalize_clock_cycle` by detecting
+        // HPerm/LogPrecompile from the OperationHelperRegisters and reading the input/output
+        // states from the processor stack.
     }
 
     fn record_hasher_build_merkle_root(
         &mut self,
-        node: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        output_root: Word,
+        _node: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _output_root: Word,
     ) {
-        let path = path.expect("execution tracer expects a valid Merkle path");
-        self.hasher_chiplet_shim.record_build_merkle_root(path, output_root);
-        self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
+        // no-op: Merkle root build recording is handled in `finalize_clock_cycle` by detecting
+        // MpVerify operations. The path is obtained from the advice provider's Merkle store
+        // via `get_merkle_path`, and other values come from the unchanged stack.
     }
 
     fn record_hasher_update_merkle_root(
         &mut self,
-        old_value: Word,
-        new_value: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        old_root: Word,
-        new_root: Word,
+        _old_value: Word,
+        _new_value: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _old_root: Word,
+        _new_root: Word,
     ) {
-        let path = path.expect("execution tracer expects a valid Merkle path");
-        self.hasher_chiplet_shim.record_update_merkle_root(path, old_root, new_root);
-        self.hasher_for_chiplet.record_update_merkle_root(
-            old_value,
-            new_value,
-            path.clone(),
-            index,
-        );
+        // no-op: Merkle root update recording is handled in `finalize_clock_cycle` by detecting
+        // MrUpdate operations. The path is obtained from the advice provider's updated Merkle
+        // store via `get_merkle_path`, and other values come from the pre/post-mutation stack.
     }
 
     fn record_memory_read_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
     ) {
-        self.memory_reads.record_read_element(element, addr, ctx, clk);
+        // no-op: memory read element recording is handled in `start_clock_cycle` and
+        // `finalize_clock_cycle`:
+        // - For MLoad: addr captured in start_clock_cycle, element from post-mutation stack in
+        //   finalize_clock_cycle.
+        // - For HornerEvalBase: values from OperationHelperRegisters in finalize_clock_cycle.
+        // - For EvalCircuit: values re-read from memory in finalize_clock_cycle.
     }
 
-    fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
-        self.memory_reads.record_read_word(word, addr, ctx, clk);
+    fn record_memory_read_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // no-op: memory read word recording is handled in `start_clock_cycle` and
+        // `finalize_clock_cycle`:
+        // - For MLoadW: addr captured in start_clock_cycle, word from post-mutation stack in
+        //   finalize_clock_cycle.
+        // - For MStream: addr captured in start_clock_cycle, words from post-mutation stack in
+        //   finalize_clock_cycle.
+        // - For HornerEvalExt: values from OperationHelperRegisters in finalize_clock_cycle.
+        // - For CryptoStream: src_addr captured in start_clock_cycle, values re-read from memory in
+        //   finalize_clock_cycle.
+        // - For EvalCircuit: values re-read from memory in finalize_clock_cycle.
+        // - For Dyn/Dyncall: recorded directly in start_clock_cycle.
     }
 
     fn record_memory_write_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
     ) {
-        self.memory_writes.record_write_element(element, addr, ctx, clk);
+        // no-op: memory write element recording is handled in `start_clock_cycle`:
+        // - For MStore operations: addr and value are read from the pre-mutation stack.
+        // - For Call (non-syscall) and Dyncall: FMP initialization is recorded in
+        //   `record_control_node_start`.
     }
 
-    fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
-        self.memory_writes.record_write_word(word, addr, ctx, clk);
+    fn record_memory_write_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // no-op: memory write word recording is handled in `start_clock_cycle` and
+        // `finalize_clock_cycle`:
+        // - For MStoreW: word and addr are read from the pre-mutation stack in `start_clock_cycle`.
+        // - For Pipe: words are read from the post-mutation stack, addrs captured in
+        //   `start_clock_cycle`, both recorded in `finalize_clock_cycle`.
+        // - For CryptoStream: ciphertext words are read from the post-mutation stack, dst_addr
+        //   captured in `start_clock_cycle`, both recorded in `finalize_clock_cycle`.
     }
 
-    fn record_advice_pop_stack(&mut self, value: Felt) {
-        self.advice.record_pop_stack(value);
+    fn record_advice_pop_stack(&mut self, _value: Felt) {
+        // no-op: advice pop recording is handled in `finalize_clock_cycle` by detecting
+        // AdvPop operations and reading the value from the post-mutation stack.
     }
 
-    fn record_advice_pop_stack_word(&mut self, word: Word) {
-        self.advice.record_pop_stack_word(word);
+    fn record_advice_pop_stack_word(&mut self, _word: Word) {
+        // no-op: advice pop word recording is handled in `finalize_clock_cycle` by detecting
+        // AdvPopW operations and reading the word from the post-mutation stack.
     }
 
-    fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]) {
-        self.advice.record_pop_stack_dword(words);
+    fn record_advice_pop_stack_dword(&mut self, _words: [Word; 2]) {
+        // no-op: advice pop dword recording is handled in `finalize_clock_cycle` by detecting
+        // Pipe operations and reading the words from the post-mutation stack.
     }
 
-    fn record_u32and(&mut self, a: Felt, b: Felt) {
-        self.bitwise.record_u32and(a, b);
+    fn record_u32and(&mut self, _a: Felt, _b: Felt) {
+        // no-op: u32and recording is handled in `finalize_clock_cycle` using operands captured
+        // in `start_clock_cycle`.
     }
 
-    fn record_u32xor(&mut self, a: Felt, b: Felt) {
-        self.bitwise.record_u32xor(a, b);
+    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {
+        // no-op: u32xor recording is handled in `finalize_clock_cycle` using operands captured
+        // in `start_clock_cycle`.
     }
 
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
-        let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
-        let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
-
-        self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
+    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {
+        // no-op: u32 range check recording is handled in `finalize_clock_cycle` by extracting
+        // lo/hi values from OperationHelperRegisters.
     }
 
-    fn record_kernel_proc_access(&mut self, proc_hash: Word) {
-        self.kernel.record_kernel_proc_access(proc_hash);
+    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {
+        // no-op: kernel proc access recording is handled in `start_clock_cycle` via
+        // `record_control_node_start` when a syscall Call node is encountered.
     }
 
-    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
-        self.ace.record_circuit_evaluation(clk, circuit_eval);
+    fn record_circuit_evaluation(&mut self, _clk: RowIndex, _circuit_eval: CircuitEvaluation) {
+        // no-op: circuit evaluation recording is handled in `finalize_clock_cycle` by detecting
+        // EvalCircuit operations and fetching the circuit from the processor's Ace chiplet.
     }
 
     fn finalize_clock_cycle(
         &mut self,
-        _processor: &FastProcessor,
-        _op_helper_registers: OperationHelperRegisters,
+        processor: &FastProcessor,
+        op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
     ) {
-        // do nothing
-    }
+        // Record hasher permutation for HPERM and LOG_PRECOMPILE operations.
+        // The input_state was captured in `start_clock_cycle`; the output_state is on the stack
+        // after the operation.
+        if matches!(
+            op_helper_registers,
+            OperationHelperRegisters::HPerm { .. } | OperationHelperRegisters::LogPrecompile { .. }
+        ) {
+            let input_state = self
+                .pending_hasher_input
+                .take()
+                .expect("pending_hasher_input should be set for HPerm/LogPrecompile");
 
-    fn increment_stack_size(&mut self, processor: &FastProcessor) {
-        let new_overflow_value = processor.stack_get(15);
-        self.overflow_table.push(new_overflow_value, processor.system().clock());
-    }
+            let output_state: [Felt; STATE_WIDTH] =
+                core::array::from_fn(|i| processor.stack_get(i));
 
-    fn decrement_stack_size(&mut self) {
-        // Record the popped value for replay, if present
-        if let Some(popped_value) = self.overflow_table.pop() {
-            let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-            self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
+            self.hasher_for_chiplet.record_permute_input(input_state);
+            self.hasher_chiplet_shim.record_permute_output(output_state);
+        }
+
+        // Record u32 range checks from OperationHelperRegisters. The lo/hi values used for
+        // range checking are embedded in the helper register variants for all u32 operations.
+        let range_check_values = match &op_helper_registers {
+            OperationHelperRegisters::U32Split { lo, hi } => Some((*lo, *hi)),
+            OperationHelperRegisters::U32Add { sum, carry } => Some((*sum, *carry)),
+            OperationHelperRegisters::U32Add3 { sum, carry } => Some((*sum, *carry)),
+            OperationHelperRegisters::U32Sub { second_new } => Some((*second_new, ZERO)),
+            OperationHelperRegisters::U32Mul { lo, hi } => Some((*lo, *hi)),
+            OperationHelperRegisters::U32Madd { lo, hi } => Some((*lo, *hi)),
+            OperationHelperRegisters::U32Div { lo, hi } => Some((*lo, *hi)),
+            OperationHelperRegisters::U32Assert2 { first, second } => Some((*first, *second)),
+            _ => None,
+        };
+        if let Some((u32_lo, u32_hi)) = range_check_values {
+            let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
+            let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
+            self.range_checker
+                .record_range_check_u32(processor.system().clock(), [t0, t1, t2, t3]);
+        }
+
+        // Record memory reads for HornerEvalBase and HornerEvalExt operations.
+        // The evaluation point alpha (and k0, k1 for ext) come from the helper registers, and
+        // the memory address is at stack[13] which is unchanged by these operations.
+        match &op_helper_registers {
+            OperationHelperRegisters::HornerEvalBase { alpha, .. } => {
+                let addr = processor.stack_get(13);
+                let ctx = processor.system().ctx();
+                let clk = processor.system().clock();
+                let coeffs = alpha.as_basis_coefficients_slice();
+                self.memory_reads.record_read_element(coeffs[0], addr, ctx, clk);
+                self.memory_reads.record_read_element(coeffs[1], addr + ONE, ctx, clk);
+            },
+            OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, .. } => {
+                let addr = processor.stack_get(13);
+                let ctx = processor.system().ctx();
+                let clk = processor.system().clock();
+                let coeffs = alpha.as_basis_coefficients_slice();
+                let word: Word = [coeffs[0], coeffs[1], *k0, *k1].into();
+                self.memory_reads.record_read_word(word, addr, ctx, clk);
+            },
+            _ => {},
+        }
+
+        // Handle pending operations that were detected in `start_clock_cycle`.
+        if let Some(pending_op) = self.pending_op.take() {
+            match pending_op {
+                PendingOp::U32And { a, b } => {
+                    self.bitwise.record_u32and(a, b);
+                },
+                PendingOp::U32Xor { a, b } => {
+                    self.bitwise.record_u32xor(a, b);
+                },
+                PendingOp::AdvPop => {
+                    let value = processor.stack_get(0);
+                    self.advice.record_pop_stack(value);
+                },
+                PendingOp::AdvPopW => {
+                    let word = processor.stack_get_word(0);
+                    self.advice.record_pop_stack_word(word);
+                },
+                PendingOp::Pipe { addr_first_word } => {
+                    let words = [processor.stack_get_word(0), processor.stack_get_word(4)];
+                    self.advice.record_pop_stack_dword(words);
+
+                    // Record memory writes for the two words piped from advice to memory.
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    let addr_second_word = addr_first_word + Felt::new(4);
+                    self.memory_writes.record_write_word(words[0], addr_first_word, ctx, clk);
+                    self.memory_writes.record_write_word(words[1], addr_second_word, ctx, clk);
+                },
+                PendingOp::CryptoStream { src_addr, dst_addr } => {
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    let src_addr_word2 = src_addr + Felt::new(4);
+                    let dst_addr_word2 = dst_addr + Felt::new(4);
+
+                    // Record memory reads for the two plaintext words from source.
+                    let plaintext_word1 = processor
+                        .memory()
+                        .read_word(ctx, src_addr, clk)
+                        .expect("CryptoStream source memory read should succeed");
+                    let plaintext_word2 = processor
+                        .memory()
+                        .read_word(ctx, src_addr_word2, clk)
+                        .expect("CryptoStream source memory read should succeed");
+                    self.memory_reads.record_read_word(plaintext_word1, src_addr, ctx, clk);
+                    self.memory_reads.record_read_word(plaintext_word2, src_addr_word2, ctx, clk);
+
+                    // Record memory writes for the two ciphertext words to destination.
+                    let ciphertext_word1 = processor.stack_get_word(0);
+                    let ciphertext_word2 = processor.stack_get_word(4);
+                    self.memory_writes.record_write_word(ciphertext_word1, dst_addr, ctx, clk);
+                    self.memory_writes.record_write_word(
+                        ciphertext_word2,
+                        dst_addr_word2,
+                        ctx,
+                        clk,
+                    );
+                },
+                PendingOp::EvalCircuit => {
+                    let clk = processor.system().clock();
+                    let ctx = processor.system().ctx();
+
+                    // Record circuit evaluation.
+                    let circuit_eval = processor.ace.circuit_evaluations[&clk].clone();
+                    self.ace.record_circuit_evaluation(clk, circuit_eval);
+
+                    // Record memory reads for the circuit evaluation.
+                    let mut ptr = processor.stack_get(0);
+                    let num_vars = processor.stack_get(1).as_canonical_u64();
+                    let num_eval = processor.stack_get(2).as_canonical_u64();
+                    let num_read_rows = num_vars / 2;
+
+                    // Word reads for the READ section.
+                    for _ in 0..num_read_rows {
+                        let word = processor
+                            .memory()
+                            .read_word(ctx, ptr, clk)
+                            .expect("EvalCircuit memory read should succeed");
+                        self.memory_reads.record_read_word(word, ptr, ctx, clk);
+                        ptr += PTR_OFFSET_WORD;
+                    }
+                    // Element reads for the EVAL section.
+                    for _ in 0..num_eval {
+                        let element = processor
+                            .memory()
+                            .read_element(ctx, ptr)
+                            .expect("EvalCircuit memory read should succeed");
+                        self.memory_reads.record_read_element(element, ptr, ctx, clk);
+                        ptr += PTR_OFFSET_ELEM;
+                    }
+                },
+                PendingOp::MLoad { addr } => {
+                    // Post-mutation: the read element is at stack[0].
+                    let element = processor.stack_get(0);
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    self.memory_reads.record_read_element(element, addr, ctx, clk);
+                },
+                PendingOp::MLoadW { addr } => {
+                    // Post-mutation: the read word is at stack[0..4].
+                    let word = processor.stack_get_word(0);
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    self.memory_reads.record_read_word(word, addr, ctx, clk);
+                },
+                PendingOp::MStream { addr_first_word } => {
+                    // Post-mutation: the two words are at stack[0..8].
+                    let word1 = processor.stack_get_word(0);
+                    let word2 = processor.stack_get_word(4);
+                    let ctx = processor.system().ctx();
+                    let clk = processor.system().clock();
+                    let addr_second_word = addr_first_word + Felt::new(4);
+                    self.memory_reads.record_read_word(word1, addr_first_word, ctx, clk);
+                    self.memory_reads.record_read_word(word2, addr_second_word, ctx, clk);
+                },
+                PendingOp::MrUpdate { old_value } => {
+                    // Post-mutation: new_root replaced old_value at stack[0..4].
+                    // depth, index, old_root, new_value are unchanged.
+                    let new_root = processor.stack_get_word(0);
+                    let depth = processor.stack_get(4);
+                    let index = processor.stack_get(5);
+                    let old_root = processor.stack_get_word(6);
+                    let new_value = processor.stack_get_word(10);
+
+                    // After update_merkle_node, the advice provider contains the updated
+                    // tree, so get_merkle_path with the new root returns the correct path.
+                    let path = processor
+                        .advice_provider()
+                        .get_merkle_path(new_root, depth, index)
+                        .expect("MrUpdate Merkle path should be available after update");
+
+                    self.hasher_chiplet_shim.record_update_merkle_root(&path, old_root, new_root);
+                    self.hasher_for_chiplet
+                        .record_update_merkle_root(old_value, new_value, path, index);
+                },
+                PendingOp::MpVerify => {
+                    // Stack is unchanged by MpVerify, so all values are available post-mutation.
+                    let node = processor.stack_get_word(0);
+                    let depth = processor.stack_get(4);
+                    let index = processor.stack_get(5);
+                    let root = processor.stack_get_word(6);
+
+                    // The advice provider is not modified by MpVerify, so we can get the
+                    // Merkle path directly.
+                    let path = processor
+                        .advice_provider()
+                        .get_merkle_path(root, depth, index)
+                        .expect("MpVerify Merkle path should be available");
+
+                    self.hasher_chiplet_shim.record_build_merkle_root(&path, root);
+                    self.hasher_for_chiplet.record_build_merkle_root(node, path, index);
+                },
+            }
+        }
+
+        // Start a new overflow table context for Call/Syscall/Dyncall. This is deferred from
+        // start_clock_cycle because for Dyncall, decrement_size (which pops from the overflow
+        // table in the current context) happens before start_context.
+        if self.pending_start_context {
+            self.overflow_table.start_context();
+            self.pending_start_context = false;
+        }
+
+        // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
+        // from start_clock_cycle because finalize_clock_cycle is only called when the operation
+        // succeeds (i.e., the stack depth check in processor.restore_context() passes).
+        if self.pending_restore_context {
+            self.overflow_table.restore_context();
+            self.overflow_replay.record_restore_context_overflow_addr(
+                MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
+                self.overflow_table.last_update_clk_in_current_ctx(),
+            );
+            self.pending_restore_context = false;
         }
     }
 
+    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
+        // no-op: overflow table push is handled in `start_clock_cycle` by detecting all
+        // operations that increment the stack size (Push, Pad, Dup*, U32split, SDepth, Clk,
+        // AdvPop) and capturing `stack_get(15)` before any mutations occur.
+    }
+
+    fn decrement_stack_size(&mut self) {
+        // no-op: overflow table pop is handled in `start_clock_cycle` by detecting all
+        // operations and control flow continuations that decrement the stack size.
+    }
+
     fn start_context(&mut self) {
-        self.overflow_table.start_context();
+        // no-op: overflow table context start is handled in `finalize_clock_cycle` when
+        // `pending_start_context` flag is set. The flag is set in `start_clock_cycle` for
+        // Call/Syscall/Dyncall nodes.
     }
 
     fn restore_context(&mut self) {
-        self.overflow_table.restore_context();
-        self.overflow_replay.record_restore_context_overflow_addr(
-            MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
-            self.overflow_table.last_update_clk_in_current_ctx(),
-        );
+        // no-op: overflow table context restore is handled in `start_clock_cycle` when
+        // encountering FinishCall/FinishDyn continuations with context info.
     }
+}
+
+/// Tracks which operation is being executed in the current clock cycle, along with any
+/// pre-mutation state that needs to be captured in `start_clock_cycle` for consumption in
+/// `finalize_clock_cycle`.
+#[derive(Debug)]
+enum PendingOp {
+    /// U32and operation: operands captured before the operation.
+    U32And { a: Felt, b: Felt },
+    /// U32xor operation: operands captured before the operation.
+    U32Xor { a: Felt, b: Felt },
+    /// AdvPop operation: value will be read from stack after the operation.
+    AdvPop,
+    /// AdvPopW operation: word will be read from stack after the operation.
+    AdvPopW,
+    /// Pipe operation: two words will be read from stack after the operation.
+    /// Also records memory writes of the two words to `addr_first_word` and `addr_first_word + 4`.
+    Pipe { addr_first_word: Felt },
+    /// CryptoStream operation: records memory reads of two plaintext words from `src_addr` and
+    /// `src_addr + 4`, and memory writes of two ciphertext words to `dst_addr` and `dst_addr + 4`.
+    CryptoStream { src_addr: Felt, dst_addr: Felt },
+    /// EvalCircuit operation: circuit evaluation will be fetched from the processor's Ace chiplet
+    /// after the operation, and memory reads will be replayed.
+    EvalCircuit,
+    /// MLoad operation: memory read element will be recorded using the captured addr and the
+    /// post-mutation stack value.
+    MLoad { addr: Felt },
+    /// MLoadW operation: memory read word will be recorded using the captured addr and the
+    /// post-mutation stack word.
+    MLoadW { addr: Felt },
+    /// MStream operation: two memory read words will be recorded using the captured addr and the
+    /// post-mutation stack values.
+    MStream { addr_first_word: Felt },
+    /// MrUpdate operation: old_value is captured before the operation overwrites stack[0..4]
+    /// with new_root.
+    MrUpdate { old_value: Word },
+    /// MpVerify operation: all values are available post-mutation since the stack is unchanged.
+    MpVerify,
 }
 
 // HASHER CHIPLET SHIM

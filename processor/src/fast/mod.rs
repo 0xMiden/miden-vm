@@ -134,7 +134,7 @@ pub struct FastProcessor {
     memory: Memory,
 
     /// A map storing metadata per call to the ACE chiplet.
-    ace: Ace,
+    pub(crate) ace: Ace,
 
     /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
     /// `dyncall`) to keep track of the information needed to return to the previous context upon
