@@ -13,6 +13,9 @@ mod span;
 
 use alloc::{string::String, sync::Arc};
 
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "serde")]
@@ -158,6 +161,18 @@ impl<'a> From<&'a std::path::Path> for Uri {
         use alloc::string::ToString;
 
         Self::from(path.display().to_string())
+    }
+}
+
+impl Serializable for Uri {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_str().write_into(target);
+    }
+}
+
+impl Deserializable for Uri {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        String::read_from(source).map(Self::from)
     }
 }
 

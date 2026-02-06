@@ -1,4 +1,4 @@
-use alloc::{string::ToString, sync::Arc, vec::Vec};
+use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
 use miden_crypto::field::PrimeField64;
@@ -238,105 +238,35 @@ impl Deserializable for DebugVarLocation {
 
 impl Serializable for DebugVarInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        // Write name as length-prefixed string
-        let name_bytes = self.name.as_bytes();
-        target.write_u16(name_bytes.len() as u16);
-        target.write_bytes(name_bytes);
-
-        // Write value location
+        (*self.name).write_into(target);
         self.value_location.write_into(target);
-
-        // Write optional type_id
-        if let Some(type_id) = self.type_id {
-            target.write_bool(true);
-            target.write_u32(type_id);
-        } else {
-            target.write_bool(false);
-        }
-
-        // Write optional arg_index
-        if let Some(arg_index) = self.arg_index {
-            target.write_bool(true);
-            target.write_u32(arg_index.get());
-        } else {
-            target.write_bool(false);
-        }
-
-        // Write optional location
-        if let Some(loc) = &self.location {
-            target.write_bool(true);
-            // Write URI as string
-            let uri_str = loc.uri.as_str();
-            target.write_u16(uri_str.len() as u16);
-            target.write_bytes(uri_str.as_bytes());
-            // Write line and column as u32
-            target.write_u32(loc.line.to_u32());
-            target.write_u32(loc.column.to_u32());
-        } else {
-            target.write_bool(false);
-        }
+        self.type_id.write_into(target);
+        self.arg_index.map(|n| n.get()).write_into(target);
+        self.location.write_into(target);
     }
 }
 
 impl Deserializable for DebugVarInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        // Read name
-        let name_len = source.read_u16()? as usize;
-        let mut name_bytes = Vec::with_capacity(name_len);
-        for _ in 0..name_len {
-            name_bytes.push(source.read_u8()?);
-        }
-        let name = alloc::string::String::from_utf8(name_bytes)
-            .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-
-        // Read value location
+        let name: Arc<str> = String::read_from(source)?.into();
         let value_location = DebugVarLocation::read_from(source)?;
+        let type_id = Option::<u32>::read_from(source)?;
+        let arg_index = Option::<u32>::read_from(source)?
+            .map(|n| {
+                NonZeroU32::new(n).ok_or_else(|| {
+                    DeserializationError::InvalidValue("arg_index must be non-zero".into())
+                })
+            })
+            .transpose()?;
+        let location = Option::<FileLineCol>::read_from(source)?;
 
-        let mut debug_var = DebugVarInfo::new(name, value_location);
-
-        // Read optional type_id
-        if source.read_bool()? {
-            debug_var.set_type_id(source.read_u32()?);
-        }
-
-        // Read optional arg_index
-        if source.read_bool()? {
-            let arg_index = source.read_u32()?;
-            if arg_index == 0 {
-                return Err(DeserializationError::InvalidValue(
-                    "arg_index must be non-zero".to_string(),
-                ));
-            }
-            debug_var.set_arg_index(arg_index);
-        }
-
-        // Read optional location
-        if source.read_bool()? {
-            // Read URI
-            let uri_len = source.read_u16()? as usize;
-            let mut uri_bytes = Vec::with_capacity(uri_len);
-            for _ in 0..uri_len {
-                uri_bytes.push(source.read_u8()?);
-            }
-            let uri_str = alloc::string::String::from_utf8(uri_bytes)
-                .map_err(|e| DeserializationError::InvalidValue(e.to_string()))?;
-            let uri = miden_debug_types::Uri::new(uri_str);
-            // Read line and column
-            let line = source.read_u32()?;
-            let column = source.read_u32()?;
-            let loc = FileLineCol::new(
-                uri,
-                miden_debug_types::LineNumber::new(line).ok_or_else(|| {
-                    DeserializationError::InvalidValue("line number cannot be zero".to_string())
-                })?,
-                miden_debug_types::ColumnNumber::new(column).ok_or_else(|| {
-                    DeserializationError::InvalidValue("column number cannot be zero".to_string())
-                })?,
-            );
-            debug_var.set_location(loc);
-        }
-
-        Ok(debug_var)
+        Ok(Self {
+            name,
+            type_id,
+            arg_index,
+            location,
+            value_location,
+        })
     }
 }
 
