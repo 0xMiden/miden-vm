@@ -560,3 +560,104 @@ fn expect_node_in_forest(forest: &MastForest, node_id: MastNodeId) -> &MastNode 
         .get_node_by_id(node_id)
         .unwrap_or_else(|| panic!("invalid node ID stored in continuation: {}", node_id))
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::{vec, vec::Vec};
+
+    use miden_core::mast::{DynNodeBuilder, MastForestContributor};
+
+    use super::*;
+    use crate::{
+        fast::trace_state::{
+            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+            MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+        },
+        trace::parallel::CORE_TRACE_WIDTH,
+    };
+
+    /// Ensures that `get_execution_context_for_dyncall()` correctly populates the
+    /// `parent_next_overflow_addr` field of the execution context info when the stack is at
+    /// MIN_STACK_DEPTH with a non-empty overflow table replay.
+    ///
+    /// Scenario: the stack is at MIN_STACK_DEPTH (16), but the `StackOverflowReplay` contains a
+    /// pending overflow pop (representing a future pop that will occur as the stack grows beyond
+    /// the minimum depth) with a non-zero overflow address. This simulates a state where the
+    /// overflow table replay is non-empty, even though the stack is currently at minimum depth. In
+    /// this case, `get_execution_context_for_dyncall()` should return execution context info with
+    /// `parent_next_overflow_addr` equal to the stack's `last_overflow_addr` (which is ZERO),
+    /// rather than peeking at the replay queue and returning the post-pop overflow address from the
+    /// future/unrelated overflow pop (which is non-zero).
+    ///
+    /// (`last_overflow_addr != ZERO`). The overflow replay queue contains a stale entry whose
+    /// post-pop overflow address is 42. The method should return the stack's `last_overflow_addr`,
+    /// but instead peeks at the replay queue and returns ZERO.
+    #[test]
+    fn get_execution_context_for_dyncall_at_min_stack_depth_with_overflow_entries() {
+        // Build a MastForest with a single DYNCALL node.
+        let mut forest = MastForest::new();
+        let dyncall_node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+
+        let continuation = Continuation::StartNode(dyncall_node_id);
+
+        // Create a stack of depth 16 (and hence `last_overflow_addr == ZERO`).
+        let stack = StackState::new([ZERO; MIN_STACK_DEPTH], MIN_STACK_DEPTH, ZERO);
+
+        // Place an entry in the overflow replay queue that corresponds to a future pop (once the
+        // stack will have grown beyond the minimum depth).
+        let overflow_addr_of_future_pop = Felt::new(42);
+        let mut stack_overflow_replay = StackOverflowReplay::new();
+        stack_overflow_replay.record_pop_overflow(Felt::new(99), overflow_addr_of_future_pop);
+
+        let system = SystemState {
+            clk: 0u32.into(),
+            ctx: ContextId::root(),
+            fn_hash: Word::default(),
+            pc_transcript_state: Word::default(),
+        };
+
+        let processor = ReplayProcessor::new(
+            system,
+            stack,
+            stack_overflow_replay,
+            ExecutionContextReplay::default(),
+            AdviceReplay::default(),
+            MemoryReadsReplay::default(),
+            HasherResponseReplay::default(),
+            MastForestResolutionReplay::default(),
+            1u32.into(),
+        );
+
+        // Create a minimal CoreTraceFragment — its contents are unused by the method under
+        // test.
+        let mut columns_data: Vec<Vec<Felt>> =
+            (0..CORE_TRACE_WIDTH).map(|_| vec![ZERO; 1]).collect();
+        let column_slices: Vec<&mut [Felt]> =
+            columns_data.iter_mut().map(|v| v.as_mut_slice()).collect();
+        let mut fragment = CoreTraceFragment {
+            columns: column_slices.try_into().expect("CORE_TRACE_WIDTH columns"),
+        };
+
+        let tracer = CoreTraceGenerationTracer::new(
+            &mut fragment,
+            DecoderState { current_addr: ZERO, parent_addr: ZERO },
+            BlockAddressReplay::default(),
+            BlockStackReplay::default(),
+        );
+
+        // Call the method under test.
+        let ctx_info = tracer
+            .get_execution_context_for_dyncall(&forest, &continuation, &processor)
+            .expect("should return Some for a DYNCALL StartNode continuation");
+
+        // check for bug: When the stack is at MIN_STACK_DEPTH with a non-empty overflow table
+        // replay queue, parent_next_overflow_addr should reflect the current overflow state of
+        // ZERO; NOT the non-zero overflow address from the future pop in the replay queue (which
+        // would indicate an incorrect peek at the replay queue).
+        assert_eq!(
+            ctx_info.parent_next_overflow_addr, ZERO,
+            "parent_next_overflow_addr should be ZERO, reflecting the current overflow state of the stack, \
+            and should not reflect the non-zero overflow address from the future pop in the replay queue"
+        );
+    }
+}
