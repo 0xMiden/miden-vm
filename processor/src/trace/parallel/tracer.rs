@@ -473,34 +473,44 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         continuation: &Continuation,
         processor: &ReplayProcessor,
     ) -> Option<ExecutionContextInfo> {
-        if let Continuation::StartNode(node_id) = &continuation {
-            let node = current_forest
-                .get_node_by_id(*node_id)
-                .expect("invalid node ID stored in continuation");
+        let Continuation::StartNode(node_id) = &continuation else {
+            return None;
+        };
 
-            if let MastNode::Dyn(dyn_node) = node
-                && dyn_node.is_dyncall()
-            {
-                // Capture execution context info after dropping the top stack element.
-                let stack_depth =
-                    core::cmp::max(processor.stack.stack_depth() - 1, MIN_STACK_DEPTH) as u32;
-                let overflow_addr = match processor.stack_overflow_replay.peek_replay_pop_overflow()
-                {
-                    Some((_, overflow_addr)) => *overflow_addr,
-                    None => ZERO,
-                };
+        let node = current_forest
+            .get_node_by_id(*node_id)
+            .expect("invalid node ID stored in continuation");
 
-                let ctx_info = ExecutionContextInfo::new(
-                    processor.system.ctx,
-                    processor.system.fn_hash,
-                    stack_depth,
-                    overflow_addr,
-                );
-                return Some(ctx_info);
-            }
+        let MastNode::Dyn(dyn_node) = node else {
+            return None;
+        };
+
+        if !dyn_node.is_dyncall() {
+            return None;
         }
 
-        None
+        let (stack_depth_after_drop, overflow_addr_after_drop) = if processor.stack.stack_depth()
+            > MIN_STACK_DEPTH
+        {
+            // Stack is above minimum depth, so peek at the overflow replay for the post-pop
+            // overflow address.
+            let (_, overflow_addr_after_drop) =
+                    processor.stack_overflow_replay.peek_replay_pop_overflow().expect("stack depth is above minimum, so we expect a corresponding overflow pop in the replay");
+            let stack_depth_after_drop = processor.stack.stack_depth() - 1;
+
+            (stack_depth_after_drop as u32, *overflow_addr_after_drop)
+        } else {
+            // Stack is at minimum depth already, so the overflow address is ZERO and the depth
+            // remains the same after the drop.
+            (processor.stack.stack_depth() as u32, ZERO)
+        };
+
+        Some(ExecutionContextInfo::new(
+            processor.system.ctx,
+            processor.system.fn_hash,
+            stack_depth_after_drop,
+            overflow_addr_after_drop,
+        ))
     }
 
     /// Returns the loop condition sitting on top of the stack for a `FinishLoop` continuation, or
