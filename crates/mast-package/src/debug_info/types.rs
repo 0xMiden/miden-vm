@@ -15,11 +15,43 @@
 //! Debuggers can use this information along with `DebugVar` decorators in the MAST
 //! to provide source-level variable inspection, stepping, and call stack visualization.
 
-use alloc::{string::String, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
+use miden_core::Word;
 use miden_debug_types::{ColumnNumber, LineNumber};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+// DEBUG TYPE INDEX
+// ================================================================================================
+
+/// A strongly-typed index into the type table of a [`DebugTypesSection`].
+///
+/// This prevents accidental misuse of raw `u32` indices (e.g., using a string index
+/// where a type index is expected).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct DebugTypeIdx(u32);
+
+impl DebugTypeIdx {
+    /// Returns the inner value as a `u32`.
+    pub fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl From<u32> for DebugTypeIdx {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<DebugTypeIdx> for u32 {
+    fn from(value: DebugTypeIdx) -> Self {
+        value.0
+    }
+}
 
 // DEBUG TYPES SECTION
 // ================================================================================================
@@ -40,7 +72,7 @@ pub struct DebugTypesSection {
     /// Version of the debug types format
     pub version: u8,
     /// String table containing type names, field names
-    pub strings: Vec<String>,
+    pub strings: Vec<Arc<str>>,
     /// Type table containing all type definitions
     pub types: Vec<DebugTypeInfo>,
 }
@@ -56,9 +88,8 @@ impl DebugTypesSection {
     }
 
     /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
-        let s = s.into();
-        if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
+    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
+        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
             return idx as u32;
         }
         let idx = self.strings.len() as u32;
@@ -67,20 +98,20 @@ impl DebugTypesSection {
     }
 
     /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<&str> {
-        self.strings.get(idx as usize).map(String::as_str)
+    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
+        self.strings.get(idx as usize).cloned()
     }
 
     /// Adds a type to the type table and returns its index.
-    pub fn add_type(&mut self, ty: DebugTypeInfo) -> u32 {
-        let idx = self.types.len() as u32;
+    pub fn add_type(&mut self, ty: DebugTypeInfo) -> DebugTypeIdx {
+        let idx = DebugTypeIdx(self.types.len() as u32);
         self.types.push(ty);
         idx
     }
 
     /// Gets a type by index.
-    pub fn get_type(&self, idx: u32) -> Option<&DebugTypeInfo> {
-        self.types.get(idx as usize)
+    pub fn get_type(&self, idx: DebugTypeIdx) -> Option<&DebugTypeInfo> {
+        self.types.get(idx.0 as usize)
     }
 
     /// Returns true if the section is empty (no types).
@@ -108,7 +139,7 @@ pub struct DebugSourcesSection {
     /// Version of the debug sources format
     pub version: u8,
     /// String table containing file paths
-    pub strings: Vec<String>,
+    pub strings: Vec<Arc<str>>,
     /// Source file table
     pub files: Vec<DebugFileInfo>,
 }
@@ -124,9 +155,8 @@ impl DebugSourcesSection {
     }
 
     /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
-        let s = s.into();
-        if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
+    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
+        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
             return idx as u32;
         }
         let idx = self.strings.len() as u32;
@@ -135,8 +165,8 @@ impl DebugSourcesSection {
     }
 
     /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<&str> {
-        self.strings.get(idx as usize).map(String::as_str)
+    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
+        self.strings.get(idx as usize).cloned()
     }
 
     /// Adds a file to the file table and returns its index.
@@ -180,7 +210,7 @@ pub struct DebugFunctionsSection {
     /// Version of the debug functions format
     pub version: u8,
     /// String table containing function names, variable names, linkage names
-    pub strings: Vec<String>,
+    pub strings: Vec<Arc<str>>,
     /// Function debug information
     pub functions: Vec<DebugFunctionInfo>,
 }
@@ -196,9 +226,8 @@ impl DebugFunctionsSection {
     }
 
     /// Adds a string to the string table and returns its index.
-    pub fn add_string(&mut self, s: impl Into<String>) -> u32 {
-        let s = s.into();
-        if let Some(idx) = self.strings.iter().position(|existing| existing == &s) {
+    pub fn add_string(&mut self, s: Arc<str>) -> u32 {
+        if let Some(idx) = self.strings.iter().position(|existing| **existing == *s) {
             return idx as u32;
         }
         let idx = self.strings.len() as u32;
@@ -207,8 +236,8 @@ impl DebugFunctionsSection {
     }
 
     /// Gets a string by index.
-    pub fn get_string(&self, idx: u32) -> Option<&str> {
-        self.strings.get(idx as usize).map(String::as_str)
+    pub fn get_string(&self, idx: u32) -> Option<Arc<str>> {
+        self.strings.get(idx as usize).cloned()
     }
 
     /// Adds a function to the function table.
@@ -237,12 +266,12 @@ pub enum DebugTypeInfo {
     /// A pointer type pointing to another type
     Pointer {
         /// The type being pointed to (index into type table)
-        pointee_type_idx: u32,
+        pointee_type_idx: DebugTypeIdx,
     },
     /// An array type
     Array {
         /// The element type (index into type table)
-        element_type_idx: u32,
+        element_type_idx: DebugTypeIdx,
         /// Number of elements (None for dynamically-sized arrays)
         count: Option<u32>,
     },
@@ -258,15 +287,18 @@ pub enum DebugTypeInfo {
     /// A function type
     Function {
         /// Return type (index into type table, None for void)
-        return_type_idx: Option<u32>,
+        return_type_idx: Option<DebugTypeIdx>,
         /// Parameter types (indices into type table)
-        param_type_indices: Vec<u32>,
+        param_type_indices: Vec<DebugTypeIdx>,
     },
     /// An unknown or opaque type
     Unknown,
 }
 
 /// Primitive type variants supported by the debug info format.
+///
+/// New variants must be added at the end to maintain backwards compatibility
+/// with previously serialized debug info.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[repr(u8)]
@@ -274,35 +306,35 @@ pub enum DebugPrimitiveType {
     /// Void type (0 bytes)
     Void = 0,
     /// Boolean (1 byte)
-    Bool = 1,
+    Bool,
     /// Signed 8-bit integer
-    I8 = 2,
+    I8,
     /// Unsigned 8-bit integer
-    U8 = 3,
+    U8,
     /// Signed 16-bit integer
-    I16 = 4,
+    I16,
     /// Unsigned 16-bit integer
-    U16 = 5,
+    U16,
     /// Signed 32-bit integer
-    I32 = 6,
+    I32,
     /// Unsigned 32-bit integer
-    U32 = 7,
+    U32,
     /// Signed 64-bit integer
-    I64 = 8,
+    I64,
     /// Unsigned 64-bit integer
-    U64 = 9,
+    U64,
     /// Signed 128-bit integer
-    I128 = 10,
+    I128,
     /// Unsigned 128-bit integer
-    U128 = 11,
+    U128,
     /// 32-bit floating point
-    F32 = 12,
+    F32,
     /// 64-bit floating point
-    F64 = 13,
+    F64,
     /// Miden field element (64-bit, but with field semantics)
-    Felt = 14,
+    Felt,
     /// Miden word (4 field elements)
-    Word = 15,
+    Word,
 }
 
 impl DebugPrimitiveType {
@@ -367,7 +399,7 @@ pub struct DebugFieldInfo {
     /// Name of the field (index into string table)
     pub name_idx: u32,
     /// Type of the field (index into type table)
-    pub type_idx: u32,
+    pub type_idx: DebugTypeIdx,
     /// Byte offset within the struct
     pub offset: u32,
 }
@@ -392,7 +424,9 @@ pub struct DebugFileInfo {
     ///
     /// When present, debuggers can use this to verify that the source file on disk
     /// matches the version used during compilation.
-    pub checksum: Option<[u8; 32]>,
+    ///
+    /// Boxed to reduce the size of `DebugFileInfo` when checksums are not used.
+    pub checksum: Option<Box<[u8; 32]>>,
 }
 
 impl DebugFileInfo {
@@ -403,7 +437,7 @@ impl DebugFileInfo {
 
     /// Sets the checksum.
     pub fn with_checksum(mut self, checksum: [u8; 32]) -> Self {
-        self.checksum = Some(checksum);
+        self.checksum = Some(Box::new(checksum));
         self
     }
 }
@@ -429,10 +463,10 @@ pub struct DebugFunctionInfo {
     /// Column number where the function starts (1-indexed)
     pub column: ColumnNumber,
     /// Type of this function (index into type table, optional)
-    pub type_idx: Option<u32>,
+    pub type_idx: Option<DebugTypeIdx>,
     /// MAST root digest of this function (if known).
     /// This links the debug info to the compiled code.
-    pub mast_root: Option<[u8; 32]>,
+    pub mast_root: Option<Word>,
     /// Local variables declared in this function
     pub variables: Vec<DebugVariableInfo>,
     /// Inline call sites within this function
@@ -462,13 +496,13 @@ impl DebugFunctionInfo {
     }
 
     /// Sets the type index.
-    pub fn with_type(mut self, type_idx: u32) -> Self {
+    pub fn with_type(mut self, type_idx: DebugTypeIdx) -> Self {
         self.type_idx = Some(type_idx);
         self
     }
 
     /// Sets the MAST root digest.
-    pub fn with_mast_root(mut self, mast_root: [u8; 32]) -> Self {
+    pub fn with_mast_root(mut self, mast_root: Word) -> Self {
         self.mast_root = Some(mast_root);
         self
     }
@@ -497,7 +531,7 @@ pub struct DebugVariableInfo {
     /// Name of the variable (index into string table)
     pub name_idx: u32,
     /// Type of the variable (index into type table)
-    pub type_idx: u32,
+    pub type_idx: DebugTypeIdx,
     /// If this is a parameter, its 1-based index (0 = not a parameter)
     pub arg_index: u32,
     /// Line where the variable is declared (1-indexed)
@@ -531,7 +565,12 @@ pub struct DebugVariableInfo {
 
 impl DebugVariableInfo {
     /// Creates a new variable info.
-    pub fn new(name_idx: u32, type_idx: u32, line: LineNumber, column: ColumnNumber) -> Self {
+    pub fn new(
+        name_idx: u32,
+        type_idx: DebugTypeIdx,
+        line: LineNumber,
+        column: ColumnNumber,
+    ) -> Self {
         Self {
             name_idx,
             type_idx,
@@ -595,9 +634,9 @@ mod tests {
     fn test_debug_types_section_string_dedup() {
         let mut section = DebugTypesSection::new();
 
-        let idx1 = section.add_string("test.rs");
-        let idx2 = section.add_string("main.rs");
-        let idx3 = section.add_string("test.rs"); // Duplicate
+        let idx1 = section.add_string(Arc::from("test.rs"));
+        let idx2 = section.add_string(Arc::from("main.rs"));
+        let idx3 = section.add_string(Arc::from("test.rs")); // Duplicate
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
@@ -609,9 +648,9 @@ mod tests {
     fn test_debug_sources_section_string_dedup() {
         let mut section = DebugSourcesSection::new();
 
-        let idx1 = section.add_string("test.rs");
-        let idx2 = section.add_string("main.rs");
-        let idx3 = section.add_string("test.rs"); // Duplicate
+        let idx1 = section.add_string(Arc::from("test.rs"));
+        let idx2 = section.add_string(Arc::from("main.rs"));
+        let idx3 = section.add_string(Arc::from("test.rs")); // Duplicate
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);
@@ -623,9 +662,9 @@ mod tests {
     fn test_debug_functions_section_string_dedup() {
         let mut section = DebugFunctionsSection::new();
 
-        let idx1 = section.add_string("foo");
-        let idx2 = section.add_string("bar");
-        let idx3 = section.add_string("foo"); // Duplicate
+        let idx1 = section.add_string(Arc::from("foo"));
+        let idx2 = section.add_string(Arc::from("bar"));
+        let idx3 = section.add_string(Arc::from("foo")); // Duplicate
 
         assert_eq!(idx1, 0);
         assert_eq!(idx2, 1);

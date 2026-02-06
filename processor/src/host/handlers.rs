@@ -88,12 +88,6 @@ pub type DebugError = Box<dyn Error + Send + Sync + 'static>;
 /// into this type since it is a [`Box`].
 pub type TraceError = Box<dyn Error + Send + Sync + 'static>;
 
-/// A generic [`Error`] wrapper for debug variable handler errors.
-///
-/// Debug variable handlers can define their own [`Error`] type which can be seamlessly converted
-/// into this type since it is a [`Box`].
-pub type DebugVarError = Box<dyn Error + Send + Sync + 'static>;
-
 // EVENT HANDLER REGISTRY
 // ================================================================================================
 
@@ -229,11 +223,8 @@ pub trait DebugHandler: Sync {
     ///
     /// This provides debuggers with information about source-level variables and
     /// where their values can be found during execution.
-    fn on_debug_var(
-        &mut self,
-        _process: &ProcessorState,
-        _var_info: &DebugVarInfo,
-    ) -> Result<(), DebugVarError> {
-        Ok(())
-    }
+    ///
+    /// This is purely informational; implementations should either silently handle
+    /// any errors or panic if an invariant is violated.
+    fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 }

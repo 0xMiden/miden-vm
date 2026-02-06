@@ -1,16 +1,18 @@
 //! Serialization and deserialization for the debug_info section.
 
-use alloc::string::String;
+use alloc::sync::Arc;
 
-use miden_core::serde::{
-    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+use miden_core::{
+    Word,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{ColumnNumber, LineNumber};
 
 use super::{
     DEBUG_FUNCTIONS_VERSION, DEBUG_SOURCES_VERSION, DEBUG_TYPES_VERSION, DebugFieldInfo,
     DebugFileInfo, DebugFunctionInfo, DebugFunctionsSection, DebugInlinedCallInfo,
-    DebugPrimitiveType, DebugSourcesSection, DebugTypeInfo, DebugTypesSection, DebugVariableInfo,
+    DebugPrimitiveType, DebugSourcesSection, DebugTypeIdx, DebugTypeInfo, DebugTypesSection,
+    DebugVariableInfo,
 };
 
 // DEBUG TYPES SECTION SERIALIZATION
@@ -171,11 +173,11 @@ impl Serializable for DebugTypeInfo {
             },
             Self::Pointer { pointee_type_idx } => {
                 target.write_u8(TYPE_TAG_POINTER);
-                target.write_u32(*pointee_type_idx);
+                target.write_u32(pointee_type_idx.as_u32());
             },
             Self::Array { element_type_idx, count } => {
                 target.write_u8(TYPE_TAG_ARRAY);
-                target.write_u32(*element_type_idx);
+                target.write_u32(element_type_idx.as_u32());
                 target.write_bool(count.is_some());
                 if let Some(count) = count {
                     target.write_u32(*count);
@@ -194,11 +196,11 @@ impl Serializable for DebugTypeInfo {
                 target.write_u8(TYPE_TAG_FUNCTION);
                 target.write_bool(return_type_idx.is_some());
                 if let Some(idx) = return_type_idx {
-                    target.write_u32(*idx);
+                    target.write_u32(idx.as_u32());
                 }
                 target.write_usize(param_type_indices.len());
                 for idx in param_type_indices {
-                    target.write_u32(*idx);
+                    target.write_u32(idx.as_u32());
                 }
             },
             Self::Unknown => {
@@ -222,11 +224,11 @@ impl Deserializable for DebugTypeInfo {
                 Ok(Self::Primitive(prim))
             },
             TYPE_TAG_POINTER => {
-                let pointee_type_idx = source.read_u32()?;
+                let pointee_type_idx = DebugTypeIdx::from(source.read_u32()?);
                 Ok(Self::Pointer { pointee_type_idx })
             },
             TYPE_TAG_ARRAY => {
-                let element_type_idx = source.read_u32()?;
+                let element_type_idx = DebugTypeIdx::from(source.read_u32()?);
                 let has_count = source.read_bool()?;
                 let count = if has_count { Some(source.read_u32()?) } else { None };
                 Ok(Self::Array { element_type_idx, count })
@@ -243,11 +245,15 @@ impl Deserializable for DebugTypeInfo {
             },
             TYPE_TAG_FUNCTION => {
                 let has_return = source.read_bool()?;
-                let return_type_idx = if has_return { Some(source.read_u32()?) } else { None };
+                let return_type_idx = if has_return {
+                    Some(DebugTypeIdx::from(source.read_u32()?))
+                } else {
+                    None
+                };
                 let params_len = source.read_usize()?;
                 let mut param_type_indices = alloc::vec::Vec::with_capacity(params_len);
                 for _ in 0..params_len {
-                    param_type_indices.push(source.read_u32()?);
+                    param_type_indices.push(DebugTypeIdx::from(source.read_u32()?));
                 }
                 Ok(Self::Function { return_type_idx, param_type_indices })
             },
@@ -263,7 +269,7 @@ impl Deserializable for DebugTypeInfo {
 impl Serializable for DebugFieldInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.name_idx);
-        target.write_u32(self.type_idx);
+        target.write_u32(self.type_idx.as_u32());
         target.write_u32(self.offset);
     }
 }
@@ -271,7 +277,7 @@ impl Serializable for DebugFieldInfo {
 impl Deserializable for DebugFieldInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let name_idx = source.read_u32()?;
-        let type_idx = source.read_u32()?;
+        let type_idx = DebugTypeIdx::from(source.read_u32()?);
         let offset = source.read_u32()?;
         Ok(Self { name_idx, type_idx, offset })
     }
@@ -286,7 +292,7 @@ impl Serializable for DebugFileInfo {
 
         target.write_bool(self.checksum.is_some());
         if let Some(checksum) = &self.checksum {
-            target.write_bytes(checksum);
+            target.write_bytes(checksum.as_ref());
         }
     }
 }
@@ -300,7 +306,7 @@ impl Deserializable for DebugFileInfo {
             let bytes = source.read_slice(32)?;
             let mut arr = [0u8; 32];
             arr.copy_from_slice(bytes);
-            Some(arr)
+            Some(alloc::boxed::Box::new(arr))
         } else {
             None
         };
@@ -327,12 +333,12 @@ impl Serializable for DebugFunctionInfo {
 
         target.write_bool(self.type_idx.is_some());
         if let Some(idx) = self.type_idx {
-            target.write_u32(idx);
+            target.write_u32(idx.as_u32());
         }
 
         target.write_bool(self.mast_root.is_some());
         if let Some(root) = &self.mast_root {
-            target.write_bytes(root);
+            root.write_into(target);
         }
 
         // Write variables
@@ -367,14 +373,15 @@ impl Deserializable for DebugFunctionInfo {
         let column = ColumnNumber::new(column_raw).unwrap_or_default();
 
         let has_type = source.read_bool()?;
-        let type_idx = if has_type { Some(source.read_u32()?) } else { None };
+        let type_idx = if has_type {
+            Some(DebugTypeIdx::from(source.read_u32()?))
+        } else {
+            None
+        };
 
         let has_mast_root = source.read_bool()?;
         let mast_root = if has_mast_root {
-            let bytes = source.read_slice(32)?;
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(bytes);
-            Some(arr)
+            Some(Word::read_from(source)?)
         } else {
             None
         };
@@ -413,7 +420,7 @@ impl Deserializable for DebugFunctionInfo {
 impl Serializable for DebugVariableInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
         target.write_u32(self.name_idx);
-        target.write_u32(self.type_idx);
+        target.write_u32(self.type_idx.as_u32());
         target.write_u32(self.arg_index);
         target.write_u32(self.line.to_u32());
         target.write_u32(self.column.to_u32());
@@ -424,7 +431,7 @@ impl Serializable for DebugVariableInfo {
 impl Deserializable for DebugVariableInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let name_idx = source.read_u32()?;
-        let type_idx = source.read_u32()?;
+        let type_idx = DebugTypeIdx::from(source.read_u32()?);
         let arg_index = source.read_u32()?;
         let line_raw = source.read_u32()?;
         let column_raw = source.read_u32()?;
@@ -475,12 +482,13 @@ fn write_string<W: ByteWriter>(target: &mut W, s: &str) {
     target.write_bytes(bytes);
 }
 
-fn read_string<R: ByteReader>(source: &mut R) -> Result<String, DeserializationError> {
+fn read_string<R: ByteReader>(source: &mut R) -> Result<Arc<str>, DeserializationError> {
     let len = source.read_usize()?;
     let bytes = source.read_slice(len)?;
-    String::from_utf8(bytes.to_vec()).map_err(|err| {
+    let s = core::str::from_utf8(bytes).map_err(|err| {
         DeserializationError::InvalidValue(alloc::format!("invalid utf-8 in string: {err}"))
-    })
+    })?;
+    Ok(Arc::from(s))
 }
 
 #[cfg(test)]
@@ -512,9 +520,9 @@ mod tests {
         });
 
         // Add a struct type
-        let x_idx = section.add_string("x");
-        let y_idx = section.add_string("y");
-        let point_idx = section.add_string("Point");
+        let x_idx = section.add_string(Arc::from("x"));
+        let y_idx = section.add_string(Arc::from("y"));
+        let point_idx = section.add_string(Arc::from("Point"));
         section.add_type(DebugTypeInfo::Struct {
             name_idx: point_idx,
             size: 16,
@@ -539,10 +547,10 @@ mod tests {
     fn test_debug_sources_section_roundtrip() {
         let mut section = DebugSourcesSection::new();
 
-        let path_idx = section.add_string("test.rs");
+        let path_idx = section.add_string(Arc::from("test.rs"));
         section.add_file(DebugFileInfo::new(path_idx));
 
-        let path2_idx = section.add_string("main.rs");
+        let path2_idx = section.add_string(Arc::from("main.rs"));
         section.add_file(DebugFileInfo::new(path2_idx).with_checksum([42u8; 32]));
 
         roundtrip(&section);
@@ -552,16 +560,17 @@ mod tests {
     fn test_debug_functions_section_roundtrip() {
         let mut section = DebugFunctionsSection::new();
 
-        let name_idx = section.add_string("test_function");
+        let name_idx = section.add_string(Arc::from("test_function"));
 
         let line = LineNumber::new(10).unwrap();
         let column = ColumnNumber::new(1).unwrap();
         let mut func = DebugFunctionInfo::new(name_idx, 0, line, column);
-        let var_name_idx = section.add_string("x");
+        let var_name_idx = section.add_string(Arc::from("x"));
         let var_line = LineNumber::new(10).unwrap();
         let var_column = ColumnNumber::new(5).unwrap();
         func.add_variable(
-            DebugVariableInfo::new(var_name_idx, 0, var_line, var_column).with_arg_index(1),
+            DebugVariableInfo::new(var_name_idx, DebugTypeIdx::from(0), var_line, var_column)
+                .with_arg_index(1),
         );
         section.add_function(func);
 
@@ -606,8 +615,12 @@ mod tests {
     #[test]
     fn test_function_type_roundtrip() {
         let ty = DebugTypeInfo::Function {
-            return_type_idx: Some(0),
-            param_type_indices: alloc::vec![1, 2, 3],
+            return_type_idx: Some(DebugTypeIdx::from(0)),
+            param_type_indices: alloc::vec![
+                DebugTypeIdx::from(1),
+                DebugTypeIdx::from(2),
+                DebugTypeIdx::from(3)
+            ],
         };
         roundtrip(&ty);
 
@@ -630,13 +643,13 @@ mod tests {
         let col1 = ColumnNumber::new(1).unwrap();
         let mut func = DebugFunctionInfo::new(0, 0, line1, col1)
             .with_linkage_name(1)
-            .with_type(2)
-            .with_mast_root([0xab; 32]);
+            .with_type(DebugTypeIdx::from(2))
+            .with_mast_root(Word::default());
 
         let var_line = LineNumber::new(5).unwrap();
         let var_col = ColumnNumber::new(10).unwrap();
         func.add_variable(
-            DebugVariableInfo::new(0, 0, var_line, var_col)
+            DebugVariableInfo::new(0, DebugTypeIdx::from(0), var_line, var_col)
                 .with_arg_index(1)
                 .with_scope_depth(2),
         );

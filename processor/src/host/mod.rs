@@ -21,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::{DebugHandler, DebugVarError, EventError};
+use handlers::{DebugHandler, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -123,14 +123,12 @@ pub trait Host {
     /// which provides information about source-level variables and their locations
     /// during execution. This is useful for debuggers to track variable values.
     ///
+    /// This is purely informational; implementations should either silently handle
+    /// any errors or panic if an invariant is violated.
+    ///
     /// The default implementation does nothing, as most hosts don't need variable tracking.
-    fn on_debug_var(
-        &mut self,
-        _process: &ProcessorState,
-        _var_info: &DebugVarInfo,
-    ) -> Result<(), DebugVarError> {
-        Ok(())
-    }
+    #[inline(always)]
+    fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///

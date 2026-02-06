@@ -13,7 +13,6 @@ use crate::{
     event::{EventError, EventId, EventName},
     fast::SystemEventError,
     field::QuadFelt,
-    host::handlers::DebugVarError,
     mast::{MastForest, MastNodeId},
     utils::to_hex,
 };
@@ -47,11 +46,6 @@ pub enum ExecutionError {
     DebugHandlerError {
         #[source]
         err: DebugError,
-    },
-    #[error("debug variable handler error: {err}")]
-    DebugVarHandlerError {
-        #[source]
-        err: DebugVarError,
     },
     #[error("attempted to add event handler for '{event}' (already registered)")]
     DuplicateEventHandler { event: EventName },
