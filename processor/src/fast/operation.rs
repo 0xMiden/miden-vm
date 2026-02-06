@@ -326,29 +326,13 @@ impl StackInterface for FastProcessor {
     #[inline(always)]
     fn rotate_left(&mut self, n: usize) {
         let rotation_bot_index = self.stack_top_idx - n;
-        let new_stack_top_element = self.stack[rotation_bot_index];
-
-        // shift the top n elements down by 1, starting from the bottom of the rotation.
-        for i in 0..n - 1 {
-            self.stack[rotation_bot_index + i] = self.stack[rotation_bot_index + i + 1];
-        }
-
-        // Set the top element (which comes from the bottom of the rotation).
-        self.stack_write(0, new_stack_top_element);
+        self.stack[rotation_bot_index..self.stack_top_idx].rotate_left(1);
     }
 
     #[inline(always)]
     fn rotate_right(&mut self, n: usize) {
         let rotation_bot_index = self.stack_top_idx - n;
-        let new_stack_bot_element = self.stack[self.stack_top_idx - 1];
-
-        // shift the top n elements up by 1, starting from the top of the rotation.
-        for i in 1..n {
-            self.stack[self.stack_top_idx - i] = self.stack[self.stack_top_idx - i - 1];
-        }
-
-        // Set the bot element (which comes from the top of the rotation).
-        self.stack[rotation_bot_index] = new_stack_bot_element;
+        self.stack[rotation_bot_index..self.stack_top_idx].rotate_right(1);
     }
 
     #[inline(always)]
