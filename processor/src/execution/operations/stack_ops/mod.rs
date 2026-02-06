@@ -1,6 +1,5 @@
 use crate::{
     ExecutionError, Felt, ZERO,
-    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},

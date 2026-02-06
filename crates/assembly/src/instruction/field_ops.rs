@@ -3,11 +3,7 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{
-    events::SystemEvent,
-    field::{Field, PrimeCharacteristicRing, PrimeField64},
-    operations::Operation::*,
-};
+use miden_core::{events::SystemEvent, field::Field, operations::Operation::*};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};

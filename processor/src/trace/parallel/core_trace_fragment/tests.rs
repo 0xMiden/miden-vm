@@ -13,7 +13,6 @@ use miden_air::trace::{
 use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     events::EventName,
-    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, JoinNodeBuilder, LoopNodeBuilder,
         MastForest, MastForestContributor, MastNodeExt, OP_BATCH_SIZE, SplitNodeBuilder,
@@ -24,7 +23,7 @@ use miden_core::{
 use miden_utils_testing::rand::rand_value;
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, FastProcessor, PrimeField64,
+    AdviceInputs, DefaultHost, ExecutionOptions, ExecutionTrace, FastProcessor,
     event::NoopEventHandler, trace::build_trace,
 };
 

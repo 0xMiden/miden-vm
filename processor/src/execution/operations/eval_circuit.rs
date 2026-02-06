@@ -1,5 +1,5 @@
 use miden_air::trace::RowIndex;
-use miden_core::field::{PrimeCharacteristicRing, PrimeField64, QuadFelt};
+use miden_core::field::{PrimeCharacteristicRing, QuadFelt};
 
 use crate::{
     ContextId, Felt,

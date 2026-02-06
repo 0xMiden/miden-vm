@@ -1,11 +1,7 @@
 use alloc::vec::Vec;
 use core::ops::{Bound, Range};
 
-use crate::{
-    Felt, Word,
-    crypto::hash::Blake3_256,
-    field::{PrimeCharacteristicRing, PrimeField64},
-};
+use crate::{Felt, Word, crypto::hash::Blake3_256, field::PrimeCharacteristicRing};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -183,7 +179,6 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
-    use crate::field::PrimeCharacteristicRing;
 
     proptest! {
         #[test]

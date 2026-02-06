@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     Felt, WORD_SIZE, Word,
     advice::AdviceMap,
-    field::PrimeCharacteristicRing,
     mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::ToElements,

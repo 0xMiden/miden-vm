@@ -8,7 +8,6 @@ use miden_core::ZERO;
 use miden_utils_testing::rand::rand_value;
 
 use super::{Bitwise, Felt, TraceFragment};
-use crate::PrimeField64;
 
 #[test]
 fn bitwise_init() {

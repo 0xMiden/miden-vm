@@ -5,7 +5,6 @@ use crate::{
     Felt, Word, ZERO,
     chiplets::hasher,
     crypto::hash::Blake3_256,
-    field::PrimeField64,
     mast::{
         DecoratedLinksIter, DecoratedOpLink, DecoratorId, DecoratorStore, MastForest,
         MastForestError, MastNode, MastNodeFingerprint, MastNodeId,

@@ -3,7 +3,6 @@ use std::string::ToString;
 use super::*;
 use crate::{
     Felt, ONE, Word,
-    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,

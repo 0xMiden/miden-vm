@@ -16,7 +16,7 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, PrimeField64,
+    ContextId,
     execution::eval_circuit_impl,
     fast::{Memory, NoopTracer},
     trace::chiplets::ace::{

@@ -1,6 +1,6 @@
 use miden_core::chiplets::hasher::apply_permutation;
 use miden_utils_testing::{
-    Felt, PrimeField64, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
+    Felt, TRUNCATE_STACK_PROC, ToElements, assert_eq, build_op_test, build_test,
 };
 
 mod adv_ops;

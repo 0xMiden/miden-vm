@@ -13,7 +13,6 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, Word, ZERO,
-    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, CallNode, JoinNode, LoopNode, MastForest, MastNodeExt, OpBatch, SplitNode,
     },

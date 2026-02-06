@@ -1,7 +1,7 @@
 use miden_core::WORD_SIZE;
 use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, PrimeField64, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, Word, ZERO,
     crypto::{
         MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
     },

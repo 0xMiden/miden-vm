@@ -4,12 +4,7 @@ use core::slice;
 use miden_air::trace::MainTrace;
 
 use super::chiplets::Chiplets;
-use crate::{
-    Felt, RowIndex,
-    debug::BusDebugger,
-    field::{ExtensionField, PrimeField64},
-    utils::uninit_vector,
-};
+use crate::{Felt, RowIndex, debug::BusDebugger, field::ExtensionField, utils::uninit_vector};
 #[cfg(test)]
 use crate::{operation::Operation, utils::ToElements};
 

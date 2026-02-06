@@ -56,7 +56,6 @@ pub use node::{
 use crate::{
     Felt, LexicographicWord, Word,
     advice::AdviceMap,
-    field::PrimeField64,
     operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,

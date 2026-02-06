@@ -9,7 +9,7 @@
 //! a consistent interface for the Miden VM's hashing needs. For higher-level hasher chiplet
 //! functionality, see the trace and processor modules.
 
-use miden_crypto::{Word as Digest, field::PrimeCharacteristicRing};
+use miden_crypto::Word as Digest;
 
 use super::Felt;
 pub use crate::crypto::hash::Poseidon2 as Hasher;

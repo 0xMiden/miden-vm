@@ -1,5 +1,5 @@
 use miden_utils_testing::{
-    PrimeField64, Word, build_op_test,
+    Word, build_op_test,
     crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
