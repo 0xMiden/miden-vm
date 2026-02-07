@@ -318,12 +318,12 @@ pub proc generate_aux_randomness
     padw exec.constants::aux_rand_nd_ptr mem_loadw_be
     # => [alpha1, alpha0, beta1, beta0, beta1, beta0, alpha1, alpha0, ...]
 
-    movup.6 assert_eq
-    movup.5 assert_eq
+    movup.6 assert_eq.err="aux randomness mismatch"
+    movup.5 assert_eq.err="aux randomness mismatch"
     # => [beta1, beta0, beta1, beta0, ...]
 
-    movup.2 assert_eq
-    assert_eq
+    movup.2 assert_eq.err="aux randomness mismatch"
+    assert_eq.err="aux randomness mismatch"
     #=> [...]
 end
 
