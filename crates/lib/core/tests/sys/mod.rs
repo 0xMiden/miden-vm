@@ -60,7 +60,7 @@ fn reduce_kernel_digests_too_many_procs_has_message() {
 }
 
 #[test]
-fn reduce_kernel_digests_misaligned_inputs_has_message() {
+fn process_public_inputs_misaligned_var_len_has_message() {
     let source = "
         use miden::core::stark::random_coin
         use miden::core::sys::vm::public_inputs
@@ -70,6 +70,7 @@ fn reduce_kernel_digests_misaligned_inputs_has_message() {
         end
     ";
 
+    // Not divisible by 8, so the alignment assert in load_public_inputs should fire.
     let num_var_len_pi = 1_u64;
     let fixed_length_public_inputs = vec![0_u64; 40];
     let mut advice_stack = vec![num_var_len_pi];
