@@ -219,12 +219,13 @@ pub trait DebugHandler: Sync {
         Ok(())
     }
 
-    /// This function is invoked when the `DebugVar` decorator is executed.
+    /// Handles a debug variable annotation.
     ///
-    /// This provides debuggers with information about source-level variables and
-    /// where their values can be found during execution.
-    ///
-    /// This is purely informational; implementations should either silently handle
-    /// any errors or panic if an invariant is violated.
+    /// Separate from [`DebugHandler::on_debug`] because debug variables are not decorators — they
+    /// use a parallel per-operation annotation layer with different cardinality (N per
+    /// op). `DebugVarInfo` carries variable names, types, and value locations
+    /// (heap-allocated), whereas `DebugOptions` is a simple `Copy` enum for VM-state
+    /// inspection. Infallible by design since variable metadata is purely
+    /// informational.
     fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 }

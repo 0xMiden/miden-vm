@@ -117,14 +117,14 @@ pub trait Host {
         handler.on_trace(process, trace_id)
     }
 
-    /// Handles a debug variable decorator from the VM.
+    /// Handles a debug variable annotation from the VM.
     ///
-    /// This callback is invoked when the processor encounters a `DebugVar` decorator,
-    /// which provides information about source-level variables and their locations
-    /// during execution. This is useful for debuggers to track variable values.
-    ///
-    /// This is purely informational; implementations should either silently handle
-    /// any errors or panic if an invariant is violated.
+    /// This is separate from [`Host::on_debug`] because debug variables are not decorators —
+    /// they live in a parallel per-operation annotation layer in `MastForest` with
+    /// different cardinality (N per op). `DebugVarInfo` carries variable names, types,
+    /// and value locations (heap-allocated), whereas `DebugOptions` is a simple `Copy`
+    /// enum for VM-state inspection. This callback is infallible by design since
+    /// variable metadata is purely informational.
     ///
     /// The default implementation does nothing, as most hosts don't need variable tracking.
     #[inline(always)]
