@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    Felt, Word,
+    Felt, WORD_SIZE, Word,
     events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
@@ -27,6 +27,36 @@ fn truncate_stack() {
     // After 12 push.0 and truncate: [0, 0, ..., 0, 1, 2, 3, 4]
     build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
         .expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn reduce_kernel_digests_too_many_procs_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::sys::vm::public_inputs
+        begin
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+        end
+    ";
+
+    let num_kernel_proc_digests = 1024_usize;
+    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
+    let fixed_length_public_inputs = vec![0_u64; 40];
+    let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
+    let auxiliary_rand_values = [0_u64; 4];
+
+    let mut advice_stack = vec![num_elements_kernel_proc_digests as u64];
+    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+    advice_stack.extend_from_slice(&kernel_procedures_digests);
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
+    advice_stack.push(num_kernel_proc_digests as u64);
+
+    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
+    initial_stack.reverse();
+
+    let test = build_test!(source, &initial_stack, &advice_stack);
+    expect_assert_error_message!(test, contains "range check");
 }
 
 proptest! {
