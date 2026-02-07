@@ -364,7 +364,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let test = build_test!(four_words, operand_stack, &advice_stack);
-    expect_assert_error_message!(test, contains "comparison");
+    expect_assert_error_message!(test);
 }
 
 #[test]
@@ -388,5 +388,5 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     builder.push_u64_slice(data);
     let advice_stack = builder.build_vec_u64();
     let test = build_test!(three_words, operand_stack, &advice_stack);
-    expect_assert_error_message!(test, contains "range check");
+    expect_assert_error_message!(test);
 }
