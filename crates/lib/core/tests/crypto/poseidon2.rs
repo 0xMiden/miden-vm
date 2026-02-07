@@ -24,6 +24,28 @@ fn test_invalid_end_addr() {
 }
 
 #[test]
+fn test_invalid_end_addr_has_message() {
+    let source = "
+    use miden::core::crypto::hashes::poseidon2
+
+    begin
+        push.0999 # end address
+        push.1000 # start address
+
+        exec.poseidon2::hash_double_words
+    end
+    ";
+    let test = build_test!(source, &[]);
+
+    expect_exec_error_matches!(
+        test,
+        ExecutionError::OperationError{ err: OperationError::FailedAssertion{ err_code, err_msg }, .. }
+        if err_code == ZERO
+            && err_msg.as_deref() == Some("start address should be less or equal to the end address")
+    );
+}
+
+#[test]
 fn test_hash_empty() {
     // computes the hash for 8 consecutive zeros using mem_stream directly
     let two_zeros_mem_stream = "
