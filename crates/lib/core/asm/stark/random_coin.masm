@@ -698,7 +698,7 @@ pub proc check_pow
 
     # Compute the mask.
     pow2
-    u32assert u32overflowing_sub.1 assertz
+    u32assert u32overflowing_sub.1 assertz.err="range check failed: pow"
     #=> [mask, ...]
 
     # Load Capacity portion
@@ -733,7 +733,7 @@ pub proc check_pow
     u32split
     drop
     u32and
-    assertz
+    assertz.err="range check failed: pow"
     drop
     #=> [...]
 end

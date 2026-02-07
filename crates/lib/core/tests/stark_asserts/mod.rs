@@ -56,6 +56,21 @@ fn generate_aux_randomness_mismatch_has_message() {
     expect_assert_error_message!(test, contains "comparison");
 }
 
+#[test]
+fn check_pow_invalid_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        begin
+            push.0 push.0 push.0 push.1 push.7 push.32
+            exec.random_coin::init_seed
+            exec.random_coin::check_pow
+        end
+    ";
+    let advice_stack = &[0_u64];
+    let test = build_test!(source, &[], advice_stack);
+    expect_assert_error_message!(test, contains "range check");
+}
+
 fn validate_inputs_source() -> &'static str {
     "
         use miden::core::stark::utils
