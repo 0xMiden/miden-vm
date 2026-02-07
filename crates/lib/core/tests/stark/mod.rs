@@ -303,6 +303,19 @@ fn validate_inputs_grinding_upper_bound() {
     assert_validate_inputs_error(10, 7, 32);
 }
 
+#[test]
+fn init_seed_trace_length_too_large_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        begin
+            push.0 push.0 push.0 push.0 push.7 push.32
+            exec.random_coin::init_seed
+        end
+    ";
+    let test = build_test!(source, &[]);
+    expect_assert_error_message!(test);
+}
+
 // HELPERS
 // ===============================================================================================
 
