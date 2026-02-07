@@ -59,6 +59,29 @@ fn reduce_kernel_digests_too_many_procs_has_message() {
     expect_assert_error_message!(test, contains "range check");
 }
 
+#[test]
+fn reduce_kernel_digests_misaligned_inputs_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::sys::vm::public_inputs
+        begin
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+        end
+    ";
+
+    let num_var_len_pi = 1_u64;
+    let fixed_length_public_inputs = vec![0_u64; 40];
+    let mut advice_stack = vec![num_var_len_pi];
+    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+
+    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
+    initial_stack.reverse();
+
+    let test = build_test!(source, &initial_stack, &advice_stack);
+    expect_assert_error_message!(test, contains "range check");
+}
+
 proptest! {
     #[test]
     fn truncate_stack_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH), n in 1_usize..100) {
