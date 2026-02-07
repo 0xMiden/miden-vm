@@ -26,7 +26,7 @@ end
 # ERRORS
 # =================================================================================================
 
-const ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION = "failed to load the circuit description for the constraints evaluation check"
+const ERR_FAILED_TO_LOAD_CIRCUIT_DESCRIPTION = "comparison failed"
 
 
 # CONSTRAINT EVALUATION CHECKER

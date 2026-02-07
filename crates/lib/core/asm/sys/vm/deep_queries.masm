@@ -5,7 +5,7 @@ use miden::core::stark::deep_queries
 # ERRORS
 # =================================================================================================
 
-const LEAF_VALUE_MISMATCH = "hash of leaf pre-image does not match leaf value from the Merkle tree"
+const LEAF_VALUE_MISMATCH = "comparison failed"
 
 # MAIN PROCEDURE
 # =================================================================================================
