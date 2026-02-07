@@ -55,6 +55,22 @@ macro_rules! expect_assert_error_message {
             if err_msg.as_deref().map(|msg| msg.len() > $min_len).unwrap_or(false)
         );
     };
+    ($test:expr, contains $needle:expr $(,)?) => {
+        ::miden_utils_testing::expect_exec_error_matches!(
+            $test,
+            ::miden_processor::ExecutionError::OperationError {
+                err: ::miden_processor::operation::OperationError::FailedAssertion {
+                    err_msg,
+                    ..
+                },
+                ..
+            }
+            if err_msg
+                .as_deref()
+                .map(|msg| msg.len() > 5 && msg.contains($needle))
+                .unwrap_or(false)
+        );
+    };
 }
 
 mod collections;
@@ -63,6 +79,7 @@ mod helpers;
 mod mast_forest_merge;
 mod math;
 mod mem;
+mod stark_asserts;
 mod sys;
 mod word;
 

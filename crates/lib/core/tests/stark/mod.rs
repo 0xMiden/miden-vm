@@ -266,56 +266,6 @@ proptest! {
     }
 }
 
-fn assert_validate_inputs_error(log_trace_len: u64, num_queries: u64, grinding: u64) {
-    let source = "
-        use miden::core::stark::utils
-        begin
-            exec.utils::validate_inputs
-        end
-    ";
-    let stack_inputs = vec![log_trace_len, num_queries, grinding];
-    let test = build_test!(source, &stack_inputs);
-    expect_assert_error_message!(test);
-}
-
-#[test]
-fn validate_inputs_trace_length_upper_bound() {
-    assert_validate_inputs_error(30, 7, 0);
-}
-
-#[test]
-fn validate_inputs_trace_length_lower_bound() {
-    assert_validate_inputs_error(5, 7, 0);
-}
-
-#[test]
-fn validate_inputs_num_queries_upper_bound() {
-    assert_validate_inputs_error(10, 151, 0);
-}
-
-#[test]
-fn validate_inputs_num_queries_lower_bound() {
-    assert_validate_inputs_error(10, 6, 0);
-}
-
-#[test]
-fn validate_inputs_grinding_upper_bound() {
-    assert_validate_inputs_error(10, 7, 32);
-}
-
-#[test]
-fn init_seed_trace_length_too_large_has_message() {
-    let source = "
-        use miden::core::stark::random_coin
-        begin
-            push.0 push.0 push.0 push.0 push.7 push.32
-            exec.random_coin::init_seed
-        end
-    ";
-    let test = build_test!(source, &[]);
-    expect_assert_error_message!(test);
-}
-
 // HELPERS
 // ===============================================================================================
 

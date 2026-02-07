@@ -15,7 +15,7 @@ fn test_invalid_end_addr() {
     end
     ";
     let test = build_test!(empty_range, &[]);
-    expect_assert_error_message!(test);
+    expect_assert_error_message!(test, contains "start address");
 }
 
 #[test]
@@ -31,7 +31,7 @@ fn test_invalid_end_addr_has_message() {
     end
     ";
     let test = build_test!(source, &[]);
-    expect_assert_error_message!(test);
+    expect_assert_error_message!(test, contains "start address");
 }
 
 #[test]

@@ -153,7 +153,9 @@ pub proc init_seed
     ## Compute trace_length
     dup
     pow2
-    u32split assertz.err="trace length must fit in u32"
+    dup
+    u32test
+    assert.err="trace length must fit in u32"
     #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     ## Save the trace length and its log to memory
