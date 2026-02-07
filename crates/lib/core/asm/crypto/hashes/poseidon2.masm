@@ -124,7 +124,7 @@ end
 #! where `words` is the `start_addr - end_addr - 1`
 pub proc hash_words
     # enforce `start_addr ≤ end_addr`
-    dup.1 dup.1 u32assert2 u32gte assert
+    dup.1 dup.1 u32assert2 u32gte assert.err="start address should be less or equal to the end address"
 
     # figure out if the range is for an odd number of words (11 cycles)
     dup.1 dup.1 sub div.4 is_odd

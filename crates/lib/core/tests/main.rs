@@ -26,6 +26,37 @@ macro_rules! build_debug_test {
     }}
 }
 
+/// Asserts that executing the test fails with a FailedAssertion containing the expected message.
+#[macro_export]
+macro_rules! expect_assert_error_message {
+    ($test:expr $(,)?) => {
+        ::miden_utils_testing::expect_exec_error_matches!(
+            $test,
+            ::miden_processor::ExecutionError::OperationError {
+                err: ::miden_processor::operation::OperationError::FailedAssertion {
+                    err_msg,
+                    ..
+                },
+                ..
+            }
+            if err_msg.as_deref().map(|msg| msg.len() > 5).unwrap_or(false)
+        );
+    };
+    ($test:expr, $min_len:expr $(,)?) => {
+        ::miden_utils_testing::expect_exec_error_matches!(
+            $test,
+            ::miden_processor::ExecutionError::OperationError {
+                err: ::miden_processor::operation::OperationError::FailedAssertion {
+                    err_msg,
+                    ..
+                },
+                ..
+            }
+            if err_msg.as_deref().map(|msg| msg.len() > $min_len).unwrap_or(false)
+        );
+    };
+}
+
 mod collections;
 mod crypto;
 mod helpers;

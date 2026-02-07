@@ -266,6 +266,43 @@ proptest! {
     }
 }
 
+fn assert_validate_inputs_error(log_trace_len: u64, num_queries: u64, grinding: u64) {
+    let source = "
+        use miden::core::stark::utils
+        begin
+            exec.utils::validate_inputs
+        end
+    ";
+    let stack_inputs = vec![log_trace_len, num_queries, grinding];
+    let test = build_test!(source, &stack_inputs);
+    expect_assert_error_message!(test);
+}
+
+#[test]
+fn validate_inputs_trace_length_upper_bound() {
+    assert_validate_inputs_error(30, 7, 0);
+}
+
+#[test]
+fn validate_inputs_trace_length_lower_bound() {
+    assert_validate_inputs_error(5, 7, 0);
+}
+
+#[test]
+fn validate_inputs_num_queries_upper_bound() {
+    assert_validate_inputs_error(10, 151, 0);
+}
+
+#[test]
+fn validate_inputs_num_queries_lower_bound() {
+    assert_validate_inputs_error(10, 6, 0);
+}
+
+#[test]
+fn validate_inputs_grinding_upper_bound() {
+    assert_validate_inputs_error(10, 7, 32);
+}
+
 // HELPERS
 // ===============================================================================================
 
