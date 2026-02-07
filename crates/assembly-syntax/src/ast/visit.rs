@@ -501,8 +501,9 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
         | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint
-        | DebugVar(_) | HornerBase | HornerExt | CryptoStream | EvalCircuit | LogPrecompile
-        | Emit => ControlFlow::Continue(()),
+        | HornerBase | HornerExt | CryptoStream | EvalCircuit | LogPrecompile | Emit => {
+            ControlFlow::Continue(())
+        },
     }
 }
 
@@ -1092,8 +1093,9 @@ where
         | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
         | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
         | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | Breakpoint
-        | DebugVar(_) | HornerBase | HornerExt | EvalCircuit | CryptoStream | LogPrecompile
-        | Emit => ControlFlow::Continue(()),
+        | HornerBase | HornerExt | EvalCircuit | CryptoStream | LogPrecompile | Emit => {
+            ControlFlow::Continue(())
+        },
     }
 }
 

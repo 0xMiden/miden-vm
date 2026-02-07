@@ -206,6 +206,7 @@ impl BasicBlockBuilder<'_> {
     /// Debug variables are stored in dedicated CSR storage (not as decorators) and are
     /// only accessed by the debugger. They track source-level variable locations at
     /// specific points in program execution.
+    #[allow(dead_code)]
     pub fn push_debug_var(&mut self, debug_var: DebugVarInfo) -> Result<(), Report> {
         let debug_var_id = self.mast_forest_builder.add_debug_var(debug_var)?;
         self.debug_vars.push((self.ops.len(), debug_var_id));

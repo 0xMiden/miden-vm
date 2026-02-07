@@ -8,12 +8,6 @@ impl PrettyPrint for Instruction {
     fn render(&self) -> Document {
         use crate::prettier::*;
 
-        // Instructions without textual representation (e.g., DebugVar) should not be printed.
-        // They are decorator-only constructs emitted by the compiler.
-        if !self.has_textual_representation() {
-            return Document::Empty;
-        }
-
         match self {
             Self::Nop => const_text("nop"),
             Self::Assert => const_text("assert"),
@@ -332,9 +326,6 @@ impl PrettyPrint for Instruction {
 
             // ----- debug decorators -------------------------------------------------------------
             Self::Debug(options) => inst_with_imm("debug", options),
-            Self::DebugVar(_) => {
-                unreachable!("expected {self:#?} to have textual representation")
-            },
 
             // ----- event decorators -------------------------------------------------------------
             Self::Emit => const_text("emit"),

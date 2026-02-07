@@ -544,6 +544,7 @@ impl MastForestBuilder {
     /// Unlike decorators, debug variables are not deduplicated since each occurrence
     /// represents a specific point in program execution where the variable's location
     /// is being tracked.
+    #[allow(dead_code)]
     pub fn add_debug_var(
         &mut self,
         debug_var: miden_core::operations::DebugVarInfo,
