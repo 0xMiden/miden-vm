@@ -34,18 +34,18 @@ pub proc validate_inputs
     #    the blowup factor is 8, we need to make sure that the LDE size is at most 2^32.
     #    We also check that the trace length is greater than the minimal length supported i.e., 2^6.
     drop
-    dup u32lt.30 assert.err="trace length log must be <= 29"
-    u32gt.5 assert.err="trace length log must be >= 6"
+    dup u32lt.30 assert.err="range check failed: input bounds"
+    u32gt.5 assert.err="range check failed: input bounds"
 
     # 3) Assert that the number of FRI queries is at most 150. This restriction is a soft one
     #    and is due to the memory layout in the `constants.masm` files but can be updated
     #    therein.
     #    We also make sure that the number of FRI queries is at least 7.
-    dup u32lt.151 assert.err="num FRI queries must be <= 150"
-    u32gt.6 assert.err="num FRI queries must be >= 7"
+    dup u32lt.151 assert.err="range check failed: input bounds"
+    u32gt.6 assert.err="range check failed: input bounds"
 
     # 4) Assert that the grinding factor is at most 31
-    u32lt.32 assert.err="grinding factor must be <= 31"
+    u32lt.32 assert.err="range check failed: input bounds"
 
     # 5) Clean up the stack
     drop
