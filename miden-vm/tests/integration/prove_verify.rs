@@ -203,8 +203,7 @@ mod fast_parallel {
     use miden_core::proof::{ExecutionProof, HashFunction};
     use miden_crypto::stark;
     use miden_processor::{
-        ExecutionOptions, StackInputs, advice::AdviceInputs, fast::FastProcessor,
-        trace::build_trace,
+        ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
     use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
     use miden_verifier::verify;

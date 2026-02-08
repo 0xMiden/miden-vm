@@ -16,25 +16,24 @@ use miden_core::{
     program::MIN_STACK_DEPTH,
 };
 
-use crate::{
-    continuation_stack::{Continuation, ContinuationStack},
+use super::{
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
-    fast::{
-        FastProcessor,
-        trace_state::{
-            AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
-            CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
-            ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
-            KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
-            NodeFlags, RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
-        },
-    },
-    processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
-    system::ContextId,
+    trace_state::{
+        AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+        CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+        ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+        KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay, NodeFlags,
+        RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
+    },
+    utils::split_u32_into_u16,
+};
+use crate::{
+    ContextId, FastProcessor,
+    continuation_stack::{Continuation, ContinuationStack},
+    processor::{Processor, StackInterface, SystemInterface},
     trace::chiplets::CircuitEvaluation,
     tracer::{OperationHelperRegisters, Tracer},
-    utils::split_u32_into_u16,
 };
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
@@ -72,7 +71,7 @@ pub struct TraceGenerationContext {
 /// fragments of configurable length. This requires storing state at the very beginning of the
 /// fragment before any operations are executed, as well as recording the various values read during
 /// execution in the corresponding "replays" (e.g. values read from memory are recorded in
-/// [MemoryReadsReplay], values read from the advice provider are recorded in [AdviceReplay], etc).
+/// `MemoryReadsReplay`, values read from the advice provider are recorded in `AdviceReplay``, etc).
 ///
 /// Then, to generate a trace fragment, we initialize the state of the processor using the stored
 /// snapshot from the beginning of the fragment, and replay the recorded values as they are
@@ -89,26 +88,26 @@ pub struct ExecutionTracer {
     state_snapshot: Option<StateSnapshot>,
 
     // Replay data aggregated throughout the execution of a core trace fragment
-    pub overflow_table: OverflowTable,
-    pub overflow_replay: StackOverflowReplay,
+    overflow_table: OverflowTable,
+    overflow_replay: StackOverflowReplay,
 
-    pub block_stack: BlockStack,
-    pub block_stack_replay: BlockStackReplay,
-    pub execution_context_replay: ExecutionContextReplay,
+    block_stack: BlockStack,
+    block_stack_replay: BlockStackReplay,
+    execution_context_replay: ExecutionContextReplay,
 
-    pub hasher_chiplet_shim: HasherChipletShim,
-    pub memory_reads: MemoryReadsReplay,
-    pub advice: AdviceReplay,
-    pub external: MastForestResolutionReplay,
+    hasher_chiplet_shim: HasherChipletShim,
+    memory_reads: MemoryReadsReplay,
+    advice: AdviceReplay,
+    external: MastForestResolutionReplay,
 
     // Replays that contain additional data needed to generate the range checker and chiplets
     // columns.
-    pub range_checker: RangeCheckerReplay,
-    pub memory_writes: MemoryWritesReplay,
-    pub bitwise: BitwiseReplay,
-    pub kernel: KernelReplay,
-    pub hasher_for_chiplet: HasherRequestReplay,
-    pub ace: AceReplay,
+    range_checker: RangeCheckerReplay,
+    memory_writes: MemoryWritesReplay,
+    bitwise: BitwiseReplay,
+    kernel: KernelReplay,
+    hasher_for_chiplet: HasherRequestReplay,
+    ace: AceReplay,
 
     // Output
     fragment_contexts: Vec<CoreTraceFragmentContext>,

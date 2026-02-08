@@ -17,9 +17,8 @@ use miden_utils_testing::{
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    DefaultHost, Kernel, ONE, Program, StackInputs, Word, ZERO,
+    DefaultHost, FastProcessor, Kernel, ONE, Program, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMap},
-    fast::FastProcessor,
     field::PrimeField64,
     operation::Operation,
 };

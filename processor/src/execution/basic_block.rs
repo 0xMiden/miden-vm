@@ -7,13 +7,12 @@ use miden_core::{
 };
 
 use crate::{
-    Host, Stopper,
+    BreakReason, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         InternalBreakReason, execute_sync_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
     },
-    fast::step::BreakReason,
     processor::Processor,
     tracer::Tracer,
 };

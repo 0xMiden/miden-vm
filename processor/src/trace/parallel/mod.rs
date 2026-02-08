@@ -29,16 +29,7 @@ use tracing::instrument;
 use crate::{
     ContextId,
     continuation_stack::ContinuationStack,
-    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
-    fast::{
-        ExecutionOutput,
-        execution_tracer::TraceGenerationContext,
-        trace_state::{
-            AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
-            ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
-        },
-    },
-    stack::AuxTraceBuilder as StackAuxTraceBuilder,
+    fast::ExecutionOutput,
     trace::{
         AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary,
         parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
@@ -54,7 +45,17 @@ use core_trace_fragment::CoreTraceFragment;
 mod processor;
 mod tracer;
 
-use super::chiplets::Chiplets;
+use super::{
+    chiplets::Chiplets,
+    decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
+    execution_tracer::TraceGenerationContext,
+    stack::AuxTraceBuilder as StackAuxTraceBuilder,
+    trace_state::{
+        AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
+        ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
+        RangeCheckerReplay,
+    },
+};
 
 #[cfg(test)]
 mod tests;
@@ -424,7 +425,7 @@ fn push_halt_opcode_row(
 }
 
 fn initialize_range_checker(
-    range_checker_replay: crate::fast::trace_state::RangeCheckerReplay,
+    range_checker_replay: RangeCheckerReplay,
     chiplets: &Chiplets,
 ) -> RangeChecker {
     let mut range_checker = RangeChecker::new();

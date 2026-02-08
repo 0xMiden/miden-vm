@@ -11,20 +11,17 @@ use miden_core::{
     utils::range,
 };
 
+use super::super::trace_state::{
+    AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
+    MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
+};
 use crate::{
-    ContextId, ExecutionError, Host, Stopper,
+    BreakReason, ContextId, ExecutionError, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     errors::{AceEvalError, OperationError},
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
-    },
-    fast::{
-        step::BreakReason,
-        trace_state::{
-            AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
-        },
     },
     host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
@@ -45,8 +42,8 @@ use crate::{
 /// maximum clock cycle, at which point it stops execution (due to the [`ReplayStopper`]).
 ///
 /// The replay structures and initial system and stack state are built by the
-/// [`crate::fast::execution_tracer::ExecutionTracer`] in conjunction with
-/// [`crate::fast::FastProcessor::execute_for_trace`].
+/// [`crate::execution_tracer::ExecutionTracer`] in conjunction with
+/// [`crate::FastProcessor::execute_for_trace`].
 #[derive(Debug)]
 pub(crate) struct ReplayProcessor {
     pub system: SystemState,
@@ -66,8 +63,8 @@ impl ReplayProcessor {
     /// Creates a new instance of the [`ReplayProcessor`].
     ///
     /// The parameters are expected to be built by the
-    /// [`crate::fast::execution_tracer::ExecutionTracer`] when used in conjunction with
-    /// [`crate::fast::FastProcessor::execute_for_trace`].
+    /// [`crate::execution_tracer::ExecutionTracer`] when used in conjunction with
+    /// [`crate::FastProcessor::execute_for_trace`].
     pub fn new(
         initial_system: SystemState,
         initial_stack: StackState,

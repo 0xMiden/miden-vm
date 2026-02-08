@@ -9,10 +9,9 @@ use miden_core::{
 };
 
 use crate::{
+    ContextId,
     continuation_stack::{Continuation, ContinuationStack},
-    system::ContextId,
-    trace::chiplets::CircuitEvaluation,
-    utils::split_u32_into_u16,
+    trace::{chiplets::CircuitEvaluation, utils::split_u32_into_u16},
 };
 
 // TRACER TRAIT
@@ -21,7 +20,7 @@ use crate::{
 /// A trait for tracing the execution of a processor.
 ///
 /// Allows for recording different aspects of the processor's execution. For example, the
-/// [`crate::fast::FastProcessor::execute_for_trace`] execution mode needs to build a
+/// [`crate::FastProcessor::execute_for_trace`] execution mode needs to build a
 /// [`crate::fast::execution_tracer::TraceGenerationContext`] which records information necessary to
 /// build the trace at each clock cycle.
 ///

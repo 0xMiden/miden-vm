@@ -7,13 +7,12 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, Host, MapExecErr, Stopper,
+    BreakReason, ContextId, Host, MapExecErr, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         InternalBreakReason, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
         get_next_ctx_id,
     },
-    fast::step::BreakReason,
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
 };

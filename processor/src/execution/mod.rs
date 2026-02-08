@@ -8,9 +8,8 @@ use miden_core::{
 };
 
 use crate::{
-    ContextId, Host, Stopper,
+    BreakReason, ContextId, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::step::BreakReason,
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -47,7 +46,7 @@ pub(crate) use operations::execute_sync_op;
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::fast::FastProcessor::execute_for_trace`]
+/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
 /// execution mode needs to build a [`crate::fast::execution_tracer::TraceGenerationContext`] which
 /// records information necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace

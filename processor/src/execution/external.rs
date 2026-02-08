@@ -4,8 +4,8 @@ use core::ops::ControlFlow;
 use miden_core::mast::{MastForest, MastNodeExt, MastNodeId};
 
 use crate::{
-    Host, continuation_stack::ContinuationStack, execution::InternalBreakReason,
-    fast::step::BreakReason, operation::OperationError, processor::Processor, tracer::Tracer,
+    BreakReason, Host, continuation_stack::ContinuationStack, execution::InternalBreakReason,
+    operation::OperationError, processor::Processor, tracer::Tracer,
 };
 
 /// Executes an External node.

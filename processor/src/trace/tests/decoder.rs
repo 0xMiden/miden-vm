@@ -5,28 +5,21 @@ use miden_air::trace::{
     chiplets::hasher::HASH_CYCLE_LEN_FELT,
     decoder::{P1_COL_IDX, P2_COL_IDX, P3_COL_IDX},
 };
-use miden_core::{
-    ONE, Word, ZERO,
+use miden_utils_testing::rand::rand_array;
+
+use super::super::{
+    decoder::{BlockHashTableRow, build_op_group},
+    tests::{build_trace_from_ops, build_trace_from_program},
+    utils::build_span_with_respan_ops,
+};
+use crate::{
+    ContextId, Felt, ONE, Program, Word, ZERO,
     field::{ExtensionField, Field, PrimeCharacteristicRing},
     mast::{
         BasicBlockNodeBuilder, JoinNodeBuilder, LoopNodeBuilder, MastForest, MastForestContributor,
         MastNodeExt, SplitNodeBuilder,
     },
-    operations::Operation,
-    program::Program,
-};
-use miden_utils_testing::rand::rand_array;
-
-use super::{
-    super::{
-        tests::{build_trace_from_ops, build_trace_from_program},
-        utils::build_span_with_respan_ops,
-    },
-    Felt,
-};
-use crate::{
-    ContextId,
-    decoder::{BlockHashTableRow, build_op_group},
+    operation::Operation,
 };
 
 // BLOCK STACK TABLE TESTS

@@ -9,8 +9,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, Program, fast::FastProcessor,
-    test_utils::test_consistency_host::TestConsistencyHost,
+    AdviceInputs, FastProcessor, Program, test_utils::test_consistency_host::TestConsistencyHost,
 };
 
 // Test helper to create a basic block with decorators for fast processor

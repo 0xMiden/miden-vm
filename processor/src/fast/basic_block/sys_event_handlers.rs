@@ -9,6 +9,13 @@ use miden_core::{
 
 use crate::{MemoryError, ProcessorState, advice::AdviceError, errors::OperationError};
 
+// CONSTANTS
+// ================================================================================================
+
+/// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
+/// Offset accounts for the event ID at position 0 on the stack.
+pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
+
 // SYSTEM EVENT ERROR
 // ================================================================================================
 
@@ -26,9 +33,8 @@ pub enum SystemEventError {
     Memory(#[from] MemoryError),
 }
 
-/// The offset of the domain value on the stack in the `hdword_to_map_with_domain` system event.
-/// Offset accounts for the event ID at position 0 on the stack.
-pub const HDWORD_TO_MAP_WITH_DOMAIN_DOMAIN_OFFSET: usize = 9;
+// SYSTEM EVENT HANDLERS
+// ================================================================================================
 
 pub fn handle_system_event(
     process: &mut ProcessorState,
@@ -489,7 +495,7 @@ fn push_ilog2(process: &mut ProcessorState) -> Result<(), SystemEventError> {
 }
 
 // HELPER METHODS
-// --------------------------------------------------------------------------------------------
+// ================================================================================================
 
 /// Gets the top stack element, applies a provided function to it and pushes it to the advice
 /// provider.

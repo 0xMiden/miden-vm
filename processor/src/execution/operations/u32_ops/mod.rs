@@ -8,7 +8,6 @@ use crate::{
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
-    utils::split_element,
 };
 
 #[cfg(test)]
@@ -302,4 +301,16 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     // Stack remains unchanged for assert operations
 
     Ok(OperationHelperRegisters::U32Assert2 { first, second })
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+/// Splits an element into two field elements containing 32-bit integer values
+#[inline(always)]
+fn split_element(value: Felt) -> (Felt, Felt) {
+    let value = value.as_canonical_u64();
+    let lo = (value as u32) as u64;
+    let hi = value >> 32;
+    (Felt::new(hi), Felt::new(lo))
 }
