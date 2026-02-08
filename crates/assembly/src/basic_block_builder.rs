@@ -37,8 +37,6 @@ struct PendingAsmOp {
     context_name: String,
     /// The string representation of the instruction (e.g., "add", "push.1").
     op: String,
-    /// Whether this instruction is a breakpoint.
-    should_break: bool,
 }
 
 // BASIC BLOCK BUILDER
@@ -166,7 +164,6 @@ impl BasicBlockBuilder<'_> {
             location: proc_ctx.source_manager().location(span).ok(),
             context_name: proc_ctx.path().to_string(),
             op: instruction.to_string(),
-            should_break: instruction.should_break(),
         });
 
         Ok(())
@@ -187,13 +184,8 @@ impl BasicBlockBuilder<'_> {
         // Compute the cycle count for the instruction
         let cycle_count = self.ops.len() - pending.op_start;
 
-        let asm_op = AssemblyOp::new(
-            pending.location,
-            pending.context_name,
-            cycle_count as u8,
-            pending.op,
-            pending.should_break,
-        );
+        let asm_op =
+            AssemblyOp::new(pending.location, pending.context_name, cycle_count as u8, pending.op);
 
         match cycle_count {
             0 => Some(asm_op),
