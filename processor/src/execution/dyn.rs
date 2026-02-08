@@ -1,10 +1,7 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
-    mast::{MastForest, MastNodeId},
-};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
     BreakReason, ContextId, Host, MapExecErr, Stopper,
@@ -13,9 +10,13 @@ use crate::{
         InternalBreakReason, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
         get_next_ctx_id,
     },
+    mast::{MastForest, MastNodeId},
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
     tracer::Tracer,
 };
+
+// DYN NODE PROCESSING
+// ================================================================================================
 
 /// Executes a Dyn node from the start.
 #[inline(always)]

@@ -1,13 +1,17 @@
 use alloc::{string::ToString, vec::Vec};
 use core::slice;
 
-use miden_air::trace::{MainTrace, RowIndex};
-use miden_core::field::ExtensionField;
-#[cfg(test)]
-use miden_core::{operations::Operation, utils::ToElements};
+use miden_air::trace::MainTrace;
 
 use super::chiplets::Chiplets;
-use crate::{Felt, debug::BusDebugger, field::PrimeField64, utils::uninit_vector};
+use crate::{
+    Felt, RowIndex,
+    debug::BusDebugger,
+    field::{ExtensionField, PrimeField64},
+    utils::uninit_vector,
+};
+#[cfg(test)]
+use crate::{operation::Operation, utils::ToElements};
 
 // TRACE FRAGMENT
 // ================================================================================================

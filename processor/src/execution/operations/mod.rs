@@ -1,12 +1,8 @@
-use miden_core::{
-    Felt,
-    mast::{MastForest, MastNodeId},
-    operations::Operation,
-};
-
 use crate::{
-    ExecutionError, Host,
+    ExecutionError, Felt, Host,
     errors::MapExecErrWithOpIdx,
+    mast::{MastForest, MastNodeId},
+    operation::Operation,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -18,12 +14,17 @@ mod io_ops;
 mod stack_ops;
 mod sys_ops;
 mod u32_ops;
-mod utils;
+
+// CONSTANTS
+// ================================================================================================
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);
 /// The size of a double-word.
 const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+// OPERATION HANDLER
+// ================================================================================================
 
 /// Executes the provided synchronous operation.
 ///
@@ -34,14 +35,14 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub(crate) fn execute_sync_op<P, T>(
+pub(crate) fn execute_op<P, T>(
     processor: &mut P,
     op: &Operation,
+    op_idx: usize,
     current_forest: &MastForest,
     node_id: MastNodeId,
     host: &mut impl Host,
     tracer: &mut T,
-    op_idx: usize,
 ) -> Result<OperationHelperRegisters, ExecutionError>
 where
     P: Processor,

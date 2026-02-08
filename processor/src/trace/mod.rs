@@ -11,10 +11,9 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
-use miden_core::program::MIN_STACK_DEPTH;
 
 use crate::{
-    AdviceProvider, Felt, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
     fast::ExecutionOutput,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
@@ -33,11 +32,6 @@ mod range;
 mod row_major_adapter;
 mod stack;
 mod trace_state;
-
-use chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder;
-use decoder::AuxTraceBuilder as DecoderAuxTraceBuilder;
-use range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder;
-use stack::AuxTraceBuilder as StackAuxTraceBuilder;
 
 #[cfg(test)]
 mod tests;
@@ -255,10 +249,10 @@ impl ExecutionTrace {
 
 #[derive(Debug, Clone)]
 pub struct AuxTraceBuilders {
-    pub(crate) decoder: DecoderAuxTraceBuilder,
-    pub(crate) stack: StackAuxTraceBuilder,
-    pub(crate) range: RangeCheckerAuxTraceBuilder,
-    pub(crate) chiplets: ChipletsAuxTraceBuilder,
+    pub(crate) decoder: decoder::AuxTraceBuilder,
+    pub(crate) stack: stack::AuxTraceBuilder,
+    pub(crate) range: range::AuxTraceBuilder,
+    pub(crate) chiplets: chiplets::AuxTraceBuilder,
 }
 
 impl AuxTraceBuilders {

@@ -1,15 +1,17 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::mast::{JoinNode, MastForest, MastNodeId};
-
 use crate::{
     BreakReason, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    mast::{JoinNode, MastForest, MastNodeId},
     processor::Processor,
     tracer::Tracer,
 };
+
+// JOIN NODE PROCESSING
+// ================================================================================================
 
 /// Executes a Join node from the start.
 #[inline(always)]

@@ -1,19 +1,18 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    ONE, ZERO,
-    mast::{LoopNode, MastForest, MastNodeId},
-};
-
 use crate::{
-    BreakReason, Host, Stopper,
+    BreakReason, Host, ONE, Stopper, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    mast::{LoopNode, MastForest, MastNodeId},
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };
+
+// LOOP NODE PROCESSING
+// ================================================================================================
 
 /// Executes a Loop node from the start.
 #[inline(always)]

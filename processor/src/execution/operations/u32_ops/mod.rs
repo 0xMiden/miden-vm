@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ZERO, field::PrimeField64};
 use paste::paste;
 
 use crate::{
-    ExecutionError,
+    ExecutionError, Felt, ZERO,
+    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -13,7 +13,13 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
+// CONSTANTS
+// ================================================================================================
+
 const U32_MAX: u64 = u32::MAX as u64;
+
+// HELPER MACROS
+// ================================================================================================
 
 macro_rules! require_u32_operands {
     ($processor:expr, [$($idx:expr),*]) => {{
@@ -35,6 +41,9 @@ macro_rules! require_u32_operands {
         }
     }};
 }
+
+// U32 OPERATIONS
+// ================================================================================================
 
 /// Removes and splits the top element of the stack into two 32-bit values, and pushes them onto
 /// the stack.

@@ -1,12 +1,18 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::mast::{MastForest, MastNodeExt, MastNodeId};
-
 use crate::{
-    BreakReason, Host, continuation_stack::ContinuationStack, execution::InternalBreakReason,
-    operation::OperationError, processor::Processor, tracer::Tracer,
+    BreakReason, Host,
+    continuation_stack::ContinuationStack,
+    execution::InternalBreakReason,
+    mast::{MastForest, MastNodeExt, MastNodeId},
+    operation::OperationError,
+    processor::Processor,
+    tracer::Tracer,
 };
+
+// EXTERNAL NODE PROCESSING
+// ================================================================================================
 
 /// Executes an External node.
 #[inline(always)]

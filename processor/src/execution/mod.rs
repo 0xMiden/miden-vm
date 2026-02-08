@@ -1,15 +1,10 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    Word,
-    mast::{MastForest, MastNode, MastNodeId},
-    program::Kernel,
-};
-
 use crate::{
-    BreakReason, ContextId, Host, Stopper,
+    BreakReason, ContextId, Host, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
+    mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -20,9 +15,8 @@ mod r#dyn;
 mod external;
 mod join;
 mod r#loop;
-mod split;
-
 mod operations;
+mod split;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -30,7 +24,7 @@ mod operations;
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
 pub(crate) use external::finish_load_mast_forest_from_external;
-pub(crate) use operations::execute_sync_op;
+use operations::execute_op;
 
 // MAIN EXECUTION FUNCTION
 // ================================================================================================

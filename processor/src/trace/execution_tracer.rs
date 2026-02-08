@@ -1,20 +1,6 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_air::trace::{
-    RowIndex,
-    chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH},
-};
-use miden_core::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
-    field::{PrimeCharacteristicRing, PrimeField64},
-    mast::{
-        BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
-        SplitNode,
-    },
-    precompile::PrecompileTranscript,
-    program::MIN_STACK_DEPTH,
-};
+use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
 
 use super::{
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
@@ -29,12 +15,22 @@ use super::{
     utils::split_u32_into_u16,
 };
 use crate::{
-    ContextId, FastProcessor,
+    ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
+    crypto::merkle::MerklePath,
+    field::{PrimeCharacteristicRing, PrimeField64},
+    mast::{
+        BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
+        SplitNode,
+    },
+    precompile::PrecompileTranscript,
     processor::{Processor, StackInterface, SystemInterface},
     trace::chiplets::CircuitEvaluation,
     tracer::{OperationHelperRegisters, Tracer},
 };
+
+// STATE SNAPSHOT
+// ================================================================================================
 
 /// Execution state snapshot, used to record the state at the start of a trace fragment.
 #[derive(Debug)]
@@ -43,6 +39,9 @@ struct StateSnapshot {
     continuation_stack: ContinuationStack,
     initial_mast_forest: Arc<MastForest>,
 }
+
+// TRACE GENERATION CONTEXT
+// ================================================================================================
 
 pub struct TraceGenerationContext {
     /// The list of trace fragment contexts built during execution.

@@ -4,10 +4,9 @@ use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, STATE_WIDTH},
 };
-use miden_core::program::MIN_STACK_DEPTH;
 
 use crate::{
-    ContextId, Felt, ONE, Word, ZERO,
+    ContextId, Felt, MIN_STACK_DEPTH, ONE, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
