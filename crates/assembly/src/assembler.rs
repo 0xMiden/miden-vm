@@ -889,8 +889,7 @@ impl Assembler {
         let location = proc_ctx.source_manager().location(*span).ok();
         let context_name = proc_ctx.path().to_string();
         let num_cycles = 0;
-        let should_break = false;
-        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string(), should_break)
+        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string())
     }
 
     fn compile_body<'a, I>(
