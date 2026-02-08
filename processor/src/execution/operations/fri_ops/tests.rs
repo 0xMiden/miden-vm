@@ -11,9 +11,8 @@ use super::{
     op_fri_ext2fold4,
 };
 use crate::{
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, SystemInterface},
-    tracer::NoopTracer,
 };
 
 // FRI FOLDING TESTS

@@ -15,9 +15,8 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, SystemInterface},
-    tracer::NoopTracer,
 };
 
 // CONSTANTS

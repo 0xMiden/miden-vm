@@ -3,7 +3,7 @@ use core::ops::ControlFlow;
 
 use miden_air::{
     Felt,
-    trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
+    trace::{RowIndex, chiplets::hasher::HasherState},
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
@@ -18,15 +18,11 @@ use crate::{
     AdviceProvider, ContextId, ExecutionError, Host,
     errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
-    processor::{
-        HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
-        SystemInterface,
-    },
+    processor::{HasherInterface, MemoryInterface, Processor, StackInterface, SystemInterface},
     trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
 };
 
 impl Processor for FastProcessor {
-    type HelperRegisters = NoopHelperRegisters;
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceProvider;
@@ -51,11 +47,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider {
         &mut self.advice
-    }
-
-    #[inline(always)]
-    fn memory(&self) -> &Self::Memory {
-        &self.memory
     }
 
     #[inline(always)]
@@ -270,6 +261,8 @@ impl SystemInterface for FastProcessor {
 }
 
 impl StackInterface for FastProcessor {
+    type Processor = FastProcessor;
+
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
@@ -352,7 +345,10 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
+    where
+        T: Tracer<Processor = Self::Processor>,
+    {
         if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
             self.increment_stack_size(tracer);
             Ok(())
@@ -362,115 +358,11 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self, tracer: &mut impl Tracer) {
+    fn decrement_size<T>(&mut self, tracer: &mut T)
+    where
+        T: Tracer<Processor = Self::Processor>,
+    {
         self.decrement_stack_size(tracer)
-    }
-}
-
-pub struct NoopHelperRegisters;
-
-/// Dummy helpers implementation used in the fast processor, where we don't compute the helper
-/// registers. These are expected to be ignored.
-const DEFAULT_HELPERS: [Felt; NUM_USER_OP_HELPERS] = [ZERO; NUM_USER_OP_HELPERS];
-
-impl OperationHelperRegisters for NoopHelperRegisters {
-    #[inline(always)]
-    fn op_eq_registers(_a: Felt, _b: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32split_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_eqz_registers(_top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_expacc_registers(_acc_update_val: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_fri_ext2fold4_registers(
-        _ev: QuadFelt,
-        _es: QuadFelt,
-        _x: Felt,
-        _x_inv: Felt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add3_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32sub_registers(_second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32mul_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32madd_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32div_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32assert2_registers(_first: Felt, _second: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_merkle_path_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_base_registers(
-        _alpha: QuadFelt,
-        _tmp0: QuadFelt,
-        _tmp1: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_ext_registers(
-        _alpha: QuadFelt,
-        _k0: Felt,
-        _k1: Felt,
-        _acc_tmp: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
     }
 }
 
@@ -478,7 +370,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-pub fn eval_circuit_fast_(
+pub(crate) fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,

@@ -12,9 +12,8 @@ use super::{
 };
 use crate::{
     AdviceInputs, ContextId,
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, StackInterface, SystemInterface},
-    tracer::NoopTracer,
 };
 
 // ADVICE INPUT TESTS

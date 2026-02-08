@@ -1,4 +1,3 @@
-use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
 use miden_core::{
     Felt, ONE, ZERO,
     field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
@@ -6,8 +5,8 @@ use miden_core::{
 
 use crate::{
     errors::OperationError,
-    processor::{OperationHelperRegisters, Processor, StackInterface},
-    tracer::Tracer,
+    processor::{Processor, StackInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
@@ -42,10 +41,14 @@ mod tests;
 /// operation has been executed, the top 10 elements of the stack can be considered to be
 /// "garbage".
 #[inline(always)]
-pub(super) fn op_fri_ext2fold4<P: Processor>(
+pub(super) fn op_fri_ext2fold4<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, OperationError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
@@ -113,7 +116,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor.stack_mut().set(13, folded_value[1]);
     processor.stack_mut().set(14, folded_value[0]);
 
-    Ok(P::HelperRegisters::op_fri_ext2fold4_registers(ev, es, x, x_inv))
+    Ok(OperationHelperRegisters::FriExt2Fold4 { ev, es, x, x_inv })
 }
 
 // HELPER METHODS

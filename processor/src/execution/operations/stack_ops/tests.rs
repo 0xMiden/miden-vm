@@ -7,9 +7,8 @@ use miden_core::{
 
 use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};
 use crate::{
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, StackInterface},
-    tracer::NoopTracer,
 };
 
 // TESTS

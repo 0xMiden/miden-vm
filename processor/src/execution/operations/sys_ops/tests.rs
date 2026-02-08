@@ -9,9 +9,8 @@ use miden_core::{
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
     execution::operations::stack_ops::op_push,
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, StackInterface, SystemInterface},
-    tracer::NoopTracer,
 };
 
 // TESTS

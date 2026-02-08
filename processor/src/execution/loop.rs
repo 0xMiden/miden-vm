@@ -18,19 +18,20 @@ use crate::{
 
 /// Executes a Loop node from the start.
 #[inline(always)]
-pub(super) fn start_loop_node<P, S>(
+pub(super) fn start_loop_node<P, S, T>(
     processor: &mut P,
     loop_node: &LoopNode,
     current_node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -55,18 +56,24 @@ where
         continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle(processor, tracer, stopper)
+        finalize_clock_cycle(processor, tracer, stopper, current_forest)
     } else if condition == ZERO {
         // Start and exit the loop immediately - corresponding to adding a LOOP and END row
         // immediately since there is no body to execute.
 
         // Finalize the clock cycle corresponding to the LOOP operation.
-        finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-            Some(Continuation::FinishLoop {
-                node_id: current_node_id,
-                was_entered: false,
-            })
-        })?;
+        finalize_clock_cycle_with_continuation(
+            processor,
+            tracer,
+            stopper,
+            || {
+                Some(Continuation::FinishLoop {
+                    node_id: current_node_id,
+                    was_entered: false,
+                })
+            },
+            current_forest,
+        )?;
 
         finish_loop_node(
             processor,
@@ -94,19 +101,20 @@ where
 /// `loop_was_entered` is true), or when the loop condition was found to be ZERO at the start of
 /// the loop (in which case `loop_was_entered` is false).
 #[inline(always)]
-pub(super) fn finish_loop_node<P, S>(
+pub(super) fn finish_loop_node<P, S, T>(
     processor: &mut P,
     loop_was_entered: bool,
     current_node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     // This happens after loop body execution or when the loop condition was ZERO at the start.
     // Check condition again to see if we should continue looping. If the loop was never entered, we
@@ -139,7 +147,7 @@ where
         continuation_stack.push_start_node(loop_node.body());
 
         // Finalize the clock cycle corresponding to the REPEAT operation.
-        finalize_clock_cycle(processor, tracer, stopper)
+        finalize_clock_cycle(processor, tracer, stopper, current_forest)
     } else if condition == ZERO {
         // Exit the loop - start the clock cycle corresponding to the END operation.
         tracer.start_clock_cycle(
@@ -162,9 +170,13 @@ where
         }
 
         // Finalize the clock cycle corresponding to the END operation.
-        finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-            Some(Continuation::AfterExitDecorators(current_node_id))
-        })?;
+        finalize_clock_cycle_with_continuation(
+            processor,
+            tracer,
+            stopper,
+            || Some(Continuation::AfterExitDecorators(current_node_id)),
+            current_forest,
+        )?;
 
         processor.execute_after_exit_decorators(current_node_id, current_forest, host)
     } else {

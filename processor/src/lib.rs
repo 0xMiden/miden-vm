@@ -23,7 +23,7 @@ mod stack;
 mod system;
 
 pub mod fast;
-pub mod processor;
+pub(crate) mod processor;
 pub mod trace;
 pub mod tracer;
 pub mod utils;
@@ -319,7 +319,7 @@ impl<'a> ProcessorState<'a> {
 
 /// A trait for types that determine whether execution should be stopped at a given point.
 pub trait Stopper {
-    type Processor: Processor;
+    type Processor;
 
     /// Determines whether execution should be stopped.
     ///

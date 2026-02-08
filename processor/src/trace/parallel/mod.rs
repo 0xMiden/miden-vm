@@ -1,4 +1,4 @@
-use alloc::{boxed::Box, vec::Vec};
+use alloc::{boxed::Box, sync::Arc, vec::Vec};
 
 use itertools::Itertools;
 use miden_air::{
@@ -18,6 +18,7 @@ use miden_air::{
 use miden_core::{
     ONE, Word, ZERO,
     field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    mast::MastForest,
     operations::Operation,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},
     utils::{ColMatrix, uninit_vector},
@@ -27,25 +28,31 @@ use tracing::instrument;
 
 use crate::{
     ContextId,
+    continuation_stack::ContinuationStack,
     decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
     fast::{
         ExecutionOutput,
         execution_tracer::TraceGenerationContext,
         trace_state::{
-            AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, HasherOp,
-            HasherRequestReplay, KernelReplay, MemoryWritesReplay,
+            AceReplay, BitwiseOp, BitwiseReplay, CoreTraceFragmentContext, CoreTraceState,
+            ExecutionReplay, HasherOp, HasherRequestReplay, KernelReplay, MemoryWritesReplay,
         },
     },
     stack::AuxTraceBuilder as StackAuxTraceBuilder,
     trace::{
-        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary, range::RangeChecker,
+        AuxTraceBuilders, ChipletsLengths, ExecutionTrace, TraceLenSummary,
+        parallel::{processor::ReplayProcessor, tracer::CoreTraceGenerationTracer},
+        range::RangeChecker,
     },
 };
 
 pub const CORE_TRACE_WIDTH: usize = SYS_TRACE_WIDTH + DECODER_TRACE_WIDTH + STACK_TRACE_WIDTH;
 
 pub(crate) mod core_trace_fragment;
-use core_trace_fragment::{CoreTraceFragment, CoreTraceFragmentFiller};
+use core_trace_fragment::CoreTraceFragment;
+
+mod processor;
+mod tracer;
 
 use super::chiplets::Chiplets;
 
@@ -86,7 +93,11 @@ pub fn build_trace(
 
     let range_checker = initialize_range_checker(range_checker_replay, &chiplets);
 
-    let mut core_trace_columns = generate_core_trace_columns(core_trace_contexts, fragment_size);
+    let mut core_trace_columns = generate_core_trace_columns(
+        core_trace_contexts,
+        program_info.kernel().clone(),
+        fragment_size,
+    );
 
     // Calculate trace length
     let core_trace_len = core_trace_columns[0].len();
@@ -165,6 +176,7 @@ fn compute_main_trace_length(
 /// Generates core trace fragments in parallel from the provided trace fragment contexts.
 fn generate_core_trace_columns(
     core_trace_contexts: Vec<CoreTraceFragmentContext>,
+    kernel: Kernel,
     fragment_size: usize,
 ) -> Vec<Vec<Felt>> {
     let mut core_trace_columns: Vec<Vec<Felt>> =
@@ -185,9 +197,14 @@ fn generate_core_trace_columns(
             .into_par_iter()
             .zip(fragments.par_iter_mut())
             .map(|(trace_state, fragment)| {
-                let core_trace_fragment_filler =
-                    CoreTraceFragmentFiller::new(trace_state, fragment);
-                core_trace_fragment_filler.fill_fragment()
+                let (mut processor, mut tracer, mut continuation_stack, mut current_forest) =
+                    split_trace_fragment_context(trace_state, fragment, fragment_size);
+
+                processor
+                    .execute(&mut continuation_stack, &mut current_forest, &kernel, &mut tracer)
+                    .expect("fragment execution failed");
+
+                tracer.into_parts()
             })
             .collect();
 
@@ -656,4 +673,50 @@ fn pad_trace_columns(trace_columns: &mut [Vec<Felt>], main_trace_len: usize) {
         let last_stack_value = trace_columns[col_idx][total_program_rows - 1];
         trace_columns[col_idx].resize(main_trace_len, last_stack_value);
     }
+}
+
+/// Uses the provided `CoreTraceFragmentContext` to build and return a `ReplayProcessor` and
+/// `CoreTraceGenerationTracer` that can be used to execute the fragment.
+fn split_trace_fragment_context<'a>(
+    fragment_context: CoreTraceFragmentContext,
+    fragment: &'a mut CoreTraceFragment<'a>,
+    fragment_size: usize,
+) -> (
+    ReplayProcessor,
+    CoreTraceGenerationTracer<'a>,
+    ContinuationStack,
+    Arc<MastForest>,
+) {
+    let CoreTraceFragmentContext {
+        state: CoreTraceState { system, decoder, stack },
+        replay:
+            ExecutionReplay {
+                block_stack: block_stack_replay,
+                execution_context: execution_context_replay,
+                stack_overflow: stack_overflow_replay,
+                memory_reads: memory_reads_replay,
+                advice: advice_replay,
+                hasher: hasher_response_replay,
+                block_address: block_address_replay,
+                mast_forest_resolution: mast_forest_resolution_replay,
+            },
+        continuation,
+        initial_mast_forest,
+    } = fragment_context;
+
+    let processor = ReplayProcessor::new(
+        system,
+        stack,
+        stack_overflow_replay,
+        execution_context_replay,
+        advice_replay,
+        memory_reads_replay,
+        hasher_response_replay,
+        mast_forest_resolution_replay,
+        fragment_size.into(),
+    );
+    let tracer =
+        CoreTraceGenerationTracer::new(fragment, decoder, block_address_replay, block_stack_replay);
+
+    (processor, tracer, continuation, initial_mast_forest)
 }

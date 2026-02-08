@@ -63,6 +63,7 @@
 - [BREAKING] Removed `PushMany` trait and `new_array_vec()` from `miden-core` ([#2630](https://github.com/0xMiden/miden-vm/pull/2630)).
 - [BREAKING] `Host::on_debug()` and `Host::on_trace()` now take immutable references to `ProcessorState` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
 - [BREAKING] Removed unused `meta` field from `ExecutionTrace` and changed the constructor to take `ProgramInfo` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
+- [BREAKING] Migrate parallel trace generation to use the common `execute_impl()` ([#2642](https://github.com/0xMiden/miden-vm/pull/2642)).
 - [BREAKING] Removed unused `should_break` field from `AssemblyOp` decorator ([#2646](https://github.com/0xMiden/miden-vm/pull/2646)).
 
 ## 0.20.6 (2026-02-04)
