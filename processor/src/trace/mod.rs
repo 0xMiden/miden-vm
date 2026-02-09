@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 #[cfg(any(test, feature = "testing"))]
 use core::ops::Range;
 
-use chiplets::AuxTraceBuilder as ChipletsAuxTraceBuilder;
 #[cfg(feature = "std")]
 use miden_air::trace::PADDED_TRACE_WIDTH;
 use miden_air::{
@@ -12,30 +11,27 @@ use miden_air::{
         decoder::{NUM_USER_OP_HELPERS, USER_OP_HELPERS_OFFSET},
     },
 };
-use miden_core::{
-    Word, ZERO,
+
+use crate::{
+    AdviceProvider, Felt, MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs, Word, ZERO,
+    fast::ExecutionOutput,
     field::ExtensionField,
     precompile::{PrecompileRequest, PrecompileTranscript},
-    program::{MIN_STACK_DEPTH, ProgramInfo, StackInputs, StackOutputs},
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };
-use range::AuxTraceBuilder as RangeCheckerAuxTraceBuilder;
 
-use super::{
-    AdviceProvider, Felt, decoder::AuxTraceBuilder as DecoderAuxTraceBuilder,
-    stack::AuxTraceBuilder as StackAuxTraceBuilder,
-};
-use crate::fast::ExecutionOutput;
-
-mod utils;
-pub(crate) use utils::{AuxColumnBuilder, TraceFragment};
-
-mod row_major_adapter;
+pub(crate) mod utils;
+use utils::{AuxColumnBuilder, TraceFragment};
 
 pub mod chiplets;
-pub mod range;
+pub mod execution_tracer;
 
+mod decoder;
 mod parallel;
+mod range;
+mod row_major_adapter;
+mod stack;
+mod trace_state;
 
 #[cfg(test)]
 mod tests;
@@ -253,10 +249,10 @@ impl ExecutionTrace {
 
 #[derive(Debug, Clone)]
 pub struct AuxTraceBuilders {
-    pub(crate) decoder: DecoderAuxTraceBuilder,
-    pub(crate) stack: StackAuxTraceBuilder,
-    pub(crate) range: RangeCheckerAuxTraceBuilder,
-    pub(crate) chiplets: ChipletsAuxTraceBuilder,
+    pub(crate) decoder: decoder::AuxTraceBuilder,
+    pub(crate) stack: stack::AuxTraceBuilder,
+    pub(crate) range: range::AuxTraceBuilder,
+    pub(crate) chiplets: chiplets::AuxTraceBuilder,
 }
 
 impl AuxTraceBuilders {

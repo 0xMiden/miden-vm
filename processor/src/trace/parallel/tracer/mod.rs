@@ -1,32 +1,33 @@
 use alloc::sync::Arc;
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, chiplets::hasher::STATE_WIDTH},
+use miden_air::trace::{
+    RowIndex, STACK_TRACE_WIDTH, SYS_TRACE_WIDTH, chiplets::hasher::STATE_WIDTH,
 };
-use miden_core::{
-    ONE, Word, ZERO,
-    crypto::merkle::MerklePath,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    program::MIN_STACK_DEPTH,
-};
+use miden_core::program::MIN_STACK_DEPTH;
 
-use crate::{
-    ContextId,
-    continuation_stack::{Continuation, ContinuationStack},
-    decoder::block_stack::ExecutionContextInfo,
-    fast::trace_state::{BlockAddressReplay, BlockStackReplay, DecoderState},
-    trace::{
-        chiplets::CircuitEvaluation,
-        parallel::{
-            core_trace_fragment::{BasicBlockContext, CoreTraceFragment},
-            processor::ReplayProcessor,
+use super::{
+    super::{
+        decoder::block_stack::ExecutionContextInfo,
+        trace_state::{
+            BlockAddressReplay, BlockStackReplay, DecoderState, StackState, SystemState,
         },
     },
+    core_trace_fragment::{BasicBlockContext, CoreTraceFragment},
+    processor::ReplayProcessor,
+};
+use crate::{
+    ContextId, Felt, ONE, Word, ZERO,
+    continuation_stack::{Continuation, ContinuationStack},
+    crypto::merkle::MerklePath,
+    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
+    trace::chiplets::CircuitEvaluation,
     tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod trace_row;
+
+// CORE TRACE GENERATION TRACER
+// ================================================================================================
 
 /// A tracer implementation for generating a core trace fragment of a predetermined number of rows.
 ///
@@ -112,7 +113,191 @@ impl<'a> CoreTraceGenerationTracer<'a> {
             num_rows_built,
         )
     }
+
+    // HELPER METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Fills a trace row for a `StartNode` continuation based on the type of node being started.
+    fn fill_start_row(
+        &mut self,
+        node_id: MastNodeId,
+        processor: &ReplayProcessor,
+        current_forest: &Arc<MastForest>,
+    ) {
+        let node = current_forest
+            .get_node_by_id(node_id)
+            .expect("invalid node ID stored in continuation");
+
+        match node {
+            MastNode::Block(basic_block_node) => {
+                self.fill_basic_block_start_trace_row(
+                    &processor.system,
+                    &processor.stack,
+                    basic_block_node,
+                );
+            },
+            MastNode::Join(join_node) => {
+                self.fill_join_start_trace_row(
+                    &processor.system,
+                    &processor.stack,
+                    join_node,
+                    current_forest,
+                );
+            },
+            MastNode::Split(split_node) => {
+                self.fill_split_start_trace_row(
+                    &processor.system,
+                    &processor.stack,
+                    split_node,
+                    current_forest,
+                );
+            },
+            MastNode::Loop(loop_node) => {
+                self.fill_loop_start_trace_row(
+                    &processor.system,
+                    &processor.stack,
+                    loop_node,
+                    current_forest,
+                );
+            },
+            MastNode::Call(call_node) => {
+                self.fill_call_start_trace_row(
+                    &processor.system,
+                    &processor.stack,
+                    call_node,
+                    current_forest,
+                );
+            },
+            MastNode::Dyn(dyn_node) => {
+                let callee_hash = self
+                    .dyn_callee_hash
+                    .take()
+                    .expect("dyn callee hash stored at start of clock cycle");
+
+                if dyn_node.is_dyncall() {
+                    let ctx_info = self.ctx_info.take().expect(
+                        "execution context info stored at start of clock cycle for DYNCALL node",
+                    );
+
+                    self.fill_dyncall_start_trace_row(
+                        &processor.system,
+                        &processor.stack,
+                        callee_hash,
+                        ctx_info,
+                    );
+                } else {
+                    self.fill_dyn_start_trace_row(&processor.system, &processor.stack, callee_hash);
+                }
+            },
+            MastNode::External(_) => {
+                unreachable!("The Tracer contract guarantees that external nodes do not occur here")
+            },
+        }
+    }
+
+    /// Returns the execution context info for a DYNCALL node, or `None` if the continuation does
+    /// not represent a `StartNode` for a DYNCALL. The state of the processor is expected to be at
+    /// the beginning of the DYNCALL execution (i.e., during `start_clock_cycle()`).
+    ///
+    /// Recall that DYNCALL drops the top stack element, which represents the memory address where
+    /// the callee hash is stored. The execution context info is captured *after* the top stack
+    /// element has been dropped, as per the semantics of DYNCALL.
+    fn get_execution_context_for_dyncall(
+        &self,
+        current_forest: &MastForest,
+        continuation: &Continuation,
+        processor: &ReplayProcessor,
+    ) -> Option<ExecutionContextInfo> {
+        let Continuation::StartNode(node_id) = &continuation else {
+            return None;
+        };
+
+        let node = current_forest
+            .get_node_by_id(*node_id)
+            .expect("invalid node ID stored in continuation");
+
+        let MastNode::Dyn(dyn_node) = node else {
+            return None;
+        };
+
+        if !dyn_node.is_dyncall() {
+            return None;
+        }
+
+        let (stack_depth_after_drop, overflow_addr_after_drop) = if processor.stack.stack_depth()
+            > MIN_STACK_DEPTH
+        {
+            // Stack is above minimum depth, so peek at the overflow replay for the post-pop
+            // overflow address.
+            let (_, overflow_addr_after_drop) =
+                    processor.stack_overflow_replay.peek_replay_pop_overflow().expect("stack depth is above minimum, so we expect a corresponding overflow pop in the replay");
+            let stack_depth_after_drop = processor.stack.stack_depth() - 1;
+
+            (stack_depth_after_drop as u32, *overflow_addr_after_drop)
+        } else {
+            // Stack is at minimum depth already, so the overflow address is ZERO and the depth
+            // remains the same after the drop.
+            (processor.stack.stack_depth() as u32, ZERO)
+        };
+
+        Some(ExecutionContextInfo::new(
+            processor.system.ctx,
+            processor.system.fn_hash,
+            stack_depth_after_drop,
+            overflow_addr_after_drop,
+        ))
+    }
+
+    /// Returns the loop condition sitting on top of the stack for a `FinishLoop` continuation, or
+    /// `None` if the continuation is not a `FinishLoop`.
+    ///
+    /// The loop condition is `true` if the top of the stack equals ONE (meaning the loop body
+    /// should be re-executed), and `false` otherwise (meaning the loop is finished).
+    fn get_finish_loop_condition(
+        &self,
+        continuation: &Continuation,
+        processor: &ReplayProcessor,
+    ) -> Option<bool> {
+        if let Continuation::FinishLoop { .. } = &continuation {
+            let condition = processor.stack.get(0);
+            return Some(condition == ONE);
+        }
+
+        None
+    }
+
+    /// Returns the callee hash for a `Dyn` node, or `None` if the continuation is not a
+    /// `StartNode` for a `Dyn` node.
+    ///
+    /// The callee hash is read from the memory reads replay, as `Dyn` nodes read the procedure
+    /// hash (as a word) from memory.
+    fn get_dyn_callee_hash(
+        &self,
+        continuation: &Continuation,
+        processor: &ReplayProcessor,
+        current_forest: &MastForest,
+    ) -> Option<Word> {
+        if let Continuation::StartNode(node_id) = continuation {
+            let node = current_forest
+                .get_node_by_id(*node_id)
+                .expect("invalid node ID stored in continuation");
+
+            if let MastNode::Dyn(_) = node {
+                let (word_read, _addr, _ctx, _clk) = processor
+                    .memory_reads_replay
+                    .iter_read_words()
+                    .next()
+                    .expect("dyn node reads the procedure hash (word) from memory");
+                return Some(word_read);
+            }
+        }
+
+        None
+    }
 }
+
+// TRACER IMPLEMENTATION
+// ================================================================================================
 
 impl Tracer for CoreTraceGenerationTracer<'_> {
     type Processor = ReplayProcessor;
@@ -380,186 +565,8 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
     }
 }
 
-/// Helpers
-impl<'a> CoreTraceGenerationTracer<'a> {
-    /// Fills a trace row for a `StartNode` continuation based on the type of node being started.
-    fn fill_start_row(
-        &mut self,
-        node_id: MastNodeId,
-        processor: &ReplayProcessor,
-        current_forest: &Arc<MastForest>,
-    ) {
-        let node = current_forest
-            .get_node_by_id(node_id)
-            .expect("invalid node ID stored in continuation");
-
-        match node {
-            MastNode::Block(basic_block_node) => {
-                self.fill_basic_block_start_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    basic_block_node,
-                );
-            },
-            MastNode::Join(join_node) => {
-                self.fill_join_start_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    join_node,
-                    current_forest,
-                );
-            },
-            MastNode::Split(split_node) => {
-                self.fill_split_start_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    split_node,
-                    current_forest,
-                );
-            },
-            MastNode::Loop(loop_node) => {
-                self.fill_loop_start_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    loop_node,
-                    current_forest,
-                );
-            },
-            MastNode::Call(call_node) => {
-                self.fill_call_start_trace_row(
-                    &processor.system,
-                    &processor.stack,
-                    call_node,
-                    current_forest,
-                );
-            },
-            MastNode::Dyn(dyn_node) => {
-                let callee_hash = self
-                    .dyn_callee_hash
-                    .take()
-                    .expect("dyn callee hash stored at start of clock cycle");
-
-                if dyn_node.is_dyncall() {
-                    let ctx_info = self.ctx_info.take().expect(
-                        "execution context info stored at start of clock cycle for DYNCALL node",
-                    );
-
-                    self.fill_dyncall_start_trace_row(
-                        &processor.system,
-                        &processor.stack,
-                        callee_hash,
-                        ctx_info,
-                    );
-                } else {
-                    self.fill_dyn_start_trace_row(&processor.system, &processor.stack, callee_hash);
-                }
-            },
-            MastNode::External(_) => {
-                unreachable!("The Tracer contract guarantees that external nodes do not occur here")
-            },
-        }
-    }
-
-    /// Returns the execution context info for a DYNCALL node, or `None` if the continuation does
-    /// not represent a `StartNode` for a DYNCALL. The state of the processor is expected to be at
-    /// the beginning of the DYNCALL execution (i.e., during `start_clock_cycle()`).
-    ///
-    /// Recall that DYNCALL drops the top stack element, which represents the memory address where
-    /// the callee hash is stored. The execution context info is captured *after* the top stack
-    /// element has been dropped, as per the semantics of DYNCALL.
-    fn get_execution_context_for_dyncall(
-        &self,
-        current_forest: &MastForest,
-        continuation: &Continuation,
-        processor: &ReplayProcessor,
-    ) -> Option<ExecutionContextInfo> {
-        let Continuation::StartNode(node_id) = &continuation else {
-            return None;
-        };
-
-        let node = current_forest
-            .get_node_by_id(*node_id)
-            .expect("invalid node ID stored in continuation");
-
-        let MastNode::Dyn(dyn_node) = node else {
-            return None;
-        };
-
-        if !dyn_node.is_dyncall() {
-            return None;
-        }
-
-        let (stack_depth_after_drop, overflow_addr_after_drop) = if processor.stack.stack_depth()
-            > MIN_STACK_DEPTH
-        {
-            // Stack is above minimum depth, so peek at the overflow replay for the post-pop
-            // overflow address.
-            let (_, overflow_addr_after_drop) =
-                    processor.stack_overflow_replay.peek_replay_pop_overflow().expect("stack depth is above minimum, so we expect a corresponding overflow pop in the replay");
-            let stack_depth_after_drop = processor.stack.stack_depth() - 1;
-
-            (stack_depth_after_drop as u32, *overflow_addr_after_drop)
-        } else {
-            // Stack is at minimum depth already, so the overflow address is ZERO and the depth
-            // remains the same after the drop.
-            (processor.stack.stack_depth() as u32, ZERO)
-        };
-
-        Some(ExecutionContextInfo::new(
-            processor.system.ctx,
-            processor.system.fn_hash,
-            stack_depth_after_drop,
-            overflow_addr_after_drop,
-        ))
-    }
-
-    /// Returns the loop condition sitting on top of the stack for a `FinishLoop` continuation, or
-    /// `None` if the continuation is not a `FinishLoop`.
-    ///
-    /// The loop condition is `true` if the top of the stack equals ONE (meaning the loop body
-    /// should be re-executed), and `false` otherwise (meaning the loop is finished).
-    fn get_finish_loop_condition(
-        &self,
-        continuation: &Continuation,
-        processor: &ReplayProcessor,
-    ) -> Option<bool> {
-        if let Continuation::FinishLoop { .. } = &continuation {
-            let condition = processor.stack.get(0);
-            return Some(condition == ONE);
-        }
-
-        None
-    }
-
-    /// Returns the callee hash for a `Dyn` node, or `None` if the continuation is not a
-    /// `StartNode` for a `Dyn` node.
-    ///
-    /// The callee hash is read from the memory reads replay, as `Dyn` nodes read the procedure
-    /// hash (as a word) from memory.
-    fn get_dyn_callee_hash(
-        &self,
-        continuation: &Continuation,
-        processor: &ReplayProcessor,
-        current_forest: &MastForest,
-    ) -> Option<Word> {
-        if let Continuation::StartNode(node_id) = continuation {
-            let node = current_forest
-                .get_node_by_id(*node_id)
-                .expect("invalid node ID stored in continuation");
-
-            if let MastNode::Dyn(_) = node {
-                let (word_read, _addr, _ctx, _clk) = processor
-                    .memory_reads_replay
-                    .iter_read_words()
-                    .next()
-                    .expect("dyn node reads the procedure hash (word) from memory");
-                return Some(word_read);
-            }
-        }
-
-        None
-    }
-}
+// HELPER FUNCTIONS
+// ================================================================================================
 
 /// Returns a reference to the node with the given ID from the forest.
 ///
@@ -571,6 +578,9 @@ fn expect_node_in_forest(forest: &MastForest, node_id: MastNodeId) -> &MastNode 
         .unwrap_or_else(|| panic!("invalid node ID stored in continuation: {}", node_id))
 }
 
+// TESTS
+// ================================================================================================
+
 #[cfg(test)]
 mod tests {
     use alloc::{vec, vec::Vec};
@@ -578,12 +588,12 @@ mod tests {
     use miden_core::mast::{DynNodeBuilder, MastForestContributor};
 
     use super::*;
-    use crate::{
-        fast::trace_state::{
+    use crate::trace::{
+        parallel::CORE_TRACE_WIDTH,
+        trace_state::{
             AdviceReplay, ExecutionContextReplay, HasherResponseReplay, MastForestResolutionReplay,
             MemoryReadsReplay, StackOverflowReplay, StackState, SystemState,
         },
-        trace::parallel::CORE_TRACE_WIDTH,
     };
 
     /// Ensures that `get_execution_context_for_dyncall()` correctly populates the

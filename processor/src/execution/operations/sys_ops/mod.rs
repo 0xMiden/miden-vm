@@ -1,8 +1,8 @@
-use miden_core::{Felt, ONE, field::PrimeCharacteristicRing, mast::MastForest};
-
 use crate::{
-    ExecutionError,
+    ExecutionError, Felt, ONE,
     errors::OperationError,
+    field::PrimeCharacteristicRing,
+    mast::MastForest,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -10,7 +10,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-// OPERATION HANDLERS
+// SYTEM HANDLERS
 // ================================================================================================
 
 /// Pops a value off the stack and asserts that it is equal to ONE.

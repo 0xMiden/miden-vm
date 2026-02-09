@@ -7,14 +7,14 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::MainTrace;
-use miden_core::{
-    Felt,
-    field::{ExtensionField, PrimeCharacteristicRing},
-    utils::{ColMatrix, Matrix, RowMajorMatrix},
-};
 use tracing::instrument;
 
-use crate::trace::AuxTraceBuilders;
+use crate::{
+    Felt,
+    field::{ExtensionField, PrimeCharacteristicRing},
+    trace::AuxTraceBuilders,
+    utils::{ColMatrix, Matrix, RowMajorMatrix},
+};
 
 /// Converts a row-major Felt matrix to column-major MainTrace format.
 ///

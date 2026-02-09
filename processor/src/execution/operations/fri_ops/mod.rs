@@ -1,16 +1,16 @@
-use miden_core::{
-    Felt, ONE, ZERO,
-    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
-};
-
 use crate::{
+    Felt, ONE, ZERO,
     errors::OperationError,
+    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
 mod tests;
+
+// FRI OPERATIONS
+// ================================================================================================
 
 /// Performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2
 /// extension of the base field. Additionally, performs several computations which simplify

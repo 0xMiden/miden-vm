@@ -1,13 +1,17 @@
 use alloc::{string::ToString, vec::Vec};
 use core::slice;
 
-use miden_air::trace::{MainTrace, RowIndex};
-use miden_core::field::ExtensionField;
-#[cfg(test)]
-use miden_core::{operations::Operation, utils::ToElements};
+use miden_air::trace::MainTrace;
 
 use super::chiplets::Chiplets;
-use crate::{Felt, debug::BusDebugger, utils::uninit_vector};
+use crate::{
+    Felt, RowIndex,
+    debug::BusDebugger,
+    field::{ExtensionField, PrimeField64},
+    utils::uninit_vector,
+};
+#[cfg(test)]
+use crate::{operation::Operation, utils::ToElements};
 
 // TRACE FRAGMENT
 // ================================================================================================
@@ -297,6 +301,30 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
 
         result_aux_column
     }
+}
+
+// U32 HELPERS
+// ================================================================================================
+
+/// Splits an element into two 16 bit integer limbs. It assumes that the field element contains a
+/// valid 32-bit integer value.
+pub(crate) fn split_element_u32_into_u16(value: Felt) -> (Felt, Felt) {
+    let (hi, lo) = split_u32_into_u16(value.as_canonical_u64());
+    (Felt::new(hi as u64), Felt::new(lo as u64))
+}
+
+/// Splits a u64 integer assumed to contain a 32-bit value into two u16 integers.
+///
+/// # Errors
+/// Fails in debug mode if the provided value is not a 32-bit value.
+pub(crate) fn split_u32_into_u16(value: u64) -> (u16, u16) {
+    const U32MAX: u64 = u32::MAX as u64;
+    debug_assert!(value <= U32MAX, "not a 32-bit value");
+
+    let lo = value as u16;
+    let hi = (value >> 16) as u16;
+
+    (hi, lo)
 }
 
 // TEST HELPERS

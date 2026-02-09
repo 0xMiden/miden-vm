@@ -9,8 +9,7 @@ use miden_utils_testing::rand::rand_array;
 
 use super::{ExecutionTrace, Felt};
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, StackInputs,
-    fast::FastProcessor,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, StackInputs,
     trace::{build_trace, chiplets::init_state_from_words},
 };
 

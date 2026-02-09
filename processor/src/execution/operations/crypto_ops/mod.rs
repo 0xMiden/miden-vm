@@ -1,17 +1,16 @@
 use alloc::boxed::Box;
 
-use miden_air::trace::log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE};
-use miden_core::{
-    Felt, Word, ZERO,
+use miden_air::trace::{
     chiplets::hasher::STATE_WIDTH,
-    field::{BasedVectorSpace, PrimeField64, QuadFelt},
-    mast::MastForest,
+    log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
 
-use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT, utils::validate_dual_word_stream_addrs};
+use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
 use crate::{
-    ONE,
+    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
     errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
+    field::{BasedVectorSpace, PrimeField64, QuadFelt},
+    mast::MastForest,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
         SystemInterface,
@@ -582,4 +581,51 @@ pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     processor.stack_mut().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
 
     Ok(OperationHelperRegisters::Empty)
+}
+
+// Note: assert_binary now returns OperationError, imported via crate::OperationError in the
+// function
+
+/// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
+/// are within u32 bounds and do not overlap in the same cycle.
+///
+/// Uses half-open intervals: [addr, addr+8). If ranges overlap, returns an IllegalMemoryAccess
+/// error pointing at the first destination word that would be written.
+#[inline(always)]
+fn validate_dual_word_stream_addrs(
+    src_addr: Felt,
+    dst_addr: Felt,
+    ctx: ContextId,
+    clk: RowIndex,
+) -> Result<(), MemoryError> {
+    // Convert to u32 and check end-exclusive bounds
+    let src_addr_u64 = src_addr.as_canonical_u64();
+    let dst_addr_u64 = dst_addr.as_canonical_u64();
+
+    let src_addr_u32 = u32::try_from(src_addr_u64)
+        .map_err(|_| MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
+    let src_end = src_addr_u32
+        .checked_add(8)
+        .ok_or(MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
+
+    let dst_addr_u32 = u32::try_from(dst_addr_u64)
+        .map_err(|_| MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
+    let dst_end = dst_addr_u32
+        .checked_add(8)
+        .ok_or(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
+
+    // Check for overlap between [src, src+8) and [dst, dst+8)
+    if src_addr_u32 < dst_end && dst_addr_u32 < src_end {
+        let dst_word2 = dst_addr_u32 + 4; // safe since dst_end computed above
+        // We write dst first, then dst+4. Use the first that overlaps.
+        let overlap_first = (dst_addr_u32 >= src_addr_u32) && (dst_addr_u32 < src_end);
+        let offending_addr = if overlap_first { dst_addr_u32 } else { dst_word2 };
+        return Err(MemoryError::IllegalMemoryAccess {
+            ctx,
+            addr: offending_addr,
+            clk: Felt::from(clk),
+        });
+    }
+
+    Ok(())
 }

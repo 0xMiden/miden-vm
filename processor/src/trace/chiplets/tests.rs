@@ -18,7 +18,7 @@ use miden_core::{
 };
 
 use crate::{
-    AdviceInputs, DefaultHost, ExecutionOptions, Kernel, fast::FastProcessor, operation::Operation,
+    AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, Kernel, operation::Operation,
 };
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];

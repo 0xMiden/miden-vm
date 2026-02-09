@@ -1,21 +1,20 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
-    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
-    program::Kernel,
-};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
-    ContextId, Host, MapExecErr, Stopper,
+    BreakReason, ContextId, Host, Kernel, MapExecErr, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation, get_next_ctx_id},
-    fast::step::BreakReason,
+    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
     processor::{MemoryInterface, Processor, SystemInterface},
     tracer::Tracer,
 };
+
+// CALL NODE PROCESSORS
+// ================================================================================================
 
 /// Executes a Call node from the start.
 #[inline(always)]

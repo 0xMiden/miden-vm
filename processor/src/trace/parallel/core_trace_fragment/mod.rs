@@ -10,7 +10,7 @@ use miden_core::{
 
 use super::{super::chiplets::CircuitEvaluation, CORE_TRACE_WIDTH};
 use crate::{
-    ContextId, errors::AceEvalError, fast::eval_circuit_fast_, processor::MemoryInterface,
+    ContextId, errors::AceEvalError, fast::eval_circuit_fast, processor::MemoryInterface,
     tracer::Tracer,
 };
 
@@ -45,7 +45,7 @@ pub(crate) fn eval_circuit_parallel_(
 ) -> Result<CircuitEvaluation, AceEvalError> {
     // Delegate to the fast implementation with the processor's memory interface.
     // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast_(ctx, ptr, clk, num_vars, num_eval, memory, tracer)
+    eval_circuit_fast(ctx, ptr, clk, num_vars, num_eval, memory, tracer)
 }
 
 // BASIC BLOCK CONTEXT

@@ -29,32 +29,26 @@ use crate::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
-    fast::{
+    trace::{
+        chiplets::{Ace, CircuitEvaluation},
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
-        external::maybe_use_caller_error_context,
-        step::{BreakReason, NeverStopper, StepStopper},
     },
-    trace::chiplets::{Ace, CircuitEvaluation},
     tracer::{OperationHelperRegisters, Tracer},
 };
-
-pub mod execution_tracer;
-mod memory;
-pub use memory::Memory;
-
-mod operation;
-pub(crate) use operation::eval_circuit_fast_;
-
-pub(crate) mod step;
-pub use step::ResumeContext;
-
-pub mod trace_state;
 
 mod basic_block;
 mod call_and_dyn;
 mod external;
+mod memory;
+mod operation;
+mod step;
 
 pub use basic_block::SystemEventError;
+use external::maybe_use_caller_error_context;
+pub use memory::Memory;
+pub(crate) use operation::eval_circuit_fast;
+pub use step::{BreakReason, ResumeContext};
+use step::{NeverStopper, StepStopper};
 
 #[cfg(test)]
 mod tests;
@@ -171,7 +165,7 @@ impl FastProcessor {
     ///
     /// # Example
     /// ```ignore
-    /// use miden_processor::fast::FastProcessor;
+    /// use miden_processor::FastProcessor;
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)

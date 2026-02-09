@@ -8,10 +8,9 @@ use miden_core::{
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
 use crate::{
-    DebugError, FutureMaybeSend, Host, ProcessorState, Program, TraceError, Word,
+    DebugError, FastProcessor, FutureMaybeSend, Host, ProcessorState, Program, TraceError, Word,
     advice::{AdviceInputs, AdviceMutation},
     event::EventError,
-    fast::FastProcessor,
     test_utils::test_consistency_host::TestConsistencyHost,
 };
 

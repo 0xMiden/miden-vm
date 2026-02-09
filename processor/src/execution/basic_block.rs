@@ -1,22 +1,21 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    mast::{BasicBlockNode, MastForest, MastNodeId},
-    operations::Operation,
-};
-
 use crate::{
-    Host, Stopper,
+    BreakReason, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
-        InternalBreakReason, execute_sync_op, finalize_clock_cycle_with_continuation,
+        InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
         finalize_clock_cycle_with_continuation_and_op_helpers,
     },
-    fast::step::BreakReason,
+    mast::{BasicBlockNode, MastForest, MastNodeId},
+    operation::Operation,
     processor::Processor,
     tracer::Tracer,
 };
+
+// BASIC BLOCK PROCESSING
+// ================================================================================================
 
 /// Execute the given basic block node.
 #[inline(always)]
@@ -341,14 +340,14 @@ where
             },
             _ => {
                 // If the operation is not an Emit, we execute it normally.
-                match execute_sync_op(
+                match execute_op(
                     processor,
                     op,
+                    op_idx_in_block,
                     current_forest,
                     node_id,
                     host,
                     tracer,
-                    op_idx_in_block,
                 ) {
                     Ok(operation_helpers) => operation_helpers,
                     Err(err) => {

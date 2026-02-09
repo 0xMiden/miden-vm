@@ -39,9 +39,6 @@ use crate::{host::AdviceMutation, processor::AdviceProviderInterface};
 ///      or,
 ///    - used to produce a STARK proof using a precompile VM, which can be verified in the epilog of
 ///      the program.
-///
-/// Advice data is store in-memory using [`BTreeMap`](alloc::collections::btree_map::BTreeMap)s as
-/// its backing storage.
 #[derive(Debug, Clone, Default)]
 pub struct AdviceProvider {
     stack: VecDeque<Felt>,
@@ -84,7 +81,7 @@ impl AdviceProvider {
     ///
     /// # Errors
     /// Returns an error if the advice stack is empty.
-    pub fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
+    fn pop_stack(&mut self) -> Result<Felt, AdviceError> {
         self.stack.pop_front().ok_or(AdviceError::StackReadFailed)
     }
 
@@ -95,7 +92,7 @@ impl AdviceProvider {
     ///
     /// # Errors
     /// Returns an error if the advice stack does not contain a full word.
-    pub fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
+    fn pop_stack_word(&mut self) -> Result<Word, AdviceError> {
         if self.stack.len() < 4 {
             return Err(AdviceError::StackReadFailed);
         }
@@ -116,7 +113,7 @@ impl AdviceProvider {
     ///
     /// # Errors
     /// Returns an error if the advice stack does not contain two words.
-    pub fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
+    fn pop_stack_dword(&mut self) -> Result<[Word; 2], AdviceError> {
         let word0 = self.pop_stack_word()?;
         let word1 = self.pop_stack_word()?;
 
@@ -430,6 +427,9 @@ impl From<AdviceInputs> for AdviceProvider {
         }
     }
 }
+
+// ADVICE PROVIDER INTERFACE IMPLEMENTATION
+// ================================================================================================
 
 impl AdviceProviderInterface for AdviceProvider {
     #[inline(always)]

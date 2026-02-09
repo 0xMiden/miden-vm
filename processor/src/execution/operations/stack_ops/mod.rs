@@ -1,7 +1,6 @@
-use miden_core::{Felt, ZERO, field::PrimeField64};
-
 use crate::{
-    ExecutionError,
+    ExecutionError, Felt, ZERO,
+    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -9,6 +8,9 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+// STACK OPERATIONS
+// ================================================================================================
 
 /// Pushes a new element onto the stack.
 #[inline(always)]
