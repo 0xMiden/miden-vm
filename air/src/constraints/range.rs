@@ -150,9 +150,7 @@ where
     // LogUp transition constraint terms
     let b_next_term = b_next.into() * lookups.clone();
     let b_term = b_local.into() * lookups;
-    let rc_term = stack_lookups
-        * memory_lookups
-        * AB::ExprEF::from(local.range[0].clone().into());
+    let rc_term = stack_lookups * memory_lookups * AB::ExprEF::from(local.range[0].clone().into());
 
     // Stack lookup removal terms
     let s0_term = sflag_rc_mem.clone() * sv1.clone() * sv2.clone() * sv3.clone();
