@@ -1,13 +1,9 @@
-use miden_core::{
-    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
-    operations::{Decorator, Operation},
-    program::StackInputs,
-};
+use miden_core::operations::{Decorator, Operation};
 
 use crate::{
-    DebugError, FastProcessor, FutureMaybeSend, Host, ProcessorState, Program, TraceError, Word,
-    advice::{AdviceInputs, AdviceMutation},
-    event::EventError,
+    FastProcessor, Program, StackInputs,
+    advice::AdviceInputs,
+    mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor},
     test_utils::TestHost,
 };
 
