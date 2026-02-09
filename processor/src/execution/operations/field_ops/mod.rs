@@ -1,10 +1,6 @@
-use miden_core::{
+use crate::{
     Felt, ONE, ZERO,
     field::{Field, PrimeField64},
-};
-
-use super::utils::assert_binary;
-use crate::{
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::{OperationHelperRegisters, Tracer},
@@ -13,7 +9,7 @@ use crate::{
 #[cfg(test)]
 mod tests;
 
-// OPERATION HANDLERS
+// FIELD OPERATIONS
 // ================================================================================================
 
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
@@ -301,4 +297,14 @@ where
     processor.stack_mut().set(0, f(a, b)?);
 
     Ok(())
+}
+
+/// Asserts that the given value is a binary value (0 or 1).
+#[inline(always)]
+fn assert_binary(value: Felt) -> Result<(), OperationError> {
+    if value != ZERO && value != ONE {
+        Err(OperationError::NotBinaryValue { value })
+    } else {
+        Ok(())
+    }
 }

@@ -16,7 +16,7 @@ use pretty_assertions::assert_eq;
 use rstest::{fixture, rstest};
 
 use super::*;
-use crate::{AdviceInputs, DefaultHost, ExecutionOptions, HostLibrary, fast::FastProcessor};
+use crate::{AdviceInputs, DefaultHost, ExecutionOptions, FastProcessor, HostLibrary};
 
 const DEFAULT_STACK: &[Felt] = &[Felt::new(1), Felt::new(2), Felt::new(3)];
 

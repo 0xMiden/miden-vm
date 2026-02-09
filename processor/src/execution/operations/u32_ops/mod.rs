@@ -1,20 +1,25 @@
 use alloc::vec::Vec;
 
-use miden_core::{Felt, ZERO, field::PrimeField64};
 use paste::paste;
 
 use crate::{
-    ExecutionError,
+    ExecutionError, Felt, ZERO,
+    field::PrimeField64,
     operation::OperationError,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
-    utils::split_element,
 };
 
 #[cfg(test)]
 mod tests;
 
+// CONSTANTS
+// ================================================================================================
+
 const U32_MAX: u64 = u32::MAX as u64;
+
+// HELPER MACROS
+// ================================================================================================
 
 macro_rules! require_u32_operands {
     ($processor:expr, [$($idx:expr),*]) => {{
@@ -36,6 +41,9 @@ macro_rules! require_u32_operands {
         }
     }};
 }
+
+// U32 OPERATIONS
+// ================================================================================================
 
 /// Removes and splits the top element of the stack into two 32-bit values, and pushes them onto
 /// the stack.
@@ -302,4 +310,16 @@ pub(super) fn op_u32assert2<P: Processor, T: Tracer>(
     // Stack remains unchanged for assert operations
 
     Ok(OperationHelperRegisters::U32Assert2 { first, second })
+}
+
+// HELPER FUNCTIONS
+// ================================================================================================
+
+/// Splits an element into two field elements containing 32-bit integer values
+#[inline(always)]
+fn split_element(value: Felt) -> (Felt, Felt) {
+    let value = value.as_canonical_u64();
+    let lo = (value as u32) as u64;
+    let hi = value >> 32;
+    (Felt::new(hi), Felt::new(lo))
 }

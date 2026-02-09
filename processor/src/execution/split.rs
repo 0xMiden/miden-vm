@@ -1,20 +1,18 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    ONE, ZERO,
-    mast::{MastForest, MastNodeId, SplitNode},
-};
-
 use crate::{
-    Host, Stopper,
+    BreakReason, Host, ONE, Stopper, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    fast::step::BreakReason,
+    mast::{MastForest, MastNodeId, SplitNode},
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };
+
+// SPLIT PROCESSING
+// ================================================================================================
 
 /// Executes a Split node from the start.
 #[inline(always)]

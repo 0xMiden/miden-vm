@@ -2,18 +2,14 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
-use miden_core::{
-    Felt, Word,
-    crypto::merkle::MerklePath,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
-};
 
 use crate::{
-    ContextId, ExecutionError, Host, MemoryError,
+    BreakReason, ContextId, ExecutionError, Felt, Host, MemoryError, Word,
     advice::AdviceError,
+    crypto::merkle::MerklePath,
     errors::{AceEvalError, OperationError},
-    fast::step::BreakReason,
+    mast::{BasicBlockNode, MastForest, MastNodeId},
+    precompile::PrecompileTranscriptState,
     tracer::Tracer,
 };
 

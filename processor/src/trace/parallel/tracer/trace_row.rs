@@ -20,10 +20,9 @@ use miden_core::{
     operations::Operation,
 };
 
-use crate::{
-    decoder::block_stack::ExecutionContextInfo,
-    fast::trace_state::{StackState, SystemState},
-    trace::parallel::{core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer},
+use super::{ExecutionContextInfo, StackState, SystemState};
+use crate::trace::parallel::{
+    core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer,
 };
 
 // DECODER ROW

@@ -1,16 +1,10 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    Word,
-    mast::{MastForest, MastNode, MastNodeId},
-    program::Kernel,
-};
-
 use crate::{
-    ContextId, Host, Stopper,
+    BreakReason, ContextId, Host, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::step::BreakReason,
+    mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},
 };
@@ -21,9 +15,8 @@ mod r#dyn;
 mod external;
 mod join;
 mod r#loop;
-mod split;
-
 mod operations;
+mod split;
 
 // RE-EXPORTS
 // ================================================================================================
@@ -31,7 +24,7 @@ mod operations;
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
 pub(crate) use external::finish_load_mast_forest_from_external;
-pub(crate) use operations::execute_sync_op;
+use operations::execute_op;
 
 // MAIN EXECUTION FUNCTION
 // ================================================================================================
@@ -47,7 +40,7 @@ pub(crate) use operations::execute_sync_op;
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::fast::FastProcessor::execute_for_trace`]
+/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
 /// execution mode needs to build a [`crate::fast::execution_tracer::TraceGenerationContext`] which
 /// records information necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace

@@ -118,7 +118,7 @@ impl Processor for FastProcessor {
         let ptr = self.stack_get(0);
         let ctx = self.ctx;
         let circuit_evaluation =
-            eval_circuit_fast_(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)?;
+            eval_circuit_fast(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)?;
         self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
@@ -370,7 +370,7 @@ impl StackInterface for FastProcessor {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-pub(crate) fn eval_circuit_fast_(
+pub(crate) fn eval_circuit_fast(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,

@@ -1,8 +1,7 @@
-use miden_air::Felt;
-
 use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
-pub use crate::errors::IoError;
 use crate::{
+    Felt,
+    errors::IoError,
     processor::{
         AdviceProviderInterface, MemoryInterface, Processor, StackInterface, SystemInterface,
     },
@@ -11,6 +10,9 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+// IO OPERATIONS
+// ================================================================================================
 
 /// Pops an element from the advice stack and pushes it onto the operand stack.
 ///

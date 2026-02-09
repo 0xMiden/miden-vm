@@ -3,20 +3,18 @@
 
 use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 
-use miden_core::{
-    Felt, Word,
-    events::{EventId, EventName},
-    field::QuadFelt,
-    mast::{MastForest, MastNodeId},
-    program::MIN_STACK_DEPTH,
-    utils::to_hex,
-};
+use miden_core::program::MIN_STACK_DEPTH;
 use miden_debug_types::{SourceFile, SourceSpan};
 use miden_utils_diagnostics::{Diagnostic, miette};
 
 use crate::{
-    DebugError, Host, MemoryError, TraceError, advice::AdviceError, event::EventError,
+    ContextId, DebugError, Felt, Host, TraceError, Word,
+    advice::AdviceError,
+    event::{EventError, EventId, EventName},
     fast::SystemEventError,
+    field::QuadFelt,
+    mast::{MastForest, MastNodeId},
+    utils::to_hex,
 };
 
 // EXECUTION ERROR
@@ -182,13 +180,40 @@ impl From<ExecutionError> for IoError {
     }
 }
 
+// MEMORY ERROR
+// ================================================================================================
+
+/// Lightweight error type for memory operations.
+///
+/// This enum captures error conditions without expensive context information (no source location,
+/// no file references). When a `MemoryError` propagates up to become an `ExecutionError`, the
+/// context is resolved lazily via `MapExecErr::map_exec_err`.
+#[derive(Debug, thiserror::Error, Diagnostic)]
+pub enum MemoryError {
+    #[error("memory address cannot exceed 2^32 but was {addr}")]
+    AddressOutOfBounds { addr: u64 },
+    #[error(
+        "memory address {addr} in context {ctx} was read and written, or written twice, in the same clock cycle {clk}"
+    )]
+    IllegalMemoryAccess { ctx: ContextId, addr: u32, clk: Felt },
+    #[error(
+        "memory range start address cannot exceed end address, but was ({start_addr}, {end_addr})"
+    )]
+    InvalidMemoryRange { start_addr: u64, end_addr: u64 },
+    #[error("word access at memory address {addr} in context {ctx} is unaligned")]
+    #[diagnostic(help(
+        "ensure that the memory address accessed is aligned to a word boundary (it is a multiple of 4)"
+    ))]
+    UnalignedWordAccess { addr: u32, ctx: ContextId },
+}
+
 // CRYPTO ERROR
 // ================================================================================================
 
 /// Context-free error type for cryptographic operations (Merkle path verification, updates).
 ///
-/// This enum wraps errors from the advice provider and operation subsystems without
-/// carrying source location context. Context is added at the call site via
+/// This enum wraps errors from the advice provider and operation subsystems without carrying
+/// source location context. Context is added at the call site via
 /// `CryptoResultExt::map_crypto_err`.
 #[derive(Debug, thiserror::Error, Diagnostic)]
 pub enum CryptoError {
@@ -204,10 +229,9 @@ pub enum CryptoError {
 
 /// Lightweight error type for operations that can fail.
 ///
-/// This enum captures error conditions without expensive context information (no
-/// source location, no file references). When an `OperationError` propagates up
-/// to become an `ExecutionError`, the context is resolved lazily via extension
-/// traits like `OperationResultExt::map_exec_err`.
+/// This enum captures error conditions without expensive context information (no source location,
+/// no file references). When an `OperationError` propagates up to become an `ExecutionError`, the
+/// context is resolved lazily via extension traits like `OperationResultExt::map_exec_err`.
 ///
 /// # Adding new errors (for contributors)
 ///
@@ -230,9 +254,9 @@ pub enum CryptoError {
 /// some_op().map_exec_err(mast_forest, node_id, host)?;
 /// ```
 ///
-/// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the
-/// corresponding extension traits (`AdviceResultExt`, `AceResultExt`) or
-/// helper functions (`advice_error_with_context`, `event_error_with_context`).
+/// For wrapper errors (`AdviceError`, `EventError`, `AceError`), use the corresponding extension
+/// traits (`AdviceResultExt`, `AceResultExt`) or helper functions (`advice_error_with_context`,
+/// `event_error_with_context`).
 #[derive(Debug, Clone, thiserror::Error, Diagnostic)]
 pub enum OperationError {
     #[error("external node with mast root {0} resolved to an external node")]

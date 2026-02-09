@@ -1,8 +1,7 @@
 use miden_core::assert_matches;
 use miden_processor::{
-    ContextId, DefaultHost, ExecutionError, Felt, ONE, Program, StackInputs, Word, ZERO,
-    fast::FastProcessor, field::PrimeCharacteristicRing, operation::OperationError,
-    trace::RowIndex,
+    ContextId, DefaultHost, ExecutionError, FastProcessor, Felt, ONE, Program, StackInputs, Word,
+    ZERO, field::PrimeCharacteristicRing, operation::OperationError, trace::RowIndex,
 };
 use miden_utils_testing::{
     AdviceStackBuilder, build_expected_hash, build_expected_perm, felt_slice_to_ints,
