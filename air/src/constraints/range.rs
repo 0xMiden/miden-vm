@@ -64,7 +64,7 @@ pub fn enforce_range_transition_constraint<AB>(
             * (change_v.clone() - eighty_one)
             * (change_v.clone() - two_forty_three)
             * (change_v.clone() - seven_twenty_nine)
-            * (change_v.clone() - two_one_eight_seven),
+            * (change_v - two_one_eight_seven),
     );
 }
 
@@ -134,7 +134,7 @@ where
 
     // Flags for conditional inclusion
     // u32_rc_op = decoder[7] * (1 - decoder[6]) * (1 - decoder[5])
-    let one_ef = AB::ExprEF::from(one_expr.clone());
+    let one_ef = AB::ExprEF::from(one_expr);
     let not_4 = one_ef.clone() - AB::ExprEF::from(local.decoder[5].clone().into());
     let not_5 = one_ef.clone() - AB::ExprEF::from(local.decoder[6].clone().into());
     let u32_rc_op = AB::ExprEF::from(local.decoder[7].clone().into()) * not_5 * not_4;
@@ -144,25 +144,23 @@ where
     let s_0 = AB::ExprEF::from(local.chiplets[0].clone().into());
     let s_1 = AB::ExprEF::from(local.chiplets[1].clone().into());
     let s_2 = AB::ExprEF::from(local.chiplets[2].clone().into());
-    let chiplets_memory_flag = s_0 * s_1 * (one_ef.clone() - s_2);
-    let mflag_rc_stack = range_check.clone() * stack_lookups.clone() * chiplets_memory_flag;
+    let chiplets_memory_flag = s_0 * s_1 * (one_ef - s_2);
+    let mflag_rc_stack = range_check * stack_lookups.clone() * chiplets_memory_flag;
 
     // LogUp transition constraint terms
     let b_next_term = b_next.into() * lookups.clone();
-    let b_term = b_local.into() * lookups.clone();
-    let rc_term = stack_lookups.clone()
-        * memory_lookups.clone()
-        * AB::ExprEF::from(local.range[0].clone().into());
+    let b_term = b_local.into() * lookups;
+    let rc_term = stack_lookups * memory_lookups * AB::ExprEF::from(local.range[0].clone().into());
 
     // Stack lookup removal terms
     let s0_term = sflag_rc_mem.clone() * sv1.clone() * sv2.clone() * sv3.clone();
     let s1_term = sflag_rc_mem.clone() * sv0.clone() * sv2.clone() * sv3.clone();
-    let s2_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv3.clone();
-    let s3_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv2.clone();
+    let s2_term = sflag_rc_mem.clone() * sv0.clone() * sv1.clone() * sv3;
+    let s3_term = sflag_rc_mem * sv0 * sv1 * sv2;
 
     // Memory lookup removal terms
-    let m0_term: AB::ExprEF = mflag_rc_stack.clone() * mv1.clone();
-    let m1_term = mflag_rc_stack.clone() * mv0.clone();
+    let m0_term: AB::ExprEF = mflag_rc_stack.clone() * mv1;
+    let m1_term = mflag_rc_stack * mv0;
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
