@@ -251,6 +251,10 @@ impl Test {
 
     /// Builds a final stack from the provided stack-ordered array and asserts that executing the
     /// test will result in the expected final stack state.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
     #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn expect_stack(&self, final_stack: &[u64]) {
@@ -262,6 +266,10 @@ impl Test {
     /// Executes the test and validates that the process memory has the elements of `expected_mem`
     /// at address `mem_start_addr` and that the end of the stack execution trace matches the
     /// `final_stack`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
     #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn expect_stack_and_memory(
@@ -279,7 +287,7 @@ impl Test {
             .with_advice(self.advice_inputs.clone())
             .with_debugging(self.in_debug_mode)
             .with_tracing(self.in_debug_mode);
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = Self::create_test_runtime();
         let execution_output = rt.block_on(processor.execute(&program, &mut host)).unwrap();
 
         // validate the memory state
@@ -371,6 +379,11 @@ impl Test {
     ///
     /// Internally, this also checks that the slow and fast processors agree on the stack
     /// outputs.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
+    /// Use [`Self::execute_async`] instead.
     #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn execute(&self) -> Result<ExecutionTrace, ExecutionError> {
@@ -382,7 +395,7 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = Self::create_test_runtime();
 
         let fast_stack_result = {
             let fast_processor = FastProcessor::new_with_options(
@@ -444,9 +457,14 @@ impl Test {
     /// Compiles the test's source to a Program and executes it with the tests inputs.
     ///
     /// Returns the [`ExecutionOutput`] once execution is finished.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
+    /// Use [`Self::execute_for_output_async`] instead.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_for_output(&self) -> Result<(ExecutionOutput, DefaultHost), ExecutionError> {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = Self::create_test_runtime();
         rt.block_on(self.execute_for_output_async())
     }
 
@@ -470,9 +488,14 @@ impl Test {
     /// the [`StackOutputs`] and a [`String`] containing all debug output.
     ///
     /// If the execution fails, the output is printed `stderr`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
+    /// Use [`Self::execute_with_debug_buffer_async`] instead.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn execute_with_debug_buffer(&self) -> Result<(StackOutputs, String), ExecutionError> {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = Self::create_test_runtime();
         rt.block_on(self.execute_with_debug_buffer_async())
     }
 
@@ -512,9 +535,14 @@ impl Test {
     /// Compiles the test's code into a program, then generates and verifies a proof of execution
     /// using the given public inputs and the specified number of stack outputs. When `test_fail`
     /// is true, this function will force a failure by modifying the first output.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
+    /// Use [`Self::prove_and_verify_async`] instead.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prove_and_verify(&self, pub_inputs: Vec<u64>, test_fail: bool) {
-        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        let rt = Self::create_test_runtime();
         rt.block_on(self.prove_and_verify_async(pub_inputs, test_fail))
     }
 
@@ -546,6 +574,11 @@ impl Test {
     }
 
     /// Returns the last state of the stack after executing a test.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called from within an existing tokio runtime (e.g., inside a `#[tokio::test]`).
+    /// Use [`Self::get_last_stack_state_async`] instead.
     #[cfg(not(target_arch = "wasm32"))]
     #[track_caller]
     pub fn get_last_stack_state(&self) -> StackOutputs {
@@ -578,6 +611,24 @@ impl Test {
 
     // HELPERS
     // ------------------------------------------------------------------------------------------
+
+    /// Creates a new single-threaded tokio runtime for sync test helpers.
+    ///
+    /// # Panics
+    ///
+    /// Panics with a descriptive message if called from within an existing tokio runtime
+    /// (e.g., inside a `#[tokio::test]`). In async contexts, use the corresponding `*_async`
+    /// method variant instead.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn create_test_runtime() -> tokio::runtime::Runtime {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            panic!(
+                "sync test helper called from within an existing tokio runtime; \
+                 use the corresponding `*_async` method variant instead"
+            );
+        }
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
 
     /// Returns the program and host for the test.
     ///

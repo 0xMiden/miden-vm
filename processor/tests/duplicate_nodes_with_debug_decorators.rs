@@ -1,6 +1,7 @@
 use miden_assembly::testing::TestContext;
 use miden_processor::{
-    DefaultHost, StackInputs, advice::AdviceInputs, fast::FastProcessor, operation::Operation,
+    DefaultHost, ExecutionOutput, FastProcessor, StackInputs, advice::AdviceInputs,
+    operation::Operation,
 };
 
 /// Ensures that equal MAST nodes don't get added twice to a MAST forest
@@ -40,7 +41,7 @@ async fn duplicate_nodes_with_debug_decorators() {
     // Verify the program can be executed (functional test)
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::default()).with_advice(AdviceInputs::default());
-    let result = processor.execute(&program, &mut host).await;
+    let result: Result<ExecutionOutput, _> = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Program should execute successfully");
 
     // Check that we have the expected control flow structure
