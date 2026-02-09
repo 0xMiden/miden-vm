@@ -1,0 +1,26 @@
+[package]
+name = "synthetic-tx-kernel"
+version = "0.1.0"
+edition = "2021"
+license.workspace = true
+
+[dependencies]
+miden-vm = { path = "../../miden-vm" }
+miden-core = { path = "../../core" }
+miden-processor = { path = "../../processor", default-features = false, features = ["concurrent"] }
+miden-core-lib = { path = "../../crates/lib/core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+tokio = { version = "1.0", features = ["rt-multi-thread"] }
+
+[[bench]]
+name = "component_benchmarks"
+harness = false
+
+[[bench]]
+name = "synthetic_kernel"
+harness = false

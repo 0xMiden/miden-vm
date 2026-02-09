@@ -188,7 +188,7 @@ build: ## Builds with default parameters
 
 .PHONY: build-no-std
 build-no-std: ## Builds without the standard library
-	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace
+	$(BUILDDOCS) cargo build --no-default-features --target wasm32-unknown-unknown --workspace --exclude synthetic-tx-kernel
 
 # --- executable ----------------------------------------------------------------------------------
 

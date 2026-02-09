@@ -1,0 +1,93 @@
+{
+  "profile_version": "1.0",
+  "source": "miden-base/bin/bench-transaction",
+  "timestamp": "2026-02-03T03:40:57.648937+00:00",
+  "miden_vm_version": "0.1.0",
+  "transaction_kernel": {
+    "total_cycles": 69454,
+    "trace_main_len": 68897,
+    "trace_padded_len": 131072,
+    "phases": {
+      "epilogue": {
+        "cycles": 64243,
+        "operations": {}
+      },
+      "notes_processing": {
+        "cycles": 1707,
+        "operations": {}
+      },
+      "prologue": {
+        "cycles": 2977,
+        "operations": {}
+      },
+      "tx_script_processing": {
+        "cycles": 527,
+        "operations": {}
+      }
+    },
+    "instruction_mix": {
+      "arithmetic": 0.009668269646096695,
+      "hashing": 0.04834134823048347,
+      "memory": 0.01933653929219339,
+      "control_flow": 0.01933653929219339,
+      "signature_verify": 0.9033173035390331
+    },
+    "key_procedures": [
+      {
+        "name": "auth_procedure",
+        "cycles": 62739,
+        "invocations": 1
+      }
+    ],
+    "operation_details": [
+      {
+        "op_type": "falcon512_verify",
+        "input_sizes": [
+          64,
+          32
+        ],
+        "iterations": 1,
+        "cycle_cost": 59859
+      },
+      {
+        "op_type": "hperm",
+        "input_sizes": [
+          48
+        ],
+        "iterations": 2685,
+        "cycle_cost": 1
+      },
+      {
+        "op_type": "hmerge",
+        "input_sizes": [
+          32,
+          32
+        ],
+        "iterations": 41,
+        "cycle_cost": 16
+      },
+      {
+        "op_type": "load_store",
+        "input_sizes": [
+          32
+        ],
+        "iterations": 134,
+        "cycle_cost": 10
+      },
+      {
+        "op_type": "arithmetic",
+        "input_sizes": [
+          8
+        ],
+        "iterations": 671,
+        "cycle_cost": 1
+      },
+      {
+        "op_type": "control_flow",
+        "input_sizes": [],
+        "iterations": 268,
+        "cycle_cost": 5
+      }
+    ]
+  }
+}
