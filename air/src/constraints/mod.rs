@@ -110,7 +110,7 @@ where
 
     // RANGE CHECKER BUS CONSTRAINTS
     #[cfg(feature = "range_constraints")]
-    range::bus::enforce_range_bus_constraints(builder, alpha, &beta_challenges, &aux_current, &aux_next, local, next);
+    range::bus::enforce_range_bus_constraints(builder, local);
 
     // CHIPLETS BUS CONSTRAINTS
     #[cfg(feature = "chiplets_constraints")]
