@@ -62,8 +62,8 @@ use miden_crypto::{Felt, Word, ZERO, hash::poseidon2::Poseidon2};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EventId, EventName,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    events::{EventId, EventName},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // PRECOMPILE REQUEST

@@ -134,14 +134,14 @@ impl VisitMut for VerifyInvokeTargets<'_> {
             // kernel module.
             InvocationTarget::Symbol(name) => {
                 let span = name.span();
-                let path = Path::kernel_path().join(name.as_str()).into();
+                let path = Path::kernel_path().join(name).into();
                 *target = InvocationTarget::Path(Span::new(span, path));
             },
             // Syscalls which reference a path, are only valid if the module id is $kernel
             InvocationTarget::Path(path) => {
                 let span = path.span();
                 if let Some(name) = path.as_ident() {
-                    let new_path = Path::kernel_path().join(name.as_str()).into();
+                    let new_path = Path::kernel_path().join(&name).into();
                     *path = Span::new(span, new_path);
                 } else {
                     self.analyzer.error(SemanticAnalysisError::InvalidSyscallTarget { span });

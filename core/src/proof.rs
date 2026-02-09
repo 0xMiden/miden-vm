@@ -1,13 +1,15 @@
-use alloc::{string::ToString, vec::Vec};
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto::hash::{Blake3_256, Poseidon2, Rpo256, Rpx256},
-    errors::InvalidHashFunctionError,
     precompile::PrecompileRequest,
-    utils::{
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
@@ -17,8 +19,9 @@ use crate::{
 
 /// A proof of correct execution of Miden VM.
 ///
-/// The proof encodes the proof itself as well as STARK protocol parameters used to generate the
-/// proof. However, the proof does not contain public inputs needed to verify the proof.
+/// The proof contains the STARK proof, the hash function used during proof generation, and a set
+/// of precompile requests deferred during proof generation. However, the proof does not contain
+/// public inputs needed to verify the proof.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct ExecutionProof {
@@ -31,8 +34,8 @@ impl ExecutionProof {
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
 
-    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash
-    /// function, and list of all deferred [PrecompileRequest]s.
+    /// Creates a new instance of [ExecutionProof] from the specified STARK proof, hash function,
+    /// and list of all deferred [PrecompileRequest]s.
     pub const fn new(
         proof: Vec<u8>,
         hash_fn: HashFunction,
@@ -192,5 +195,34 @@ impl Deserializable for ExecutionProof {
         let pc_requests = Vec::<PrecompileRequest>::read_from(source)?;
 
         Ok(ExecutionProof { proof, hash_fn, pc_requests })
+    }
+}
+
+// HASH FUNCTION ERROR
+// ================================================================================================
+
+/// Error type for invalid hash function strings.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "invalid hash function '{hash_function}'. Valid options are: blake3-256, rpo, rpx, poseidon2, keccak"
+)]
+pub struct InvalidHashFunctionError {
+    pub hash_function: String,
+}
+
+// TESTING UTILS
+// ================================================================================================
+
+#[cfg(any(test, feature = "testing"))]
+impl ExecutionProof {
+    /// Creates a dummy `ExecutionProof` for testing purposes only.
+    ///
+    /// A proof created in this way will not be verifiable against any verifier.
+    pub fn new_dummy() -> Self {
+        ExecutionProof {
+            proof: Vec::new(),
+            hash_fn: HashFunction::Blake3_256,
+            pc_requests: Vec::new(),
+        }
     }
 }

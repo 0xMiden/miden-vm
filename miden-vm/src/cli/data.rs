@@ -10,11 +10,11 @@ use miden_assembly::{
     ast::{Module, ModuleKind},
     diagnostics::{Report, WrapErr},
     report,
-    utils::Deserializable,
+    serde::Deserializable,
 };
 use miden_core::{Felt, field::QuotientMap};
 use miden_core_lib::CoreLibrary;
-use miden_vm::{ExecutionProof, Program, StackOutputs, Word, utils::SliceReader};
+use miden_vm::{ExecutionProof, Program, StackOutputs, Word, serde::SliceReader};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 

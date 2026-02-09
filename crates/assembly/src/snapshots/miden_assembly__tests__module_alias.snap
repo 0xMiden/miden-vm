@@ -9,14 +9,10 @@ begin
             push(4294967294)
             mstore
             drop
-            asmOp(push.1, 2)
             pad
             incr
-            asmOp(push.0, 1)
             pad
-            asmOp(push.2, 1)
             push(2)
-            asmOp(push.0, 1)
             pad
         end
         external.0x9ca74bde31561aca2278d330b782707a5c9ee8dcb911bec58ebbd9544077d09a

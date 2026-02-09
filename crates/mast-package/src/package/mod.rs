@@ -7,7 +7,7 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 pub use miden_assembly_syntax::{Version, VersionError};
-use miden_core::{Program, Word};
+use miden_core::{Word, program::Program};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

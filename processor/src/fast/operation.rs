@@ -1,27 +1,28 @@
+use alloc::sync::Arc;
+use core::ops::ControlFlow;
+
 use miden_air::{
     Felt,
-    trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
+    trace::{RowIndex, chiplets::hasher::HasherState},
 };
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
     field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
+use super::step::BreakReason;
 use crate::{
-    AdviceProvider, ContextId, ExecutionError,
-    chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    AdviceProvider, ContextId, ExecutionError, Host,
     errors::{AceError, AceEvalError, OperationError},
     fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
-    processor::{
-        HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
-        SystemInterface,
-    },
+    processor::{HasherInterface, MemoryInterface, Processor, StackInterface, SystemInterface},
+    trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
 };
 
 impl Processor for FastProcessor {
-    type HelperRegisters = NoopHelperRegisters;
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceProvider;
@@ -29,17 +30,27 @@ impl Processor for FastProcessor {
     type Hasher = Self;
 
     #[inline(always)]
-    fn stack(&mut self) -> &mut Self::Stack {
+    fn stack(&self) -> &Self::Stack {
         self
     }
 
     #[inline(always)]
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider {
+    fn stack_mut(&mut self) -> &mut Self::Stack {
+        self
+    }
+
+    #[inline(always)]
+    fn advice_provider(&self) -> &Self::AdviceProvider {
+        &self.advice
+    }
+
+    #[inline(always)]
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider {
         &mut self.advice
     }
 
     #[inline(always)]
-    fn memory(&mut self) -> &mut Self::Memory {
+    fn memory_mut(&mut self) -> &mut Self::Memory {
         &mut self.memory
     }
 
@@ -49,8 +60,23 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn system(&mut self) -> &mut Self::System {
+    fn system(&self) -> &Self::System {
         self
+    }
+
+    #[inline(always)]
+    fn system_mut(&mut self) -> &mut Self::System {
+        self
+    }
+
+    #[inline(always)]
+    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+        self.save_context_and_truncate_stack(tracer);
+    }
+
+    #[inline(always)]
+    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
+        self.restore_context(tracer)
     }
 
     #[inline(always)]
@@ -83,8 +109,9 @@ impl Processor for FastProcessor {
     /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
     ///
     /// Note that we do not record any memory reads in this operation (through a
-    /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
+    /// [crate::tracer::Tracer]), because the parallel trace generation skips the circuit
     /// evaluation completely.
+    #[inline(always)]
     fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
         let num_eval = self.stack_get(2);
         let num_read = self.stack_get(1);
@@ -96,6 +123,57 @@ impl Processor for FastProcessor {
         tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
 
         Ok(())
+    }
+
+    #[inline(always)]
+    fn execute_before_enter_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_before_enter_decorators(node_id, current_forest, host)
+    }
+
+    #[inline(always)]
+    fn execute_after_exit_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    #[inline(always)]
+    fn execute_decorators_for_op(
+        &mut self,
+        node_id: MastNodeId,
+        op_idx_in_block: usize,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        if self.should_execute_decorators() {
+            #[cfg(test)]
+            self.record_decorator_retrieval();
+
+            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
+                self.execute_decorator(decorator, host)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    #[inline(always)]
+    fn execute_end_of_block_decorators(
+        &mut self,
+        basic_block_node: &BasicBlockNode,
+        node_id: MastNodeId,
+        current_forest: &Arc<MastForest>,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }
 
@@ -157,7 +235,7 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn clk(&self) -> RowIndex {
+    fn clock(&self) -> RowIndex {
         self.clk
     }
 
@@ -165,9 +243,26 @@ impl SystemInterface for FastProcessor {
     fn ctx(&self) -> ContextId {
         self.ctx
     }
+
+    #[inline(always)]
+    fn increment_clock(&mut self) {
+        self.clk += 1_u32;
+    }
+
+    #[inline(always)]
+    fn set_caller_hash(&mut self, caller_hash: Word) {
+        self.caller_hash = caller_hash;
+    }
+
+    #[inline(always)]
+    fn set_ctx(&mut self, ctx: ContextId) {
+        self.ctx = ctx;
+    }
 }
 
 impl StackInterface for FastProcessor {
+    type Processor = FastProcessor;
+
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
@@ -250,7 +345,10 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
+    where
+        T: Tracer<Processor = Self::Processor>,
+    {
         if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
             self.increment_stack_size(tracer);
             Ok(())
@@ -260,115 +358,11 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self, tracer: &mut impl Tracer) {
+    fn decrement_size<T>(&mut self, tracer: &mut T)
+    where
+        T: Tracer<Processor = Self::Processor>,
+    {
         self.decrement_stack_size(tracer)
-    }
-}
-
-pub struct NoopHelperRegisters;
-
-/// Dummy helpers implementation used in the fast processor, where we don't compute the helper
-/// registers. These are expected to be ignored.
-const DEFAULT_HELPERS: [Felt; NUM_USER_OP_HELPERS] = [ZERO; NUM_USER_OP_HELPERS];
-
-impl OperationHelperRegisters for NoopHelperRegisters {
-    #[inline(always)]
-    fn op_eq_registers(_a: Felt, _b: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32split_registers(_lo: Felt, _hi: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_eqz_registers(_top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_expacc_registers(_acc_update_val: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_fri_ext2fold4_registers(
-        _ev: QuadFelt,
-        _es: QuadFelt,
-        _x: Felt,
-        _x_inv: Felt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add_registers(_carry: Felt, _sum: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add3_registers(_sum: Felt, _carry: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32sub_registers(_second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32mul_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32madd_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32div_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32assert2_registers(_first: Felt, _second: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_merkle_path_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_base_registers(
-        _alpha: QuadFelt,
-        _tmp0: QuadFelt,
-        _tmp1: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_ext_registers(
-        _alpha: QuadFelt,
-        _k0: Felt,
-        _k1: Felt,
-        _acc_tmp: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
     }
 }
 
@@ -376,7 +370,7 @@ impl OperationHelperRegisters for NoopHelperRegisters {
 // ================================================================================================
 
 /// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-pub fn eval_circuit_fast_(
+pub(crate) fn eval_circuit_fast_(
     ctx: ContextId,
     ptr: Felt,
     clk: RowIndex,

@@ -1,6 +1,5 @@
 use alloc::vec::Vec;
 
-use miden_debug_types::{Location, Uri};
 use num_derive::{FromPrimitive, ToPrimitive};
 use num_traits::{FromPrimitive, ToPrimitive};
 #[cfg(all(feature = "arbitrary", feature = "std"))]
@@ -11,8 +10,8 @@ use super::{
     string_table::{StringTable, StringTableBuilder},
 };
 use crate::{
-    AssemblyOp, DebugOptions, Decorator,
-    utils::{
+    operations::{DebugOptions, Decorator},
+    serde::{
         ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
     },
 };
@@ -44,7 +43,7 @@ impl DecoratorInfo {
 
     pub fn try_into_decorator(
         &self,
-        string_table: &StringTable,
+        _string_table: &StringTable,
         decorator_data: &[u8],
     ) -> Result<Decorator, DeserializationError> {
         // This is safe because for decorators that don't use the offset, `0` is used (and hence
@@ -53,43 +52,6 @@ impl DecoratorInfo {
         let mut data_reader =
             SliceReader::new(&decorator_data[self.decorator_data_offset as usize..]);
         match self.variant {
-            EncodedDecoratorVariant::AssemblyOp => {
-                let num_cycles = data_reader.read_u8()?;
-                let should_break = data_reader.read_bool()?;
-
-                // source location
-                let location = if data_reader.read_bool()? {
-                    let str_index_in_table = data_reader.read_usize()?;
-                    let uri = string_table.read_arc_str(str_index_in_table).map(Uri::from)?;
-                    let start = data_reader.read_u32()?;
-                    let end = data_reader.read_u32()?;
-                    Some(Location {
-                        uri,
-                        start: start.into(),
-                        end: end.into(),
-                    })
-                } else {
-                    None
-                };
-
-                let context_name = {
-                    let str_index_in_table = data_reader.read_usize()?;
-                    string_table.read_string(str_index_in_table)?
-                };
-
-                let op = {
-                    let str_index_in_table = data_reader.read_usize()?;
-                    string_table.read_string(str_index_in_table)?
-                };
-
-                Ok(Decorator::AsmOp(AssemblyOp::new(
-                    location,
-                    context_name,
-                    num_cycles,
-                    op,
-                    should_break,
-                )))
-            },
             EncodedDecoratorVariant::DebugOptionsStackAll => {
                 Ok(Decorator::Debug(DebugOptions::StackAll))
             },
@@ -143,6 +105,11 @@ impl Deserializable for DecoratorInfo {
 
         Ok(Self { variant, decorator_data_offset })
     }
+
+    /// Returns the minimum serialized size: 1 byte variant + 4 bytes offset.
+    fn min_serialized_size() -> usize {
+        5
+    }
 }
 
 // ENCODED DATA VARIANT
@@ -160,14 +127,14 @@ impl Deserializable for DecoratorInfo {
 )]
 #[repr(u8)]
 pub enum EncodedDecoratorVariant {
-    AssemblyOp,
-    DebugOptionsStackAll,
-    DebugOptionsStackTop,
-    DebugOptionsMemAll,
-    DebugOptionsMemInterval,
-    DebugOptionsLocalInterval,
-    DebugOptionsAdvStackTop,
-    Trace,
+    // Note: AssemblyOp removed in version [0, 0, 2] - now stored separately in DebugInfo
+    DebugOptionsStackAll = 0,
+    DebugOptionsStackTop = 1,
+    DebugOptionsMemAll = 2,
+    DebugOptionsMemInterval = 3,
+    DebugOptionsLocalInterval = 4,
+    DebugOptionsAdvStackTop = 5,
+    Trace = 6,
 }
 
 impl EncodedDecoratorVariant {
@@ -188,7 +155,6 @@ impl EncodedDecoratorVariant {
 impl From<&Decorator> for EncodedDecoratorVariant {
     fn from(decorator: &Decorator) -> Self {
         match decorator {
-            Decorator::AsmOp(_) => Self::AssemblyOp,
             Decorator::Debug(debug_options) => match debug_options {
                 DebugOptions::StackAll => Self::DebugOptionsStackAll,
                 DebugOptions::StackTop(_) => Self::DebugOptionsStackTop,
@@ -217,6 +183,11 @@ impl Deserializable for EncodedDecoratorVariant {
                 "invalid decorator discriminant: {discriminant}"
             ))
         })
+    }
+
+    /// Returns the fixed serialized size: 1 byte discriminant.
+    fn min_serialized_size() -> usize {
+        1
     }
 }
 
@@ -252,35 +223,6 @@ impl DecoratorDataBuilder {
         let data_offset = self.decorator_data.len() as DecoratorDataOffset;
 
         match decorator {
-            Decorator::AsmOp(assembly_op) => {
-                self.decorator_data.push(assembly_op.num_cycles());
-                self.decorator_data.write_bool(assembly_op.should_break());
-
-                // source location
-                let loc = assembly_op.location();
-                self.decorator_data.write_bool(loc.is_some());
-                if let Some(loc) = loc {
-                    let str_offset = self.string_table_builder.add_string(loc.uri.as_ref());
-                    self.decorator_data.write_usize(str_offset);
-                    self.decorator_data.write_u32(loc.start.to_u32());
-                    self.decorator_data.write_u32(loc.end.to_u32());
-                }
-
-                // context name
-                {
-                    let str_offset =
-                        self.string_table_builder.add_string(assembly_op.context_name());
-                    self.decorator_data.write_usize(str_offset);
-                }
-
-                // op
-                {
-                    let str_index_in_table = self.string_table_builder.add_string(assembly_op.op());
-                    self.decorator_data.write_usize(str_index_in_table);
-                }
-
-                Some(data_offset)
-            },
             Decorator::Debug(debug_options) => match debug_options {
                 DebugOptions::StackTop(value) => {
                     self.decorator_data.push(*value);

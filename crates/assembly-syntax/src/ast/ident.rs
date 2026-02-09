@@ -5,7 +5,7 @@ use core::{
     str::FromStr,
 };
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
@@ -135,8 +135,13 @@ impl Ident {
     }
 
     /// Returns true if this identifier must be quoted in Miden Assembly syntax
-    pub fn requires_quoting(&self) -> bool {
-        !self.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    pub fn requires_quoting(ident: impl AsRef<str>) -> bool {
+        match ident.as_ref() {
+            crate::Path::KERNEL_PATH
+            | crate::Path::EXEC_PATH
+            | crate::ast::ProcedureName::MAIN_PROC_NAME => false,
+            ident => !ident.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'),
+        }
     }
 
     /// Applies the default [Ident] validation rules to `source`.

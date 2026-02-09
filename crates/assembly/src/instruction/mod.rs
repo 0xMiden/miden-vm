@@ -7,7 +7,10 @@ use miden_assembly_syntax::{
     parser::{IntValue, PushValue},
 };
 use miden_core::{
-    Decorator, Felt, Operation, WORD_SIZE, ZERO, field::PrimeCharacteristicRing, mast::MastNodeId,
+    Felt, WORD_SIZE, ZERO,
+    field::PrimeCharacteristicRing,
+    mast::MastNodeId,
+    operations::{Decorator, Operation},
 };
 
 use crate::{
@@ -44,36 +47,32 @@ impl Assembler {
                 | Instruction::DynCall
         );
 
-        // Always collect decorators into a single Vec; it will remain empty if not needed.
-        let mut decorators = Vec::new();
-
         // Start tracking the instruction about to be executed; this will allow us to map the
         // instruction to the sequence of operations which were executed as a part of this
         // instruction.
         block_builder.track_instruction(instruction, proc_ctx)?;
 
-        // New node is being created, so we are done building the current block. We then want to
-        // add the assembly operation to the new node - for example call, dyncall, if/else
-        // statements, loops, etc. However, `exec` instructions are compiled away and not
-        // added to the trace, so we should ignore them. Theoretically, we
-        // could probably add them anyways, but it currently breaks the
-        // `VmStateIterator`.
-        if can_create_node
-            && !matches!(instruction.inner(), Instruction::Exec(_))
-            && let Some(asm_op_id) = block_builder.set_instruction_cycle_count()
-        {
-            // Set the cycle count for this assembly op to 1
-            let assembly_op = &mut block_builder.mast_forest_builder_mut()[asm_op_id];
-            match assembly_op {
-                Decorator::AsmOp(op) => op.set_num_cycles(1),
-                _ => panic!("expected AsmOp decorator"),
-            }
-            decorators.push(asm_op_id);
-        }
+        // For node-creating instructions, finalize the AssemblyOp now (it will have 0 cycles
+        // since no operations have been added yet for this instruction).
+        let pending_node_asm_op = if can_create_node {
+            // The returned AssemblyOp will have cycle_count=0, but we'll set it to 1
+            // since the instruction creates exactly one node (call/syscall/dyn).
+            block_builder.set_instruction_cycle_count().map(|mut asm_op| {
+                asm_op.set_num_cycles(1);
+                asm_op
+            })
+        } else {
+            None
+        };
 
-        // Compile the instruction, passing the decorators (which may be empty).
+        // Compile the instruction (decorators are now always empty for this path).
         let opt_new_node_id =
-            self.compile_instruction_impl(instruction, block_builder, proc_ctx, decorators)?;
+            self.compile_instruction_impl(instruction, block_builder, proc_ctx, vec![])?;
+
+        // If we have a pending AssemblyOp for a node-creating instruction, register it now.
+        if let (Some(asm_op), Some(node_id)) = (pending_node_asm_op, opt_new_node_id) {
+            block_builder.mast_forest_builder_mut().register_node_asm_op(node_id, asm_op)?;
+        }
 
         // If we didn't create a node, set the cycle count after compilation.
         if !can_create_node {
@@ -187,16 +186,21 @@ impl Assembler {
             Instruction::U32Cast => block_builder.push_ops([U32split, Swap, Drop]),
             Instruction::U32Split => block_builder.push_op(U32split),
 
-            Instruction::U32OverflowingAdd => u32_ops::u32add(block_builder, Overflowing, None),
+            Instruction::U32OverflowingAdd => u32_ops::u32overflowing_add(block_builder, None),
             Instruction::U32OverflowingAddImm(v) => {
-                u32_ops::u32add(block_builder, Overflowing, Some(v.expect_value()))
+                u32_ops::u32overflowing_add(block_builder, Some(v.expect_value()))
+            },
+            Instruction::U32WideningAdd => u32_ops::u32widening_add(block_builder, None),
+            Instruction::U32WideningAddImm(v) => {
+                u32_ops::u32widening_add(block_builder, Some(v.expect_value()))
             },
             Instruction::U32WrappingAdd => u32_ops::u32add(block_builder, Wrapping, None),
             Instruction::U32WrappingAddImm(v) => {
                 u32_ops::u32add(block_builder, Wrapping, Some(v.expect_value()))
             },
-            Instruction::U32OverflowingAdd3 => block_builder.push_op(U32add3),
-            Instruction::U32WrappingAdd3 => block_builder.push_ops([U32add3, Swap, Drop]),
+            Instruction::U32OverflowingAdd3 => u32_ops::u32overflowing_add3(block_builder),
+            Instruction::U32WideningAdd3 => u32_ops::u32widening_add3(block_builder),
+            Instruction::U32WrappingAdd3 => u32_ops::u32wrapping_add3(block_builder),
 
             Instruction::U32OverflowingSub => u32_ops::u32sub(block_builder, Overflowing, None),
             Instruction::U32OverflowingSubImm(v) => {

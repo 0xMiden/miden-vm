@@ -13,9 +13,9 @@ use alloc::vec::Vec;
 
 use super::NodeDataOffset;
 use crate::{
-    Operation,
     mast::{BasicBlockNode, OP_GROUP_SIZE},
-    utils::{ByteReader, DeserializationError, Serializable, SliceReader},
+    operations::Operation,
+    serde::{ByteReader, DeserializationError, Serializable, SliceReader},
 };
 
 // BASIC BLOCK DATA BUILDER
@@ -207,6 +207,15 @@ impl BasicBlockDataDecoder<'_> {
             // Extract operations for this batch
             let batch_num_ops = indptr[highest_op_group];
             let batch_ops_end = global_op_offset + batch_num_ops;
+
+            // Validate that the batch doesn't exceed the operations array
+            if batch_ops_end > operations.len() {
+                return Err(DeserializationError::InvalidValue(format!(
+                    "batch_op_end {} exceeds operations length {}",
+                    batch_ops_end,
+                    operations.len()
+                )));
+            }
 
             let batch_ops: Vec<Operation> = operations[global_op_offset..batch_ops_end].to_vec();
 

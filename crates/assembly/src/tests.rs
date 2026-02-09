@@ -7,16 +7,17 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    EventId, Felt, Operation, Program, StackInputs, Word, assert_matches,
+    Felt, Word, assert_matches,
+    events::EventId,
     field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
-    utils::{Deserializable, Serializable},
+    operations::Operation,
+    program::Program,
+    serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
 };
-#[cfg(test)]
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions};
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
@@ -347,16 +348,16 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // With debug mode always enabled (issue #1821), identical procedures get unique debug
-    // decorators, so they are no longer deduplicated. This is expected behavior.
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // The debug info (AssemblyOps) is stored separately and doesn't affect deduplication.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // With debug mode always enabled, we expect more nodes due to unique debug decorators
-    // NOTE: The MAST forest now has more nodes than before because identical procedures
-    // get unique debug decorators and cannot be deduplicated
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
+    // With deduplication restored, we expect fewer nodes than before when debug decorators
+    // prevented deduplication. The identical procedures now share the same node.
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -1606,7 +1607,7 @@ fn link_time_const_evaluation_undefined_symbol() -> TestResult {
         use lib::a::FOO
         begin
             push.FOO
-            exec.a::f
+            exec.lib::a::f
             add
         end"
     );
@@ -2733,11 +2734,11 @@ fn module_alias() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;
@@ -2803,11 +2804,11 @@ fn module_alias_unused_import() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;
@@ -3635,11 +3636,10 @@ fn vendoring() -> TestResult {
 
     // Rigorous testing of vendoring functionality
 
-    // 1. Verify the vendored library has the expected structure with debug decorators
-    assert!(
-        !lib.mast_forest().decorators().is_empty(),
-        "Vendored library should have debug decorators"
-    );
+    // 1. The vendored library (lib) has `exec.::test::mod1::bar` which is a 0-cycle instruction.
+    // 0-cycle instructions like `exec` don't generate AssemblyOps because they don't execute
+    // any VM operations. The debug info may still have procedure names, error codes, etc.
+    // The vendor_lib (mod1) has actual instructions (push.1, push.2) which do have AssemblyOps.
 
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
@@ -3648,11 +3648,10 @@ fn vendoring() -> TestResult {
         Assembler::default().assemble_library([mod2]).unwrap()
     };
 
-    // 3. Verify that both libraries have the expected structure with debug decorators
-    //    (always-enabled mode)
+    // 3. Verify that the expected library (which has push.1) has AssemblyOps
     assert!(
-        !expected_lib.mast_forest().decorators().is_empty(),
-        "Expected library should have debug decorators"
+        expected_lib.mast_forest().debug_info().num_asm_ops() > 0,
+        "Expected library should have AssemblyOps for instruction tracking"
     );
 
     // 4. Verify we can create an assembler that successfully links the vendored library
@@ -3675,10 +3674,10 @@ fn vendoring() -> TestResult {
     );
     let assembled_program = assemble_result.unwrap();
 
-    // Verify the assembled program has debug decorators
+    // Verify the assembled program has debug info (AssemblyOps)
     assert!(
-        !assembled_program.mast_forest().decorators().is_empty(),
-        "Assembled program with library should have debug decorators"
+        assembled_program.mast_forest().debug_info().num_asm_ops() > 0,
+        "Assembled program with library should have AssemblyOps for instruction tracking"
     );
 
     // 6. Verify the vendored library contains the expected structure
@@ -3688,21 +3687,6 @@ fn vendoring() -> TestResult {
     // Verify there are root procedures (the first node is usually a root for libraries)
     let nodes = mast_forest.nodes();
     assert!(!nodes.is_empty(), "Vendored library should have root procedures");
-
-    // 7. Verify debug decorators are present and proper for tracking
-    let vendored_decorator_count = mast_forest.decorators().len();
-    assert!(vendored_decorator_count > 0, "Vendored library should have decorators");
-
-    // 8. Check that the library has expected procedures by examining MAST structure
-    // The vendored library should contain procedures from the vendor module
-    let has_debug_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_debug_decorators,
-        "Vendored library should have AsmOp decorators for instruction tracking"
-    );
 
     Ok(())
 }
@@ -3935,7 +3919,7 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![])
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
@@ -3983,32 +3967,32 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
         .ensure_split(r#true1, r#false1, vec![], vec![])
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
         .ensure_split(r#true3, r#false3, vec![], vec![])
@@ -4025,13 +4009,14 @@ fn nested_blocks() -> Result<(), Report> {
                 Vec::new(),
                 vec![],
                 vec![],
+                vec![],
             )
             .unwrap();
 
         expected_mast_forest_builder.ensure_loop(body_node_id, vec![], vec![]).unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
@@ -4176,9 +4161,11 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // With debug mode always enabled, each procedure gets unique debug decorators
-    // so they are no longer deduplicated. This is expected behavior per issue #1821.
-    assert_eq!(program.num_procedures(), 3);
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // foo and bar have identical code, so they share the same MAST node. The entrypoint
+    // is a separate procedure, so we have 2 procedures total.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
@@ -4208,61 +4195,6 @@ fn distinguish_grandchildren_correctly() {
 
     // Make sure that both `if.true` blocks compile down to a different MAST node.
     assert_ne!(join_node.first(), join_node.second());
-}
-
-/// Ensures that equal MAST nodes don't get added twice to a MAST forest
-///
-/// This test is disabled because with debug mode always enabled (issue #1821),
-/// nodes get unique debug decorators and are no longer de-duplicated.
-#[test]
-fn duplicate_nodes_with_debug_decorators() {
-    let context = TestContext::new();
-
-    let program_source = r#"
-    begin
-        if.true
-            mul
-        else
-            if.true add else mul end
-        end
-    end
-    "#;
-
-    let program = context.assemble(program_source).unwrap();
-    let mast_forest = program.mast_forest();
-
-    // With debug mode always enabled, we should have debug decorators
-    assert!(
-        !mast_forest.decorators().is_empty(),
-        "Should have debug decorators with always-enabled debug mode"
-    );
-
-    // Count nodes - should be more than before due to unique debug decorators
-    // The exact number depends on implementation, but should be greater than the minimum expected
-    assert!(
-        mast_forest.num_nodes() > 3,
-        "Should have more nodes with debug decorators enabled"
-    );
-
-    // Verify the program can be executed (functional test)
-    let mut host = DefaultHost::default();
-    let result = miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    );
-    assert!(result.is_ok(), "Program should execute successfully");
-
-    // Check that we have the expected control flow structure
-    // With debug decorators enabled, the program should have more nodes due to less deduplication
-    let nodes = mast_forest.nodes();
-    let has_mul_operations = nodes.iter().any(|node| {
-        matches!(node, miden_core::mast::MastNode::Block(bb)
-            if bb.operations().any(|op| op == &Operation::Mul))
-    });
-    assert!(has_mul_operations, "Should contain mul operations in control flow");
 }
 
 #[test]
@@ -4556,21 +4488,10 @@ fn test_assembler_debug_info_present() {
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 
-    // Debug info should be present since debug mode is always enabled
-    assert!(
-        !mast_forest.decorators().is_empty(),
-        "Debug info should be present with always-enabled debug mode"
-    );
-
-    // Specifically check for AsmOp decorators that track instruction execution
-    let has_asmop_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_asmop_decorators,
-        "AsmOp decorators should be present for tracking instructions"
-    );
+    // Debug info should be present since debug mode is always enabled.
+    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
+    assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }
 
 #[test]
@@ -4609,6 +4530,390 @@ fn test_cross_module_constant_resolution() -> TestResult {
     let assembler = Assembler::new(context.source_manager());
 
     let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_cross_module_constant_resolution_as_local_definition() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::module_a",
+        source_file!(
+            &context,
+            r#"
+            pub const A_VAL = 10
+            pub proc a_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module_b",
+        source_file!(
+            &context,
+            r#"
+            use cycle::module_a::A_VAL
+            pub proc b_proc
+                push.A_VAL
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+#[test]
+fn test_cross_module_quoted_identifier_resolution() -> TestResult {
+    let context = TestContext::default();
+
+    // Module A defines and exports a constant
+    let module_a = context.parse_module_with_path(
+        "cycle::\"module::a\"",
+        source_file!(
+            &context,
+            r#"
+            # Checks local path resolution
+            pub proc "$item::<T>::fun"
+                exec."$item::<T>::get"
+            end
+
+            # Checks absolute path resolution to a local item
+            proc "$item::<T>::get"
+                exec.::cycle::"module::a"::"$item::<T>::get_impl"
+            end
+
+            proc "$item::<T>::get_impl"
+                push.1
+            end
+        "#
+        ),
+    )?;
+
+    // Module B imports Module A and defines a constant using it
+    let module_b = context.parse_module_with_path(
+        "cycle::module::b",
+        source_file!(
+            &context,
+            r#"
+            # Checks that import resolution with quoted path components works
+            use cycle::"module::a"->a
+
+            # Checks that link-time cross-module resolution with quoted path components works
+            pub proc b_proc
+                exec.a::"$item::<T>::fun"
+            end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+
+    let _ = assembler.assemble_library([module_a, module_b])?;
+
+    Ok(())
+}
+
+#[test]
+fn test_kernel_linking_against_its_own_library() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        proc internal_proc
+            caller
+            drop
+            exec.$kernel::lib::lib_proc
+        end
+
+        pub proc kernel_proc
+            exec.internal_proc
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "$kernel::lib",
+        source_file!(
+            &context,
+            r#"
+            pub proc lib_proc
+                swap
+            end
+            "#
+        ),
+    )?;
+
+    let mut assembler = Assembler::new(context.source_manager());
+
+    assembler.compile_and_statically_link(lib)?;
+
+    let _ = assembler.assemble_kernel(kernel)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_syscall_resolution_uses_kernel_module() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        pub proc foo
+            caller
+            drop
+            push.1
+        end
+
+        pub proc bar
+            caller
+            drop
+            push.2
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "userspace",
+        source_file!(
+            &context,
+            r#"
+            pub proc bar
+                push.0
+            end
+            "#
+        ),
+    )?;
+
+    let source = source_file!(
+        &context,
+        r#"
+        use userspace::bar
+
+        proc foo
+            push.0
+        end
+
+        begin
+            syscall.foo
+            syscall.bar
+        end
+        "#
+    );
+
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
+    let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
+
+    let mut assembler = Assembler::with_kernel(context.source_manager(), kernel);
+    assembler.compile_and_statically_link(lib)?;
+    let program = assembler.assemble_program(source)?;
+
+    let mast = {
+        let entry = program.get_node_by_id(program.entrypoint()).unwrap();
+        format!("{}", entry.to_display(program.mast_forest()))
+    };
+
+    let expected = format!(
+        r#"join
+    join
+        basic_block push(2147483648) push(4294967294) mstore drop noop end
+        syscall.{kernel_foo_root}
+    end
+    syscall.{kernel_bar_root}
+end"#
+    );
+    assert_eq!(mast, expected);
+
+    Ok(())
+}
+
+#[test]
+fn test_syscall_resolution_to_non_kernel_path_is_checked() -> TestResult {
+    let context = TestContext::default();
+
+    let kernel = context.parse_kernel(source_file!(
+        &context,
+        r#"
+        pub proc foo
+            caller
+            drop
+            push.1
+        end
+        "#
+    ))?;
+
+    let lib = context.parse_module_with_path(
+        "userspace",
+        source_file!(
+            &context,
+            r#"
+            pub proc bar
+                push.0
+            end
+            "#
+        ),
+    )?;
+
+    let source = source_file!(
+        &context,
+        r#"
+        begin
+            syscall.userspace::bar
+        end
+        "#
+    );
+
+    let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let lib = Assembler::new(context.source_manager()).assemble_library([lib])?;
+
+    let error = Assembler::with_kernel(context.source_manager(), kernel)
+        .with_static_library(lib)?
+        .assemble_program(source)
+        .expect_err("expected diagnostic to be raised, but compilation succeeded");
+
+    assert_diagnostic_lines!(
+        error,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid syscall: callee must be resolvable to kernel module",
+        regex!(r#",-\[test[\d]+:3:21\]"#),
+        "2 |         begin",
+        "3 |             syscall.userspace::bar",
+        "  :                     ^^^^^^^^^^^^^^",
+        "4 |         end",
+        "  `----"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_linking_imported_symbols_with_duplicate_prefix_components() -> TestResult {
+    let context = TestContext::default();
+
+    // The name of this library is `lib::lib` on purpose
+    let lib = context.parse_module_with_path(
+        "lib::lib",
+        source_file!(
+            &context,
+            r#"
+        pub proc lib_proc
+            swap
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let lib = assembler.assemble_library([lib])?;
+
+    // This program triggers a pathological edge case in symbol resolution, caused by the
+    // import-relative reference `exec.lib::lib_proc`. This causes the following to occur:
+    //
+    // 1. We attempt to expand `lib` to an import, which succeeds, giving us a new relative path,
+    //    `lib::lib::lib_proc`.
+    // 2. Because imports can refer to other imported items, we attempt to resolve `lib` as an
+    //    import again, resulting in us expanding the path to `lib::lib::lib::lib::lib_proc`, and so
+    //    on until we blow the stack
+    //
+    // The fix for this is to disregard import expansions of the same import in the same module
+    // after the first time an import is expanded.
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.with_static_library(lib)?.assemble_program(
+        r#"
+        use lib::lib
+
+        begin
+            exec.lib::lib_proc
+        end
+        "#,
+    )?;
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
+fn test_linking_recursive_expansion() -> TestResult {
+    let context = TestContext::default();
+
+    let a_lib = context.parse_module_with_path(
+        "a",
+        source_file!(
+            &context,
+            r#"
+        pub use b::a
+        pub proc x
+            push.1
+        end
+        "#
+        ),
+    )?;
+
+    let b_lib = context.parse_module_with_path(
+        "b",
+        source_file!(
+            &context,
+            r#"
+        pub use a::a
+        pub proc foo
+            exec.a::x
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.assemble_library([a_lib, b_lib])?;
+
+    Ok(())
+}
+
+#[test]
+#[ignore = "leave disabled until either symbol resolution is rewritten or path semantics are refined"]
+fn test_linking_recursive_expansion_via_renamed_aliases() -> TestResult {
+    let context = TestContext::default();
+
+    let a_lib = context.parse_module_with_path(
+        "a::a",
+        source_file!(
+            &context,
+            r#"
+        pub use b::a2
+        pub proc x
+            push.1
+        end
+        "#
+        ),
+    )?;
+
+    let b_lib = context.parse_module_with_path(
+        "b",
+        source_file!(
+            &context,
+            r#"
+        pub use a::a->a2
+        pub proc foo
+            exec.a2::x
+        end
+        "#
+        ),
+    )?;
+
+    let assembler = Assembler::new(context.source_manager());
+    let _ = assembler.assemble_library([a_lib, b_lib])?;
 
     Ok(())
 }

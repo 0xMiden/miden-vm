@@ -1,6 +1,5 @@
 use miden_assembly::Assembler;
-use miden_processor::{AdviceInputs, ExecutionOptions, Program};
-use miden_prover::StackInputs;
+use miden_processor::{ExecutionOptions, Program, StackInputs, advice::AdviceInputs};
 
 use super::TestHost;
 

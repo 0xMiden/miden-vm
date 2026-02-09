@@ -40,7 +40,8 @@ serde = [
     "miden-utils-indexing/serde",
 ]
 arbitrary = ["dep:proptest", "dep:proptest-derive"]
-testing = ["arbitrary" ]
+testing = ["arbitrary"]
+fuzzing = []
 
 [dependencies]
 # Miden dependencies

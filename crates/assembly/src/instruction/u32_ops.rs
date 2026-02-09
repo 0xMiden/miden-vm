@@ -4,11 +4,10 @@ use miden_assembly_syntax::{
     diagnostics::{RelatedLabel, Report},
 };
 use miden_core::{
-    Felt,
-    Operation::{self, *},
-    ZERO,
+    Felt, ZERO,
+    events::SystemEvent,
     field::PrimeCharacteristicRing,
-    sys_events::SystemEvent,
+    operations::Operation::{self, *},
 };
 
 use super::{field_ops::append_pow2_op, push_u32_value};
@@ -78,15 +77,69 @@ pub fn u32assertw(span_builder: &mut BasicBlockBuilder, err_code: Felt) {
 /// Translates u32add assembly instructions to VM operations.
 ///
 /// The base operation is `U32ADD`, but depending on the mode, additional operations may be
-/// inserted. Please refer to the docs of `handle_arithmetic_operation` for more details.
+/// inserted.
 ///
 /// VM cycles per mode:
 /// - u32wrapping_add: 3 cycles
 /// - u32wrapping_add.b: 4 cycles
-/// - u32overflowing_add: 1 cycles
-/// - u32overflowing_add.b: 2 cycles
+/// - u32overflowing_add: 2 cycles
+/// - u32overflowing_add.b: 3 cycles
 pub fn u32add(span_builder: &mut BasicBlockBuilder, op_mode: U32OpMode, imm: Option<u32>) {
-    handle_arithmetic_operation(span_builder, U32add, op_mode, imm);
+    u32widening_add(span_builder, imm);
+
+    if matches!(op_mode, U32OpMode::Overflowing) {
+        span_builder.push_op(Swap);
+    } else {
+        span_builder.push_ops([Swap, Drop]);
+    }
+}
+
+/// Translates u32widening_add assembly instructions to VM operations.
+///
+/// VM cycles per mode:
+/// - u32widening_add: 1 cycle
+/// - u32widening_add.b: 2 cycles
+pub fn u32widening_add(span_builder: &mut BasicBlockBuilder, imm: Option<u32>) {
+    if let Some(imm) = imm {
+        push_u32_value(span_builder, imm);
+    }
+    span_builder.push_op(U32add);
+}
+
+/// Translates u32overflowing_add assembly instructions to VM operations.
+///
+/// VM cycles per mode:
+/// - u32overflowing_add: 2 cycles
+/// - u32overflowing_add.b: 3 cycles
+pub fn u32overflowing_add(span_builder: &mut BasicBlockBuilder, imm: Option<u32>) {
+    u32widening_add(span_builder, imm);
+    span_builder.push_op(Swap);
+}
+
+/// Translates u32widening_add3 assembly instructions to VM operations.
+///
+/// VM cycles per mode:
+/// - u32widening_add3: 1 cycle
+pub fn u32widening_add3(span_builder: &mut BasicBlockBuilder) {
+    span_builder.push_op(U32add3);
+}
+
+/// Translates u32overflowing_add3 assembly instructions to VM operations.
+///
+/// VM cycles per mode:
+/// - u32overflowing_add3: 2 cycles
+pub fn u32overflowing_add3(span_builder: &mut BasicBlockBuilder) {
+    span_builder.push_op(U32add3);
+    span_builder.push_op(Swap);
+}
+
+/// Translates u32wrapping_add3 assembly instructions to VM operations.
+///
+/// VM cycles per mode:
+/// - u32wrapping_add3: 3 cycles
+pub fn u32wrapping_add3(span_builder: &mut BasicBlockBuilder) {
+    span_builder.push_op(U32add3);
+    span_builder.push_ops([Swap, Drop]);
 }
 
 /// Translates u32sub assembly instructions to VM operations.

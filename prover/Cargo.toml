@@ -29,8 +29,6 @@ p3-miden-air.workspace = true
 
 # External dependencies
 bincode = "1.3"
-p3-matrix.workspace = true
-p3-merkle-tree.workspace = true
 serde.workspace = true
 tracing.workspace = true
 

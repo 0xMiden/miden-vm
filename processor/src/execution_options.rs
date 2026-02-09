@@ -1,11 +1,5 @@
 use miden_air::trace::MIN_TRACE_LEN;
 
-// CONSTANTS
-// ================================================================================================
-
-/// Default fragment size for core trace generation.
-pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
-
 // EXECUTION OPTIONS
 // ================================================================================================
 
@@ -27,7 +21,7 @@ impl Default for ExecutionOptions {
         ExecutionOptions {
             max_cycles: Self::MAX_CYCLES,
             expected_cycles: MIN_TRACE_LEN as u32,
-            core_trace_fragment_size: DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
+            core_trace_fragment_size: Self::DEFAULT_CORE_TRACE_FRAGMENT_SIZE,
             enable_tracing: false,
             enable_debugging: false,
         }
@@ -40,6 +34,9 @@ impl ExecutionOptions {
 
     /// The maximum number of VM cycles a program is allowed to take.
     pub const MAX_CYCLES: u32 = 1 << 29;
+
+    /// Default fragment size for core trace generation.
+    pub const DEFAULT_CORE_TRACE_FRAGMENT_SIZE: usize = 4096; // 2^12
 
     // CONSTRUCTOR
     // --------------------------------------------------------------------------------------------
@@ -139,6 +136,7 @@ impl ExecutionOptions {
     // --------------------------------------------------------------------------------------------
 
     /// Returns maximum number of cycles a program is allowed to execute for.
+    #[inline(always)]
     pub fn max_cycles(&self) -> u32 {
         self.max_cycles
     }

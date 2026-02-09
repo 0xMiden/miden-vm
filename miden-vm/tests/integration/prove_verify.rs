@@ -200,11 +200,13 @@ mod fast_parallel {
     use alloc::sync::Arc;
 
     use miden_assembly::{Assembler, DefaultSourceManager};
-    use miden_core::{ExecutionProof, HashFunction};
+    use miden_core::proof::{ExecutionProof, HashFunction};
+    use miden_crypto::stark;
     use miden_processor::{
-        AdviceInputs, ExecutionOptions, StackInputs, fast::FastProcessor, parallel::build_trace,
+        ExecutionOptions, StackInputs, advice::AdviceInputs, fast::FastProcessor,
+        trace::build_trace,
     };
-    use miden_prover::{config, execution_trace_to_row_major, stark};
+    use miden_prover::{config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -246,8 +248,7 @@ mod fast_parallel {
         let fast_stack_outputs = execution_output.stack;
 
         // Build trace using parallel trace generation
-        let trace =
-            build_trace(execution_output, trace_context, program.hash(), program.kernel().clone());
+        let trace = build_trace(execution_output, trace_context, program.to_info());
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);

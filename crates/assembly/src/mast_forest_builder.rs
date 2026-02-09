@@ -8,13 +8,15 @@ use core::ops::{Index, IndexMut};
 #[cfg(test)]
 use miden_core::mast::{LoopNodeBuilder, SplitNodeBuilder};
 use miden_core::{
-    AdviceMap, Decorator, DecoratorList, Felt, Operation, Word,
+    Felt, Word,
+    advice::AdviceMap,
     mast::{
-        BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint, DecoratorId, DynNodeBuilder,
-        ExternalNodeBuilder, JoinNodeBuilder, MastForest, MastForestContributor, MastForestError,
-        MastNode, MastNodeBuilder, MastNodeExt, MastNodeFingerprint, MastNodeId, Remapping,
-        SubtreeIterator,
+        AsmOpId, BasicBlockNode, BasicBlockNodeBuilder, CallNodeBuilder, DecoratorFingerprint,
+        DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder, MastForest,
+        MastForestContributor, MastForestError, MastNode, MastNodeBuilder, MastNodeExt,
+        MastNodeFingerprint, MastNodeId, Remapping, SubtreeIterator,
     },
+    operations::{AssemblyOp, Decorator, DecoratorList, Operation},
 };
 
 use super::{GlobalItemIndex, LinkerError, Procedure};
@@ -77,6 +79,12 @@ pub struct MastForestBuilder {
     /// Keeps track of the new ids assigned to decorators that are copied from the MAST of
     /// statically-linked libraries.
     statically_linked_decorator_remapping: BTreeMap<DecoratorId, DecoratorId>,
+    /// Pending AssemblyOp mappings to be registered at build time.
+    ///
+    /// These are collected during assembly and registered all at once in sorted node order
+    /// when `build()` is called. This is necessary because the CSR structure requires nodes
+    /// to be added in sequential order, but nodes may be created in any order during assembly.
+    pending_asm_op_mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)>,
 }
 
 impl MastForestBuilder {
@@ -117,11 +125,66 @@ impl MastForestBuilder {
     /// It also returns the map from old node IDs to new node IDs. Any [`MastNodeId`] used in
     /// reference to the old [`MastForest`] should be remapped using this map.
     pub fn build(mut self) -> (MastForest, BTreeMap<MastNodeId, MastNodeId>) {
+        // Register all pending AssemblyOp mappings in sorted node order.
+        // The CSR structure requires nodes to be added sequentially.
+        // We must also merge mappings for duplicate node_ids (can happen when control flow nodes
+        // like Call are deduplicated but still have asm_ops registered).
+        let deduped_mappings =
+            deduplicate_asm_op_mappings(core::mem::take(&mut self.pending_asm_op_mappings));
+
+        for (node_id, asm_op_mappings) in deduped_mappings {
+            let (num_operations, adjusted_mappings) =
+                compute_operations_and_adjust_mappings(&self.mast_forest[node_id], asm_op_mappings);
+
+            // Errors here are programming errors since we control the ordering.
+            // Use expect to surface any issues during development.
+            self.mast_forest
+                .debug_info_mut()
+                .register_asm_ops(node_id, num_operations, adjusted_mappings)
+                .expect("failed to register AssemblyOps - internal ordering error");
+        }
+
         let nodes_to_remove = get_nodes_to_remove(self.merged_basic_block_ids, &self.mast_forest);
         let id_remappings = self.mast_forest.remove_nodes(&nodes_to_remove);
 
         (self.mast_forest, id_remappings)
     }
+}
+
+/// Computes the number of operations for a node and adjusts AssemblyOp indices if needed.
+///
+/// For basic block nodes, adjusts indices to account for padding NOOPs in OpBatches.
+/// For control flow nodes, computes the operation count from the maximum index.
+fn compute_operations_and_adjust_mappings(
+    node: &MastNode,
+    asm_op_mappings: Vec<(usize, AsmOpId)>,
+) -> (usize, Vec<(usize, AsmOpId)>) {
+    match node {
+        MastNode::Block(block) => (
+            block.num_operations() as usize,
+            BasicBlockNode::adjust_asm_op_indices(asm_op_mappings, block.op_batches()),
+        ),
+        _ => {
+            let num_ops = asm_op_mappings.iter().map(|(idx, _)| idx + 1).max().unwrap_or(0);
+            (num_ops, asm_op_mappings)
+        },
+    }
+}
+
+/// Deduplicates AssemblyOp mappings by node_id, keeping only the first registration.
+///
+/// Mappings are sorted by node_id, then deduplicated. This is necessary because control flow
+/// nodes like Call can be deduplicated, resulting in multiple registrations for the same node_id.
+fn deduplicate_asm_op_mappings(
+    mut mappings: Vec<(MastNodeId, Vec<(usize, AsmOpId)>)>,
+) -> Vec<(MastNodeId, Vec<(usize, AsmOpId)>)> {
+    mappings.sort_by_key(|(node_id, _)| *node_id);
+
+    let mut seen_node_ids = BTreeSet::new();
+    mappings
+        .into_iter()
+        .filter(|(node_id, _)| seen_node_ids.insert(*node_id))
+        .collect()
 }
 
 /// Takes the set of MAST node ids (all basic blocks) that were merged as part of the assembly
@@ -320,6 +383,8 @@ impl MastForestBuilder {
 
         let mut operations: Vec<Operation> = Vec::new();
         let mut decorators = DecoratorList::new();
+        // Track asm_ops being accumulated for merged blocks, with adjusted indices
+        let mut merged_asm_ops: Vec<(usize, AsmOpId)> = Vec::new();
 
         let mut merged_basic_blocks: Vec<MastNodeId> = Vec::new();
 
@@ -333,21 +398,41 @@ impl MastForestBuilder {
                 self.mast_forest.is_procedure_root(basic_block_id),
                 basic_block_node.num_op_batches(),
             ) {
-                // Use forest-borrowing to get decorators from linked nodes
-                for (op_idx, decorator) in basic_block_node.raw_decorator_iter(&self.mast_forest) {
-                    decorators.push((op_idx + operations.len(), decorator));
+                // Collect decorators and operations from the block (while still borrowing)
+                // We need owned copies so we can drop the borrow before mutating self
+                let block_decorators: Vec<_> =
+                    basic_block_node.raw_decorator_iter(&self.mast_forest).collect();
+                let block_ops: Vec<Operation> = basic_block_node
+                    .op_batches()
+                    .iter()
+                    .flat_map(|b| b.raw_ops().copied())
+                    .collect();
+                let ops_offset = operations.len();
+
+                // basic_block_node borrow ends here since we collected owned data above
+
+                // Transfer any pending asm_ops for this block to the merged result
+                self.transfer_asm_ops_for_merge(basic_block_id, ops_offset, &mut merged_asm_ops);
+
+                // Add decorators with adjusted indices
+                for (op_idx, decorator) in block_decorators {
+                    decorators.push((op_idx + ops_offset, decorator));
                 }
-                for batch in basic_block_node.op_batches() {
-                    operations.extend(batch.raw_ops());
-                }
+                operations.extend(block_ops);
             } else {
                 // if we don't want to merge this block, we flush the buffer of operations into a
                 // new block, and add the un-merged block after it
                 if !operations.is_empty() {
                     let block_ops = core::mem::take(&mut operations);
                     let block_decorators = core::mem::take(&mut decorators);
-                    let merged_basic_block_id =
-                        self.ensure_block(block_ops, block_decorators, vec![], vec![])?;
+                    let block_asm_ops = core::mem::take(&mut merged_asm_ops);
+                    let merged_basic_block_id = self.ensure_block_with_asm_op_ids(
+                        block_ops,
+                        block_decorators,
+                        block_asm_ops,
+                        vec![],
+                        vec![],
+                    )?;
 
                     merged_basic_blocks.push(merged_basic_block_id);
                 }
@@ -359,11 +444,64 @@ impl MastForestBuilder {
         self.merged_basic_block_ids.extend(contiguous_basic_block_ids.iter());
 
         if !operations.is_empty() || !decorators.is_empty() {
-            let merged_basic_block = self.ensure_block(operations, decorators, vec![], vec![])?;
+            let merged_basic_block = self.ensure_block_with_asm_op_ids(
+                operations,
+                decorators,
+                merged_asm_ops,
+                vec![],
+                vec![],
+            )?;
             merged_basic_blocks.push(merged_basic_block);
         }
 
         Ok(merged_basic_blocks)
+    }
+
+    /// Helper to transfer pending asm_ops from a block being merged.
+    /// Removes the asm_ops from pending_asm_op_mappings and adds them to the merged list
+    /// with indices adjusted by the given offset.
+    fn transfer_asm_ops_for_merge(
+        &mut self,
+        source_block_id: MastNodeId,
+        ops_offset: usize,
+        merged_asm_ops: &mut Vec<(usize, AsmOpId)>,
+    ) {
+        // Partition pending mappings into those matching source_block_id and the rest
+        let (matched, rest): (Vec<_>, Vec<_>) = core::mem::take(&mut self.pending_asm_op_mappings)
+            .into_iter()
+            .partition(|(node_id, _)| *node_id == source_block_id);
+
+        self.pending_asm_op_mappings = rest;
+
+        // Add matched asm_ops to merged list with adjusted indices
+        for (_, asm_ops) in matched {
+            merged_asm_ops.extend(
+                asm_ops.into_iter().map(|(op_idx, asm_op_id)| (op_idx + ops_offset, asm_op_id)),
+            );
+        }
+    }
+
+    /// Like ensure_block but takes pre-existing AsmOpIds instead of AssemblyOps.
+    /// Used when merging blocks that already have their asm_ops registered.
+    fn ensure_block_with_asm_op_ids(
+        &mut self,
+        operations: Vec<Operation>,
+        decorators: DecoratorList,
+        asm_op_ids: Vec<(usize, AsmOpId)>,
+        before_enter: Vec<DecoratorId>,
+        after_exit: Vec<DecoratorId>,
+    ) -> Result<MastNodeId, Report> {
+        let block = BasicBlockNodeBuilder::new(operations, decorators)
+            .with_before_enter(before_enter)
+            .with_after_exit(after_exit);
+        let (node_id, is_new) = self.ensure_node_exists(block)?;
+
+        // Only register AssemblyOps for newly created nodes.
+        if is_new && !asm_op_ids.is_empty() {
+            self.pending_asm_op_mappings.push((node_id, asm_op_ids));
+        }
+
+        Ok(node_id)
     }
 }
 
@@ -398,13 +536,25 @@ impl MastForestBuilder {
         &mut self,
         builder: impl MastForestContributor,
     ) -> Result<MastNodeId, Report> {
+        let (node_id, _is_new) = self.ensure_node_exists(builder)?;
+        Ok(node_id)
+    }
+
+    /// Adds a node to the forest if it doesn't already exist.
+    ///
+    /// Returns `(node_id, is_new)` where `is_new` is true if the node was newly added,
+    /// or false if a duplicate node already existed.
+    fn ensure_node_exists(
+        &mut self,
+        builder: impl MastForestContributor,
+    ) -> Result<(MastNodeId, bool), Report> {
         let node_fingerprint = builder
             .fingerprint_for_node(&self.mast_forest, &self.hash_by_node_id)
             .expect("hash_by_node_id should contain the fingerprints of all children of `node`");
 
         if let Some(node_id) = self.node_id_by_fingerprint.get(&node_fingerprint) {
             // node already exists in the forest; return previously assigned id
-            Ok(*node_id)
+            Ok((*node_id, false))
         } else {
             let new_node_id = builder
                 .add_to_forest(&mut self.mast_forest)
@@ -413,22 +563,53 @@ impl MastForestBuilder {
             self.node_id_by_fingerprint.insert(node_fingerprint, new_node_id);
             self.hash_by_node_id.insert(new_node_id, node_fingerprint);
 
-            Ok(new_node_id)
+            Ok((new_node_id, true))
         }
     }
 
     /// Adds a basic block node to the forest, and returns the [`MastNodeId`] associated with it.
+    ///
+    /// The `asm_ops` parameter contains AssemblyOp metadata for operations in this block. Each
+    /// entry is `(op_idx, AssemblyOp)` where `op_idx` is the operation index the AssemblyOp
+    /// corresponds to.
+    ///
+    /// Note: AssemblyOps are only registered for newly created nodes. If a duplicate node already
+    /// exists in the forest (deduplication), the asm_ops are ignored since the existing node
+    /// already has its metadata registered.
+    ///
+    /// The actual registration of AssemblyOp mappings is deferred until `build()` is called,
+    /// to ensure nodes are registered in sequential order as required by the CSR structure.
     pub fn ensure_block(
         &mut self,
         operations: Vec<Operation>,
         decorators: DecoratorList,
+        asm_ops: Vec<(usize, AssemblyOp)>,
         before_enter: Vec<DecoratorId>,
         after_exit: Vec<DecoratorId>,
     ) -> Result<MastNodeId, Report> {
         let block = BasicBlockNodeBuilder::new(operations, decorators)
             .with_before_enter(before_enter)
             .with_after_exit(after_exit);
-        self.ensure_node(block)
+        let (node_id, is_new) = self.ensure_node_exists(block)?;
+
+        // Only register AssemblyOps for newly created nodes.
+        // Deduplicated nodes already have their asm_ops registered from when they were first added.
+        if is_new && !asm_ops.is_empty() {
+            let mut asm_op_mappings = Vec::with_capacity(asm_ops.len());
+            for (op_idx, asm_op) in asm_ops {
+                let asm_op_id = self
+                    .mast_forest
+                    .debug_info_mut()
+                    .add_asm_op(asm_op)
+                    .into_diagnostic()
+                    .wrap_err("failed to add AssemblyOp")?;
+                asm_op_mappings.push((op_idx, asm_op_id));
+            }
+            // Defer registration until build() to ensure sequential node order.
+            self.pending_asm_op_mappings.push((node_id, asm_op_mappings));
+        }
+
+        Ok(node_id)
     }
 
     /// Adds a join node to the forest, and returns the [`MastNodeId`] associated with it.
@@ -663,6 +844,29 @@ impl MastForestBuilder {
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         self.mast_forest.register_error(msg)
     }
+
+    /// Registers an AssemblyOp for a control flow node (e.g., if.true, while.true).
+    ///
+    /// This is used for nodes that don't have operation indices, such as Split, Loop, Call, etc.
+    /// The AssemblyOp is registered at operation index 0 for the node.
+    ///
+    /// The actual registration is deferred until `build()` is called, to ensure nodes are
+    /// registered in sequential order as required by the CSR structure.
+    pub fn register_node_asm_op(
+        &mut self,
+        node_id: MastNodeId,
+        asm_op: AssemblyOp,
+    ) -> Result<(), Report> {
+        let asm_op_id = self
+            .mast_forest
+            .debug_info_mut()
+            .add_asm_op(asm_op)
+            .into_diagnostic()
+            .wrap_err("failed to add AssemblyOp for control flow node")?;
+        // Defer registration until build() to ensure sequential node order.
+        self.pending_asm_op_mappings.push((node_id, vec![(0, asm_op_id)]));
+        Ok(())
+    }
 }
 
 impl Index<MastNodeId> for MastForestBuilder {
@@ -737,7 +941,7 @@ fn should_merge(is_procedure: bool, num_op_batches: usize) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use miden_core::Operation;
+    use miden_core::operations::Operation;
 
     use super::*;
 
@@ -778,7 +982,7 @@ mod tests {
         ];
 
         let block1_id = builder
-            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![])
+            .ensure_block(block1_ops.clone(), block1_decorators, vec![], vec![], vec![])
             .unwrap();
 
         // Sanity check the test itself makes sense
@@ -799,7 +1003,7 @@ mod tests {
         ]; // [push mul] [3]
 
         let block2_id = builder
-            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![])
+            .ensure_block(block2_ops.clone(), block2_decorators, vec![], vec![], vec![])
             .unwrap();
 
         // Merge the blocks

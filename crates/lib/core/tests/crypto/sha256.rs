@@ -1,8 +1,9 @@
+use miden_air::Serializable;
+use miden_crypto::hash::sha2::Sha256;
 use miden_utils_testing::{
     Felt, IntoBytes, group_slice_elements, push_inputs,
     rand::{rand_array, rand_value, rand_vector},
 };
-use sha2::{Digest, Sha256};
 
 #[test]
 fn sha256_hash_bytes() {
@@ -39,13 +40,13 @@ fn sha256_hash_bytes() {
         mem_store.1
 
         # mem.2 - length in words
-        mem_load.1 u32assert u32overflowing_add.15 swap assertz u32assert u32div.16 mem_store.2
+        mem_load.1 u32assert u32overflowing_add.15 assertz u32assert u32div.16 mem_store.2
 
         # Load input data into memory address 10000, 10004, ...
         mem_load.2 u32assert neq.0
         while.true
             mem_load.0 mem_storew_be dropw
-            mem_load.0 u32assert u32overflowing_add.4 swap assertz mem_store.0
+            mem_load.0 u32assert u32overflowing_add.4 assertz mem_store.0
             mem_load.2 u32assert u32overflowing_sub.1 assertz dup mem_store.2 u32assert neq.0
         end
 
@@ -60,10 +61,7 @@ fn sha256_hash_bytes() {
         inputs = push_inputs(&ifelts)
     );
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
@@ -94,10 +92,7 @@ fn sha256_2_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
@@ -121,10 +116,7 @@ fn sha256_1_to_1_hash() {
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)
         .collect();
 
-    let mut hasher = Sha256::new();
-    hasher.update(ibytes);
-
-    let obytes = hasher.finalize();
+    let obytes = Sha256::hash(&ibytes).to_bytes();
     let ofelts: Vec<u64> = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_be_bytes(bytes) as u64)

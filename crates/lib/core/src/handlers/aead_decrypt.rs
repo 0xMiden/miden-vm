@@ -7,12 +7,12 @@
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, field::PrimeField64};
+use miden_core::{events::EventName, field::PrimeField64};
 use miden_crypto::aead::{
     DataType, EncryptionError,
     aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{AdviceMutation, EventError, ProcessorState};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::read_memory_region;
 

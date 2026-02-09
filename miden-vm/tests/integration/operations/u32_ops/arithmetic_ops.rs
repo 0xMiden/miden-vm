@@ -1,4 +1,4 @@
-use miden_processor::{ExecutionError, OperationError};
+use miden_processor::{ExecutionError, operation::OperationError};
 use miden_utils_testing::{
     U32_BOUND, build_op_test, expect_exec_error_matches, proptest::prelude::*, rand::rand_value,
 };
@@ -81,21 +81,110 @@ fn u32overflowing_add() {
 
     // --- (a + b) < 2^32 -------------------------------------------------------------------------
     // c = a + b and d should be unset, since there was no overflow.
-    // Output is [sum, carry] with sum on top
+    // Output is [carry, sum] with carry on top
     let test = build_op_test!(asm_op, &[2, 1]);
-    test.expect_stack(&[3, 0]);
+    test.expect_stack(&[0, 3]);
 
     // --- (a + b) = 2^32 -------------------------------------------------------------------------
     let a = u32::MAX;
     let b = 1_u64;
     // c should be the sum mod 2^32 and d should be set to signal overflow.
     let test = build_op_test!(asm_op, &[b, a as u64]);
-    test.expect_stack(&[0, 1]);
+    test.expect_stack(&[1, 0]);
 
     // --- (a + b) > 2^32 -------------------------------------------------------------------------
     let a = 2_u64;
     let b = u32::MAX;
     // c should be the sum mod 2^32 and d should be set to signal overflow.
+    let test = build_op_test!(asm_op, &[b as u64, a]);
+    test.expect_stack(&[1, 1]);
+
+    // --- random u32 values ----------------------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let (c, overflow) = a.overflowing_add(b);
+    let d = if overflow { 1 } else { 0 };
+    let test = build_op_test!(asm_op, &[b as u64, a as u64]);
+    test.expect_stack(&[d, c as u64]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    let e = rand_value::<u64>();
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, e]);
+    test.expect_stack(&[d, c as u64, e]);
+}
+
+#[test]
+fn u32overflowing_add3() {
+    let asm_op = "u32overflowing_add3";
+
+    // --- test correct execution -----------------------------------------------------------------
+    // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
+    // d = a + b + c and e should be unset, since there was no overflow.
+    // Output is [carry, sum] with carry on top
+    let test = build_op_test!(asm_op, &[0, 1, 2]);
+    test.expect_stack(&[0, 3]);
+
+    // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
+    // d = a + b + c and e should be unset, since there was no overflow.
+    let test = build_op_test!(asm_op, &[1, 2, 3]);
+    test.expect_stack(&[0, 6]);
+
+    // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
+    let a = u32::MAX;
+    let b = 1_u64;
+    // d should be the sum mod 2^32 and e should be set to signal overflow.
+    let test = build_op_test!(asm_op, &[b, a as u64, 0]);
+    test.expect_stack(&[1, 0]);
+
+    // --- (a + b + c) > 2^32 ---------------------------------------------------------------------
+    let a = 1_u64;
+    let b = u32::MAX;
+    // d should be the sum mod 2^32 and e should be set to signal overflow.
+    let test = build_op_test!(asm_op, &[b as u64, a, 1]);
+    test.expect_stack(&[1, 1]);
+
+    // --- random u32 values with c = 0 -----------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let c = 0_u64;
+    let (d, overflow) = a.overflowing_add(b);
+    let e = if overflow { 1 } else { 0 };
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c]);
+    test.expect_stack(&[e, d as u64]);
+
+    // --- random u32 values with c = 1 -----------------------------------------------------------
+    let a = rand_value::<u32>();
+    let b = rand_value::<u32>();
+    let c = 1_u32;
+    let (d, overflow_b) = a.overflowing_add(b);
+    let (d, overflow_c) = d.overflowing_add(c);
+    let e = if overflow_b || overflow_c { 1 } else { 0 };
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64]);
+    test.expect_stack(&[e, d as u64]);
+
+    // --- test that the rest of the stack isn't affected -----------------------------------------
+    let f = rand_value::<u64>();
+    let test = build_op_test!(asm_op, &[b as u64, a as u64, c as u64, f]);
+    test.expect_stack(&[e, d as u64, f]);
+}
+
+#[test]
+fn u32widening_add() {
+    let asm_op = "u32widening_add";
+
+    // --- (a + b) < 2^32 -------------------------------------------------------------------------
+    let test = build_op_test!(asm_op, &[2, 1]);
+    test.expect_stack(&[3, 0]);
+
+    // --- (a + b) = 2^32 -------------------------------------------------------------------------
+    let a = u32::MAX;
+    let b = 1_u64;
+    let test = build_op_test!(asm_op, &[b, a as u64]);
+    test.expect_stack(&[0, 1]);
+
+    // --- (a + b) > 2^32 -------------------------------------------------------------------------
+    let a = 2_u64;
+    let b = u32::MAX;
     let test = build_op_test!(asm_op, &[b as u64, a]);
     test.expect_stack(&[1, 1]);
 
@@ -114,32 +203,26 @@ fn u32overflowing_add() {
 }
 
 #[test]
-fn u32overflowing_add3() {
-    let asm_op = "u32overflowing_add3";
+fn u32widening_add3() {
+    let asm_op = "u32widening_add3";
 
-    // --- test correct execution -----------------------------------------------------------------
     // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
-    // d = a + b + c and e should be unset, since there was no overflow.
-    // Output is [sum, carry] with sum on top
-    let test = build_op_test!(asm_op, &[2, 1, 0]);
+    let test = build_op_test!(asm_op, &[0, 1, 2]);
     test.expect_stack(&[3, 0]);
 
     // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
-    // d = a + b + c and e should be unset, since there was no overflow.
-    let test = build_op_test!(asm_op, &[3, 2, 1]);
+    let test = build_op_test!(asm_op, &[1, 2, 3]);
     test.expect_stack(&[6, 0]);
 
     // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
     let a = u32::MAX;
     let b = 1_u64;
-    // d should be the sum mod 2^32 and e should be set to signal overflow.
     let test = build_op_test!(asm_op, &[b, a as u64, 0]);
     test.expect_stack(&[0, 1]);
 
     // --- (a + b + c) > 2^32 ---------------------------------------------------------------------
     let a = 1_u64;
     let b = u32::MAX;
-    // d should be the sum mod 2^32 and e should be set to signal overflow.
     let test = build_op_test!(asm_op, &[b as u64, a, 1]);
     test.expect_stack(&[1, 1]);
 
@@ -174,11 +257,11 @@ fn u32wrapping_add3() {
 
     // --- (a + b + c) < 2^32 where c = 0 ---------------------------------------------------------
     // wrapping_add3 should return (a + b + c) mod 2^32
-    let test = build_op_test!(asm_op, &[2, 1, 0]);
+    let test = build_op_test!(asm_op, &[0, 1, 2]);
     test.expect_stack(&[3]);
 
     // --- (a + b + c) < 2^32 where c = 1 ---------------------------------------------------------
-    let test = build_op_test!(asm_op, &[3, 2, 1]);
+    let test = build_op_test!(asm_op, &[1, 2, 3]);
     test.expect_stack(&[6]);
 
     // --- (a + b + c) = 2^32 ---------------------------------------------------------------------
@@ -196,7 +279,7 @@ fn u32wrapping_add3() {
     test.expect_stack(&[1]);
 
     // --- test that the rest of the stack isn't affected -----------------------------------------
-    let test = build_op_test!(asm_op, &[2, 1, 0, 99]);
+    let test = build_op_test!(asm_op, &[0, 1, 2, 99]);
     test.expect_stack(&[3, 99]);
 }
 
@@ -606,6 +689,7 @@ proptest! {
     fn u32unchecked_add_proptest(a in any::<u32>(), b in any::<u32>()) {
         let wrapping_asm_op = "u32wrapping_add";
         let overflowing_asm_op = "u32overflowing_add";
+        let widening_asm_op = "u32widening_add";
 
         let (c, overflow) = a.overflowing_add(b);
         let d = if overflow { 1 } else { 0 };
@@ -613,8 +697,11 @@ proptest! {
         let test = build_op_test!(wrapping_asm_op, &[b as u64, a as u64]);
         test.prop_expect_stack(&[c as u64])?;
 
-        // Output is [sum, carry] with sum on top
+        // Output is [carry, sum] with carry on top
         let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64]);
+        test.prop_expect_stack(&[d, c as u64])?;
+
+        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64]);
         test.prop_expect_stack(&[c as u64, d])?;
     }
 
@@ -622,8 +709,9 @@ proptest! {
     fn u32unchecked_add3_proptest(a in any::<u32>(), b in any::<u32>(), c in any::<u32>()) {
         let wrapping_asm_op = "u32wrapping_add3";
         let overflowing_asm_op = "u32overflowing_add3";
+        let widening_asm_op = "u32widening_add3";
 
-        // Output is [sum, carry] with sum on top
+        // sum split into [lo, hi] limbs
         let sum: u64 = u64::from(a) + u64::from(b) + u64::from(c);
         let lo = (sum as u32) as u64;
         let hi = sum >> 32;
@@ -632,6 +720,9 @@ proptest! {
         test.prop_expect_stack(&[lo])?;
 
         let test = build_op_test!(overflowing_asm_op, &[b as u64, a as u64, c as u64]);
+        test.prop_expect_stack(&[hi, lo])?;
+
+        let test = build_op_test!(widening_asm_op, &[b as u64, a as u64, c as u64]);
         test.prop_expect_stack(&[lo, hi])?;
     }
 

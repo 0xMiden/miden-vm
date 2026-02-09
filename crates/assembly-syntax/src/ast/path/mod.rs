@@ -1,10 +1,12 @@
 mod components;
+mod join;
 #[expect(clippy::module_inception)]
 mod path;
 mod path_buf;
 
 pub use self::{
     components::{Iter, PathComponent},
+    join::Join,
     path::Path,
     path_buf::PathBuf,
 };
@@ -55,6 +57,17 @@ pub enum NamespaceError {
 }
 
 /// This trait abstracts over the concept of matching a prefix pattern against a path
+///
+/// To understand the semantics of how a given prefix pattern matches against a path, you must check
+/// the implementation for the type, but all of the provided implementations are broken down into
+/// two categories:
+///
+/// 1. The prefix is a `Path` or `PathBuf`, in which case each component of the prefix is matched
+///    against each component of `self` until the entire prefix has been visited, or a mismatch is
+///    identified.
+/// 2. The prefix is a `str` or something that derefs to `str`, in which case the prefix is matched
+///    against the first component of `self` (which component of `self` is considered "first" is
+///    dependent on whether the match must be exact or not).
 pub trait StartsWith<Prefix: ?Sized> {
     /// Returns true if the current path, sans root component, starts with `prefix`
     fn starts_with(&self, prefix: &Prefix) -> bool;
@@ -78,10 +91,10 @@ where
 #[cfg(feature = "serde")]
 pub fn deserialize<'de, P, D>(deserializer: D) -> Result<P, D::Error>
 where
-    P: From<&'de Path>,
+    P: From<PathBuf>,
     D: serde::Deserializer<'de>,
 {
-    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
     Ok(P::from(path))
 }
 
@@ -89,10 +102,10 @@ where
 #[cfg(feature = "serde")]
 pub fn deserialize_spanned<'de, P, D>(deserializer: D) -> Result<Span<P>, D::Error>
 where
-    P: From<&'de Path>,
+    P: From<PathBuf>,
     D: serde::Deserializer<'de>,
 {
-    let path = <&'de Path as serde::Deserialize>::deserialize(deserializer)?;
+    let path = <PathBuf as serde::Deserialize>::deserialize(deserializer)?;
     Ok(Span::unknown(P::from(path)))
 }
 
@@ -143,7 +156,7 @@ pub mod arbitrary {
                       (components in components_any(min, max)) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in components {
-                buf.push(&component);
+                buf.push_component(&component);
             }
             buf
         }
@@ -155,7 +168,7 @@ pub mod arbitrary {
                       (components in bare_components_any(min, max)) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in components {
-                buf.push(&component);
+                buf.push_component(&component);
             }
             buf
         }
@@ -170,9 +183,9 @@ pub mod arbitrary {
                         (prefix in components_any(min, max), name in ident::arbitrary::const_ident_any_random_length()) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in prefix {
-                buf.push(&component);
+                buf.push_component(&component);
             }
-            buf.push(&name);
+            buf.push_component(&name);
             buf
         }
     }
@@ -194,9 +207,9 @@ pub mod arbitrary {
                           ((name, prefix) in (ident::arbitrary::bare_ident_any_random_length(), components_any(min, max))) -> PathBuf {
             let mut buf = PathBuf::default();
             for component in prefix {
-                buf.push(&component);
+                buf.push_component(&component);
             }
-            buf.push(&name);
+            buf.push_component(&name);
             buf
         }
     }

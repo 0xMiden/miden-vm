@@ -20,21 +20,27 @@ pub use miden_assembly::{
     diagnostics::Report,
 };
 pub use miden_core::{
-    EMPTY_WORD, Felt, ONE, StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO,
     chiplets::hasher::{STATE_WIDTH, hash_elements},
     field::{Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
-    stack::MIN_STACK_DEPTH,
+    program::{MIN_STACK_DEPTH, StackInputs, StackOutputs},
     utils::{IntoBytes, ToElements, group_slice_elements},
 };
-use miden_core::{EventName, ProgramInfo, chiplets::hasher::apply_permutation};
+use miden_core::{
+    chiplets::hasher::apply_permutation,
+    events::{EventName, SystemEvent},
+    program::ProgramInfo,
+};
 pub use miden_processor::{
-    AdviceInputs, AdviceProvider, AdviceStackBuilder, ContextId, ExecutionError, ExecutionTrace,
-    ProcessorState,
+    ContextId, ExecutionError, ProcessorState,
+    advice::{AdviceInputs, AdviceProvider, AdviceStackBuilder},
+    trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, EventHandler, Program,
+    DefaultDebugHandler, DefaultHost, Program,
+    event::EventHandler,
     fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
-    parallel::build_trace,
+    trace::build_trace,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;
@@ -53,11 +59,7 @@ pub mod math {
     };
 }
 
-pub mod serde {
-    pub use miden_core::utils::{
-        ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, SliceReader,
-    };
-}
+pub use miden_core::serde;
 
 pub mod crypto;
 
@@ -66,7 +68,6 @@ pub mod rand;
 
 mod test_builders;
 
-use miden_core::sys_events::SystemEvent;
 #[cfg(not(target_family = "wasm"))]
 pub use proptest;
 // CONSTANTS
@@ -277,11 +278,10 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         // execute the test
-        let processor = if self.in_debug_mode {
-            FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
-        } else {
-            FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
-        };
+        let processor = FastProcessor::new(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(self.in_debug_mode)
+            .with_tracing(self.in_debug_mode);
         let execution_output = processor.execute_sync(&program, &mut host).unwrap();
 
         // validate the memory state
@@ -400,12 +400,7 @@ impl Test {
         self.assert_result_with_step_execution(&fast_stack_result);
 
         fast_stack_result.map(|(execution_output, trace_generation_ctx)| {
-            let trace = build_trace(
-                execution_output,
-                trace_generation_ctx,
-                program.hash(),
-                program.kernel().clone(),
-            );
+            let trace = build_trace(execution_output, trace_generation_ctx, program.to_info());
 
             assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
             trace
@@ -420,7 +415,10 @@ impl Test {
         let (program, host) = self.get_program_and_host();
         let mut host = host.with_source_manager(self.source_manager.clone());
 
-        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
+        let processor = FastProcessor::new(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(true)
+            .with_tracing(true);
 
         processor.execute_sync(&program, &mut host).map(|output| (output, host))
     }
@@ -438,7 +436,10 @@ impl Test {
             .with_source_manager(self.source_manager.clone())
             .with_debug_handler(debug_handler);
 
-        let processor = FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone());
+        let processor = FastProcessor::new(self.stack_inputs)
+            .with_advice(self.advice_inputs.clone())
+            .with_debugging(true)
+            .with_tracing(true);
 
         let stack_result = processor.execute_sync(&program, &mut host);
 
@@ -570,11 +571,10 @@ impl Test {
         let mut host = host.with_source_manager(self.source_manager.clone());
 
         let fast_result_by_step = {
-            let fast_process = if self.in_debug_mode {
-                FastProcessor::new_debug(self.stack_inputs, self.advice_inputs.clone())
-            } else {
-                FastProcessor::new_with_advice_inputs(self.stack_inputs, self.advice_inputs.clone())
-            };
+            let fast_process = FastProcessor::new(self.stack_inputs)
+                .with_advice(self.advice_inputs.clone())
+                .with_debugging(self.in_debug_mode)
+                .with_tracing(self.in_debug_mode);
             fast_process.execute_by_step_sync(&program, &mut host)
         };
 

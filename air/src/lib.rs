@@ -9,10 +9,11 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_core::{
-    ProgramInfo, StackInputs, StackOutputs, field::ExtensionField,
+    field::ExtensionField,
     precompile::PrecompileTranscriptState,
+    program::{ProgramInfo, StackInputs, StackOutputs},
 };
-use p3_miden_air::BusType;
+use miden_crypto::stark::matrix::RowMajorMatrix;
 
 pub mod config;
 
@@ -41,6 +42,8 @@ use constraints::enforce_bus_constraints;
     )
 ))]
 use constraints::enforce_main_constraints;
+#[cfg(feature = "human_readable")]
+use p3_miden_air::BusType;
 
 #[cfg(feature = "human_readable")]
 use crate::trace::AUX_TRACE_RAND_ELEMENTS;
@@ -61,9 +64,8 @@ use crate::trace::{AuxTraceBuilder, TRACE_WIDTH};
 mod export {
     pub use miden_core::{
         Felt,
-        utils::{
-            ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable, ToElements,
-        },
+        serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+        utils::ToElements,
     };
     pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
 }
@@ -257,9 +259,9 @@ where
 
     fn build_aux_trace(
         &self,
-        main: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
+    ) -> Option<RowMajorMatrix<Felt>> {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
         let builders = self.aux_builder.as_ref()?;
@@ -330,9 +332,9 @@ where
 
     fn build_aux_trace(
         &self,
-        main: &p3_matrix::dense::RowMajorMatrix<Felt>,
+        main: &RowMajorMatrix<Felt>,
         challenges: &[EF],
-    ) -> Option<p3_matrix::dense::RowMajorMatrix<Felt>> {
+    ) -> Option<RowMajorMatrix<Felt>> {
         let _span = tracing::info_span!("build_aux_trace").entered();
 
         let builders = self.aux_builder.as_ref()?;

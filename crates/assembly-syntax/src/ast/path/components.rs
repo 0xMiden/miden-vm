@@ -22,10 +22,14 @@ pub enum PathComponent<'a> {
 
 impl<'a> PathComponent<'a> {
     /// Get this component as a [prim@str]
-    #[inline(always)]
+    ///
+    /// NOTE: If the component is quoted, the resulting string does _not_ contain quotes. Depending
+    /// on how the resulting string is used, you may need to ensure quotes are added manually. In
+    /// general, the `Path`/`PathBuf` APIs handle this for you.
     pub fn as_str(&self) -> &'a str {
         match self {
             Self::Root => "::",
+            Self::Normal(id) if id.starts_with('"') && id.ends_with('"') => &id[1..(id.len() - 1)],
             Self::Normal(id) => id,
         }
     }
@@ -33,19 +37,36 @@ impl<'a> PathComponent<'a> {
     /// Get this component as an [Ident], if it represents an identifier
     #[inline]
     pub fn to_ident(&self) -> Option<Ident> {
-        match self {
-            Self::Root => None,
-            Self::Normal(id) => Some(Ident::from_raw_parts(Span::unknown(Arc::from(
-                id.to_string().into_boxed_str(),
-            )))),
+        if matches!(self, Self::Root) {
+            None
+        } else {
+            Some(Ident::from_raw_parts(Span::unknown(Arc::from(
+                self.as_str().to_string().into_boxed_str(),
+            ))))
         }
     }
 
     /// Get the size in [prim@char]s of this component when printed
     pub fn char_len(&self) -> usize {
+        self.as_str().chars().count()
+    }
+
+    /// Returns true if this path component is a quoted string
+    pub fn is_quoted(&self) -> bool {
+        matches!(self, Self::Normal(component) if component.starts_with('"') && component.ends_with('"'))
+    }
+
+    /// Returns true if this path component requires quoting when displayed/stored as a string
+    pub fn requires_quoting(&self) -> bool {
         match self {
-            Self::Root => 2,
-            Self::Normal(id) => id.chars().count(),
+            Self::Root => false,
+            Self::Normal(Path::KERNEL_PATH | Path::EXEC_PATH) => false,
+            Self::Normal(component)
+                if component.contains("::") || Ident::requires_quoting(component) =>
+            {
+                true
+            },
+            Self::Normal(_) => false,
         }
     }
 }
@@ -72,7 +93,13 @@ impl fmt::Display for PathComponent<'_> {
 /// Returns an iterator over the path components represented in the provided source.
 ///
 /// A path consists of at list of components separated by `::` delimiter. A path must contain
-/// at least one component.
+/// at least one component. Path components may be quoted, in which `::` delimiters are ignored.
+/// Quoted path components may also contain characters that are not otherwise valid identifiers in
+/// Miden Assembly.
+///
+/// Note that quoted components may not contain nested quotes - the appearance of a nested quote in
+/// a quoted component will be treated as a closing quote resulting in unexpected behavior or
+/// validation errors as a result.
 ///
 /// # Errors
 ///
@@ -80,9 +107,11 @@ impl fmt::Display for PathComponent<'_> {
 ///
 /// * The path is empty.
 /// * Any component of the path is empty.
-/// * Any component is not a valid identifier (quoted or unquoted) in Miden Assembly syntax, i.e.
-///   starts with an ASCII alphabetic character, contains only printable ASCII characters, except
-///   for `::`, which must only be used as a path separator.
+/// * Any quoted component is missing a closing/opening quote (depending on order of iteration)
+/// * Any unquoted component is not a valid identifier (quoted or unquoted) in Miden Assembly
+///   syntax, i.e. starts with an ASCII alphabetic character, contains only printable ASCII
+///   characters, except for `::`, which must only be used as a path separator.
+#[derive(Debug)]
 pub struct Iter<'a> {
     components: Components<'a>,
 }
@@ -92,7 +121,10 @@ impl<'a> Iter<'a> {
         Self {
             components: Components {
                 path,
+                original: path,
+                front_pos: 0,
                 front: State::Start,
+                back_pos: path.len(),
                 back: State::Body,
             },
         }
@@ -111,8 +143,8 @@ impl<'a> Iterator for Iter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.components.next() {
-            Some(Ok(PathComponent::Normal(component)))
-                if component.len() > Path::MAX_COMPONENT_LENGTH =>
+            Some(Ok(component @ PathComponent::Normal(_)))
+                if component.as_str().chars().count() > Path::MAX_COMPONENT_LENGTH =>
             {
                 Some(Err(PathError::InvalidComponent(crate::ast::IdentError::InvalidLength {
                     max: Path::MAX_COMPONENT_LENGTH,
@@ -126,8 +158,8 @@ impl<'a> Iterator for Iter<'a> {
 impl<'a> DoubleEndedIterator for Iter<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
         match self.components.next_back() {
-            Some(Ok(PathComponent::Normal(component)))
-                if component.len() > Path::MAX_COMPONENT_LENGTH =>
+            Some(Ok(component @ PathComponent::Normal(_)))
+                if component.as_str().chars().count() > Path::MAX_COMPONENT_LENGTH =>
             {
                 Some(Err(PathError::InvalidComponent(crate::ast::IdentError::InvalidLength {
                     max: Path::MAX_COMPONENT_LENGTH,
@@ -139,12 +171,16 @@ impl<'a> DoubleEndedIterator for Iter<'a> {
 }
 
 /// The underlying path component iterator used by [Iter]
+#[derive(Debug)]
 struct Components<'a> {
+    original: &'a str,
     /// The path left to parse components from
     path: &'a str,
     // To support double-ended iteration, these states keep tack of what has been produced from
     // each end
+    front_pos: usize,
     front: State,
+    back_pos: usize,
     back: State,
 }
 
@@ -155,9 +191,9 @@ enum State {
     // We're parsing components of the path
     Body,
     // We've started parsing a quoted component
-    QuoteOpened,
+    QuoteOpened(usize),
     // We've parsed a quoted component
-    QuoteClosed,
+    QuoteClosed(usize),
     // We're at the end of the path
     Done,
 }
@@ -167,7 +203,7 @@ impl<'a> Components<'a> {
         match (self.front, self.back) {
             (State::Done, _) => true,
             (_, State::Done) => true,
-            (State::Body | State::QuoteOpened | State::QuoteClosed, State::Start) => true,
+            (State::Body | State::QuoteOpened(_) | State::QuoteClosed(_), State::Start) => true,
             (..) => false,
         }
     }
@@ -177,18 +213,17 @@ impl<'a> Iterator for Components<'a> {
     type Item = Result<PathComponent<'a>, PathError>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while !self.finished() {
+        // This is used when consuming a quoted item, to hold the result of the QuoteOpened state
+        // until we've finished transitioning through the QuoteClosed state. It is never used
+        // otherwise.
+        let mut quote_opened = None;
+        while !self.finished() || quote_opened.is_some() {
             match self.front {
                 State::Start => match self.path.strip_prefix("::") {
                     Some(rest) => {
                         self.path = rest;
                         self.front = State::Body;
-                        return Some(Ok(PathComponent::Root));
-                    },
-                    None if self.path.starts_with(Path::KERNEL_PATH)
-                        || self.path.starts_with(Path::EXEC_PATH) =>
-                    {
-                        self.front = State::Body;
+                        self.front_pos += 2;
                         return Some(Ok(PathComponent::Root));
                     },
                     None => {
@@ -197,18 +232,21 @@ impl<'a> Iterator for Components<'a> {
                 },
                 State::Body => {
                     if let Some(rest) = self.path.strip_prefix('"') {
-                        self.front = State::QuoteOpened;
+                        self.front = State::QuoteOpened(self.front_pos);
+                        self.front_pos += 1;
                         self.path = rest;
                         continue;
                     }
                     match self.path.split_once("::") {
                         Some(("", rest)) => {
                             self.path = rest;
+                            self.front_pos += 2;
                             return Some(Err(PathError::InvalidComponent(
                                 crate::ast::IdentError::Empty,
                             )));
                         },
                         Some((component, rest)) => {
+                            self.front_pos += component.len() + 2;
                             if rest.is_empty() {
                                 self.path = "::";
                             } else {
@@ -233,40 +271,55 @@ impl<'a> Iterator for Components<'a> {
                             {
                                 return Some(Err(err));
                             }
+                            self.front_pos += component.len();
                             return Some(Ok(PathComponent::Normal(component)));
                         },
                     }
                 },
-                State::QuoteOpened => match self.path.split_once('"') {
+                State::QuoteOpened(opened_at) => match self.path.split_once('"') {
                     Some(("", rest)) => {
                         self.path = rest;
-                        self.front = State::QuoteClosed;
-                        return Some(Err(PathError::EmptyComponent));
+                        self.front = State::QuoteClosed(self.front_pos);
+                        self.front_pos += 1;
+                        quote_opened = Some(Err(PathError::EmptyComponent));
                     },
                     Some((quoted, rest)) => {
                         self.path = rest;
-                        self.front = State::QuoteClosed;
-                        return Some(Ok(PathComponent::Normal(quoted)));
+                        self.front_pos += quoted.len();
+                        self.front = State::QuoteClosed(self.front_pos);
+                        self.front_pos += 1;
+                        let quoted = &self.original[opened_at..self.front_pos];
+                        quote_opened = Some(Ok(PathComponent::Normal(quoted)));
                     },
                     None => {
                         self.front = State::Done;
+                        self.front_pos += self.path.len();
                         return Some(Err(PathError::UnclosedQuotedComponent));
                     },
                 },
-                State::QuoteClosed => {
+                State::QuoteClosed(_) => {
                     if self.path.is_empty() {
                         self.front = State::Done;
-                        continue;
+                    } else {
+                        match self.path.strip_prefix("::") {
+                            Some(rest) => {
+                                self.path = rest;
+                                self.front = State::Body;
+                                self.front_pos += 2;
+                            },
+                            // If we would raise an error, but we have a quoted component to return
+                            // first, leave the state untouched, return the quoted component, and we
+                            // will return here on the next call to `next_back`
+                            None if quote_opened.is_some() => (),
+                            None => {
+                                self.front = State::Done;
+                                return Some(Err(PathError::MissingPathSeparator));
+                            },
+                        }
                     }
-                    match self.path.strip_prefix("::") {
-                        Some(rest) => {
-                            self.path = rest;
-                            self.front = State::Body;
-                        },
-                        None => {
-                            self.front = State::Done;
-                            return Some(Err(PathError::MissingPathSeparator));
-                        },
+
+                    if quote_opened.is_some() {
+                        return quote_opened;
                     }
                 },
                 State::Done => break,
@@ -279,35 +332,40 @@ impl<'a> Iterator for Components<'a> {
 
 impl<'a> DoubleEndedIterator for Components<'a> {
     fn next_back(&mut self) -> Option<Self::Item> {
-        while !self.finished() {
+        // This is used when consuming a quoted item, to hold the result of the QuoteClosed state
+        // until we've finished transitioning through the QuoteOpened state. It is never used
+        // otherwise.
+        let mut quote_closed = None;
+        while !self.finished() || quote_closed.is_some() {
             match self.back {
                 State::Start => {
                     self.back = State::Done;
                     match self.path {
                         "" => break,
-                        "::" => return Some(Ok(PathComponent::Root)),
-                        other => {
-                            assert!(
-                                other.starts_with(Path::KERNEL_PATH)
-                                    || other.starts_with(Path::EXEC_PATH),
-                                "expected path in start state to be a valid path prefix, got '{other}'"
-                            );
+                        "::" => {
+                            self.back_pos = 0;
                             return Some(Ok(PathComponent::Root));
+                        },
+                        other => {
+                            return Some(Ok(PathComponent::Normal(other)));
                         },
                     }
                 },
                 State::Body => {
                     if let Some(rest) = self.path.strip_suffix('"') {
-                        self.back = State::QuoteClosed;
+                        self.back = State::QuoteClosed(self.back_pos);
+                        self.back_pos -= 1;
                         self.path = rest;
                         continue;
                     }
                     match self.path.rsplit_once("::") {
                         Some(("", "")) => {
                             self.back = State::Start;
+                            self.back_pos -= 2;
                             continue;
                         },
                         Some((prefix, component)) => {
+                            self.back_pos -= component.len() + 2;
                             if prefix.is_empty() {
                                 self.path = "::";
                                 self.back = State::Start;
@@ -327,13 +385,8 @@ impl<'a> DoubleEndedIterator for Components<'a> {
                         None => {
                             self.back = State::Start;
                             let component = self.path;
-                            if component.starts_with(Path::KERNEL_PATH)
-                                || component.starts_with(Path::EXEC_PATH)
-                            {
-                                self.path = "::";
-                            } else {
-                                self.path = "";
-                            }
+                            self.path = "";
+                            self.back_pos = 0;
                             if let Err(err) =
                                 Ident::validate(component).map_err(PathError::InvalidComponent)
                             {
@@ -343,38 +396,52 @@ impl<'a> DoubleEndedIterator for Components<'a> {
                         },
                     }
                 },
-                State::QuoteOpened => {
+                State::QuoteOpened(_) => {
                     if self.path.is_empty() {
                         self.back = State::Start;
-                        continue;
+                    } else {
+                        match self.path.strip_suffix("::") {
+                            Some("") => {
+                                self.back = State::Start;
+                                self.back_pos -= 2;
+                            },
+                            Some(rest) => {
+                                self.back_pos -= 2;
+                                self.path = rest;
+                                self.back = State::Body;
+                            },
+                            // If we would raise an error, but we have a quoted component to return
+                            // first, leave the state untouched, return the quoted component, and we
+                            // will return here on the next call to `next_back`
+                            None if quote_closed.is_some() => (),
+                            None => {
+                                self.back = State::Done;
+                                return Some(Err(PathError::MissingPathSeparator));
+                            },
+                        }
                     }
-                    match self.path.strip_suffix("::") {
-                        Some("") => {
-                            self.back = State::Start;
-                        },
-                        Some(rest) => {
-                            self.path = rest;
-                            self.back = State::Body;
-                        },
-                        None => {
-                            self.back = State::Done;
-                            return Some(Err(PathError::MissingPathSeparator));
-                        },
+
+                    if quote_closed.is_some() {
+                        return quote_closed;
                     }
                 },
-                State::QuoteClosed => match self.path.rsplit_once('"') {
+                State::QuoteClosed(closed_at) => match self.path.rsplit_once('"') {
                     Some((rest, "")) => {
+                        self.back_pos -= 1;
                         self.path = rest;
-                        self.back = State::QuoteOpened;
-                        return Some(Err(PathError::EmptyComponent));
+                        self.back = State::QuoteOpened(self.back_pos);
+                        quote_closed = Some(Err(PathError::EmptyComponent));
                     },
                     Some((rest, quoted)) => {
+                        self.back_pos -= quoted.len() + 1;
+                        let quoted = &self.original[self.back_pos..closed_at];
                         self.path = rest;
-                        self.back = State::QuoteOpened;
-                        return Some(Ok(PathComponent::Normal(quoted)));
+                        self.back = State::QuoteOpened(self.back_pos);
+                        quote_closed = Some(Ok(PathComponent::Normal(quoted)));
                     },
                     None => {
                         self.back = State::Done;
+                        self.back_pos = 0;
                         return Some(Err(PathError::UnclosedQuotedComponent));
                     },
                 },
@@ -484,6 +551,10 @@ mod tests {
     #[test]
     fn special_path() {
         let mut components = Iter::new("$kernel");
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next(), None);
+
+        let mut components = Iter::new("::$kernel");
         assert_matches!(components.next(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next(), None);
@@ -493,6 +564,10 @@ mod tests {
     fn special_path_back() {
         let mut components = Iter::new("$kernel");
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next_back(), None);
+
+        let mut components = Iter::new("::$kernel");
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next_back(), None);
     }
@@ -500,6 +575,11 @@ mod tests {
     #[test]
     fn special_nested_path() {
         let mut components = Iter::new("$kernel::bar");
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next(), None);
+
+        let mut components = Iter::new("::$kernel::bar");
         assert_matches!(components.next(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
@@ -511,6 +591,11 @@ mod tests {
         let mut components = Iter::new("$kernel::bar");
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
+        assert_matches!(components.next_back(), None);
+
+        let mut components = Iter::new("::$kernel::bar");
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("$kernel"))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Root)));
         assert_matches!(components.next_back(), None);
     }
@@ -518,14 +603,14 @@ mod tests {
     #[test]
     fn path_with_quoted_component() {
         let mut components = Iter::new("\"foo\"");
-        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("foo"))));
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("\"foo\""))));
         assert_matches!(components.next(), None);
     }
 
     #[test]
     fn path_with_quoted_component_back() {
         let mut components = Iter::new("\"foo\"");
-        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("foo"))));
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("\"foo\""))));
         assert_matches!(components.next_back(), None);
     }
 
@@ -533,14 +618,14 @@ mod tests {
     fn nested_path_with_quoted_component() {
         let mut components = Iter::new("foo::\"bar\"");
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("foo"))));
-        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("\"bar\""))));
         assert_matches!(components.next(), None);
     }
 
     #[test]
     fn nested_path_with_quoted_component_back() {
         let mut components = Iter::new("foo::\"bar\"");
-        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("\"bar\""))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("foo"))));
         assert_matches!(components.next_back(), None);
     }
@@ -549,7 +634,7 @@ mod tests {
     fn nested_path_with_interspersed_quoted_component() {
         let mut components = Iter::new("foo::\"bar\"::baz");
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("foo"))));
-        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next(), Some(Ok(PathComponent::Normal("\"bar\""))));
         assert_matches!(components.next(), Some(Ok(PathComponent::Normal("baz"))));
         assert_matches!(components.next(), None);
     }
@@ -558,7 +643,7 @@ mod tests {
     fn nested_path_with_interspersed_quoted_component_back() {
         let mut components = Iter::new("foo::\"bar\"::baz");
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("baz"))));
-        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("bar"))));
+        assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("\"bar\""))));
         assert_matches!(components.next_back(), Some(Ok(PathComponent::Normal("foo"))));
         assert_matches!(components.next_back(), None);
     }

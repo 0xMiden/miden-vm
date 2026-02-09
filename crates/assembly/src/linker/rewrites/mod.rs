@@ -38,7 +38,7 @@ pub fn rewrite_symbol(
                 module: gid.module,
                 kind: None,
             };
-            match resolver.resolve_alias_target(&context, alias.target())? {
+            match resolver.resolve_alias_target(&context, alias)? {
                 SymbolResolution::Exact { gid, .. } => {
                     resolved_gid.set(Some(gid));
                 },

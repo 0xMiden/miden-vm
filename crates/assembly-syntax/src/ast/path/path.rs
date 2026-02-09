@@ -1,10 +1,10 @@
 use alloc::{
     borrow::{Borrow, Cow, ToOwned},
-    string::{String, ToString},
+    string::ToString,
 };
 use core::fmt;
 
-use super::{Iter, PathBuf, PathComponent, PathError, StartsWith};
+use super::{Iter, Join, PathBuf, PathComponent, PathError, StartsWith};
 use crate::ast::Ident;
 
 /// A borrowed reference to a subset of a path, e.g. another [Path] or a [PathBuf]
@@ -37,9 +37,26 @@ impl<'de> serde::Deserialize<'de> for &'de Path {
     where
         D: serde::Deserializer<'de>,
     {
-        let inner = <&'de str as serde::Deserialize<'de>>::deserialize(deserializer)?;
+        use serde::de::Visitor;
 
-        Ok(Path::new(inner))
+        struct PathVisitor;
+
+        impl<'de> Visitor<'de> for PathVisitor {
+            type Value = &'de Path;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter) -> core::fmt::Result {
+                formatter.write_str("a borrowed Path")
+            }
+
+            fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Path::validate(v).map_err(serde::de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(PathVisitor)
     }
 }
 
@@ -142,7 +159,7 @@ impl Path {
     /// Verify that `path` meets all the requirements for a valid [Path]
     pub fn validate(path: &str) -> Result<&Path, PathError> {
         match path {
-            "" => return Err(PathError::Empty),
+            "" | "\"\"" => return Err(PathError::Empty),
             "::" => return Err(PathError::EmptyComponent),
             _ => (),
         }
@@ -196,13 +213,26 @@ impl Path {
     pub fn to_path_buf(&self) -> PathBuf {
         PathBuf { inner: self.inner.to_string() }
     }
+
+    /// Convert an [Ident] to an equivalent [Path] or [PathBuf], depending on whether the identifier
+    /// would require quoting as a path.
+    pub fn from_ident(ident: &Ident) -> Cow<'_, Path> {
+        let ident = ident.as_str();
+        if Ident::requires_quoting(ident) {
+            let mut buf = PathBuf::with_capacity(ident.len() + 2);
+            buf.push_component(ident);
+            Cow::Owned(buf)
+        } else {
+            Cow::Borrowed(Path::new(ident))
+        }
+    }
 }
 
 /// Accesssors
 impl Path {
     /// Returns true if this path is empty (i.e. has no components)
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty() || &self.inner == "::"
+        matches!(&self.inner, "" | "::" | "\"\"")
     }
 
     /// Returns the number of components in the path
@@ -223,11 +253,7 @@ impl Path {
 
     /// Returns true if this path is an absolute path
     pub fn is_absolute(&self) -> bool {
-        matches!(
-            self.components().next(),
-            Some(Ok(PathComponent::Root))
-                | Some(Ok(PathComponent::Normal(Self::KERNEL_PATH | Self::EXEC_PATH))),
-        )
+        matches!(self.components().next(), Some(Ok(PathComponent::Root)))
     }
 
     /// Make this path absolute, if not already
@@ -237,10 +263,10 @@ impl Path {
         if self.is_absolute() {
             Cow::Borrowed(self)
         } else {
-            let mut inner = String::with_capacity(self.byte_len() + 2);
-            inner.push_str("::");
-            inner.push_str(&self.inner);
-            Cow::Owned(PathBuf { inner })
+            let mut buf = PathBuf::with_capacity(self.byte_len() + 2);
+            buf.push_component("::");
+            buf.extend_with_components(self.components()).expect("invalid path");
+            Cow::Owned(buf)
         }
     }
 
@@ -295,7 +321,7 @@ impl Path {
                 let first = components.next().and_then(|c| c.ok()).map(|c| c.as_str())?;
                 Some((first, components.as_path()))
             },
-            PathComponent::Normal(first) => Some((first, components.as_path())),
+            first @ PathComponent::Normal(_) => Some((first.as_str(), components.as_path())),
         }
     }
 
@@ -307,7 +333,7 @@ impl Path {
         let mut components = self.components();
         match components.next_back()?.ok()? {
             PathComponent::Root => None,
-            PathComponent::Normal(last) => Some((last, components.as_path())),
+            last @ PathComponent::Normal(_) => Some((last.as_str(), components.as_path())),
         }
     }
 
@@ -327,7 +353,7 @@ impl Path {
         }
 
         match self.split_last() {
-            Some((_, prefix)) => Self::KERNEL == prefix,
+            Some((_, prefix)) => prefix.is_kernel_path(),
             None => false,
         }
     }
@@ -341,7 +367,25 @@ impl Path {
         }
     }
 
+    /// Returns true if this path is for the executable module or an item in it
+    pub fn is_in_exec(&self) -> bool {
+        if self.is_exec_path() {
+            return true;
+        }
+
+        match self.split_last() {
+            Some((_, prefix)) => prefix.is_exec_path(),
+            None => false,
+        }
+    }
+
     /// Returns true if the current path, sans root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first non-root
+    /// component of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -352,6 +396,12 @@ impl Path {
     }
 
     /// Returns true if the current path, including root component, starts with `prefix`
+    ///
+    /// The matching semantics of `Prefix` depend on the implementation of [`StartsWith<Prefix>`],
+    /// in particular, if `Prefix` is `str`, then the prefix is matched against the first component
+    /// of `self`, regardless of whether the string contains path delimiters (i.e. `::`).
+    ///
+    /// See the [StartsWith] trait for more details.
     #[inline]
     pub fn starts_with_exactly<Prefix>(&self, prefix: &Prefix) -> bool
     where
@@ -361,58 +411,134 @@ impl Path {
         <Self as StartsWith<Prefix>>::starts_with_exactly(self, prefix)
     }
 
+    /// Strips `prefix` from `self`, or returns `None` if `self` does not start with `prefix`.
+    ///
+    /// NOTE: Prefixes must be exact, i.e. if you call `path.strip_prefix(prefix)` and `path` is
+    /// relative but `prefix` is absolute, then this will return `None`. The same is true if `path`
+    /// is absolute and `prefix` is relative.
+    pub fn strip_prefix<'a>(&'a self, prefix: &Self) -> Option<&'a Self> {
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => (),
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return None;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return None,
+            }
+        }
+        Some(components.as_path())
+    }
+
     /// Create an owned [PathBuf] with `path` adjoined to `self`.
     ///
     /// If `path` is absolute, it replaces the current path.
     ///
-    /// See [PathBuf::push] for more details on what it means to adjoin a path.
-    pub fn join(&self, path: impl AsRef<Path>) -> PathBuf {
-        let path = path.as_ref();
+    /// The semantics of how `other` is joined to `self` in the resulting path depends on the
+    /// implementation of [Join] used. The implementation for [Path] and [PathBuf] joins all
+    /// components of `other` to self`; while the implementation for [prim@str], string-like values,
+    /// and identifiers/symbols joins just a single component. You must be careful to ensure that
+    /// if you are passing a string here, that you specifically want to join it as a single
+    /// component, or the resulting path may be different than you expect. It is recommended that
+    /// you use `Path::new(&string)` if you want to be explicit about treating a string-like value
+    /// as a multi-component path.
+    #[inline]
+    pub fn join<P>(&self, other: &P) -> PathBuf
+    where
+        P: ?Sized,
+        Path: Join<P>,
+    {
+        <Path as Join<P>>::join(self, other)
+    }
 
-        if path.is_empty() {
-            return self.to_path_buf();
-        }
-
-        if self.is_empty() || path.is_absolute() {
-            return path.to_path_buf();
-        }
-
-        let mut buf = self.to_path_buf();
-        buf.push(path);
-
-        buf
+    /// Canonicalize this path by ensuring that all components are in canonical form.
+    ///
+    /// Canonical form dictates that:
+    ///
+    /// * A component is quoted only if it requires quoting, and unquoted otherwise
+    /// * Is made absolute if relative and the first component is $kernel or $exec
+    ///
+    /// Returns `Err` if the path is invalid
+    pub fn canonicalize(&self) -> Result<PathBuf, PathError> {
+        let mut buf = PathBuf::with_capacity(self.byte_len());
+        buf.extend_with_components(self.components())?;
+        Ok(buf)
     }
 }
 
 impl StartsWith<str> for Path {
     fn starts_with(&self, prefix: &str) -> bool {
-        if prefix.is_empty() {
-            return true;
-        }
-        if prefix.starts_with("::") {
-            self.inner.starts_with(prefix)
-        } else {
-            match self.inner.strip_prefix("::") {
-                Some(rest) => rest.starts_with(prefix),
-                None => self.inner.starts_with(prefix),
-            }
-        }
+        let this = self.to_relative();
+        <Path as StartsWith<str>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &str) -> bool {
-        self.inner.starts_with(prefix)
+        match prefix {
+            "" => true,
+            "::" => self.is_absolute(),
+            prefix => {
+                let mut components = self.components();
+                let prefix = if let Some(prefix) = prefix.strip_prefix("::") {
+                    let is_absolute =
+                        components.next().is_some_and(|c| matches!(c, Ok(PathComponent::Root)));
+                    if !is_absolute {
+                        return false;
+                    }
+                    prefix
+                } else {
+                    prefix
+                };
+                components.next().is_some_and(
+                    |c| matches!(c, Ok(c @ PathComponent::Normal(_)) if c.as_str() == prefix),
+                )
+            },
+        }
     }
 }
 
 impl StartsWith<Path> for Path {
     fn starts_with(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with(self, prefix.as_str())
+        let this = self.to_relative();
+        let prefix = prefix.to_relative();
+        <Path as StartsWith<Path>>::starts_with_exactly(this, prefix)
     }
 
     #[inline]
     fn starts_with_exactly(&self, prefix: &Path) -> bool {
-        <Self as StartsWith<str>>::starts_with_exactly(self, prefix.as_str())
+        let mut components = self.components();
+        for prefix_component in prefix.components() {
+            // All `Path` APIs assume that a `Path` is valid upon construction, though this is not
+            // actually enforced currently. We assert here if iterating over the components of the
+            // path finds an invalid component, because we expected the caller to have already
+            // validated the path
+            //
+            // In the future, we will likely enforce validity at construction so that iterating
+            // over its components is infallible, but that will require a breaking change to some
+            // APIs
+            let prefix_component = prefix_component.expect("invalid prefix path");
+            match (components.next(), prefix_component) {
+                (Some(Ok(PathComponent::Root)), PathComponent::Root) => continue,
+                (Some(Ok(c @ PathComponent::Normal(_))), pc @ PathComponent::Normal(_)) => {
+                    if c.as_str() != pc.as_str() {
+                        return false;
+                    }
+                },
+                (Some(Ok(_) | Err(_)) | None, _) => return false,
+            }
+        }
+        true
     }
 }
 
@@ -473,5 +599,69 @@ impl PartialEq<alloc::borrow::Cow<'_, Path>> for Path {
 impl fmt::Display for Path {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.inner)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_canonicalize_path_identity() -> Result<(), PathError> {
+        let path = Path::new("foo::bar");
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_kernel_is_absolute() -> Result<(), PathError> {
+        let path = Path::new("$kernel::bar");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("::$kernel::bar");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_exec_is_absolute() -> Result<(), PathError> {
+        let path = Path::new("$exec::$main");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("::$exec::$main");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_remove_unnecessary_quoting() -> Result<(), PathError> {
+        let path = Path::new("foo::\"bar\"");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("foo::bar");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_preserve_necessary_quoting() -> Result<(), PathError> {
+        let path = Path::new("foo::\"bar::baz\"");
+        let canonicalized = path.canonicalize()?;
+
+        assert_eq!(canonicalized.as_path(), path);
+        Ok(())
+    }
+
+    #[test]
+    fn test_canonicalize_path_add_required_quoting_to_components_without_delimiter()
+    -> Result<(), PathError> {
+        let path = Path::new("foo::$bar");
+        let canonicalized = path.canonicalize()?;
+
+        let expected = Path::new("foo::\"$bar\"");
+        assert_eq!(canonicalized.as_path(), expected);
+        Ok(())
     }
 }

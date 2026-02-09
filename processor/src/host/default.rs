@@ -1,12 +1,21 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
+use miden_core::{
+    Word,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
+};
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
+use super::{
+    FutureMaybeSend,
+    debug::DefaultDebugHandler,
+    handlers::{EventError, EventHandler, EventHandlerRegistry},
+};
 use crate::{
-    AdviceMutation, DebugError, DebugHandler, EventHandler, EventHandlerRegistry, ExecutionError,
-    Host, MastForestStore, MemMastForestStore, ProcessorState, TraceError,
-    host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
+    DebugError, DebugHandler, ExecutionError, Host, MastForestStore, MemMastForestStore,
+    ProcessorState, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -160,13 +169,13 @@ where
 
     fn on_debug(
         &mut self,
-        process: &mut ProcessorState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         self.debug_handler.on_debug(process, options)
     }
 
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
     }
 

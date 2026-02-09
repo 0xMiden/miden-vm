@@ -4,8 +4,10 @@
 
 #### Enhancements
 
+- Added initial `math::u128` functions for lib/core/math runtime. ([#2438](https://github.com/0xMiden/miden-vm/pull/2438)).
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
+- Add deserialization of the `MastForest` from untrusted sources. Add fuzzing for MastForest deserialization. ([#2590](https://github.com/0xMiden/miden-vm/pull/2590)).
 - Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
 
 #### Fixes
@@ -16,9 +18,11 @@
 - Added missing `as_canonical_u64()` method to `IntValue` in `miden-assembly-syntax`, fixing compilation errors in the generated grammar code ([#2589](https://github.com/0xMiden/miden-vm/pull/2589)).
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
+- Fixed off-by-one error in cycle limit check that caused programs using exactly `max_cycles` cycles to fail ([#2635](https://github.com/0xMiden/miden-vm/pull/2635)).
 
 #### Changes
 
+- [BREAKING] Added builder methods (`with_advice()`, `with_debugging()`, `with_tracing()`, `with_options()`) directly on `FastProcessor` for fluent configuration. Removed deprecated `new_with_advice_inputs()` and `new_debug()` constructors ([#2602](https://github.com/0xMiden/miden-vm/issues/2602), [#2625](https://github.com/0xMiden/miden-vm/pull/2625)).
 - Changed `assert_u32` helper function to return `u32` instead of `Felt` ([#2575](https://github.com/0xMiden/miden-vm/issues/2575)).
 - Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
 - [BREAKING] Move `get_assembly_op` to the `MastForest`, remove trait `MastNodeErrorContext` ([#2430](https://github.com/0xMiden/miden-vm/pull/2430)).
@@ -54,6 +58,28 @@
 - [BREAKING] Cleaned up `StackInputs` and `StackOutputs` API, and use `StackInputs` in `FastProcessor` constructors ([#2605](https://github.com/0xMiden/miden-vm/pull/2605)).
 - Restore AIR constraints using AirScript with Plonky3 backend ([#2562](https://github.com/0xMiden/miden-vm/pull/2562)).
 - [BREAKING] Change the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Changed the VM’s native hash function from RPO to Poseidon2 ([#2599](https://github.com/0xMiden/miden-vm/pull/2599)).
+- [BREAKING] Added widening `u32` add variants and aligned `math::u64/math::u256` APIs and docs with little‑endian stack conventions ([#2614](https://github.com/0xMiden/miden-vm/pull/2614)).
+- [BREAKING] Separate AsmOp storage from Debug/Trace decorators. ([#2606](https://github.com/0xMiden/miden-vm/pull/2606)).
+- [BREAKING] Abstract away program execution using the sans-IO pattern ([#2615](https://github.com/0xMiden/miden-vm/pull/2615)).
+- [BREAKING] Removed `PushMany` trait and `new_array_vec()` from `miden-core` ([#2630](https://github.com/0xMiden/miden-vm/pull/2630)).
+- [BREAKING] `Host::on_debug()` and `Host::on_trace()` now take immutable references to `ProcessorState` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
+- [BREAKING] Removed unused `meta` field from `ExecutionTrace` and changed the constructor to take `ProgramInfo` ([#2639](https://github.com/0xMiden/miden-vm/pull/2639)).
+- [BREAKING] Migrate parallel trace generation to use the common `execute_impl()` ([#2642](https://github.com/0xMiden/miden-vm/pull/2642)).
+- [BREAKING] Removed unused `should_break` field from `AssemblyOp` decorator ([#2646](https://github.com/0xMiden/miden-vm/pull/2646)).
+
+## 0.20.6 (2026-02-04)
+
+- Fixed issue with link-time symbol resolution that prevented referencing an imported item as locally-defined, e.g. an import like `use some::module::CONST` used via something like `emit.CONST` would fail to resolve correctly. [#2637](https://github.com/0xMiden/miden-vm/pull/2637)
+
+## 0.20.5 (2026-02-02)
+
+- Fixed issue with deserialization of Paths due to lifetime restrictions [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+- Implemented path canonicalization and modified Path/PathBuf APIs to canonicalize paths during construction. This also addressed some issues uncovered during testing where some APIs were not canonicalizing paths, or path-related functions were inconsistent in their behavior due to special-casing that was previously needed [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+
+## 0.20.4 (2026-01-30)
+
+- Fixed issue with handling of quoted components in `PathBuf` [#2618](https://github.com/0xMiden/miden-vm/pull/2618)
 
 ## 0.20.3 (2026-01-27)
 

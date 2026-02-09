@@ -73,48 +73,25 @@ syn = "1.0"
 windows-sys = "0.61"
 
 # Third-party crates
-blake3 = { version = "1.8" }
-criterion = { version = "0.7" }
-derive_more = { version = "2.0", features = ["from"] }
-env_logger = { version = "0.11" }
-insta = { version = "1.43", default-features = false, features = ["colors"] }
-itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
-log = { version = "0.4", default-features = false }
-paste = { version = "1.0", default-features = false }
-proptest = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
+criterion       = { version = "0.7" }
+derive_more     = { version = "2.0", features = ["from"] }
+env_logger      = { version = "0.11" }
+insta           = { version = "1.43", default-features = false, features = ["colors"] }
+itertools       = { version = "0.14", default-features = false, features = ["use_alloc"] }
+log             = { version = "0.4", default-features = false }
+paste           = { version = "1.0", default-features = false }
+proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.7", default-features = false }
-serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-serde-untagged = {version = "0.1" }
-smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
-thiserror = { version = "2.0", default-features = false }
-tokio = { version = "1.48", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-rand = { version = "0.9", default-features = false }
-sha2 = { version = "0.10", default-features = false }
-
-# Upstream Plonky3 dependencies
-p3-air           = { version = "0.4.2", default-features = false }
-p3-blake3        = { version = "0.4.2", default-features = false }
-p3-challenger    = { version = "0.4.2", default-features = false }
-p3-commit        = { version = "0.4.2", default-features = false }
-p3-dft           = { version = "0.4.2", default-features = false }
-p3-field         = { version = "0.4.2", default-features = false }
-p3-goldilocks    = { version = "0.4.2", default-features = false }
-p3-interpolation = { version = "0.4.2", default-features = false }
-p3-keccak        = { version = "0.4.2", default-features = false }
-p3-matrix        = { version = "0.4.2", default-features = false }
-p3-maybe-rayon   = { version = "0.4.2", default-features = false }
-p3-merkle-tree   = { version = "0.4.2", default-features = false }
-p3-poseidon2     = { version = "0.4.2", default-features = false }
-p3-symmetric     = { version = "0.4.2", default-features = false }
-p3-uni-stark     = { version = "0.4.2", default-features = false }
-p3-util          = { version = "0.4.2", default-features = false }
-
-# Miden-specific Plonky3 crates
-p3-miden-air     = { version = "0.4.2", default-features = false }
-p3-miden-fri     = { version = "0.4.2", default-features = false }
-p3-miden-prover  = { version = "0.4.2", default-features = false }
+rand            = { version = "0.9", default-features = false }
+serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
+serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
+smallvec        = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
+thiserror       = { version = "2.0", default-features = false }
+tokio           = { version = "1.48", default-features = false }
+tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
 
 # WASM support
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
+
+[workspace.lints.rust]
+unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

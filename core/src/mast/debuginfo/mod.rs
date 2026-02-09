@@ -1,18 +1,17 @@
 //! Debug information management for MAST forests.
 //!
-//! This module provides the [`DebugInfo`] struct which consolidates all debug-related
-//! information for a MAST forest in a single location. This includes:
+//! This module provides the [`DebugInfo`] struct which consolidates all debug-related information
+//! for a MAST forest in a single location. This includes:
 //!
 //! - All decorators (debug, trace, and assembly operation metadata)
 //! - Operation-indexed decorator mappings for efficient lookup
 //! - Node-level decorator storage (before_enter/after_exit)
 //! - Error code mappings for descriptive error messages
 //!
-//! The debug info is always available at the `MastForest` level (as per issue #1821),
-//! but may be conditionally included during assembly to maintain backward compatibility.
-//! Decorators are only executed when the processor is running in debug mode, allowing
-//! debug information to be available for debugging and error reporting without
-//! impacting performance in production execution.
+//! The debug info is always available at the `MastForest` level (as per issue 1821), but may be
+//! conditionally included during assembly to maintain backward compatibility. Decorators are only
+//! executed when the processor is running in debug mode, allowing debug information to be available
+//! for debugging and error reporting without impacting performance in production execution.
 //!
 //! # Debug Mode Semantics
 //!
@@ -36,9 +35,9 @@
 //!
 //! # Production Builds
 //!
-//! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear)
-//! method, which removes decorators while preserving critical information. This allows
-//! backward compatibility while enabling size optimization for deployment.
+//! The `DebugInfo` can be stripped for production builds using the [`clear()`](Self::clear) method,
+//! which removes decorators while preserving critical information. This allows backward
+//! compatibility while enabling size optimization for deployment.
 
 use alloc::{
     collections::BTreeMap,
@@ -47,15 +46,24 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::{Idx, IndexVec};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{Decorator, DecoratorId, MastForestError, MastNodeId};
+use super::{AsmOpId, Decorator, DecoratorId, MastForestError, MastNodeId};
 use crate::{
     LexicographicWord, Word,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    mast::serialization::{
+        StringTable,
+        asm_op::{AsmOpDataBuilder, AsmOpInfo},
+        decorator::{DecoratorDataBuilder, DecoratorInfo},
+    },
+    operations::AssemblyOp,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::{Idx, IndexVec},
 };
+
+mod asm_op_storage;
+pub use asm_op_storage::{AsmOpIndexError, OpToAsmOpId};
 
 mod decorator_storage;
 pub use decorator_storage::{
@@ -72,7 +80,7 @@ pub use node_decorator_storage::NodeToDecoratorIds;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct DebugInfo {
-    /// All decorators in the MAST forest.
+    /// All decorators in the MAST forest (Debug and Trace only, no AsmOp).
     decorators: IndexVec<DecoratorId, Decorator>,
 
     /// Efficient access to decorators per operation per node.
@@ -80,6 +88,12 @@ pub struct DebugInfo {
 
     /// Efficient storage for node-level decorators (before_enter and after_exit).
     node_decorator_storage: NodeToDecoratorIds,
+
+    /// All AssemblyOps in the MAST forest.
+    asm_ops: IndexVec<AsmOpId, AssemblyOp>,
+
+    /// Efficient access to AssemblyOps per operation per node.
+    asm_op_storage: OpToAsmOpId,
 
     /// Maps error codes to error messages.
     error_codes: BTreeMap<u64, Arc<str>>,
@@ -99,6 +113,8 @@ impl DebugInfo {
             decorators: IndexVec::new(),
             op_decorator_storage: OpToDecoratorIds::new(),
             node_decorator_storage: NodeToDecoratorIds::new(),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -119,6 +135,8 @@ impl DebugInfo {
                 decorator_ids_capacity,
             ),
             node_decorator_storage: NodeToDecoratorIds::with_capacity(nodes_capacity, 0, 0),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -137,6 +155,8 @@ impl DebugInfo {
             decorators: IndexVec::new(),
             op_decorator_storage,
             node_decorator_storage: NodeToDecoratorIds::new(),
+            asm_ops: IndexVec::new(),
+            asm_op_storage: OpToAsmOpId::new(),
             error_codes: BTreeMap::new(),
             procedure_names: BTreeMap::new(),
         }
@@ -145,17 +165,24 @@ impl DebugInfo {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Returns true if this [DebugInfo] has no decorators, error codes, or procedure names.
+    /// Returns true if this [DebugInfo] has no decorators, asm_ops, error codes, or procedure
+    /// names.
     pub fn is_empty(&self) -> bool {
-        self.decorators.is_empty() && self.error_codes.is_empty() && self.procedure_names.is_empty()
+        self.decorators.is_empty()
+            && self.asm_ops.is_empty()
+            && self.error_codes.is_empty()
+            && self.procedure_names.is_empty()
     }
 
-    /// Strips all debug information, removing decorators, error codes, and procedure names.
+    /// Strips all debug information, removing decorators, asm_ops, error codes, and procedure
+    /// names.
     ///
     /// This is used for release builds where debug info is not needed.
     pub fn clear(&mut self) {
         self.clear_mappings();
         self.decorators = IndexVec::new();
+        self.asm_ops = IndexVec::new();
+        self.asm_op_storage = OpToAsmOpId::new();
         self.error_codes.clear();
         self.procedure_names.clear();
     }
@@ -258,6 +285,66 @@ impl DebugInfo {
         self.node_decorator_storage.clear();
     }
 
+    // ASSEMBLY OP ACCESSORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Returns the number of AssemblyOps.
+    pub fn num_asm_ops(&self) -> usize {
+        self.asm_ops.len()
+    }
+
+    /// Returns all AssemblyOps as a slice.
+    pub fn asm_ops(&self) -> &[AssemblyOp] {
+        self.asm_ops.as_slice()
+    }
+
+    /// Returns the AssemblyOp with the given ID, if it exists.
+    pub fn asm_op(&self, asm_op_id: AsmOpId) -> Option<&AssemblyOp> {
+        self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns the AssemblyOp for a specific operation within a node, if any.
+    pub fn asm_op_for_operation(&self, node_id: MastNodeId, op_idx: usize) -> Option<&AssemblyOp> {
+        let asm_op_id = self.asm_op_storage.asm_op_id_for_operation(node_id, op_idx)?;
+        self.asm_ops.get(asm_op_id)
+    }
+
+    /// Returns the first AssemblyOp for a node, if any.
+    pub fn first_asm_op_for_node(&self, node_id: MastNodeId) -> Option<&AssemblyOp> {
+        let asm_op_id = self.asm_op_storage.first_asm_op_for_node(node_id)?;
+        self.asm_ops.get(asm_op_id)
+    }
+
+    // ASSEMBLY OP MUTATORS
+    // --------------------------------------------------------------------------------------------
+
+    /// Adds an AssemblyOp and returns its ID.
+    pub fn add_asm_op(&mut self, asm_op: AssemblyOp) -> Result<AsmOpId, MastForestError> {
+        self.asm_ops.push(asm_op).map_err(|_| MastForestError::TooManyDecorators)
+    }
+
+    /// Registers operation-indexed AssemblyOps for a node.
+    ///
+    /// The `num_operations` parameter must be the total number of operations in the node. This is
+    /// needed to allocate enough space for all operations, even those without AssemblyOps, so that
+    /// lookups at any valid operation index will work correctly.
+    pub fn register_asm_ops(
+        &mut self,
+        node_id: MastNodeId,
+        num_operations: usize,
+        asm_ops: Vec<(usize, AsmOpId)>,
+    ) -> Result<(), AsmOpIndexError> {
+        self.asm_op_storage.add_asm_ops_for_node(node_id, num_operations, asm_ops)
+    }
+
+    /// Remaps the asm_op_storage to use new node IDs after nodes have been removed/reordered.
+    ///
+    /// This should be called after nodes are removed from the MastForest to ensure the asm_op
+    /// storage still references valid node IDs.
+    pub(super) fn remap_asm_op_storage(&mut self, remapping: &BTreeMap<MastNodeId, MastNodeId>) {
+        self.asm_op_storage = self.asm_op_storage.remap_nodes(remapping);
+    }
+
     // ERROR CODE METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -338,15 +425,21 @@ impl DebugInfo {
     /// This validates:
     /// - All CSR structures in op_decorator_storage
     /// - All CSR structures in node_decorator_storage
+    /// - All CSR structures in asm_op_storage
     /// - All decorator IDs reference valid decorators
+    /// - All AsmOpIds reference valid AssemblyOps
     pub(super) fn validate(&self) -> Result<(), String> {
         let decorator_count = self.decorators.len();
+        let asm_op_count = self.asm_ops.len();
 
         // Validate OpToDecoratorIds CSR
         self.op_decorator_storage.validate_csr(decorator_count)?;
 
         // Validate NodeToDecoratorIds CSR
         self.node_decorator_storage.validate_csr(decorator_count)?;
+
+        // Validate OpToAsmOpId CSR
+        self.asm_op_storage.validate_csr(asm_op_count)?;
 
         Ok(())
     }
@@ -363,8 +456,6 @@ impl DebugInfo {
 
 impl Serializable for DebugInfo {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
-        use crate::mast::serialization::decorator::DecoratorDataBuilder;
-
         // 1. Serialize decorators (data, string table, infos)
         let mut decorator_data_builder = DecoratorDataBuilder::new();
         for decorator in self.decorators.iter() {
@@ -377,7 +468,7 @@ impl Serializable for DebugInfo {
         decorator_infos.write_into(target);
 
         // 2. Serialize error codes
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::string::String> =
+        let error_codes: BTreeMap<u64, String> =
             self.error_codes.iter().map(|(k, v)| (*k, v.to_string())).collect();
         error_codes.write_into(target);
 
@@ -394,17 +485,28 @@ impl Serializable for DebugInfo {
         let procedure_names: BTreeMap<Word, String> =
             self.procedure_names().map(|(k, v)| (k, v.to_string())).collect();
         procedure_names.write_into(target);
+
+        // 6. Serialize AssemblyOps (data, string table, infos)
+        let mut asm_op_data_builder = AsmOpDataBuilder::new();
+        for asm_op in self.asm_ops.iter() {
+            asm_op_data_builder.add_asm_op(asm_op);
+        }
+        let (asm_op_data, asm_op_infos, asm_op_string_table) = asm_op_data_builder.finalize();
+
+        asm_op_data.write_into(target);
+        asm_op_string_table.write_into(target);
+        asm_op_infos.write_into(target);
+
+        // 7. Serialize OpToAsmOpId CSR (dense representation)
+        self.asm_op_storage.write_into(target);
     }
 }
 
 impl Deserializable for DebugInfo {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        use crate::mast::serialization::decorator::DecoratorInfo;
-
         // 1. Read decorator data and string table
         let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
-        let string_table: crate::mast::serialization::StringTable =
-            Deserializable::read_from(source)?;
+        let string_table: StringTable = Deserializable::read_from(source)?;
         let decorator_infos: Vec<DecoratorInfo> = Deserializable::read_from(source)?;
 
         // 2. Reconstruct decorators
@@ -419,12 +521,9 @@ impl Deserializable for DebugInfo {
         }
 
         // 3. Read error codes
-        let error_codes_raw: alloc::collections::BTreeMap<u64, alloc::string::String> =
-            Deserializable::read_from(source)?;
-        let error_codes: alloc::collections::BTreeMap<u64, alloc::sync::Arc<str>> = error_codes_raw
-            .into_iter()
-            .map(|(k, v)| (k, alloc::sync::Arc::from(v.as_str())))
-            .collect();
+        let error_codes_raw: BTreeMap<u64, String> = Deserializable::read_from(source)?;
+        let error_codes: BTreeMap<u64, Arc<str>> =
+            error_codes_raw.into_iter().map(|(k, v)| (k, Arc::from(v.as_str()))).collect();
 
         // 4. Read OpToDecoratorIds CSR (dense representation)
         let op_decorator_storage = OpToDecoratorIds::read_from(source, decorators.len())?;
@@ -441,11 +540,32 @@ impl Deserializable for DebugInfo {
             .map(|(k, v)| (LexicographicWord::from(k), Arc::from(v.as_str())))
             .collect();
 
-        // 7. Construct and validate DebugInfo
+        // 7. Read AssemblyOps (data, string table, infos)
+        let asm_op_data: Vec<u8> = Deserializable::read_from(source)?;
+        let asm_op_string_table: StringTable = Deserializable::read_from(source)?;
+        let asm_op_infos: Vec<AsmOpInfo> = Deserializable::read_from(source)?;
+
+        // 8. Reconstruct AssemblyOps
+        let mut asm_ops = IndexVec::new();
+        for asm_op_info in asm_op_infos {
+            let asm_op = asm_op_info.try_into_asm_op(&asm_op_string_table, &asm_op_data)?;
+            asm_ops.push(asm_op).map_err(|_| {
+                DeserializationError::InvalidValue(
+                    "Failed to add AssemblyOp to IndexVec".to_string(),
+                )
+            })?;
+        }
+
+        // 9. Read OpToAsmOpId CSR (dense representation)
+        let asm_op_storage = OpToAsmOpId::read_from(source, asm_ops.len())?;
+
+        // 10. Construct and validate DebugInfo
         let debug_info = DebugInfo {
             decorators,
             op_decorator_storage,
             node_decorator_storage,
+            asm_ops,
+            asm_op_storage,
             error_codes,
             procedure_names,
         };

@@ -9,14 +9,18 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, Word, ZERO,
+    Felt, Word, ZERO,
+    crypto::hash::{Poseidon2, Sha512},
+    events::EventName,
     field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::poseidon2::Poseidon2;
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessorState};
-use sha2::{Digest, Sha512};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 
 use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
@@ -112,7 +116,7 @@ impl Sha512Preimage {
     }
 
     pub fn digest(&self) -> Sha512FeltDigest {
-        let hash = Sha512::digest(self.as_ref());
+        let hash = Sha512::hash(self.as_ref());
         Sha512FeltDigest::from_bytes(&hash)
     }
 

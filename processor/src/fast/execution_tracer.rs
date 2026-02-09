@@ -13,26 +13,27 @@ use miden_core::{
         SplitNode,
     },
     precompile::PrecompileTranscript,
-    stack::MIN_STACK_DEPTH,
+    program::MIN_STACK_DEPTH,
 };
 
 use crate::{
-    chiplets::CircuitEvaluation,
     continuation_stack::{Continuation, ContinuationStack},
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
     fast::{
         FastProcessor,
         trace_state::{
-            AceReplay, AdviceReplay, BitwiseReplay, BlockStackReplay, CoreTraceFragmentContext,
-            CoreTraceState, DecoderState, ExecutionContextSystemInfo, ExecutionReplay,
-            HasherRequestReplay, HasherResponseReplay, KernelReplay, MastForestResolutionReplay,
-            MemoryReadsReplay, MemoryWritesReplay, NodeFlags, RangeCheckerReplay,
-            StackOverflowReplay, StackState, SystemState,
+            AceReplay, AdviceReplay, BitwiseReplay, BlockAddressReplay, BlockStackReplay,
+            CoreTraceFragmentContext, CoreTraceState, DecoderState, ExecutionContextReplay,
+            ExecutionContextSystemInfo, ExecutionReplay, HasherRequestReplay, HasherResponseReplay,
+            KernelReplay, MastForestResolutionReplay, MemoryReadsReplay, MemoryWritesReplay,
+            NodeFlags, RangeCheckerReplay, StackOverflowReplay, StackState, SystemState,
         },
-        tracer::Tracer,
     },
+    processor::{Processor, StackInterface, SystemInterface},
     stack::OverflowTable,
     system::ContextId,
+    trace::chiplets::CircuitEvaluation,
+    tracer::{OperationHelperRegisters, Tracer},
     utils::split_u32_into_u16,
 };
 
@@ -93,6 +94,7 @@ pub struct ExecutionTracer {
 
     pub block_stack: BlockStack,
     pub block_stack_replay: BlockStackReplay,
+    pub execution_context_replay: ExecutionContextReplay,
 
     pub hasher_chiplet_shim: HasherChipletShim,
     pub memory_reads: MemoryReadsReplay,
@@ -124,6 +126,7 @@ impl ExecutionTracer {
             overflow_replay: StackOverflowReplay::default(),
             block_stack: BlockStack::default(),
             block_stack_replay: BlockStackReplay::default(),
+            execution_context_replay: ExecutionContextReplay::default(),
             hasher_chiplet_shim: HasherChipletShim::default(),
             memory_reads: MemoryReadsReplay::default(),
             range_checker: RangeCheckerReplay::default(),
@@ -221,10 +224,10 @@ impl ExecutionTracer {
         };
     }
 
-    fn record_control_node_start(
+    fn record_control_node_start<P: Processor>(
         &mut self,
         node: &MastNode,
-        processor: &FastProcessor,
+        processor: &P,
         current_forest: &MastForest,
     ) {
         let (ctx_info, block_type) = match node {
@@ -278,7 +281,7 @@ impl ExecutionTracer {
                 );
 
                 let loop_entered = {
-                    let condition = processor.stack_get(0);
+                    let condition = processor.stack().get(0);
                     condition == ONE
                 };
 
@@ -300,9 +303,9 @@ impl ExecutionTracer {
                 let exec_ctx = {
                     let overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
                     ExecutionContextInfo::new(
-                        processor.ctx,
-                        processor.caller_hash,
-                        processor.stack_depth(),
+                        processor.system().ctx(),
+                        processor.system().caller_hash(),
+                        processor.stack().depth(),
                         overflow_addr,
                     )
                 };
@@ -333,10 +336,10 @@ impl ExecutionTracer {
                         // records the stack depth after the drop as the beginning of
                         // the new context. For more information, look at the docs for how the
                         // constraints are designed; it's a bit tricky but it works.
-                        let stack_depth_after_drop = processor.stack_depth() - 1;
+                        let stack_depth_after_drop = processor.stack().depth() - 1;
                         ExecutionContextInfo::new(
-                            processor.ctx,
-                            processor.caller_hash,
+                            processor.system().ctx(),
+                            processor.system().caller_hash(),
                             stack_depth_after_drop,
                             overflow_addr,
                         )
@@ -383,7 +386,7 @@ impl ExecutionTracer {
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
     fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
-        self.block_stack_replay.record_execution_context(ctx_info);
+        self.execution_context_replay.record_execution_context(ctx_info);
     }
 
     /// Records the current core trace state, if any.
@@ -397,22 +400,25 @@ impl ExecutionTracer {
     fn finish_current_fragment_context(&mut self) {
         if let Some(snapshot) = self.state_snapshot.take() {
             // Extract the replays
-            let hasher_replay = self.hasher_chiplet_shim.extract_replay();
+            let (hasher_replay, block_addr_replay) = self.hasher_chiplet_shim.extract_replay();
             let memory_reads_replay = core::mem::take(&mut self.memory_reads);
             let advice_replay = core::mem::take(&mut self.advice);
             let external_replay = core::mem::take(&mut self.external);
             let stack_overflow_replay = core::mem::take(&mut self.overflow_replay);
             let block_stack_replay = core::mem::take(&mut self.block_stack_replay);
+            let execution_context_replay = core::mem::take(&mut self.execution_context_replay);
 
             let trace_state = CoreTraceFragmentContext {
                 state: snapshot.state,
                 replay: ExecutionReplay {
                     hasher: hasher_replay,
+                    block_address: block_addr_replay,
                     memory_reads: memory_reads_replay,
                     advice: advice_replay,
                     mast_forest_resolution: external_replay,
                     stack_overflow: stack_overflow_replay,
                     block_stack: block_stack_replay,
+                    execution_context: execution_context_replay,
                 },
                 continuation: snapshot.continuation_stack,
                 initial_mast_forest: snapshot.initial_mast_forest,
@@ -424,6 +430,8 @@ impl ExecutionTracer {
 }
 
 impl Tracer for ExecutionTracer {
+    type Processor = FastProcessor;
+
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
     fn start_clock_cycle(
@@ -434,7 +442,7 @@ impl Tracer for ExecutionTracer {
         current_forest: &Arc<MastForest>,
     ) {
         // check if we need to start a new trace state
-        if processor.clk.as_usize().is_multiple_of(self.fragment_size) {
+        if processor.system().clock().as_usize().is_multiple_of(self.fragment_size) {
             self.start_new_fragment_context(
                 SystemState::from_processor(processor),
                 processor
@@ -622,13 +630,18 @@ impl Tracer for ExecutionTracer {
         self.ace.record_circuit_evaluation(clk, circuit_eval);
     }
 
-    fn increment_clk(&mut self) {
+    fn finalize_clock_cycle(
+        &mut self,
+        _processor: &FastProcessor,
+        _op_helper_registers: OperationHelperRegisters,
+        _current_forest: &Arc<MastForest>,
+    ) {
         // do nothing
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
         let new_overflow_value = processor.stack_get(15);
-        self.overflow_table.push(new_overflow_value, processor.clk);
+        self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 
     fn decrement_stack_size(&mut self) {
@@ -672,7 +685,8 @@ pub struct HasherChipletShim {
     /// node is derived.
     addr: u32,
     /// Replay for the hasher chiplet responses, recording only the hasher chiplet responses.
-    replay: HasherResponseReplay,
+    hasher_replay: HasherResponseReplay,
+    block_addr_replay: BlockAddressReplay,
 }
 
 impl HasherChipletShim {
@@ -680,7 +694,8 @@ impl HasherChipletShim {
     pub fn new() -> Self {
         Self {
             addr: 1,
-            replay: HasherResponseReplay::default(),
+            hasher_replay: HasherResponseReplay::default(),
+            block_addr_replay: BlockAddressReplay::default(),
         }
     }
 
@@ -688,7 +703,7 @@ impl HasherChipletShim {
     pub fn record_hash_control_block(&mut self) -> Felt {
         let block_addr = Felt::from_u32(self.addr);
 
-        self.replay.record_block_address(block_addr);
+        self.block_addr_replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
 
         block_addr
@@ -698,34 +713,38 @@ impl HasherChipletShim {
     pub fn record_hash_basic_block(&mut self, basic_block_node: &BasicBlockNode) -> Felt {
         let block_addr = Felt::from_u32(self.addr);
 
-        self.replay.record_block_address(block_addr);
+        self.block_addr_replay.record_block_address(block_addr);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * basic_block_node.num_op_batches() as u32;
 
         block_addr
     }
     /// Records the result of a call to `Hasher::permute()`.
     pub fn record_permute_output(&mut self, hashed_state: [Felt; 12]) {
-        self.replay.record_permute(Felt::from_u32(self.addr), hashed_state);
+        self.hasher_replay.record_permute(Felt::from_u32(self.addr), hashed_state);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION;
     }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     pub fn record_build_merkle_root(&mut self, path: &MerklePath, computed_root: Word) {
-        self.replay.record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
+        self.hasher_replay
+            .record_build_merkle_root(Felt::from_u32(self.addr), computed_root);
         self.addr += NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     pub fn record_update_merkle_root(&mut self, path: &MerklePath, old_root: Word, new_root: Word) {
-        self.replay
+        self.hasher_replay
             .record_update_merkle_root(Felt::from_u32(self.addr), old_root, new_root);
 
         // The Merkle path is verified twice: once for the old root and once for the new root.
         self.addr += 2 * NUM_HASHER_ROWS_PER_PERMUTATION * path.depth() as u32;
     }
 
-    pub fn extract_replay(&mut self) -> HasherResponseReplay {
-        core::mem::take(&mut self.replay)
+    pub fn extract_replay(&mut self) -> (HasherResponseReplay, BlockAddressReplay) {
+        (
+            core::mem::take(&mut self.hasher_replay),
+            core::mem::take(&mut self.block_addr_replay),
+        )
     }
 }
 

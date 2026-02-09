@@ -4,13 +4,11 @@ use alloc::{
 };
 
 use miden_core::{
-    AdviceMap, Felt, Word,
+    Felt, Word,
+    advice::{AdviceInputs, AdviceMap},
     crypto::merkle::{InnerNodeInfo, MerkleError, MerklePath, MerkleStore, NodeIndex},
     precompile::PrecompileRequest,
 };
-
-mod inputs;
-pub use inputs::{AdviceInputs, AdviceStackBuilder};
 
 mod errors;
 pub use errors::AdviceError;

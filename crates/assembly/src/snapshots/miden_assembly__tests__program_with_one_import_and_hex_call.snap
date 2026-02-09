@@ -10,9 +10,7 @@ begin
                 push(4294967294)
                 mstore
                 drop
-                asmOp(push.4, 1)
                 push(4)
-                asmOp(push.3, 1)
                 push(3)
                 noop
                 noop
@@ -21,7 +19,6 @@ begin
             end
             external.0x77ca6b6f945bde6a7a7eec2f0d9ae96c8c5218ad6c1f4e573c6eab2d9b9607fb
         end
-        asmOp(call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38, 1)
         call.0x20234ee941e53a15886e733cc8e041198c6e90d2a16ea18ce1030e8c3596dd38
     end
 end

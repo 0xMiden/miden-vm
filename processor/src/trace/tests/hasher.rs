@@ -5,9 +5,10 @@ use miden_air::trace::{
     chiplets::hasher::{HASH_CYCLE_LEN, P1_COL_IDX},
 };
 use miden_core::{
-    ONE, Operation, Word, ZERO,
+    ONE, Word, ZERO,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
     field::{ExtensionField, Field},
+    operations::Operation,
 };
 use rstest::rstest;
 

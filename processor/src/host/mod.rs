@@ -2,12 +2,17 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
-    mast::MastForest, precompile::PrecompileRequest,
+    Felt, Word,
+    advice::AdviceMap,
+    crypto::merkle::InnerNodeInfo,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{DebugError, EventError, ProcessorState, TraceError};
+use crate::{DebugError, ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -16,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::DebugHandler;
+use handlers::{DebugHandler, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -99,7 +104,7 @@ pub trait Host {
     /// Handles the debug request from the VM.
     fn on_debug(
         &mut self,
-        process: &mut ProcessorState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         let mut handler = debug::DefaultDebugHandler::default();
@@ -107,7 +112,7 @@ pub trait Host {
     }
 
     /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }

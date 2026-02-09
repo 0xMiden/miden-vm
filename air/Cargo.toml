@@ -48,23 +48,11 @@ decoder_constraints = []
 miden-core = { workspace = true, features = ["serde"] }
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
+p3-miden-air.workspace = true
 
 # External dependencies
 thiserror.workspace = true
 tracing.workspace = true
-
-# Plonky3 dependencies
-p3-blake3.workspace = true
-p3-commit.workspace = true
-p3-dft.workspace = true
-p3-field.workspace = true
-p3-miden-air.workspace = true
-p3-miden-fri.workspace = true
-p3-keccak.workspace = true
-p3-matrix.workspace = true
-p3-merkle-tree.workspace = true
-
-# Serialization
 serde.workspace = true
 
 [dev-dependencies]

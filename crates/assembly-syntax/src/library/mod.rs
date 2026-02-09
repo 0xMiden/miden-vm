@@ -1,9 +1,11 @@
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    AdviceMap, Kernel, Word,
+    Word,
+    advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    program::Kernel,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
 #[cfg(feature = "arbitrary")]
@@ -1043,8 +1045,8 @@ impl proptest::prelude::Arbitrary for Library {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use miden_core::{
-            Operation,
             mast::{BasicBlockNodeBuilder, MastForestContributor},
+            operations::Operation,
         };
         use proptest::prelude::*;
 

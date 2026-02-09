@@ -8,18 +8,15 @@ begin
         push(4294967294)
         mstore
         drop
-        asmOp(push.[3127914668806499073,3220751449397998004,5938778176324780339,1997527880758456713], 4)
         push(1997527880758456713)
         push(5938778176324780339)
         push(3220751449397998004)
         push(3127914668806499073)
         noop
         noop
-        asmOp(adv.push_mapval, 3)
         push(17843484659000820118)
         emit
         drop
-        asmOp(assert, 1)
         assert(0)
     end
 end

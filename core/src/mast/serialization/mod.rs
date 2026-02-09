@@ -38,10 +38,11 @@ use alloc::vec::Vec;
 
 use super::{MastForest, MastNode, MastNodeId};
 use crate::{
-    AdviceMap,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    advice::AdviceMap,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
+pub(crate) mod asm_op;
 pub(crate) mod decorator;
 
 mod info;
@@ -52,6 +53,9 @@ use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
 
 pub(crate) mod string_table;
 pub(crate) use string_table::StringTable;
+
+#[cfg(test)]
+mod seed_gen;
 
 #[cfg(test)]
 mod tests;
@@ -108,7 +112,9 @@ const FLAGS_RESERVED_MASK: u8 = 0xfe;
 ///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
 ///   serialization in CSR format (eliminates per-node decorator sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
-const VERSION: [u8; 3] = [0, 0, 1];
+/// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
+///   separately in DebugInfo.
+const VERSION: [u8; 3] = [0, 0, 2];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
@@ -182,6 +188,13 @@ impl Deserializable for MastForest {
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
         let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
@@ -296,6 +309,36 @@ where
         remaining -= 1;
         Some(MastNodeInfo::read_from(source))
     })
+}
+
+// UNTRUSTED DESERIALIZATION
+// ================================================================================================
+
+impl Deserializable for super::UntrustedMastForest {
+    /// Deserializes an [`super::UntrustedMastForest`] from a byte reader.
+    ///
+    /// Note: This method does not apply budgeting. For untrusted input, prefer using
+    /// [`read_from_bytes`](Self::read_from_bytes) which applies budgeted deserialization.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let forest = MastForest::read_from(source)?;
+        Ok(super::UntrustedMastForest(forest))
+    }
+
+    /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
+    ///
+    /// This method uses a [`crate::serde::BudgetedReader`] with a budget equal to the input size
+    /// to protect against denial-of-service attacks from malicious input.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        super::UntrustedMastForest::read_from_bytes(bytes)
+    }
 }
 
 // STRIPPED SERIALIZATION

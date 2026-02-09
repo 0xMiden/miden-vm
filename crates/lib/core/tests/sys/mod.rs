@@ -2,16 +2,20 @@ use std::sync::Arc;
 
 use miden_assembly::Assembler;
 use miden_core::{
-    EventId, EventName, Felt, HashFunction, ProgramInfo, Word,
+    Felt, Word,
+    events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,
     },
+    program::ProgramInfo,
+    proof::HashFunction,
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, EventHandler, ProcessorState, Program,
-    StackInputs,
+    DefaultHost, ProcessorState, Program, StackInputs,
+    advice::{AdviceInputs, AdviceMutation},
+    event::{EventError, EventHandler},
 };
 use miden_prover::ProvingOptions;
 use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
