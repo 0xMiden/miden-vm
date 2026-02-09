@@ -13,8 +13,8 @@
 
 use core::borrow::Borrow;
 
+use miden_core::utils::Matrix;
 use miden_crypto::stark::air::MidenAirBuilder;
-use p3_matrix::Matrix;
 
 use crate::{MainTraceRow, NUM_PERIODIC_VALUES};
 

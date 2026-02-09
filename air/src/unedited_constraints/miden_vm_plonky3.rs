@@ -1,10 +1,6 @@
 use alloc::vec::Vec;
-
-use p3_field::{ExtensionField, Field, PrimeCharacteristicRing};
-use p3_matrix::Matrix;
-use p3_matrix::dense::RowMajorMatrixView;
-use p3_matrix::stack::VerticalPair;
-use p3_miden_air::{BusType, MidenAir, MidenAirBuilder, RowMajorMatrix};
+use miden_core::{field::{ExtensionField, Field, PrimeCharacteristicRing}, utils::Matrix};
+use miden_crypto::stark::air::{MidenAir, MidenAirBuilder};
 
 // FIXME: Current trace is 71 (system: 6, padding: 0), generated constraints trace is width 80 (system: 8, padding: 7)
 pub const MAIN_WIDTH: usize = 71; // 80

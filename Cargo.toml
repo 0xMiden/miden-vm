@@ -66,6 +66,7 @@ miden-verifier = { path = "./verifier", version = "0.21", default-features = fal
 miden-crypto = { version = "0.22", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
+p3-miden-air = { version = "0.4.2" }
 
 # Constraints to resolve duplicates
 semver = "1.0"

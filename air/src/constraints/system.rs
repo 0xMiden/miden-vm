@@ -1,5 +1,5 @@
+use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
-use p3_field::PrimeCharacteristicRing;
 
 use crate::MainTraceRow;
 
