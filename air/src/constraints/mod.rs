@@ -13,6 +13,7 @@
 
 use core::borrow::Borrow;
 
+use miden_core::field::PrimeCharacteristicRing;
 use miden_core::utils::Matrix;
 use miden_crypto::stark::air::MidenAirBuilder;
 
@@ -51,11 +52,11 @@ where
     #[cfg(feature = "system_constraints")]
     system::enforce_main_system_constraints(builder, local, next);
 
-    // TODO: STACK MAIN CONSTRAINTS
+    // STACK MAIN CONSTRAINTS
     #[cfg(feature = "stack_constraints")]
     stack::enforce_main_stack_constraints(builder, local, next);
 
-    // TODO: DECODER MAIN CONSTRAINTS
+    // DECODER MAIN CONSTRAINTS
     #[cfg(feature = "decoder_constraints")]
     decoder::enforce_main_decoder_constraints(builder, local, next);
 
@@ -81,27 +82,37 @@ where
 
     // Use structured column access via MainTraceCols
     let local: &MainTraceRow<AB::Var> = (*local).borrow();
-    let _next: &MainTraceRow<AB::Var> = (*next).borrow();
+    let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
-    let _periodic_values: [_; NUM_PERIODIC_VALUES] =
+    let periodic_values: [_; NUM_PERIODIC_VALUES] =
         builder.periodic_evals().try_into().expect("Wrong number of periodic values");
 
-    // For now, decoder and stack constraints are not included in the generated constraints
-    // They will be added in the future.
+    // FIXME: move these constants to a more appropriate place, and ensure they are consistent across all constraints modules
+    const MAX_BETA_CHALLENGE_POWER: usize = 15;
+    const AUX_WIDTH: usize = 8;
 
-    // TODO: STACK BUS CONSTRAINTS
+    let (&alpha, beta_challenges) = builder.permutation_randomness().split_first().expect("Wrong number of randomness");
+    let beta_challenges: [_; MAX_BETA_CHALLENGE_POWER] = beta_challenges.try_into().expect("Wrong number of randomness");
+    let aux_bus_boundary_values: [_; AUX_WIDTH] = builder.aux_bus_boundary_values().try_into().expect("Wrong number of aux bus boundary values");
+    let aux = builder.permutation();
+    let (aux_current, aux_next) = (
+        aux.row_slice(0).unwrap(),
+        aux.row_slice(1).unwrap(),
+    );
+
+    // STACK BUS CONSTRAINTS
     #[cfg(feature = "stack_constraints")]
-    stack::bus::enforce_stack_bus_constraints(builder, local);
+    stack::bus::enforce_stack_bus_constraints(builder, alpha, &beta_challenges, &aux_current, &aux_next, local, next, &periodic_values);
 
-    // TODO: DECODER BUS CONSTRAINTS
+    // DECODER BUS CONSTRAINTS
     #[cfg(feature = "decoder_constraints")]
-    decoder::bus::enforce_decoder_bus_constraints(builder, local);
+    decoder::bus::enforce_decoder_bus_constraints(builder, alpha, &beta_challenges, &aux_current, &aux_next, local, next);
 
     // RANGE CHECKER BUS CONSTRAINTS
     #[cfg(feature = "range_constraints")]
-    range::bus::enforce_range_bus_constraints(builder, local);
+    range::bus::enforce_range_bus_constraints(builder, alpha, &beta_challenges, &aux_current, &aux_next, local, next);
 
     // CHIPLETS BUS CONSTRAINTS
     #[cfg(feature = "chiplets_constraints")]
-    chiplets::bus::enforce_chiplets_bus_constraints(builder, local);
+    chiplets::bus::enforce_chiplets_bus_constraints(builder, alpha, &beta_challenges, &aux_current, &aux_next, local, next, &periodic_values);
 }

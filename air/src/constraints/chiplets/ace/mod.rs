@@ -1,3 +1,5 @@
+pub mod bus;
+
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 

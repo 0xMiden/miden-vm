@@ -35,12 +35,8 @@ fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTraceRow
 where
     AB: MidenAirBuilder,
 {
-    // First row: V[0] = 0
-    builder.when_first_row().assert_zero(local.range[1].clone());
-
-    // Last row: V[last] = 65535 (2^16 - 1)
-    let sixty_five_k = AB::Expr::from_u32(65535);
-    builder.when_last_row().assert_eq(local.range[1].clone(), sixty_five_k);
+    builder.when_first_row().assert_zero(local.range[1].clone().into());
+    builder.when_last_row().assert_zero(local.range[1].clone().into() - AB::Expr::from_u64(65535));
 }
 
 /// Enforces the transition constraint for the range checker V column.
@@ -57,28 +53,5 @@ fn enforce_range_transition_constraint<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let change_v = next.range[1].clone() - local.range[1].clone();
-
-    // Powers of 3: {1, 3, 9, 27, 81, 243, 729, 2187}
-    let one_expr = AB::Expr::ONE;
-    let three = AB::Expr::from_u16(3);
-    let nine = AB::Expr::from_u16(9);
-    let twenty_seven = AB::Expr::from_u16(27);
-    let eighty_one = AB::Expr::from_u16(81);
-    let two_forty_three = AB::Expr::from_u16(243);
-    let seven_twenty_nine = AB::Expr::from_u16(729);
-    let two_one_eight_seven = AB::Expr::from_u16(2187);
-
-    // Note: Extra factor of change_v allows V to stay constant (change_v = 0) during padding
-    builder.when_transition().assert_zero(
-        change_v.clone()
-            * (change_v.clone() - one_expr)
-            * (change_v.clone() - three)
-            * (change_v.clone() - nine)
-            * (change_v.clone() - twenty_seven)
-            * (change_v.clone() - eighty_one)
-            * (change_v.clone() - two_forty_three)
-            * (change_v.clone() - seven_twenty_nine)
-            * (change_v.clone() - two_one_eight_seven),
-    );
+    builder.when_transition().assert_zero((next.range[1].clone().into() - local.range[1].clone().into()) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::ONE) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(3)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(9)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(27)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(81)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(243)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(729)) * (next.range[1].clone().into() - local.range[1].clone().into() - AB::Expr::from_u64(2187)));
 }
