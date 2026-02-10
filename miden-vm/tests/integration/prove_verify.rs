@@ -199,13 +199,14 @@ fn test_rpx_prove_verify() {
 mod fast_parallel {
     use alloc::sync::Arc;
 
+    use miden_air::ProcessorAir;
     use miden_assembly::{Assembler, DefaultSourceManager};
     use miden_core::proof::{ExecutionProof, HashFunction};
     use miden_crypto::stark;
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_prover::{config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 

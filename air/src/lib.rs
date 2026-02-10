@@ -7,20 +7,57 @@ extern crate alloc;
 extern crate std;
 
 use alloc::vec::Vec;
-use core::borrow::Borrow;
 
 use miden_core::{
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
     program::{ProgramInfo, StackInputs, StackOutputs},
 };
-use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
+use miden_crypto::stark::matrix::RowMajorMatrix;
 
 pub mod config;
+
+#[cfg(feature = "human_readable")]
 mod constraints;
+#[cfg(all(
+    feature = "human_readable",
+    feature = "bus_active",
+    any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    )
+))]
+use constraints::enforce_bus_constraints;
+#[cfg(all(
+    feature = "human_readable",
+    any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    )
+))]
+use constraints::enforce_main_constraints;
+#[cfg(feature = "human_readable")]
+use p3_miden_air::BusType;
+
+#[cfg(feature = "human_readable")]
+use crate::trace::AUX_TRACE_RAND_ELEMENTS;
+
+mod unedited_constraints;
+pub use unedited_constraints::miden_vm_plonky3::MidenVM;
 
 pub mod trace;
-use trace::{AUX_TRACE_WIDTH, AuxTraceBuilder, MainTraceRow, TRACE_WIDTH};
+#[cfg(feature = "human_readable")]
+use constraints::chiplets::periodic_columns::NUM_PERIODIC_VALUES;
+#[cfg(feature = "human_readable")]
+use trace::{AUX_TRACE_WIDTH, MainTraceRow};
+
+use crate::trace::{AuxTraceBuilder, TRACE_WIDTH};
 
 // RE-EXPORTS
 // ================================================================================================
@@ -129,48 +166,95 @@ impl Deserializable for PublicInputs {
 ///
 /// This struct defines the constraints for the Miden VM processor.
 /// Generic over aux trace builder to support different extension fields.
-pub struct ProcessorAir<B = ()> {
+pub struct ProcessorAir<EF, B = ()>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
+    #[cfg(not(feature = "human_readable"))]
+    /// Inner MidenVM AIR instance, obtained from Plonky3 codegen of the Miden VM air-script
+    /// constraints.
+    inner: MidenVM,
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
+    phantom: core::marker::PhantomData<EF>,
 }
 
-impl Default for ProcessorAir<()> {
+impl<EF> ProcessorAir<EF, ()>
+where
+    EF: ExtensionField<Felt>,
+{
+    /// Creates a new ProcessorAir without auxiliary trace support.
+    pub fn new() -> Self {
+        Self {
+            #[cfg(not(feature = "human_readable"))]
+            inner: MidenVM {},
+            aux_builder: None,
+            phantom: core::marker::PhantomData,
+        }
+    }
+}
+
+impl<EF> Default for ProcessorAir<EF, ()>
+where
+    EF: ExtensionField<Felt>,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ProcessorAir<()> {
-    /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
-    }
-}
-
-impl<B> ProcessorAir<B> {
+impl<EF, B> ProcessorAir<EF, B>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
     /// Creates a new ProcessorAir with auxiliary trace support.
     pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
+        Self {
+            #[cfg(not(feature = "human_readable"))]
+            inner: MidenVM {},
+            aux_builder: Some(builder),
+            phantom: core::marker::PhantomData,
+        }
     }
 }
 
-impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<B>
+#[cfg(not(feature = "human_readable"))]
+impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
     EF: ExtensionField<Felt>,
     B: AuxTraceBuilder<EF>,
 {
     fn width(&self) -> usize {
-        TRACE_WIDTH
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::width(&self.inner)
     }
 
-    fn aux_width(&self) -> usize {
-        // Return the number of extension field columns
-        // The prover will interpret the returned base field data as EF columns
-        AUX_TRACE_WIDTH
+    fn num_public_values(&self) -> usize {
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values(&self.inner)
+    }
+
+    #[cfg(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    ))]
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table(&self.inner)
     }
 
     fn num_randomness(&self) -> usize {
-        trace::AUX_TRACE_RAND_ELEMENTS
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_randomness(&self.inner)
+    }
+
+    fn aux_width(&self) -> usize {
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::aux_width(&self.inner)
+    }
+
+    fn bus_types(&self) -> &[BusType] {
+        <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::bus_types(&self.inner)
     }
 
     fn build_aux_trace(
@@ -185,25 +269,98 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
+    #[cfg(not(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    )))]
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+
+    #[cfg(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    ))]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        use crate::constraints;
+        <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(inner, builder);
+    }
+}
 
-        let main = builder.main();
+#[cfg(feature = "human_readable")]
+impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
+where
+    EF: ExtensionField<Felt>,
+    B: AuxTraceBuilder<EF>,
+{
+    fn width(&self) -> usize {
+        TRACE_WIDTH
+    }
 
-        // Access the two rows: current (local) and next
-        let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-        let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
+    fn num_public_values(&self) -> usize {
+        0
+    }
 
-        // Use structured column access via MainTraceCols
-        let local: &MainTraceRow<AB::Var> = (*local).borrow();
-        let next: &MainTraceRow<AB::Var> = (*next).borrow();
+    #[cfg(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    ))]
+    fn periodic_table(&self) -> Vec<Vec<Felt>> {
+        let mut periodic_table = crate::constraints::chiplets::bitwise::bitwise_periodic_columns();
+        periodic_table
+            .extend_from_slice(&crate::constraints::chiplets::hasher::hasher_periodic_columns());
+        periodic_table
+    }
 
-        // SYSTEM CONSTRAINTS
-        constraints::enforce_clock_constraint(builder, local, next);
+    fn num_randomness(&self) -> usize {
+        AUX_TRACE_RAND_ELEMENTS
+    }
 
-        // RANGE CHECKER CONSTRAINTS
-        constraints::range::enforce_range_boundary_constraints(builder, local);
-        constraints::range::enforce_range_transition_constraint(builder, local, next);
-        constraints::range::enforce_range_bus_constraint(builder, local);
+    fn aux_width(&self) -> usize {
+        AUX_TRACE_WIDTH
+    }
+
+    fn bus_types(&self) -> &[BusType] {
+        &[]
+    }
+
+    fn build_aux_trace(
+        &self,
+        main: &RowMajorMatrix<Felt>,
+        challenges: &[EF],
+    ) -> Option<RowMajorMatrix<Felt>> {
+        let _span = tracing::info_span!("build_aux_trace").entered();
+
+        let builders = self.aux_builder.as_ref()?;
+
+        Some(builders.build_aux_columns(main, challenges))
+    }
+
+    #[cfg(not(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    )))]
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
+
+    #[cfg(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    ))]
+    fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
+        enforce_main_constraints(builder);
+        #[cfg(feature = "bus_active")]
+        enforce_bus_constraints(builder);
     }
 }
