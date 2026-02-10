@@ -325,7 +325,6 @@ impl PrettyPrint for Instruction {
             },
 
             // ----- debug decorators -------------------------------------------------------------
-            Self::Breakpoint => const_text("breakpoint"),
             Self::Debug(options) => inst_with_imm("debug", options),
 
             // ----- event decorators -------------------------------------------------------------
