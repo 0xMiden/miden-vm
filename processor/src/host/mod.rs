@@ -7,7 +7,7 @@ use miden_core::{
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::{DebugOptions, DebugVarInfo},
+    operations::DebugOptions,
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -116,19 +116,6 @@ pub trait Host {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }
-
-    /// Handles a debug variable annotation from the VM.
-    ///
-    /// This is separate from [`Host::on_debug`] because debug variables are not decorators —
-    /// they live in a parallel per-operation annotation layer in `MastForest` with
-    /// different cardinality (N per op). `DebugVarInfo` carries variable names, types,
-    /// and value locations (heap-allocated), whereas `DebugOptions` is a simple `Copy`
-    /// enum for VM-state inspection. This callback is infallible by design since
-    /// variable metadata is purely informational.
-    ///
-    /// The default implementation does nothing, as most hosts don't need variable tracking.
-    #[inline(always)]
-    fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///
