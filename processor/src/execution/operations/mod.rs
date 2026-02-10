@@ -169,7 +169,8 @@ where
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor, tracer)?,
         Operation::Drop => {
-            processor.stack_mut().decrement_size(tracer);
+            processor.stack_mut().decrement_size();
+            tracer.decrement_stack_size();
             OperationHelperRegisters::Empty
         },
         Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,

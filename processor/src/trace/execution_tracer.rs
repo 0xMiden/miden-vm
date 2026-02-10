@@ -638,7 +638,7 @@ impl Tracer for ExecutionTracer {
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
-        let new_overflow_value = processor.stack_get(15);
+        let new_overflow_value = processor.stack_get(16);
         self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 

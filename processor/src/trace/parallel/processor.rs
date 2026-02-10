@@ -230,8 +230,6 @@ impl SystemInterface for ReplayProcessor {
 }
 
 impl StackInterface for ReplayProcessor {
-    type Processor = Self;
-
     fn top(&self) -> &[Felt] {
         &self.stack.stack_top
     }
@@ -326,10 +324,7 @@ impl StackInterface for ReplayProcessor {
         self.stack.stack_top[rotation_bot_index] = new_stack_bot_element;
     }
 
-    fn increment_size<T>(&mut self, _tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self>,
-    {
+    fn increment_size(&mut self) -> Result<(), ExecutionError> {
         const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
@@ -351,10 +346,7 @@ impl StackInterface for ReplayProcessor {
         Ok(())
     }
 
-    fn decrement_size<T>(&mut self, _tracer: &mut T)
-    where
-        T: Tracer<Processor = Self>,
-    {
+    fn decrement_size(&mut self) {
         // Shift all other elements up
         for write_idx in 0..(MIN_STACK_DEPTH - 1) {
             let read_idx = write_idx + 1;

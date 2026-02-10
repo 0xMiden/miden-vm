@@ -261,8 +261,6 @@ impl SystemInterface for FastProcessor {
 }
 
 impl StackInterface for FastProcessor {
-    type Processor = FastProcessor;
-
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
@@ -345,12 +343,9 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self::Processor>,
-    {
+    fn increment_size(&mut self) -> Result<(), ExecutionError> {
         if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
-            self.increment_stack_size(tracer);
+            self.increment_stack_size();
             Ok(())
         } else {
             Err(ExecutionError::Internal("stack overflow"))
@@ -358,11 +353,8 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self::Processor>,
-    {
-        self.decrement_stack_size(tracer)
+    fn decrement_size(&mut self) {
+        self.decrement_stack_size()
     }
 }
 

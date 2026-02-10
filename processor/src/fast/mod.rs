@@ -766,12 +766,7 @@ impl FastProcessor {
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
-    fn increment_stack_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self>,
-    {
-        tracer.increment_stack_size(self);
-
+    fn increment_stack_size(&mut self) {
         self.stack_top_idx += 1;
     }
 
@@ -780,7 +775,7 @@ impl FastProcessor {
     /// The bottom of the stack is only decremented in cases where the stack depth would become less
     /// than 16.
     #[inline(always)]
-    fn decrement_stack_size(&mut self, tracer: &mut impl Tracer) {
+    fn decrement_stack_size(&mut self) {
         if self.stack_top_idx == MIN_STACK_DEPTH {
             // We no longer have any room in the stack buffer to decrement the stack size (which
             // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
@@ -790,8 +785,6 @@ impl FastProcessor {
 
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
-
-        tracer.decrement_stack_size();
     }
 
     /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the

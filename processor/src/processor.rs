@@ -20,7 +20,7 @@ use crate::{
 /// and operation helper register computation.
 pub(crate) trait Processor: Sized {
     type System: SystemInterface;
-    type Stack: StackInterface<Processor = Self>;
+    type Stack: StackInterface;
     type AdviceProvider: AdviceProviderInterface;
     type Memory: MemoryInterface;
     type Hasher: HasherInterface;
@@ -171,8 +171,6 @@ pub(crate) trait SystemInterface {
 /// the top element, `stack_get(1)` returns the second element from the top, and so on. The stack is
 /// always at least 16 elements deep.
 pub(crate) trait StackInterface {
-    type Processor;
-
     /// Returns the top 16 elements of the stack, such that the top of the stack is at the last
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
@@ -267,18 +265,14 @@ pub(crate) trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self::Processor>;
+    fn increment_size(&mut self) -> Result<(), ExecutionError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self::Processor>;
+    fn decrement_size(&mut self);
 }
 
 // ADVICE PROVIDER INTERFACE
