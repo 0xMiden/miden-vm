@@ -44,7 +44,8 @@ where
     // Execute decorators that should be executed before entering the node
     processor.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-    processor.save_context_and_truncate_stack(tracer);
+    tracer.start_context();
+    processor.save_context_and_truncate_stack();
 
     let callee_hash = current_forest[call_node.callee()].digest();
     if call_node.is_syscall() {
@@ -118,9 +119,10 @@ where
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
-    if let Err(e) = processor.restore_context(tracer) {
+    if let Err(e) = processor.restore_context() {
         return ControlFlow::Break(BreakReason::Err(e.with_context(current_forest, node_id, host)));
     }
+    tracer.restore_context();
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(

@@ -403,12 +403,11 @@ impl Processor for ReplayProcessor {
         &mut self.hasher_response_replay
     }
 
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+    fn save_context_and_truncate_stack(&mut self) {
         self.stack.start_context();
-        tracer.start_context();
     }
 
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
+    fn restore_context(&mut self) -> Result<(), OperationError> {
         let ctx_info = self.execution_context_replay.replay_execution_context();
 
         // Restore system state
@@ -417,9 +416,6 @@ impl Processor for ReplayProcessor {
 
         // Restore stack state
         self.stack.restore_context(&mut self.stack_overflow_replay);
-
-        // Update tracer
-        tracer.restore_context();
 
         Ok(())
     }

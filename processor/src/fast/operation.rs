@@ -70,13 +70,13 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
-        self.save_context_and_truncate_stack(tracer);
+    fn save_context_and_truncate_stack(&mut self) {
+        self.save_context_and_truncate_stack();
     }
 
     #[inline(always)]
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
-        self.restore_context(tracer)
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        self.restore_context()
     }
 
     #[inline(always)]

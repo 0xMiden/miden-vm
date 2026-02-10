@@ -204,10 +204,14 @@ pub trait Tracer {
 
     /// Signals the start of a new execution context, as a result of a CALL, SYSCALL or DYNCALL
     /// operation being executed.
+    ///
+    /// This method is guaranteed to be called *before* the context is actually started.
     fn start_context(&mut self);
 
     /// Signals the end of an execution context, as a result of an END operation associated with a
     /// CALL, SYSCALL or DYNCALL.
+    ///
+    /// This method is guaranteed to be called *after* the context is actually restored.
     fn restore_context(&mut self);
 }
 

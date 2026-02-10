@@ -51,13 +51,11 @@ pub(crate) trait Processor: Sized {
 
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer);
+    fn save_context_and_truncate_stack(&mut self);
 
     /// Restores the execution context to the state it was in before the last `call`, `syscall` or
-    /// `dyncall`.
-    ///
-    /// This includes restoring the overflow stack and the system parameters.
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
+    /// `dyncall. This includes restoring the overflow stack and the system parameters.
+    fn restore_context(&mut self) -> Result<(), OperationError>;
 
     /// Returns the current precompile transcript state (sponge capacity).
     ///
