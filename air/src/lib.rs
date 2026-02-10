@@ -220,6 +220,8 @@ where
     }
 }
 
+/// MidenAir implementation for ProcessorAir that delegates the constraints evaluation to the
+/// generated MidenVM AIR if the human_readable feature is not enabled.
 #[cfg(not(feature = "human_readable"))]
 impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
@@ -290,6 +292,8 @@ where
     }
 }
 
+/// MidenAir implementation for ProcessorAir that uses the constraints entry points defined in the
+/// constraints module when the human_readable feature is enabled.
 #[cfg(feature = "human_readable")]
 impl<EF, B> MidenAir<Felt, EF> for ProcessorAir<EF, B>
 where
