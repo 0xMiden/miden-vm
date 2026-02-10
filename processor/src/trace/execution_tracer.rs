@@ -472,7 +472,8 @@ impl Tracer for ExecutionTracer {
                 },
                 MastNode::Block(basic_block_node) => {
                     self.hasher_for_chiplet.record_hash_basic_block(
-                        basic_block_node.op_batches().to_vec(),
+                        current_forest.clone(),
+                        mast_node_id,
                         basic_block_node.digest(),
                     );
                     let block_addr =
