@@ -67,6 +67,7 @@
 - [BREAKING] Migrate parallel trace generation to use the common `execute_impl()` ([#2642](https://github.com/0xMiden/miden-vm/pull/2642)).
 - [BREAKING] Removed unused `should_break` field from `AssemblyOp` decorator ([#2646](https://github.com/0xMiden/miden-vm/pull/2646)).
 - [BREAKING] Updated processor module structure ([#2651](https://github.com/0xMiden/miden-vm/pull/2651)).
+- [BREAKING] Added the Plonky3 constraints evaluation pipeline ([#2658](https://github.com/0xMiden/miden-vm/pull/2658)).
 
 ## 0.20.6 (2026-02-04)
 
