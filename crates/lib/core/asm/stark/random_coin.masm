@@ -153,7 +153,9 @@ pub proc init_seed
     ## Compute trace_length
     dup
     pow2
-    u32split assertz
+    dup
+    u32test
+    assert.err="range check failed: trace length"
     #=> [trace_length, log(trace_length), num_queries, grinding, num_constraints, trace_info, num_fixed_len_pi, ...]
 
     ## Save the trace length and its log to memory
@@ -316,12 +318,12 @@ pub proc generate_aux_randomness
     padw exec.constants::aux_rand_nd_ptr mem_loadw_be
     # => [alpha1, alpha0, beta1, beta0, beta1, beta0, alpha1, alpha0, ...]
 
-    movup.6 assert_eq
-    movup.5 assert_eq
+    movup.6 assert_eq.err="comparison failed: aux randomness"
+    movup.5 assert_eq.err="comparison failed: aux randomness"
     # => [beta1, beta0, beta1, beta0, ...]
 
-    movup.2 assert_eq
-    assert_eq
+    movup.2 assert_eq.err="comparison failed: aux randomness"
+    assert_eq.err="comparison failed: aux randomness"
     #=> [...]
 end
 
@@ -696,7 +698,7 @@ pub proc check_pow
 
     # Compute the mask.
     pow2
-    u32assert u32overflowing_sub.1 assertz
+    u32assert u32overflowing_sub.1 assertz.err="range check failed: pow"
     #=> [mask, ...]
 
     # Load Capacity portion
@@ -731,7 +733,7 @@ pub proc check_pow
     u32split
     drop
     u32and
-    assertz
+    assertz.err="range check failed: pow"
     drop
     #=> [...]
 end

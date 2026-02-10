@@ -9,6 +9,7 @@
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
 - Add deserialization of the `MastForest` from untrusted sources. Add fuzzing for MastForest deserialization. ([#2590](https://github.com/0xMiden/miden-vm/pull/2590)).
 - Added `StackInterface::get_double_word()` method for reading 8 consecutive stack elements ([#2607](https://github.com/0xMiden/miden-vm/pull/2607)).
+- Adds error messages to asserts in the standard library ([#2650](https://github.com/0xMiden/miden-vm/pull/2650))
 
 #### Fixes
 

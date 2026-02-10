@@ -406,7 +406,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     swap
     # => [p2_hi, p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
-    assert
+    assert.err="comparison failed: divmod"
     # => [p2_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     dup.4
@@ -418,7 +418,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     swap
     # => [p3_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     eq.0
-    assert
+    assert.err="comparison failed: divmod"
     # => [p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     # prod_hi = p3_lo, prod_lo = p1_lo
 
@@ -428,7 +428,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     # => [q_hi, b_hi, p3_lo, p1_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
     mul
     eq.0
-    assert
+    assert.err="comparison failed: divmod"
     # => [prod_hi, prod_lo, q_lo, q_hi, b_lo, b_hi, a_lo, a_hi, ...]
 
     #==========================================================================
@@ -456,7 +456,7 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     exec.lt
     # Computes r < b, consumes both pairs
     # => [1, r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
-    assert
+    assert.err="comparison failed: divmod"
     # => [r_lo, r_hi, prod_hi, prod_lo, q_lo, q_hi, a_lo, a_hi, ...]
 
     #==========================================================================
@@ -493,19 +493,19 @@ pub proc divmod(b: u64, a: u64) -> (remainder: u64, quotient: u64)
     swap
     # => [carry_hi, sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
     eq.0
-    assert
+    assert.err="comparison failed: divmod"
     # => [sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, a_hi, ...]
 
     # Verify sum_hi == a_hi
     movup.7
     # => [a_hi, sum_hi, sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, ...]
-    assert_eq
+    assert_eq.err="comparison failed: divmod"
     # => [sum_lo, r_lo, r_hi, q_lo, q_hi, a_lo, ...]
 
     # Verify sum_lo == a_lo
     movup.5
     # => [a_lo, sum_lo, r_lo, r_hi, q_lo, q_hi, ...]
-    assert_eq
+    assert_eq.err="comparison failed: divmod"
     # => [r_lo, r_hi, q_lo, q_hi, ...]
 
 end
