@@ -20,10 +20,11 @@ mod split;
 
 // RE-EXPORTS
 // ================================================================================================
-
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
 pub(crate) use external::finish_load_mast_forest_from_external;
+#[cfg(test)]
+pub(crate) use operations::eval_circuit_impl;
 use operations::execute_op;
 
 // MAIN EXECUTION FUNCTION

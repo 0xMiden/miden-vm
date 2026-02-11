@@ -182,7 +182,7 @@ pub trait Tracer {
     // --------------------------------------------------------------------------------------------
 
     /// Records the evaluation of a circuit.
-    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation);
+    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation);
 
     // MISCELLANEOUS
     // --------------------------------------------------------------------------------------------

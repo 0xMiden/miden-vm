@@ -7,10 +7,9 @@ use crate::{
     BreakReason, ContextId, ExecutionError, Felt, Host, MemoryError, Word,
     advice::AdviceError,
     crypto::merkle::MerklePath,
-    errors::{AceEvalError, OperationError},
+    errors::OperationError,
     mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
-    tracer::Tracer,
 };
 
 // PROCESSOR
@@ -66,29 +65,6 @@ pub(crate) trait Processor: Sized {
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    ///
-    /// The inputs are composed of:
-    ///
-    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
-    ///    itself is arranged as:
-    ///
-    ///    a. `Read` section:
-    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
-    ///       2. Constants of the circuit which are elements in the quadratic extension field,
-    ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///    where each gate is encoded as a single base field element.
-    /// 2. the number of quadratic extension field elements read in the `READ` section,
-    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
-    ///
-    /// Stack transition:
-    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// # Note
-    /// All processors need to support this operation.
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(

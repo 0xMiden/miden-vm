@@ -624,8 +624,8 @@ impl Tracer for ExecutionTracer {
         self.kernel.record_kernel_proc_access(proc_hash);
     }
 
-    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
-        self.ace.record_circuit_evaluation(clk, circuit_eval);
+    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation) {
+        self.ace.record_circuit_evaluation(circuit_evaluation);
     }
 
     fn finalize_clock_cycle(

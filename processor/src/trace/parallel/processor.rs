@@ -18,14 +18,13 @@ use super::super::trace_state::{
 use crate::{
     BreakReason, ContextId, ExecutionError, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{AceEvalError, OperationError},
+    errors::OperationError,
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
-    trace::parallel::core_trace_fragment::eval_circuit_parallel_,
     tracer::Tracer,
 };
 
@@ -426,25 +425,6 @@ impl Processor for ReplayProcessor {
 
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.system.pc_transcript_state = state;
-    }
-
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
-        let num_eval = self.stack().get(2);
-        let num_read = self.stack().get(1);
-        let ptr = self.stack().get(0);
-        let ctx = self.system().ctx();
-
-        let _circuit_evaluation = eval_circuit_parallel_(
-            ctx,
-            ptr,
-            self.system().clock(),
-            num_read,
-            num_eval,
-            self.memory_mut(),
-            tracer,
-        )?;
-
-        Ok(())
     }
 
     fn execute_before_enter_decorators(
