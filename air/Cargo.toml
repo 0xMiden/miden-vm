@@ -24,24 +24,9 @@ concurrent = ["std"]
 testing = []
 
 # Enable constraint evaluation
-human_readable = []
-all_constraints = [
-    "all_main_constraints",
-    "bus_active",
-]
-all_main_constraints = [
-    "system_constraints",
-    "chiplets_constraints",
-    "range_constraints",
-    "stack_constraints",
-    "decoder_constraints",
-]
-bus_active = []
-system_constraints = []
-chiplets_constraints = []
-range_constraints = []
-stack_constraints = []
-decoder_constraints = []
+human_readable = ["constraints"]
+constraints = []
+bus_active = ["constraints"]
 
 [dependencies]
 # Miden dependencies

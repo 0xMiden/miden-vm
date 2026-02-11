@@ -14,35 +14,16 @@ use miden_core::{
     program::{ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::matrix::RowMajorMatrix;
+use p3_miden_air::BusType;
 
 pub mod config;
 
 #[cfg(feature = "human_readable")]
 mod constraints;
-#[cfg(all(
-    feature = "human_readable",
-    feature = "bus_active",
-    any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    )
-))]
+#[cfg(all(feature = "human_readable", feature = "bus_active",))]
 use constraints::enforce_bus_constraints;
-#[cfg(all(
-    feature = "human_readable",
-    any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    )
-))]
+#[cfg(all(feature = "human_readable", feature = "constraints",))]
 use constraints::enforce_main_constraints;
-use p3_miden_air::BusType;
 
 #[cfg(feature = "human_readable")]
 use crate::trace::AUX_TRACE_RAND_ELEMENTS;
@@ -235,13 +216,7 @@ where
         <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::num_public_values(&self.inner)
     }
 
-    #[cfg(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    ))]
+    #[cfg(feature = "constraints")]
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
         <MidenVM as p3_miden_air::MidenAir<Felt, EF>>::periodic_table(&self.inner)
     }
@@ -270,37 +245,16 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
-    #[cfg(not(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    )))]
+    #[cfg(not(feature = "constraints"))]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
 
-    #[cfg(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    ))]
+    #[cfg(feature = "constraints")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(&self.inner, builder);
     }
 }
 
-#[cfg(all(
-    feature = "human_readable",
-    not(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    ))
-))]
+#[cfg(all(feature = "human_readable", not(feature = "constraints")))]
 compile_error!(
     "Please enable at least one of the constraints features when using human_readable feature"
 );
@@ -321,13 +275,7 @@ where
         0
     }
 
-    #[cfg(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    ))]
+    #[cfg(feature = "constraints")]
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
         let mut periodic_table = crate::constraints::chiplets::bitwise::bitwise_periodic_columns();
         periodic_table
@@ -359,22 +307,10 @@ where
         Some(builders.build_aux_columns(main, challenges))
     }
 
-    #[cfg(not(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    )))]
+    #[cfg(not(feature = "constraints"))]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, _builder: &mut AB) {}
 
-    #[cfg(any(
-        feature = "system_constraints",
-        feature = "chiplets_constraints",
-        feature = "range_constraints",
-        feature = "stack_constraints",
-        feature = "decoder_constraints"
-    ))]
+    #[cfg(feature = "constraints")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
         enforce_main_constraints(builder);
         #[cfg(feature = "bus_active")]

@@ -23,13 +23,9 @@ use crate::{
 
 #[rustfmt::skip]
 pub mod chiplets;
-#[cfg(feature = "decoder_constraints")]
 pub mod decoder;
-#[cfg(feature = "range_constraints")]
 pub mod range;
-#[cfg(feature = "stack_constraints")]
 pub mod stack;
-#[cfg(feature = "system_constraints")]
 pub mod system;
 
 /// Enforces all MidenVM constraints on the main trace
@@ -51,23 +47,18 @@ where
         builder.periodic_evals().try_into().expect("Wrong number of periodic values");
 
     // SYSTEM MAIN CONSTRAINTS
-    #[cfg(feature = "system_constraints")]
     system::enforce_main_system_constraints(builder, local, next);
 
     // STACK MAIN CONSTRAINTS
-    #[cfg(feature = "stack_constraints")]
     stack::enforce_main_stack_constraints(builder, local, next);
 
     // DECODER MAIN CONSTRAINTS
-    #[cfg(feature = "decoder_constraints")]
     decoder::enforce_main_decoder_constraints(builder, local, next);
 
     // RANGE CHECKER MAIN CONSTRAINTS
-    #[cfg(feature = "range_constraints")]
     range::enforce_main_range_constraints(builder, local, next);
 
     // CHIPLETS MAIN CONSTRAINTS
-    #[cfg(feature = "chiplets_constraints")]
     chiplets::enforce_main_chiplets_constraints(builder, local, next, &periodic_values);
 }
 
@@ -103,7 +94,6 @@ where
     let (aux_current, aux_next) = (aux.row_slice(0).unwrap(), aux.row_slice(1).unwrap());
 
     // STACK BUS CONSTRAINTS
-    #[cfg(feature = "stack_constraints")]
     stack::bus::enforce_stack_bus_constraints(
         builder,
         alpha,
@@ -116,7 +106,6 @@ where
     );
 
     // DECODER BUS CONSTRAINTS
-    #[cfg(feature = "decoder_constraints")]
     decoder::bus::enforce_decoder_bus_constraints(
         builder,
         alpha,
@@ -128,11 +117,9 @@ where
     );
 
     // RANGE CHECKER BUS CONSTRAINTS
-    #[cfg(feature = "range_constraints")]
     range::bus::enforce_range_bus_constraints(builder, local);
 
     // CHIPLETS BUS CONSTRAINTS
-    #[cfg(feature = "chiplets_constraints")]
     chiplets::bus::enforce_chiplets_bus_constraints(
         builder,
         alpha,
