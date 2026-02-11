@@ -4,7 +4,6 @@
 
 #### Enhancements
 
-- Added module documentation for `core/src/chiplets/hasher` module ([#TBD](https://github.com/0xMiden/miden-vm/pull/TBD)).
 - Added initial `math::u128` functions for lib/core/math runtime. ([#2438](https://github.com/0xMiden/miden-vm/pull/2438)).
 - Added `procedure_names` to `DebugInfo` for storing procedure name mappings by MAST root digest, enabling debuggers to resolve human-readable procedure names during execution (#[2474](https://github.com/0xMiden/miden-vm/pull/2474)).
 - Added constants support as an immediate value of the repeat statement ([#2548](https://github.com/0xMiden/miden-vm/pull/2548)).
