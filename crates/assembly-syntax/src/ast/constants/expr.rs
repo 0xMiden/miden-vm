@@ -369,6 +369,7 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 
 /// Represents the set of binary arithmetic operators supported in Miden Assembly syntax.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConstantOp {
     Add,
