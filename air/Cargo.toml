@@ -21,7 +21,7 @@ doctest = false
 default = ["std"]
 std = ["miden-core/std", "thiserror/std"]
 concurrent = ["std"]
-testing = []
+testing = ["std"]
 
 [dependencies]
 # Miden dependencies

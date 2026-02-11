@@ -11,6 +11,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::{
     MainTraceRow,
+    constraints::tagging::TaggingAirBuilderExt,
     trace::{RANGE_CHECK_TRACE_OFFSET, range},
 };
 
@@ -46,13 +47,15 @@ where
     AB: MidenAirBuilder,
 {
     // First row: V[0] = 0
-    builder.when_first_row().assert_zero(local.range[RANGE_V_COL_IDX].clone());
+    builder.tagged(2, "range.main.v.first_row", |b| {
+        b.when_first_row().assert_zero(local.range[RANGE_V_COL_IDX].clone());
+    });
 
     // Last row: V[last] = 65535 (2^16 - 1)
     let sixty_five_k = AB::Expr::from_u32(65535);
-    builder
-        .when_last_row()
-        .assert_eq(local.range[RANGE_V_COL_IDX].clone(), sixty_five_k);
+    builder.tagged(3, "range.main.v.last_row", |b| {
+        b.when_last_row().assert_eq(local.range[RANGE_V_COL_IDX].clone(), sixty_five_k);
+    });
 }
 
 /// Enforces the transition constraint for the range checker V column.
@@ -82,15 +85,17 @@ pub fn enforce_range_transition_constraint<AB>(
     let two_one_eight_seven = AB::Expr::from_u16(2187);
 
     // Note: Extra factor of change_v allows V to stay constant (change_v = 0) during padding
-    builder.when_transition().assert_zero(
-        change_v.clone()
-            * (change_v.clone() - one_expr)
-            * (change_v.clone() - three)
-            * (change_v.clone() - nine)
-            * (change_v.clone() - twenty_seven)
-            * (change_v.clone() - eighty_one)
-            * (change_v.clone() - two_forty_three)
-            * (change_v.clone() - seven_twenty_nine)
-            * (change_v - two_one_eight_seven),
-    );
+    builder.tagged(4, "range.main.v.transition", |b| {
+        b.when_transition().assert_zero(
+            change_v.clone()
+                * (change_v.clone() - one_expr)
+                * (change_v.clone() - three)
+                * (change_v.clone() - nine)
+                * (change_v.clone() - twenty_seven)
+                * (change_v.clone() - eighty_one)
+                * (change_v.clone() - two_forty_three)
+                * (change_v.clone() - seven_twenty_nine)
+                * (change_v - two_one_eight_seven),
+        );
+    });
 }

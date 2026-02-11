@@ -18,6 +18,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 
 use crate::{
     MainTraceRow,
+    constraints::tagging::TaggingAirBuilderExt,
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -82,8 +83,12 @@ where
     };
 
     // Boundary constraints: b_range must start and end at 0
-    builder.when_first_row().assert_zero_ext(b_local_val.into());
-    builder.when_last_row().assert_zero_ext(b_local_val.into());
+    builder.tagged(5, "range.bus.first_row", |b| {
+        b.when_first_row().assert_zero_ext(b_local_val.into());
+    });
+    builder.tagged(6, "range.bus.last_row", |b| {
+        b.when_last_row().assert_zero_ext(b_local_val.into());
+    });
 
     let alpha = &alpha_val;
     let b_local = b_local_val;
@@ -149,7 +154,15 @@ where
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
-    builder.when_transition().assert_zero_ext(
-        b_next_term - b_term - rc_term + s0_term + s1_term + s2_term + s3_term + m0_term + m1_term,
-    );
+    builder.tagged(7, "range.bus.transition", |b| {
+        b.when_transition().assert_zero_ext(
+            b_next_term - b_term - rc_term
+                + s0_term
+                + s1_term
+                + s2_term
+                + s3_term
+                + m0_term
+                + m1_term,
+        );
+    });
 }
