@@ -450,10 +450,7 @@ fn test_external_node_decorator_sequencing() {
     main_forest.make_root(external_id);
 
     let program = Program::new(main_forest.into(), external_id);
-    let mut host =
-        crate::test_utils::test_consistency_host::TestConsistencyHost::with_kernel_forest(
-            Arc::new(lib_forest),
-        );
+    let mut host = crate::test_utils::TestHost::with_kernel_forest(Arc::new(lib_forest));
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
