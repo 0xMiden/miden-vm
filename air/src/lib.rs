@@ -42,7 +42,6 @@ use constraints::enforce_bus_constraints;
     )
 ))]
 use constraints::enforce_main_constraints;
-#[cfg(feature = "human_readable")]
 use p3_miden_air::BusType;
 
 #[cfg(feature = "human_readable")]
@@ -288,9 +287,23 @@ where
         feature = "decoder_constraints"
     ))]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(inner, builder);
+        <MidenVM as p3_miden_air::MidenAir<miden_core::Felt, EF>>::eval::<AB>(&self.inner, builder);
     }
 }
+
+#[cfg(all(
+    feature = "human_readable",
+    not(any(
+        feature = "system_constraints",
+        feature = "chiplets_constraints",
+        feature = "range_constraints",
+        feature = "stack_constraints",
+        feature = "decoder_constraints"
+    ))
+))]
+compile_error!(
+    "Please enable at least one of the constraints features when using human_readable feature"
+);
 
 /// MidenAir implementation for ProcessorAir that uses the constraints entry points defined in the
 /// constraints module when the human_readable feature is enabled.
