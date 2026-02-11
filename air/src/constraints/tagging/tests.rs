@@ -139,5 +139,60 @@ fn dump_constraint_ood_evals() {
         println!("{id} {namespace} {value}");
     }
 
+    let expected = expected_ood_evals();
+    assert_eq!(builder.records().len(), expected.len());
+    for (record, expected) in builder.records().iter().zip(expected.iter()) {
+        assert_eq!(record.id, expected.id);
+        assert_eq!(record.namespace, expected.namespace);
+        assert_eq!(record.value, expected.value);
+    }
     assert_eq!(builder.records().len(), CURRENT_MAX_ID + 1);
+}
+
+fn expected_ood_evals() -> [EvalRecord; 8] {
+    [
+        EvalRecord {
+            id: 0,
+            namespace: "system.clk.first_row",
+            value: QuadFelt::new([Felt::new(1065013626484053923), Felt::ZERO]),
+        },
+        EvalRecord {
+            id: 1,
+            namespace: "system.clk.transition",
+            value: QuadFelt::new([Felt::new(5561241394822338942), Felt::ZERO]),
+        },
+        EvalRecord {
+            id: 2,
+            namespace: "range.main.v.first_row",
+            value: QuadFelt::new([Felt::new(1112338059331632069), Felt::ZERO]),
+        },
+        EvalRecord {
+            id: 3,
+            namespace: "range.main.v.last_row",
+            value: QuadFelt::new([Felt::new(13352757668188868927), Felt::ZERO]),
+        },
+        EvalRecord {
+            id: 4,
+            namespace: "range.main.v.transition",
+            value: QuadFelt::new([Felt::new(12797082443503681195), Felt::ZERO]),
+        },
+        EvalRecord {
+            id: 5,
+            namespace: "range.bus.first_row",
+            value: QuadFelt::new([Felt::new(12608813705579209032), Felt::new(3989096837606726344)]),
+        },
+        EvalRecord {
+            id: 6,
+            namespace: "range.bus.last_row",
+            value: QuadFelt::new([Felt::new(377034121616931435), Felt::new(3703916915744149174)]),
+        },
+        EvalRecord {
+            id: 7,
+            namespace: "range.bus.transition",
+            value: QuadFelt::new([
+                Felt::new(10365289165200035540),
+                Felt::new(16469718665506609592),
+            ]),
+        },
+    ]
 }
