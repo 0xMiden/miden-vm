@@ -3,8 +3,8 @@ use core::ops::ControlFlow;
 
 use crate::{
     BreakReason, Host, ONE, Stopper, ZERO,
-    continuation_stack::{Continuation, ContinuationStack},
-    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    continuation_stack::Continuation,
+    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{MastForest, MastNodeId, SplitNode},
     operation::OperationError,
     processor::{Processor, StackInterface},
@@ -16,87 +16,85 @@ use crate::{
 
 /// Executes a Split node from the start.
 #[inline(always)]
-pub(super) fn start_split_node<P, S, T>(
-    processor: &mut P,
+pub(super) fn start_split_node<P, H, S, T>(
+    state: &mut ExecutionState<'_, P, H, S, T>,
     split_node: &SplitNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
-    continuation_stack: &mut ContinuationStack,
-    host: &mut impl Host,
-    tracer: &mut T,
-    stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
+    H: Host,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    tracer.start_clock_cycle(
-        processor,
+    state.tracer.start_clock_cycle(
+        state.processor,
         Continuation::StartNode(node_id),
-        continuation_stack,
+        state.continuation_stack,
         current_forest,
     );
 
     // Execute decorators that should be executed before entering the node
-    processor.execute_before_enter_decorators(node_id, current_forest, host)?;
+    state
+        .processor
+        .execute_before_enter_decorators(node_id, current_forest, state.host)?;
 
-    let condition = processor.stack().get(0);
+    let condition = state.processor.stack().get(0);
 
     // drop the condition from the stack
-    processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
+    state.processor.stack_mut().decrement_size();
+    state.tracer.decrement_stack_size();
 
     // execute the appropriate branch
-    continuation_stack.push_finish_split(node_id);
+    state.continuation_stack.push_finish_split(node_id);
     if condition == ONE {
-        continuation_stack.push_start_node(split_node.on_true());
+        state.continuation_stack.push_start_node(split_node.on_true());
     } else if condition == ZERO {
-        continuation_stack.push_start_node(split_node.on_false());
+        state.continuation_stack.push_start_node(split_node.on_false());
     } else {
         let err = OperationError::NotBinaryValueIf { value: condition };
         return ControlFlow::Break(BreakReason::Err(err.with_context(
             current_forest,
             node_id,
-            host,
+            state.host,
         )));
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.
-    finalize_clock_cycle(processor, tracer, stopper, current_forest)
+    finalize_clock_cycle(state.processor, state.tracer, state.stopper, current_forest)
 }
 
 /// Executes the finish phase of a Split node.
 #[inline(always)]
-pub(super) fn finish_split_node<P, S, T>(
-    processor: &mut P,
+pub(super) fn finish_split_node<P, H, S, T>(
+    state: &mut ExecutionState<'_, P, H, S, T>,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
-    continuation_stack: &mut ContinuationStack,
-    host: &mut impl Host,
-    tracer: &mut T,
-    stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
+    H: Host,
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    tracer.start_clock_cycle(
-        processor,
+    state.tracer.start_clock_cycle(
+        state.processor,
         Continuation::FinishSplit(node_id),
-        continuation_stack,
+        state.continuation_stack,
         current_forest,
     );
 
     // Finalize the clock cycle corresponding to the END operation.
     finalize_clock_cycle_with_continuation(
-        processor,
-        tracer,
-        stopper,
+        state.processor,
+        state.tracer,
+        state.stopper,
         || Some(Continuation::AfterExitDecorators(node_id)),
         current_forest,
     )?;
 
-    processor.execute_after_exit_decorators(node_id, current_forest, host)
+    state
+        .processor
+        .execute_after_exit_decorators(node_id, current_forest, state.host)
 }
