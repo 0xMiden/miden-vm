@@ -537,8 +537,12 @@ impl FastProcessor {
         {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { basic_block_node_id, continuation } => {
-                    self.op_emit(host, current_forest, basic_block_node_id).await?;
+                InternalBreakReason::Emit {
+                    basic_block_node_id,
+                    op_idx,
+                    continuation,
+                } => {
+                    self.op_emit(host, current_forest, basic_block_node_id, op_idx).await?;
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
                     finish_emit_op_execution(
