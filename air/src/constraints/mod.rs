@@ -16,7 +16,10 @@ use core::borrow::Borrow;
 use miden_core::{field::PrimeCharacteristicRing, utils::Matrix};
 use miden_crypto::stark::air::MidenAirBuilder;
 
-use crate::{MainTraceRow, NUM_PERIODIC_VALUES};
+use crate::{
+    MainTraceRow, NUM_PERIODIC_VALUES,
+    trace::{AUX_TRACE_RAND_ELEMENTS, AUX_TRACE_WIDTH},
+};
 
 #[rustfmt::skip]
 pub mod chiplets;
@@ -86,18 +89,13 @@ where
     let periodic_values: [_; NUM_PERIODIC_VALUES] =
         builder.periodic_evals().try_into().expect("Wrong number of periodic values");
 
-    // FIXME: move these constants to a more appropriate place, and ensure they are consistent
-    // across all constraints modules
-    const MAX_BETA_CHALLENGE_POWER: usize = 15;
-    const AUX_WIDTH: usize = 8;
-
     let (&alpha, beta_challenges) = builder
         .permutation_randomness()
         .split_first()
         .expect("Wrong number of randomness");
-    let beta_challenges: [_; MAX_BETA_CHALLENGE_POWER] =
+    let beta_challenges: [_; AUX_TRACE_RAND_ELEMENTS - 1] =
         beta_challenges.try_into().expect("Wrong number of randomness");
-    let aux_bus_boundary_values: [_; AUX_WIDTH] = builder
+    let aux_bus_boundary_values: [_; AUX_TRACE_WIDTH] = builder
         .aux_bus_boundary_values()
         .try_into()
         .expect("Wrong number of aux bus boundary values");
