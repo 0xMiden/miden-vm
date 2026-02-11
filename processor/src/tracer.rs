@@ -257,7 +257,7 @@ pub enum OperationHelperRegisters {
     /// - `ev`: evaluation point `alpha / x`, where `alpha` is the verifier challenge and `x` is the
     ///   domain point.
     /// - `es`: `ev^2`, i.e. `(alpha / x)^2`.
-    /// - `x`: the domain point, computed as `poe * tau_factor * DOMAIN_OFFSET`.
+    /// - `x`: the domain point, computed as `poe * tau_factor`.
     /// - `x_inv`: the multiplicative inverse of `x`.
     FriExt2Fold4 {
         ev: QuadFelt,
