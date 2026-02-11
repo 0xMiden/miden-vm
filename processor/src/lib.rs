@@ -30,8 +30,10 @@ use crate::{
     trace::{ExecutionTrace, RowIndex},
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 mod test_utils;
+#[cfg(any(test, feature = "testing"))]
+pub use test_utils::{ProcessorStateSnapshot, TestHost, TraceCollector};
 
 #[cfg(test)]
 mod tests;
