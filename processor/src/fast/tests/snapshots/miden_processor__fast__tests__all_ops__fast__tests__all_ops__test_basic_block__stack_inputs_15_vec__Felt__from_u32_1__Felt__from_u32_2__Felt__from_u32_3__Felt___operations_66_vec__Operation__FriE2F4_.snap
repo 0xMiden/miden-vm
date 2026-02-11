@@ -16,8 +16,8 @@ Err(
             ),
         },
         source_file: None,
-        err: InvalidFriDomainSegment(
-            10,
+        err: FriError(
+            "domain segment value cannot exceed 3, but was 10",
         ),
     },
 )

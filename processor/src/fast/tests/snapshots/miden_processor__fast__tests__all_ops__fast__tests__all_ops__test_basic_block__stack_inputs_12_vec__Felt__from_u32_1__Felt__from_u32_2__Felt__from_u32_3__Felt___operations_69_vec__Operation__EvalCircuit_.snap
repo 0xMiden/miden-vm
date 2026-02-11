@@ -16,8 +16,8 @@ Err(
             ),
         },
         source_file: None,
-        error: NumEvalIsNotWordAlignedOrIsEmpty(
-            3,
+        error: AceError(
+            "num of evaluation gates should be word aligned and non-zero but was 3",
         ),
     },
 )

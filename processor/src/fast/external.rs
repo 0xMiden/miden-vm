@@ -3,7 +3,7 @@ use miden_core::mast::MastForest;
 use crate::{
     ExecutionError, Host,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::OperationError,
+    errors::{OperationError, procedure_not_found_with_context},
 };
 
 // HELPERS
@@ -20,7 +20,7 @@ use crate::{
 ///
 /// For example, in MASM, the user would see an error like:
 /// ```masm
-/// x no MAST forest contains the procedure with root digest <digest>
+/// x procedure with root digest <digest> could not be found
 ///     ,-[::\$exec:5:13]
 ///   4 |         begin
 ///   5 |             call.bar::dummy_proc
@@ -37,21 +37,15 @@ pub(super) fn maybe_use_caller_error_context(
     continuation_stack: &ContinuationStack,
     host: &mut impl Host,
 ) -> ExecutionError {
-    // We only care about operation errors...
-    let ExecutionError::OperationError { label: _, source_file: _, err: inner_err } = &original_err
-    else {
-        return original_err;
+    // We only care about procedure-not-found errors or malformed MAST forest errors.
+    let root_digest = match &original_err {
+        ExecutionError::ProcedureNotFound { root_digest, .. } => *root_digest,
+        ExecutionError::OperationError {
+            err: OperationError::MalformedMastForestInHost { root_digest },
+            ..
+        } => *root_digest,
+        _ => return original_err,
     };
-
-    // ... that are related to external node resolution.
-    let is_external_resolution_err = matches!(
-        inner_err,
-        OperationError::NoMastForestWithProcedure { .. }
-            | OperationError::MalformedMastForestInHost { .. }
-    );
-    if !is_external_resolution_err {
-        return original_err;
-    }
 
     // Look for caller context in the continuation stack
     let Some(top_continuation) = continuation_stack.peek_continuation() else {
@@ -69,6 +63,16 @@ pub(super) fn maybe_use_caller_error_context(
         _ => return original_err,
     };
 
-    // We were able to get the parent node ID, so use that to build the error context
-    inner_err.clone().with_context(current_forest, *parent_node_id, host)
+    // We were able to get the parent node ID, so rebuild the error with the caller's context.
+    // For ProcedureNotFound, we reconstruct with the parent's source location.
+    // For MalformedMastForestInHost, we wrap in OperationError with the parent's context.
+    match &original_err {
+        ExecutionError::ProcedureNotFound { .. } => {
+            procedure_not_found_with_context(root_digest, current_forest, *parent_node_id, host)
+        },
+        ExecutionError::OperationError { err, .. } => {
+            err.clone().with_context(current_forest, *parent_node_id, host)
+        },
+        _ => original_err,
+    }
 }

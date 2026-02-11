@@ -41,7 +41,7 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use errors::{ExecutionError, MemoryError};
+pub use errors::{ExecutionError, HostError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{

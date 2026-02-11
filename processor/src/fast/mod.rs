@@ -552,13 +552,7 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            callee_hash,
-                            host,
-                            |digest| OperationError::DynamicNodeNotFound { digest },
-                            current_forest,
-                            dyn_node_id,
-                        )
+                        .load_mast_forest(callee_hash, host, current_forest, dyn_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -583,13 +577,7 @@ impl FastProcessor {
                 } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            procedure_hash,
-                            host,
-                            |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
-                            current_forest,
-                            external_node_id,
-                        )
+                        .load_mast_forest(procedure_hash, host, current_forest, external_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -699,7 +687,7 @@ impl FastProcessor {
                     let process = &mut self.state();
                     if let Err(err) = host.on_debug(process, options) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { err },
+                            crate::errors::HostError::DebugHandlerError { err }.into(),
                         ));
                     }
                 }
@@ -709,7 +697,8 @@ impl FastProcessor {
                     let process = &mut self.state();
                     if let Err(err) = host.on_trace(process, *id) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { trace_id: *id, err },
+                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
+                                .into(),
                         ));
                     }
                 }
@@ -725,15 +714,17 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl Host,
-        get_mast_forest_failed: impl Fn(Word) -> OperationError,
         current_forest: &MastForest,
         node_id: MastNodeId,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
-            .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest))
-            .map_exec_err(current_forest, node_id, host)?;
+        let mast_forest = host.get_mast_forest(&node_digest).await.ok_or_else(|| {
+            crate::errors::procedure_not_found_with_context(
+                node_digest,
+                current_forest,
+                node_id,
+                host,
+            )
+        })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.
