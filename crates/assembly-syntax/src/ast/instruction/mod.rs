@@ -275,6 +275,7 @@ pub enum Instruction {
 
     // ----- debug decorators --------------------------------------------------------------------
     Debug(DebugOptions),
+    DebugVar(miden_core::operations::DebugVarInfo),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
@@ -283,9 +284,12 @@ pub enum Instruction {
 }
 
 impl Instruction {
-    /// Returns true if the instruction should yield a breakpoint.
-    pub const fn should_break(&self) -> bool {
-        matches!(self, Self::Breakpoint)
+    /// Returns true if this instruction has a textual representation in Miden Assembly.
+    ///
+    /// Some instructions (like [`DebugVar`](Self::DebugVar)) are compiler-internal and have
+    /// no surface syntax. They should be skipped during pretty-printing.
+    pub const fn has_textual_representation(&self) -> bool {
+        !matches!(self, Self::DebugVar(_))
     }
 }
 

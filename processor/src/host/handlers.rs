@@ -8,7 +8,7 @@ use core::{error::Error, fmt, fmt::Debug};
 
 use miden_core::{
     events::{EventId, EventName, SystemEvent},
-    operations::DebugOptions,
+    operations::{DebugOptions, DebugVarInfo},
 };
 
 use crate::{ExecutionError, ProcessorState, advice::AdviceMutation};
@@ -218,4 +218,7 @@ pub trait DebugHandler: Sync {
         );
         Ok(())
     }
+
+    /// This function is invoked when a debug variable annotation is encountered.
+    fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 }

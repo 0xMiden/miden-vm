@@ -7,7 +7,7 @@ use miden_core::{
     crypto::merkle::InnerNodeInfo,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::DebugOptions,
+    operations::{DebugOptions, DebugVarInfo},
     precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
@@ -116,6 +116,15 @@ pub trait Host {
         let mut handler = debug::DefaultDebugHandler::default();
         handler.on_trace(process, trace_id)
     }
+
+    /// Handles a debug variable annotation emitted from the VM.
+    ///
+    /// Unlike [`on_debug`](Self::on_debug), which is triggered by explicit `debug` instructions,
+    /// `on_debug_var` is a parallel annotation layer: there can be N debug var annotations per
+    /// operation, they carry heap-allocated [`DebugVarInfo`] payloads, and they are infallible
+    /// (the host may not reject them). This separation keeps the hot path for `on_debug` lean
+    /// while still allowing the debugger to track source-level variable locations.
+    fn on_debug_var(&mut self, _process: &ProcessorState, _var_info: &DebugVarInfo) {}
 
     /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
     ///
