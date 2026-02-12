@@ -50,12 +50,14 @@ pub fn enforce_main<AB>(
 ) where
     AB: MidenAirBuilder,
 {
+    let clk = local.clk.clone();
+    let clk_next = next.clk.clone();
+
     // Clock boundary constraint: clk[0] = 0
-    builder.when_first_row().assert_zero(local.clk.clone());
+    builder.when_first_row().assert_zero(clk.clone());
 
     // Clock transition constraint: clk' = clk + 1
-    let one_expr: AB::Expr = AB::F::ONE.into();
     builder
         .when_transition()
-        .assert_eq(next.clk.clone(), local.clk.clone() + one_expr);
+        .assert_eq(clk_next, clk + AB::Expr::ONE);
 }
