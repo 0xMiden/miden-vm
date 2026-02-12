@@ -1,5 +1,5 @@
 use super::*;
-use crate::test_utils::test_consistency_host::TestConsistencyHost;
+use crate::test_utils::TestHost;
 
 #[test]
 fn test_advice_provider() {
@@ -145,7 +145,7 @@ fn test_advice_provider() {
         (program, kernel_lib)
     };
 
-    let mut fast_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
+    let mut fast_host = TestHost::with_kernel_forest(kernel_lib.mast_forest().clone());
     let processor = FastProcessor::new(StackInputs::default())
         .with_advice(AdviceInputs::default())
         .with_debugging(true)
