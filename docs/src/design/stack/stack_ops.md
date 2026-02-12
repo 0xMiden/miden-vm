@@ -150,7 +150,7 @@ $$
 s_0' - s_n = 0 \text{ for } n \in [2, 9) \text{ | degree} = 1
 $$
 
-where $n$ is the depth of the element which is moved moved to the top of the stack.
+where $n$ is the depth of the element which is moved to the top of the stack.
 
 The effect of this operation on the rest of the stack is:
 * **Right shift** for elements between $0$ and $n-1$.

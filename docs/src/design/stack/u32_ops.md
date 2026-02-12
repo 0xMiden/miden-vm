@@ -4,7 +4,7 @@ sidebar_position: 5
 ---
 
 # u32 Operations
-In this section we describe semantics and AIR constraints of operations over u32 values (i.e., 32-bit unsigned integers) as they are implemented in Miden VM.
+In this section we describe semantics and AIR constraints of operations over u32 values (i.e., 32-bit unsigned integers) as they are implemented in Miden VM. Unless stated otherwise, $s_0$ denotes the top of the stack, $s_1$ the next element, $s_2$ the third element, and so on.
 
 ### Range checks
 Most operations described below require some number of 16-bit range checks (i.e., verifying that the value of a field element is smaller than $2^{16}$). The number of required range checks varies between $2$ and $4$, depending on the operation. However, to simplify the constraint system, we force each relevant operation to consume exactly $4$ range checks.
@@ -59,7 +59,7 @@ $$
 Thus, for a 64-bit value to encode a valid field element, either the lower 32 bits must be all zeros, or the upper 32 bits must not be all ones (which is $2^{32} - 1$).
 
 ## U32SPLIT
-Assume $a$ is the element at the top of the stack. The `U32SPLIT` operation computes $(b,c) \leftarrow a$, where $b$ contains the lower 32 bits of $a$, and $c$ contains the upper 32 bits of $a$. The output stack is `[b, c, ...]` with $b$ (low limb) on top. The diagram below illustrates this graphically.
+Assume $s_0$ is the element at the top of the stack. The `U32SPLIT` operation computes $(b,c) \leftarrow s_0$, where $b$ contains the lower 32 bits of $s_0$, and $c$ contains the upper 32 bits of $s_0$. The output stack is `[b, c, ...]` with $b$ (low limb) on top. The diagram below illustrates this graphically.
 
 ![u32split](../../img/design/stack/u32_operations/U32SPLIT.png)
 
@@ -83,11 +83,11 @@ The effect of this operation on the rest of the stack is:
 * **Right shift** starting from position $1$.
 
 ## U32ASSERT2
-Assume $a$ and $b$ are the elements at the top of the stack. The `U32ASSERT2` verifies that both $a$ and $b$ are smaller than $2^{32}$. The diagram below illustrates this graphically.
+Assume $s_0$ (top) and $s_1$ (next) are the elements at the top of the stack. The `U32ASSERT2` verifies that both $s_0$ and $s_1$ are smaller than $2^{32}$. The diagram below illustrates this graphically.
 
 ![u32assert2](../../img/design/stack/u32_operations/U32ASSERT2.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to low and high 16-bit limbs of $a$, and values in $h_2$ and $h_3$ to to low and high 16-bit limbs of $b$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_2$ and $h_3$ to low and high 16-bit limbs of $s_0$, and values in $h_0$ and $h_1$ to low and high 16-bit limbs of $s_1$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0' = 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
@@ -103,11 +103,11 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $0$ - i.e., the state of the stack does not change.
 
 ## U32ADD
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD` operation computes $(c,d) \leftarrow a + b$, where $c$ contains the low 32-bits of the result, and $d$ is the carry bit. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
+Assume $s_0$ and $s_1$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD` operation computes $(c,d) \leftarrow s_0 + s_1$, where $c$ contains the low 32-bits of the result, and $d$ is the carry bit. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
 
 ![u32add](../../img/design/stack/u32_operations/U32ADD.png)
 
-To facilitate this operation, the prover sets values in $h_0$, $h_1$, and $h_2$ to 16-bit limbs of $a+b$ with $h_0$ being the least significant limb. Value in $h_3$ is set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$, $h_1$, and $h_2$ to 16-bit limbs of $s_0 + s_1$ with $h_0$ being the least significant limb. Value in $h_3$ is set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0 + s_1 = 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
@@ -127,11 +127,14 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32ADD3
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32ADD3` operation computes $(d, e) \leftarrow a + b + c$, where $d$ contains the low 32-bits of the result and $e$ contains the carry. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
+Assume $s_0$, $s_1$, and $s_2$ are the values at the top of the stack which are known to be smaller than
+$2^{32}$. The `U32ADD3` operation computes $(\mathsf{sum}, \mathsf{carry}) \leftarrow s_0 + s_1 + s_2$,
+where $\mathsf{sum}$ contains the low 32 bits of the result and $\mathsf{carry}$ contains the
+high 32 bits. The diagram below illustrates this graphically.
 
 ![u32add3](../../img/design/stack/u32_operations/U32ADD3.png)
 
-To facilitate this operation, the prover sets values in $h_0$, $h_1$, and $h_2$ to 16-bit limbs of $a+b+c$ with $h_0$ being the least significant limb. Value in $h_3$ is set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$, $h_1$, and $h_2$ to 16-bit limbs of $s_0 + s_1 + s_2$ with $h_0$ being the least significant limb. Value in $h_3$ is set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0 + s_1 + s_2 = 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 1
@@ -151,14 +154,14 @@ The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $3$.
 
 ## U32SUB
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32SUB` operation computes $(c, d) \leftarrow a - b$, where $c$ contains the 32-bit result in two's complement, and $d$ is the borrow bit. The diagram below illustrates this graphically.
+Assume $s_0$ and $s_1$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32SUB` operation computes $(\text{borrow}, \text{diff}) \leftarrow s_1 - s_0$, where `diff` contains the 32-bit result in two's complement, and `borrow` is the borrow bit. The diagram below illustrates this graphically.
 
 ![u32sub](../../img/design/stack/u32_operations/U32SUB.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and the high 16-bit limbs of $a-b$ respectively. Values in $h_2$ and $h_3$ are set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and the high 16-bit limbs of $s_1 - s_0$ respectively. Values in $h_2$ and $h_3$ are set to $0$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
-s_1 = s_0 + s_1' + 2^{32} \cdot s_0' \text{ | degree} = 1
+s_1 = s_0 + s_1' - 2^{32} \cdot s_0' \text{ | degree} = 1
 $$
 
 $$
@@ -175,11 +178,11 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32MUL
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MUL` operation computes $(c, d) \leftarrow a \cdot b$, where $c$ and $d$ contain the low and the high 32-bits of the result respectively. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
+Assume $s_0$ and $s_1$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MUL` operation computes $(c, d) \leftarrow s_0 \cdot s_1$, where $c$ and $d$ contain the low and the high 32-bits of the result respectively. The output stack is `[c, d, ...]` with $c$ on top. The diagram below illustrates this graphically.
 
 ![u32mul](../../img/design/stack/u32_operations/U32MUL.png)
 
-To facilitate this operation, the prover sets values in $h_0, ..., h_3$ to 16-bit limbs of $a \cdot b$ with $h_0$ being the least significant limb. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0, ..., h_3$ to 16-bit limbs of $s_0 \cdot s_1$ with $h_0$ being the least significant limb. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0 \cdot s_1 = 2^{48} \cdot h_3 + 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 2
@@ -199,11 +202,14 @@ The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32MADD
-Assume $a$, $b$, $c$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32MADD` operation computes $(d, e) \leftarrow a + b \cdot c$, where $d$ and $e$ contain the low and the high 32-bits of $a + b \cdot c$ respectively. The output stack is `[d, e, ...]` with $d$ on top. The diagram below illustrates this graphically.
+Assume $s_0$, $s_1$, and $s_2$ are the values at the top of the stack which are known to be smaller than
+$2^{32}$. The `U32MADD` operation computes $(\mathsf{lo}, \mathsf{hi}) \leftarrow s_0 \cdot s_1 + s_2$,
+where $\mathsf{lo}$ and $\mathsf{hi}$ contain the low and the high 32 bits of the result. The
+diagram below illustrates this graphically.
 
 ![u32madd](../../img/design/stack/u32_operations/U32MADD.png)
 
-To facilitate this operation, the prover sets values in $h_0, ..., h_3$ to 16-bit limbs of $a + b \cdot c$ with $h_0$ being the least significant limb. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0, ..., h_3$ to 16-bit limbs of $s_0 \cdot s_1 + s_2$ with $h_0$ being the least significant limb. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_0 \cdot s_1 + s_2 = 2^{48} \cdot h_3 + 2^{32} \cdot h_2 + 2^{16} \cdot h_1 + h_0 \text{ | degree} = 2
@@ -219,17 +225,21 @@ $$
 
 In addition to the above constraints, we also need to verify that values in $h_0, ..., h_3$ are smaller than $2^{16}$, which we can do using 16-bit range checks as described [previously](#range-checks). Also, we need to make sure that values in $h_0, ..., h_3$, when combined, form a valid field element, which we can do by putting a nondeterministic value $m$ into helper register $h_4$ and using the technique described [here](#checking-element-validity).
 
-**Note**: that the above constraints guarantee the correctness of the operation iff $a + b \cdot c$ cannot overflow field modules (which is the case for the field with modulus $2^{64} - 2^{32} + 1$).
+**Note**: that the above constraints guarantee the correctness of the operation iff $s_0 \cdot s_1 + s_2$ cannot overflow field modules (which is the case for the field with modulus $2^{64} - 2^{32} + 1$).
 
 The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $3$.
 
 ## U32DIV
-Assume $a$ and $b$ are the values at the top of the stack which are known to be smaller than $2^{32}$. The `U32DIV` operation computes $(d, c) \leftarrow a / b$, where $d$ contains the remainder and $c$ contains the quotient. The output stack is `[d, c, ...]` with remainder on top. The diagram below illustrates this graphically.
+Assume the divisor $s_0$ is at the top of the stack and the dividend $s_1$ is below it, and both are
+smaller than $2^{32}$. The `U32DIV` operation computes $(r, q) \leftarrow s_1 / s_0$, where $r$ is
+the remainder and $q$ is the quotient. The diagram below illustrates this graphically.
 
 ![u32div](../../img/design/stack/u32_operations/U32DIV.png)
 
-To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to 16-bit limbs of $a - c$, and values in $h_2$ and $h_3$ to 16-bit limbs of $b - d - 1$. Thus, stack transition for this operation must satisfy the following constraints:
+To facilitate this operation, the prover sets values in $h_0$ and $h_1$ to the low and high
+16-bit limbs of $(s_1 - q)$, and values in $h_2$ and $h_3$ to the low and high 16-bit limbs of
+$(s_0 - r - 1)$. Thus, stack transition for this operation must satisfy the following constraints:
 
 $$
 s_1 = s_0 \cdot s_1' + s_0' \text{ | degree} = 2
@@ -243,13 +253,14 @@ $$
 s_0 - s_0' - 1= 2^{16} \cdot h_3 + h_2 \text{ | degree} = 1
 $$
 
-The second constraint enforces that $s_1' \leq s_1$, while the third constraint enforces that $s_0' < s_0$.
+The second constraint enforces that $q \leq s_1$ (equivalently $s_1' \leq s_1$), while the third
+constraint enforces that $r < s_0$ (equivalently $s_0' < s_0$).
 
 The effect of this operation on the rest of the stack is:
 * **No change** starting from position $2$.
 
 ## U32AND
-Assume $a$ and $b$ are the values at the top of the stack. The `U32AND` operation computes $c \leftarrow (a \land b)$, where $c$ is the result of performing a bitwise AND on $a$ and $b$. The diagram below illustrates this graphically.
+Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32AND` operation computes $c \leftarrow (s_0 \land s_1)$, where $c$ is the result of performing a bitwise AND on $s_0$ and $s_1$. The diagram below illustrates this graphically.
 
 ![u32and](../../img/design/stack/u32_operations/U32AND.png)
 
@@ -267,7 +278,7 @@ The effect of this operation on the rest of the stack is:
 * **Left shift** starting from position $2$.
 
 ## U32XOR
-Assume $a$ and $b$ are the values at the top of the stack. The `U32XOR` operation computes $c \leftarrow (a \oplus b)$, where $c$ is the result of performing a bitwise XOR on $a$ and $b$. The diagram below illustrates this graphically.
+Assume $s_0$ and $s_1$ are the values at the top of the stack. The `U32XOR` operation computes $c \leftarrow (s_0 \oplus s_1)$, where $c$ is the result of performing a bitwise XOR on $s_0$ and $s_1$. The diagram below illustrates this graphically.
 
 ![u32xor](../../img/design/stack/u32_operations/U32XOR.png)
 

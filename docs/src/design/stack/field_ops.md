@@ -222,7 +222,7 @@ $$
 `exp` in the next frame is half of `exp` in the current frame (accounting for even/odd).
 
 $$
-s_3' - (s_3 * 2 + s_0')  = 0 \text{ | degree} = 1
+s_3 - (s_3' * 2 + s_0')  = 0 \text{ | degree} = 1
 $$
 
 The effect on the rest of the stack is:
@@ -250,13 +250,13 @@ $$
 The third stack element should satisfy the following constraint.
 
 $$
-s_2' - (s_0 + s_1) \cdot (s_2 + s_3) + s_0 \cdot s_2 = 0 \text{ | degree} = 2
+s_2' - (s_2 \cdot s_0 + 7 \cdot s_3 \cdot s_1) = 0 \text{ | degree} = 2
 $$
 
 The fourth stack element should satisfy the following constraint.
 
 $$
-s_3' - s_1 \cdot s_3 + 2 \cdot s_0 \cdot s_2 = 0 \text{ | degree} = 2
+s_3' - ((s_2 + s_3) \cdot (s_0 + s_1) - s_2 \cdot s_0 - s_3 \cdot s_1) = 0 \text{ | degree} = 2
 $$
 
 The effect on the rest of the stack is:

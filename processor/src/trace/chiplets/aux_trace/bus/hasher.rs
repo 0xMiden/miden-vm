@@ -274,9 +274,9 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
     let node_index = main_trace.stack_element(5, row);
     let merkle_tree_root = main_trace.stack_word(6, row);
 
-    // Build input state with node at RATE1 (indices 4..8)
+    // Build input state with node at RATE0 (indices 0..4)
     let mut node_state = [ZERO; hasher::STATE_WIDTH];
-    node_state[4..8].copy_from_slice(node_value.as_elements());
+    node_state[0..4].copy_from_slice(node_value.as_elements());
 
     let input = HasherMessage {
         transition_label: Felt::from_u8(MP_VERIFY_LABEL + 16),
@@ -286,9 +286,9 @@ pub(super) fn build_mpverify_request<E: ExtensionField<Felt>>(
         source: "mpverify input",
     };
 
-    // Build output state with root at RATE1 (indices 4..8)
+    // Build output state with root at RATE0 (indices 0..4)
     let mut root_state = [ZERO; hasher::STATE_WIDTH];
-    root_state[4..8].copy_from_slice(merkle_tree_root.as_elements());
+    root_state[0..4].copy_from_slice(merkle_tree_root.as_elements());
 
     let output = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
@@ -328,9 +328,9 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
     let new_node_value = main_trace.stack_word(10, row);
     let new_root = main_trace.stack_word(0, row + 1);
 
-    // Build old node input state with value at RATE1 (indices 4..8)
+    // Build old node input state with value at RATE0 (indices 0..4)
     let mut old_node_state = [ZERO; hasher::STATE_WIDTH];
-    old_node_state[4..8].copy_from_slice(old_node_value.as_elements());
+    old_node_state[0..4].copy_from_slice(old_node_value.as_elements());
 
     let input_old = HasherMessage {
         transition_label: Felt::from_u8(MR_UPDATE_OLD_LABEL + 16),
@@ -340,9 +340,9 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate input_old",
     };
 
-    // Build old root output state with root at RATE1 (indices 4..8)
+    // Build old root output state with root at RATE0 (indices 0..4)
     let mut old_root_state = [ZERO; hasher::STATE_WIDTH];
-    old_root_state[4..8].copy_from_slice(old_root.as_elements());
+    old_root_state[0..4].copy_from_slice(old_root.as_elements());
 
     let output_old = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
@@ -352,9 +352,9 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate output_old",
     };
 
-    // Build new node input state with value at RATE1 (indices 4..8)
+    // Build new node input state with value at RATE0 (indices 0..4)
     let mut new_node_state = [ZERO; hasher::STATE_WIDTH];
-    new_node_state[4..8].copy_from_slice(new_node_value.as_elements());
+    new_node_state[0..4].copy_from_slice(new_node_value.as_elements());
 
     let input_new = HasherMessage {
         transition_label: Felt::from_u8(MR_UPDATE_NEW_LABEL + 16),
@@ -364,9 +364,9 @@ pub(super) fn build_mrupdate_request<E: ExtensionField<Felt>>(
         source: "mrupdate input_new",
     };
 
-    // Build new root output state with root at RATE1 (indices 4..8)
+    // Build new root output state with root at RATE0 (indices 0..4)
     let mut new_root_state = [ZERO; hasher::STATE_WIDTH];
-    new_root_state[4..8].copy_from_slice(new_root.as_elements());
+    new_root_state[0..4].copy_from_slice(new_root.as_elements());
 
     let output_new = HasherMessage {
         transition_label: Felt::from_u8(RETURN_HASH_LABEL + 32),
@@ -447,7 +447,7 @@ where
                     addr_next,
                     node_index,
                     hasher_state: [
-                        ZERO, ZERO, ZERO, ZERO, state[0], state[1], state[2], state[3], ZERO, ZERO,
+                        state[0], state[1], state[2], state[3], ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
                         ZERO, ZERO,
                     ],
                     source: "hasher",
@@ -463,7 +463,7 @@ where
                     addr_next,
                     node_index,
                     hasher_state: [
-                        ZERO, ZERO, ZERO, ZERO, state[4], state[5], state[6], state[7], ZERO, ZERO,
+                        state[4], state[5], state[6], state[7], ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
                         ZERO, ZERO,
                     ],
                     source: "hasher",
@@ -493,7 +493,7 @@ where
                 addr_next,
                 node_index,
                 hasher_state: [
-                    ZERO, ZERO, ZERO, ZERO, state[0], state[1], state[2], state[3], ZERO, ZERO,
+                    state[0], state[1], state[2], state[3], ZERO, ZERO, ZERO, ZERO, ZERO, ZERO,
                     ZERO, ZERO,
                 ],
                 source: "hasher",
@@ -526,7 +526,7 @@ where
         if selector1 == ONE && selector2 == ZERO && selector3 == ZERO {
             // Build the value from the hasher state just after absorption of new elements.
             // Trace is in sponge order: RATE0 at indices 0..4, RATE1 at indices 4..8.
-            // RespanBlockMessage uses alphas[8..16] for its 8-element state.
+            // Rate is mapped to lanes 0..7 with capacity lanes zeroed.
             let state_nxt = main_trace.chiplet_hasher_state(row + 1);
 
             let hasher_message = HasherMessage {
@@ -534,20 +534,18 @@ where
                 addr_next,
                 node_index,
                 hasher_state: [
-                    ZERO,
-                    ZERO,
-                    ZERO,
-                    ZERO,
-                    // RATE0 from sponge indices 0..4
                     state_nxt[0],
                     state_nxt[1],
                     state_nxt[2],
                     state_nxt[3],
-                    // RATE1 from sponge indices 4..8
                     state_nxt[4],
                     state_nxt[5],
                     state_nxt[6],
                     state_nxt[7],
+                    ZERO,
+                    ZERO,
+                    ZERO,
+                    ZERO,
                 ],
                 source: "hasher",
             };
@@ -716,10 +714,14 @@ where
         let header =
             alphas[0] + alphas[1] * self.transition_label + alphas[2] * (self.addr_next - ONE);
 
-        // Use alphas[8..16] for the 8-element rate state directly.
-        // The response (f_abp) places the absorbed rate at hasher_state[4..12],
-        // which maps to alphas[8..16], so the request must also use alphas[8..16].
-        header + build_value(&alphas[8..16], self.state)
+        // Treat the 8-lane decoder hasher state as the rate portion of the full 12-lane sponge
+        // state and reconstruct the capacity as zeros.
+        let mut full_state = [ZERO; hasher::STATE_WIDTH];
+        for (i, v) in self.state.iter().enumerate() {
+            full_state[i] = *v;
+        }
+
+        header + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], full_state)
     }
 
     fn source(&self) -> &str {
@@ -753,7 +755,11 @@ where
     fn value(&self, alphas: &[E]) -> E {
         let header = alphas[0] + alphas[1] * self.transition_label + alphas[2] * self.addr;
 
-        header + build_value(&alphas[8..12], self.digest)
+        // Treat the digest as RATE0 (lanes 0..4) with all other lanes zero.
+        let mut full_state = [ZERO; hasher::STATE_WIDTH];
+        full_state[..4].copy_from_slice(&self.digest);
+
+        header + build_value(&alphas[range(NUM_HEADER_ALPHAS, hasher::STATE_WIDTH)], full_state)
     }
 
     fn source(&self) -> &str {
