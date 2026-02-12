@@ -643,9 +643,9 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         if !self.should_execute_decorators() {
-            return ControlFlow::Continue(());
+            return Ok(());
         }
 
         #[cfg(test)]
@@ -659,7 +659,7 @@ impl FastProcessor {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
-        ControlFlow::Continue(())
+        Ok(())
     }
 
     /// Executes the decorators that should be executed after exiting a node.
@@ -668,9 +668,9 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         if !self.in_debug_mode() {
-            return ControlFlow::Continue(());
+            return Ok(());
         }
 
         #[cfg(test)]
@@ -684,7 +684,7 @@ impl FastProcessor {
             self.execute_decorator(&current_forest[decorator_id], host)?;
         }
 
-        ControlFlow::Continue(())
+        Ok(())
     }
 
     /// Executes the specified decorator
@@ -692,30 +692,24 @@ impl FastProcessor {
         &mut self,
         decorator: &Decorator,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
                     let process = &mut self.state();
-                    if let Err(err) = host.on_debug(process, options) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { err },
-                        ));
-                    }
+                    host.on_debug(process, options)
+                        .map_err(|err| ExecutionError::DebugHandlerError { err })?;
                 }
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
                     let process = &mut self.state();
-                    if let Err(err) = host.on_trace(process, *id) {
-                        return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { trace_id: *id, err },
-                        ));
-                    }
+                    host.on_trace(process, *id)
+                        .map_err(|err| ExecutionError::TraceHandlerError { trace_id: *id, err })?;
                 }
             },
         };
-        ControlFlow::Continue(())
+        Ok(())
     }
 
     // HELPERS

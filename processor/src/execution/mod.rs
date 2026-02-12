@@ -2,7 +2,7 @@ use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
 use crate::{
-    BreakReason, ContextId, Host, Kernel, Stopper, Word,
+    BreakReason, ContextId, ExecutionError, Host, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
     mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
@@ -212,10 +212,12 @@ where
             Continuation::FinishExternal(node_id) => {
                 // Execute after_exit decorators when returning from an external node
                 // Note: current_forest should already be restored by EnterForest continuation
-                state
-                    .processor
-                    .execute_after_exit_decorators(node_id, current_forest, state.host)
-                    .map_break(InternalBreakReason::from)?;
+                result_to_control_flow(state.processor.execute_after_exit_decorators(
+                    node_id,
+                    current_forest,
+                    state.host,
+                ))
+                .map_break(InternalBreakReason::from)?;
             },
             Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
                 let basic_block_node =
@@ -258,27 +260,29 @@ where
                 // Restore the previous forest
                 *current_forest = previous_forest;
             },
-            Continuation::AfterExitDecorators(node_id) => state
-                .processor
-                .execute_after_exit_decorators(node_id, current_forest, state.host)
-                .map_break(InternalBreakReason::from)?,
+            Continuation::AfterExitDecorators(node_id) => result_to_control_flow(
+                state
+                    .processor
+                    .execute_after_exit_decorators(node_id, current_forest, state.host),
+            )
+            .map_break(InternalBreakReason::from)?,
             Continuation::AfterExitDecoratorsBasicBlock(node_id) => {
                 let basic_block_node =
                     current_forest.get_node_by_id(node_id).unwrap().unwrap_basic_block();
 
-                state
-                    .processor
-                    .execute_end_of_block_decorators(
-                        basic_block_node,
-                        node_id,
-                        current_forest,
-                        state.host,
-                    )
-                    .map_break(InternalBreakReason::from)?;
-                state
-                    .processor
-                    .execute_after_exit_decorators(node_id, current_forest, state.host)
-                    .map_break(InternalBreakReason::from)?;
+                result_to_control_flow(state.processor.execute_end_of_block_decorators(
+                    basic_block_node,
+                    node_id,
+                    current_forest,
+                    state.host,
+                ))
+                .map_break(InternalBreakReason::from)?;
+                result_to_control_flow(state.processor.execute_after_exit_decorators(
+                    node_id,
+                    current_forest,
+                    state.host,
+                ))
+                .map_break(InternalBreakReason::from)?;
             },
         }
     }
@@ -359,6 +363,17 @@ impl From<BreakReason> for InternalBreakReason {
 
 // HELPERS
 // ================================================================================================
+
+/// Maps a decorator execution result to a [`ControlFlow<BreakReason>`].
+#[inline(always)]
+pub(super) fn result_to_control_flow(
+    result: Result<(), ExecutionError>,
+) -> ControlFlow<BreakReason> {
+    match result {
+        Ok(()) => ControlFlow::Continue(()),
+        Err(err) => ControlFlow::Break(BreakReason::Err(err)),
+    }
+}
 
 /// This function marks the end of a clock cycle.
 ///

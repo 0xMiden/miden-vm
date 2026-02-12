@@ -4,7 +4,10 @@ use core::ops::ControlFlow;
 use crate::{
     BreakReason, Host, Stopper,
     continuation_stack::Continuation,
-    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
+    execution::{
+        ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
+        result_to_control_flow,
+    },
     mast::{JoinNode, MastForest, MastNodeId},
     processor::Processor,
     tracer::Tracer,
@@ -35,9 +38,11 @@ where
     );
 
     // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(node_id, current_forest, state.host)?;
+    result_to_control_flow(state.processor.execute_before_enter_decorators(
+        node_id,
+        current_forest,
+        state.host,
+    ))?;
 
     state.continuation_stack.push_finish_join(node_id);
     state.continuation_stack.push_start_node(join_node.second());
@@ -76,7 +81,9 @@ where
         current_forest,
     )?;
 
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    result_to_control_flow(state.processor.execute_after_exit_decorators(
+        node_id,
+        current_forest,
+        state.host,
+    ))
 }

@@ -1,10 +1,9 @@
 use alloc::sync::Arc;
-use core::ops::ControlFlow;
 
 use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 
 use crate::{
-    BreakReason, ContextId, ExecutionError, Felt, Host, MemoryError, Word,
+    ContextId, ExecutionError, Felt, Host, MemoryError, Word,
     advice::AdviceError,
     crypto::merkle::MerklePath,
     errors::OperationError,
@@ -72,7 +71,7 @@ pub(crate) trait Processor: Sized {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason>;
+    ) -> Result<(), ExecutionError>;
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
@@ -80,7 +79,7 @@ pub(crate) trait Processor: Sized {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason>;
+    ) -> Result<(), ExecutionError>;
 
     /// Executes any decorator in a basic block that is to be executed before the operation at the
     /// given index in the block.
@@ -90,7 +89,7 @@ pub(crate) trait Processor: Sized {
         op_idx_in_block: usize,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason>;
+    ) -> Result<(), ExecutionError>;
 
     /// Executes any decorator in a basic block that is to be executed after all operations in the
     /// block. This only differs from `execute_after_exit_decorators` in that these decorators are
@@ -101,7 +100,7 @@ pub(crate) trait Processor: Sized {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason>;
+    ) -> Result<(), ExecutionError>;
 }
 
 // SYSTEM INTERFACE

@@ -4,7 +4,7 @@ use core::ops::ControlFlow;
 use crate::{
     BreakReason, Host,
     continuation_stack::ContinuationStack,
-    execution::InternalBreakReason,
+    execution::{InternalBreakReason, result_to_control_flow},
     mast::{MastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
     processor::Processor,
@@ -23,9 +23,12 @@ pub(super) fn execute_external_node(
     host: &mut impl Host,
 ) -> ControlFlow<InternalBreakReason> {
     // Execute decorators that should be executed before entering the node
-    processor
-        .execute_before_enter_decorators(external_node_id, current_forest, host)
-        .map_break(InternalBreakReason::from)?;
+    result_to_control_flow(processor.execute_before_enter_decorators(
+        external_node_id,
+        current_forest,
+        host,
+    ))
+    .map_break(InternalBreakReason::from)?;
 
     // This is a sans-IO point: we cannot proceed with loading the MAST forest, since some
     // processors need this to be done asynchronously. Thus, we break here and make the implementing

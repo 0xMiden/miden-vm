@@ -1,5 +1,4 @@
 use alloc::sync::Arc;
-use core::ops::ControlFlow;
 
 use miden_air::{
     Felt,
@@ -13,7 +12,6 @@ use miden_core::{
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
-use super::step::BreakReason;
 use crate::{
     AdviceProvider, ContextId, ExecutionError, Host,
     errors::OperationError,
@@ -94,7 +92,7 @@ impl Processor for FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         self.execute_before_enter_decorators(node_id, current_forest, host)
     }
 
@@ -104,7 +102,7 @@ impl Processor for FastProcessor {
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         self.execute_after_exit_decorators(node_id, current_forest, host)
     }
 
@@ -115,7 +113,7 @@ impl Processor for FastProcessor {
         op_idx_in_block: usize,
         current_forest: &MastForest,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         if self.should_execute_decorators() {
             #[cfg(test)]
             self.record_decorator_retrieval();
@@ -125,7 +123,7 @@ impl Processor for FastProcessor {
             }
         }
 
-        ControlFlow::Continue(())
+        Ok(())
     }
 
     #[inline(always)]
@@ -135,7 +133,7 @@ impl Processor for FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
-    ) -> ControlFlow<BreakReason> {
+    ) -> Result<(), ExecutionError> {
         self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }

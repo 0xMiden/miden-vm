@@ -8,7 +8,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         ExecutionState, InternalBreakReason, finalize_clock_cycle,
-        finalize_clock_cycle_with_continuation, get_next_ctx_id,
+        finalize_clock_cycle_with_continuation, get_next_ctx_id, result_to_control_flow,
     },
     mast::{MastForest, MastNodeId},
     processor::{MemoryInterface, Processor, StackInterface, SystemInterface},
@@ -39,10 +39,12 @@ where
     );
 
     // Execute decorators that should be executed before entering the node
-    state
-        .processor
-        .execute_before_enter_decorators(current_node_id, current_forest, state.host)
-        .map_break(InternalBreakReason::from)?;
+    result_to_control_flow(state.processor.execute_before_enter_decorators(
+        current_node_id,
+        current_forest,
+        state.host,
+    ))
+    .map_break(InternalBreakReason::from)?;
 
     let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
@@ -213,7 +215,9 @@ where
         current_forest,
     )?;
 
-    state
-        .processor
-        .execute_after_exit_decorators(node_id, current_forest, state.host)
+    result_to_control_flow(state.processor.execute_after_exit_decorators(
+        node_id,
+        current_forest,
+        state.host,
+    ))
 }
