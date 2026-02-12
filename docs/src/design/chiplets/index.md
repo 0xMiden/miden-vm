@@ -214,12 +214,8 @@ Lookup requests are sent to the chiplets bus by the following components:
 
 Responses are provided by the [hash](./hasher.md#chiplets-bus-constraints), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
 
-<<<<<<< HEAD
 The verifier computes the expected final value of $b_{chip}$ from public inputs and checks it
 against `aux_finals`. There is no explicit last-row boundary constraint in the chiplets bus.
-
-=======
->>>>>>> 219c20e83 (cleanup API)
 ## Chiplets virtual table
 
 _Note: over time, the use of this construction has evolved to the point where its name doesn't match the way it is used. This is documented in [issue #1779](https://github.com/0xMiden/miden-vm/issues/1779)._
