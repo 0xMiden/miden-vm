@@ -57,7 +57,5 @@ pub fn enforce_main<AB>(
     builder.when_first_row().assert_zero(clk.clone());
 
     // Clock transition constraint: clk' = clk + 1
-    builder
-        .when_transition()
-        .assert_eq(clk_next, clk + AB::Expr::ONE);
+    builder.when_transition().assert_eq(clk_next, clk + AB::Expr::ONE);
 }
