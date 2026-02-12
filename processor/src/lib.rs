@@ -12,12 +12,12 @@ use core::{
     ops::ControlFlow,
 };
 
-mod continuation_stack;
+pub mod continuation_stack;
 mod debug;
 mod errors;
 mod execution;
 mod execution_options;
-mod fast;
+pub mod fast;
 mod host;
 mod processor;
 mod tracer;

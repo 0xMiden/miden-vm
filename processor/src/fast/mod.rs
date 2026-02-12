@@ -1020,7 +1020,7 @@ struct ExecutionContextInfo {
 // NOOP TRACER
 // ================================================================================================
 
-/// A [Tracer] that does nothing.
+/// A `Tracer` that does nothing.
 pub struct NoopTracer;
 
 impl Tracer for NoopTracer {
