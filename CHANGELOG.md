@@ -20,6 +20,7 @@
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
 - Fixed off-by-one error in cycle limit check that caused programs using exactly `max_cycles` cycles to fail ([#2635](https://github.com/0xMiden/miden-vm/pull/2635)).
+- System event errors now include the operation index, so diagnostics point to the exact emit instruction instead of the first operation in the basic block ([#2672](https://github.com/0xMiden/miden-vm/pull/2672)).
 
 #### Changes
 
@@ -68,6 +69,7 @@
 - [BREAKING] Migrate parallel trace generation to use the common `execute_impl()` ([#2642](https://github.com/0xMiden/miden-vm/pull/2642)).
 - [BREAKING] Removed unused `should_break` field from `AssemblyOp` decorator ([#2646](https://github.com/0xMiden/miden-vm/pull/2646)).
 - [BREAKING] Updated processor module structure ([#2651](https://github.com/0xMiden/miden-vm/pull/2651)).
+- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
 
 ## 0.20.6 (2026-02-04)
 
