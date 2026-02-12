@@ -44,7 +44,8 @@ where
     let condition = processor.stack().get(0);
 
     // drop the condition from the stack
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     // execute the appropriate branch
     continuation_stack.push_finish_split(node_id);

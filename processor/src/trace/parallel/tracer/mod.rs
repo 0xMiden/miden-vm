@@ -544,7 +544,7 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         // do nothing
     }
 
-    fn record_circuit_evaluation(&mut self, _clk: RowIndex, _circuit_eval: CircuitEvaluation) {
+    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
         // do nothing
     }
 

@@ -30,7 +30,7 @@ use crate::{
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     trace::{
-        chiplets::{Ace, CircuitEvaluation},
+        chiplets::CircuitEvaluation,
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
     },
     tracer::{OperationHelperRegisters, Tracer},
@@ -46,7 +46,6 @@ mod step;
 pub use basic_block::SystemEventError;
 use external::maybe_use_caller_error_context;
 pub use memory::Memory;
-pub(crate) use operation::eval_circuit_fast;
 pub use step::{BreakReason, ResumeContext};
 use step::{NeverStopper, StepStopper};
 
@@ -132,9 +131,6 @@ pub struct FastProcessor {
 
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
-
-    /// A map storing metadata per call to the ACE chiplet.
-    ace: Ace,
 
     /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
     /// `dyncall`) to keep track of the information needed to return to the previous context upon
@@ -239,7 +235,6 @@ impl FastProcessor {
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
-            ace: Ace::default(),
             options,
             pc_transcript: PrecompileTranscript::new(),
             #[cfg(test)]
@@ -766,12 +761,7 @@ impl FastProcessor {
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
-    fn increment_stack_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self>,
-    {
-        tracer.increment_stack_size(self);
-
+    fn increment_stack_size(&mut self) {
         self.stack_top_idx += 1;
     }
 
@@ -780,7 +770,7 @@ impl FastProcessor {
     /// The bottom of the stack is only decremented in cases where the stack depth would become less
     /// than 16.
     #[inline(always)]
-    fn decrement_stack_size(&mut self, tracer: &mut impl Tracer) {
+    fn decrement_stack_size(&mut self) {
         if self.stack_top_idx == MIN_STACK_DEPTH {
             // We no longer have any room in the stack buffer to decrement the stack size (which
             // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
@@ -790,8 +780,6 @@ impl FastProcessor {
 
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
-
-        tracer.decrement_stack_size();
     }
 
     /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the
@@ -1167,7 +1155,7 @@ impl Tracer for NoopTracer {
     }
 
     #[inline(always)]
-    fn record_circuit_evaluation(&mut self, _clk: RowIndex, _circuit_eval: CircuitEvaluation) {
+    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
         // do nothing
     }
 

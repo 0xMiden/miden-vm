@@ -158,7 +158,9 @@ where
 
     // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
     // to return user op helpers, which makes the abstraction less suitable here.
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     let result = if a == b { ONE } else { ZERO };
     processor.stack_mut().set(0, result);
 
@@ -272,7 +274,9 @@ where
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     processor.stack_mut().set(0, f(a, b));
 }
 
@@ -293,7 +297,9 @@ where
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     processor.stack_mut().set(0, f(a, b)?);
 
     Ok(())

@@ -8,7 +8,7 @@ use miden_air::{
 use miden_core::{
     WORD_SIZE, Word, ZERO,
     crypto::{hash::Poseidon2, merkle::MerklePath},
-    field::{PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::PrimeField64,
     mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
@@ -16,10 +16,9 @@ use miden_core::{
 use super::step::BreakReason;
 use crate::{
     AdviceProvider, ContextId, ExecutionError, Host,
-    errors::{AceError, AceEvalError, OperationError},
-    fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
-    processor::{HasherInterface, MemoryInterface, Processor, StackInterface, SystemInterface},
-    trace::chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
+    errors::OperationError,
+    fast::{FastProcessor, STACK_BUFFER_SIZE, memory::Memory},
+    processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 
 impl Processor for FastProcessor {
@@ -70,13 +69,13 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
-        self.save_context_and_truncate_stack(tracer);
+    fn save_context_and_truncate_stack(&mut self) {
+        self.save_context_and_truncate_stack();
     }
 
     #[inline(always)]
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
-        self.restore_context(tracer)
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        self.restore_context()
     }
 
     #[inline(always)]
@@ -87,42 +86,6 @@ impl Processor for FastProcessor {
     #[inline(always)]
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.pc_transcript = PrecompileTranscript::from_state(state);
-    }
-
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    ///
-    /// The inputs are composed of:
-    ///
-    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
-    ///    itself is arranged as:
-    ///
-    ///    a. `Read` section:
-    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
-    ///       2. Constants of the circuit which are elements in the quadratic extension field,
-    ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///    where each gate is encoded as a single base field element.
-    /// 2. the number of quadratic extension field elements read in the `READ` section,
-    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
-    ///
-    /// Stack transition:
-    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// Note that we do not record any memory reads in this operation (through a
-    /// [crate::tracer::Tracer]), because the parallel trace generation skips the circuit
-    /// evaluation completely.
-    #[inline(always)]
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
-        let num_eval = self.stack_get(2);
-        let num_read = self.stack_get(1);
-        let ptr = self.stack_get(0);
-        let ctx = self.ctx;
-        let circuit_evaluation =
-            eval_circuit_fast(ctx, ptr, self.clk, num_read, num_eval, &mut self.memory, tracer)?;
-        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
-        tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
-
-        Ok(())
     }
 
     #[inline(always)]
@@ -261,8 +224,6 @@ impl SystemInterface for FastProcessor {
 }
 
 impl StackInterface for FastProcessor {
-    type Processor = FastProcessor;
-
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
@@ -345,12 +306,9 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self::Processor>,
-    {
+    fn increment_size(&mut self) -> Result<(), ExecutionError> {
         if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
-            self.increment_stack_size(tracer);
+            self.increment_stack_size();
             Ok(())
         } else {
             Err(ExecutionError::Internal("stack overflow"))
@@ -358,73 +316,7 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn decrement_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self::Processor>,
-    {
-        self.decrement_stack_size(tracer)
+    fn decrement_size(&mut self) {
+        self.decrement_stack_size()
     }
-}
-
-// HELPERS
-// ================================================================================================
-
-/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-pub(crate) fn eval_circuit_fast(
-    ctx: ContextId,
-    ptr: Felt,
-    clk: RowIndex,
-    num_vars: Felt,
-    num_eval: Felt,
-    mem: &mut impl MemoryInterface,
-    tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, AceEvalError> {
-    let num_vars = num_vars.as_canonical_u64();
-    let num_eval = num_eval.as_canonical_u64();
-
-    let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(AceError::TooManyWires(num_wires).into());
-    }
-
-    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
-    // quadratic extension field elements while instructions are encoded as base field elements.
-    // Hence we can pack 2 variables and 4 instructions per word.
-    if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars).into());
-    }
-    if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval).into());
-    }
-
-    // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
-    let num_eval_rows = num_eval as u32;
-
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
-
-    let mut ptr = ptr;
-    // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
-    for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word);
-        ptr += PTR_OFFSET_WORD;
-    }
-    // perform EVAL operations
-    for _ in 0..num_eval_rows {
-        let instruction = mem.read_element(ctx, ptr)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction)?;
-        ptr += PTR_OFFSET_ELEM;
-    }
-
-    // Ensure the circuit evaluated to zero.
-    if evaluation_context.output_value().is_none_or(|eval| eval != QuadFelt::ZERO) {
-        return Err(AceError::CircuitNotEvaluateZero.into());
-    }
-
-    Ok(evaluation_context)
 }
