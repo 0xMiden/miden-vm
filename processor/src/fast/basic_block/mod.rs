@@ -8,7 +8,7 @@ use miden_core::{
 
 use crate::{
     Host,
-    errors::{MapExecErr, advice_error_with_context, event_error_with_context},
+    errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor},
 };
 
@@ -49,17 +49,16 @@ impl FastProcessor {
         host: &mut impl Host,
         current_forest: &MastForest,
         node_id: MastNodeId,
+        op_idx: usize,
     ) -> ControlFlow<BreakReason> {
         let mut process = self.state();
         let event_id = EventId::from_felt(process.get_stack_item(0));
 
         // If it's a system event, handle it directly. Otherwise, forward it to the host.
         if let Some(system_event) = SystemEvent::from_event_id(event_id) {
-            if let Err(err) = handle_system_event(&mut process, system_event).map_exec_err(
-                current_forest,
-                node_id,
-                host,
-            ) {
+            if let Err(err) = handle_system_event(&mut process, system_event)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)
+            {
                 return ControlFlow::Break(BreakReason::Err(err));
             }
         } else {

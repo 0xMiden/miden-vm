@@ -82,7 +82,7 @@ use operations::execute_op;
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, continuation } => {
+///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
 ///             // Handle Emit operation (e.g., call `Host::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -388,6 +388,7 @@ pub enum InternalBreakReason {
     User(BreakReason),
     Emit {
         basic_block_node_id: MastNodeId,
+        op_idx: usize,
         continuation: Continuation,
     },
     LoadMastForestFromDyn {
