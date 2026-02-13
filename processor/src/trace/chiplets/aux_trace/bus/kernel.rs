@@ -23,7 +23,9 @@ use crate::{
 ///
 /// If a kernel procedure digest is requested `n` times by the decoder, it is repeated
 /// `n+1` times in the trace.
-/// In the first row, the chiplet responds to a request made via public inputs.
+/// In the first row for a digest, the chiplet emits an init message balanced against
+/// verifier-supplied kernel digests (var-len public inputs); the aux_finals boundary check
+/// enforces the expected final bus value.
 /// The remaining `n` rows respond to decoder requests.
 pub(super) fn build_kernel_chiplet_responses<E>(
     main_trace: &MainTrace,
@@ -39,10 +41,10 @@ where
     let root2 = main_trace.chiplet_kernel_root_2(row);
     let root3 = main_trace.chiplet_kernel_root_3(row);
 
-    // First hash row for a digest: emit the init message used to verify kernel membership via
-    // aux_finals.
+    // First hash row for a digest: emit the init message used to verify kernel membership. The
+    // expected final bus value is enforced via aux_finals.
     if main_trace.chiplet_kernel_is_first_hash_row(row) {
-        // Emit the digest for aux-final verification of kernel procedure membership.
+        // Emit the digest for kernel procedure membership verification (enforced via aux_finals).
         let message = KernelRomInitMessage {
             kernel_proc_digest: [root0, root1, root2, root3],
         };
@@ -69,7 +71,7 @@ where
 // ===============================================================================================
 
 /// A message between the decoder and the kernel ROM to ensure a SYSCALL can only call procedures
-///in the kernel as specified through public inputs.
+/// in the kernel as specified by verifier-supplied kernel digests (var-len public inputs).
 pub struct KernelRomMessage {
     pub kernel_proc_digest: [Felt; 4],
 }
@@ -104,8 +106,8 @@ impl Display for KernelRomMessage {
     }
 }
 
-/// A message linking unique kernel procedure hashes provided by public inputs, with hashes
-/// contained in the kernel ROM chiplet trace.
+/// A message linking unique kernel procedure hashes provided by the verifier (var-len public
+/// inputs), with hashes contained in the kernel ROM chiplet trace.
 pub struct KernelRomInitMessage {
     pub kernel_proc_digest: [Felt; 4],
 }

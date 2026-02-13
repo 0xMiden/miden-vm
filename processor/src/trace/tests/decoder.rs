@@ -357,7 +357,7 @@ fn decoder_p2_span_with_respan() {
     let row_values =
         [BlockHashTableRow::new_test(ZERO, program.hash(), false, false).collapse(&alphas)];
 
-    // p2 starts at 1; program hash is checked via aux_finals.
+    // p2 starts at 1; program hash is enforced via aux_finals (derived from public inputs).
     let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
@@ -407,7 +407,7 @@ fn decoder_p2_join() {
         BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // p2 starts at 1; program hash is checked via aux_finals.
+    // p2 starts at 1; program hash is enforced via aux_finals (derived from public inputs).
     let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
@@ -435,7 +435,7 @@ fn decoder_p2_join() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[8]);
 
-    // at this point the table should be empty; program hash is checked via aux_finals.
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 9..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -474,7 +474,7 @@ fn decoder_p2_split_true() {
         BlockHashTableRow::new_test(ONE, basic_block_1.digest(), false, false).collapse(&alphas),
     ];
 
-    // p2 starts at 1; program hash is checked via aux_finals.
+    // p2 starts at 1; program hash is enforced via aux_finals (derived from public inputs).
     let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
@@ -494,7 +494,7 @@ fn decoder_p2_split_true() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty; program hash is checked via aux_finals.
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 6..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -534,7 +534,7 @@ fn decoder_p2_split_false() {
         BlockHashTableRow::new_test(ONE, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // p2 starts at 1; program hash is checked via aux_finals.
+    // p2 starts at 1; program hash is enforced via aux_finals (derived from public inputs).
     let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
@@ -554,7 +554,7 @@ fn decoder_p2_split_false() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty; program hash is checked via aux_finals.
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 6..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -606,7 +606,7 @@ fn decoder_p2_loop_with_repeat() {
         BlockHashTableRow::new_test(a_129, basic_block_2.digest(), false, false).collapse(&alphas),
     ];
 
-    // p2 starts at 1; program hash is checked via aux_finals.
+    // p2 starts at 1; program hash is enforced via aux_finals (derived from public inputs).
     let mut expected_value = ONE;
     assert_eq!(expected_value, p2[0]);
 
@@ -674,7 +674,7 @@ fn decoder_p2_loop_with_repeat() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[19]);
 
-    // at this point the table should be empty; program hash is checked via aux_finals.
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 20..(p2.len()) {
         assert_eq!(expected_value, p2[i]);

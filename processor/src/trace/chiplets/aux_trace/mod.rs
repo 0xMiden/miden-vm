@@ -37,8 +37,9 @@ impl AuxTraceBuilder {
     /// Builds and returns the Chiplets's auxiliary trace columns. This consists of:
     ///
     /// 1. A bus column `b_chip` describing requests made by the stack and decoder and responses
-    ///    received from the chiplets in the Chiplets module. It also responds to requests made by
-    ///    the verifier with kernel procedure hashes included in the public inputs of the program.
+    ///    received from the chiplets in the Chiplets module. It also emits init messages for
+    ///    verifier-supplied kernel digests (var-len public inputs); the expected final bus value
+    ///    is computed from those public inputs and enforced via aux_finals.
     /// 2. A column acting as
     ///    - a virtual table for the sibling table used by the hasher chiplet,
     ///    - a bus between the memory chiplet and the ACE chiplet.

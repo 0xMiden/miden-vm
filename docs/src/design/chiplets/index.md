@@ -178,7 +178,12 @@ The bus is implemented as a single [running product column](../lookups/multiset.
 - Each request is “sent” by computing an operation-specific lookup value from an [operation-specific label](#operation-labels), the operation inputs, and the operation outputs, and then dividing it out of the $b_{chip}$ running product column.
 - Each chiplet response is “sent” by computing the same operation-specific lookup value from the label, inputs, and outputs, and then multiplying it into the $b_{chip}$ running product column.
 
-Thus, if the requests and responses match, then the bus column $b_{chip}$ starts at $1$ and ends at the product of randomness-reduced kernel procedure digests. The initial value is enforced by a first-row boundary constraint, while the final value is verified via `aux_finals`.
+Thus, if the requests and responses match, then the bus column $b_{chip}$ will start at $1$ and (absent verifier-supplied messages) end at $1$.
+The first-row initialization is enforced by boundary constraints. When the verifier needs to enforce
+membership of a specific message set (e.g., kernel procedure digests), it supplies those messages
+as public inputs, computes the expected final bus value from them, and enforces it via the
+aux-finals boundary check (implemented in `verify_aux_finals`). The aux-finals vector only carries
+the final value; the semantics are defined by the public inputs.
 
 Note that the order of the requests and responses does not matter, as long as they are all included in $b_{chip}$. In fact, requests and responses for the same operation will generally occur at different cycles.
 
@@ -203,13 +208,18 @@ Lookup requests are sent to the chiplets bus by the following components:
 - The stack sends requests for [bitwise](../stack/u32_ops.md#u32and), [memory](../stack/io_ops.md#memory-access-operations), and [cryptographic hash operations](../stack/crypto_ops.md).
 - The decoder sends requests for [hash operations](../decoder/index.md#program-block-hashing) for program block hashing.
 - The decoder sends a procedure access request to the [Kernel ROM chiplet](./kernel_rom.md) for each `SYSCALL` during [program block hashing](../decoder/index.md#program-block-hashing).
-- The verifier initializes the bus with requests to the [Kernel ROM chiplet](./kernel_rom.md) for each unique kernel procedure digest.
+- The verifier supplies kernel procedure digests as variable-length public inputs; it computes the
+  expected final bus value from that digest set, and the aux-finals boundary check enforces it
+  (see [Kernel ROM chiplet](./kernel_rom.md)).
 
 Responses are provided by the [hash](./hasher.md#chiplets-bus-constraints), [bitwise](./bitwise.md#chiplets-bus-constraints), [memory](./memory.md#chiplets-bus-constraints), and [kernel ROM](./kernel_rom.md#chiplets-bus-constraints) chiplets.
 
+<<<<<<< HEAD
 The verifier computes the expected final value of $b_{chip}$ from public inputs and checks it
 against `aux_finals`. There is no explicit last-row boundary constraint in the chiplets bus.
 
+=======
+>>>>>>> 219c20e83 (cleanup API)
 ## Chiplets virtual table
 
 _Note: over time, the use of this construction has evolved to the point where its name doesn't match the way it is used. This is documented in [issue #1779](https://github.com/0xMiden/miden-vm/issues/1779)._

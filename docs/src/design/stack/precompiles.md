@@ -10,7 +10,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | ------- | ----------- |
 | `PrecompileRequest` | Minimal calldata for a precompile, recorded by the host when the event handler runs. It contains exactly the information needed to deterministically recompute the result and the commitment. Requests are included in the proof artifact. |
 | `PrecompileCommitment` | A word pair `(TAG, COMM)` computed by the MASM wrapper, and deterministically recomputable from the corresponding `PrecompileRequest`. `COMM` typically commits to inputs, and may also include outputs for long results; the three free elements in `TAG` carry metadata and/or simple results. Together `(TAG, COMM)` represent the full request (inputs + outputs). |
-| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with an Poseidon2 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re‑evaluating requests and their commitments. Finalizing yields a transcript digest. |
+| `PrecompileTranscript` | A sequential commitment to all precompile requests. Implemented with a Poseidon2 sponge; the VM stores only the capacity (4 elements). The verifier reconstructs the same transcript by re-evaluating requests and their commitments. Finalizing yields a transcript digest. |
 
 ## Lifecycle overview
 
@@ -38,7 +38,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
 | Host | Executes the event handler, reads inputs from process state, stores `PrecompileRequest`, and returns the result via the advice provider (typically the advice stack; map/Merkle store as needed). |
 | MASM wrapper | Collects inputs and emits the event; pops results from advice; computes `(TAG, COMM)`; invokes `log_precompile`. |
 | Prover | Includes the precompile requests in the proof. |
-| Verifier | Replays requests via registered verifiers, rebuilds the transcript, enforces the initial/final capacity via variable‑length public inputs, and finalizes to a digest if needed. |
+| Verifier | Replays requests via registered verifiers, rebuilds the transcript, derives the init/final messages from public inputs, and enforces the expected final bus value via the aux-finals boundary check before finalizing a digest if needed. |
 
 ## Conventions
 
@@ -54,7 +54,7 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   `Poseidon2([COMM, TAG, CAP_PREV]) = [R0, R1, CAP_NEXT]`.
 
 - Input encoding:
-  - By convention, inputs are encoded as packed u32 values in field elements (4 bytes per element, little‑endian). If the input length is not a multiple of 4, the final u32 is zero‑padded. Because of this packing, wrappers commonly include the byte length in `TAG` to distinguish data bytes from padding.
+  - By convention, inputs are encoded as packed u32 values in field elements (4 bytes per element, little-endian). If the input length is not a multiple of 4, the final u32 is zero-padded. Because of this packing, wrappers commonly include the byte length in `TAG` to distinguish data bytes from padding.
 
 ## Examples
 
@@ -69,11 +69,11 @@ coordinate to maintain a sequential commitment to every precompile invocation.
   - Inputs: public key, message (or prehash), signature; may include flag bits indicating special operation options. Output: `is_valid` (boolean).
   - Wrapper emits the event; handler verifies and may push auxiliary results; wrapper computes:
     - `TAG = [event_id, is_valid, flags, 0]` (encode simple result and flags)
-    - `COMM = Poseidon2( prepared_inputs[..] )` (inputs‑only is typical when outputs are simple)
+    - `COMM = Poseidon2( prepared_inputs[..] )` (inputs-only is typical when outputs are simple)
   - Wrapper calls `log_precompile` to record the request commitment and result tag.
 
 ## Related reading
 
 - [`log_precompile` instruction](../../user_docs/assembly/instruction_reference.md) – stack behaviour and semantics.
 - `PrecompileTranscript` implementation (`core/src/precompile.rs`) – transcript details in the codebase.
-- Kernel ROM chiplet initialization pattern (`../chiplets/kernel_rom.md`) – example use of variable‑length public inputs to initialize a chiplet/aux column via the bus.
+- Kernel ROM chiplet pattern (`../chiplets/kernel_rom.md`) – example use of variable-length public inputs; the verifier computes an expected final bus value and enforces it via aux-finals.

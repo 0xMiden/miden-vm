@@ -35,6 +35,7 @@ use crate::{
 /// Since the hasher chip is in the first position, the other chiplets can treat it as a shared bus.
 /// However, this prevents any bus initialization via public inputs using boundary constraints
 /// in the first row. If such constraints are required, they must be enforced via aux_finals
+/// (computed from public inputs).
 /// in the last row of the trace.
 ///
 /// If public inputs are required for other chiplets, it is also possible to use the chiplet bus,
@@ -54,7 +55,8 @@ where
 {
     #[cfg(any(test, feature = "bus-debugger"))]
     fn enforce_bus_balance(&self) -> bool {
-        // The chiplets bus final value is bound via aux_finals, so it is not required to end at 1.
+        // The chiplets bus final value is enforced via aux_finals (computed from public inputs),
+        // so it is not required to end at 1.
         false
     }
 

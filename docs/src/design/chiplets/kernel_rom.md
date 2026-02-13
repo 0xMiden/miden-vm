@@ -14,7 +14,7 @@ More background about Miden VM execution contexts can be found [here](../../user
 
 The kernel ROM table consists of five columns.
 The following example table shows the execution trace of the kernel ROM with procedure digests $a, b, c$, which were called 1, 2, and 0 times, respectively.
-Each digest is included once to respond to the initialization request by the public inputs, and then repeated for each call made by the decoder. 
+Each digest is included once to match the verifier-supplied kernel digest set (via variable-length public inputs), and then repeated for each call made by the decoder.
 
 | $s_{first}$ | $r_0$ | $r_1$ | $r_2$ | $r_3$ |
 |-------------|-------|-------|-------|-------|
@@ -43,7 +43,9 @@ where $s_i$ are the chiplet selector flags. Refer to the [chiplets order](./inde
 The following constraints are required to enforce the correctness of the kernel ROM trace.
 
 The $s_{first}$ column is a selector indicating the start of a new digest included in the kernel ROM chiplet trace.
-In this row, the chiplet responds to a bus request made by the verifier to ensure consistency with the set of kernel procedure digests given as public inputs.
+In this row, the chiplet emits an init bus message for the verifier-supplied kernel digest set
+(variable-length public inputs). The verifier computes the expected final bus value from these
+public inputs; the aux-finals boundary check enforces the expected final bus value.
 
 As $s_{first}$ is a selector, it must be binary.
 
@@ -74,16 +76,17 @@ For $i \in \{0,1,2,3\}$,
 
 ### Chiplets bus constraints
 
-The kernel ROM chiplet must ensure that all kernel procedure digests requested by the decoder correspond to one of the digests provided by the verifier through public inputs.
-This is achieved by making use of the chiplet bus $b_{bus}$, responding to requests made by the decoder and by the verifier through public inputs.
+The kernel ROM chiplet must ensure that all kernel procedure digests requested by the decoder correspond to one of the digests provided by the verifier through variable-length public inputs.
+This is achieved by making use of the chiplet bus $b_{bus}$, responding to requests made by the decoder and emitting init messages for the verifier-supplied digests.
 
-In the first row of each new block of hashes in the kernel ROM chiplet trace (i.e., when $s_{first} = 1$), the chiplet responds to a message $v_{init}$ requested by the verifier.
+In the first row of each new block of hashes in the kernel ROM chiplet trace (i.e., when $s_{first} = 1$), the chiplet emits a message $v_{init}$ corresponding to one verifier-supplied digest. The verifier checks that the multiset of these init messages matches the digest set provided as public inputs.
 Since these initialization messages must match, the set of digests across all blocks must be equal to the set of procedure digests provided by the verifier (though not necessarily in the same order).
 
-Whenever a digest is requested by the decoder during program block hashing of the [`SYSCALL` operation](../decoder/constraints.md#block-hash-computation-constraints), a new row is added to the trace after the first row which is used to respond to one of the initialization requests made by the verifier using public inputs.
-The chiplet responds to the request with a message $v_{call}$.
+Whenever a digest is requested by the decoder during program block hashing of the [`SYSCALL` operation](../decoder/constraints.md#block-hash-computation-constraints), a new row is added to the trace after the first row.
+The chiplet responds to the decoder request with a message $v_{call}$.
 
-In other words, the selector $s_{first}$ indicates whether the chiplet should respond to the decoder or the verifier initialization requests.
+In other words, the selector $s_{first}$ indicates whether the chiplet should emit an init message
+(verifier-supplied digest set) or a call message (decoder request).
 If a digest is requested $n$ times by the decoder, the same digest appears in a single block of length $n+1$.
 
 The variables $v_{init}$ and $v_{call}$ representing the bus messages contain reduced bus messages containing a kernel procedure digest.
@@ -99,7 +102,7 @@ $$
 
 Here, $\textsf{KERNEL\_PROC\_INIT}$ and $\textsf{KERNEL\_PROC\_CALL}$ are the unique [operation labels](./index.md#operation-labels) for the kernel ROM bus message.
 
-Each row of the kernel ROM chiplet trace responds to either a procedure digest initialization or decoder call request.
+Each row of the kernel ROM chiplet trace emits either an init message or a decoder call message.
 Since the $s_{first}$ column defines which type of response is sent to the bus, it is used to combine both requests into a single constraint given by
 
 > $$
@@ -111,9 +114,10 @@ The above simplifies to
 - $s_{first} = 1$: $b'_{chip} = b_{chip} \cdot v_{init}$, when responding to a $\textsf{KERNEL\_PROC\_INIT}$ request.
 - $s_{first} = 0$: $b'_{chip} = b_{chip} \cdot v_{call}$, when responding to a $\textsf{KERNEL\_PROC\_CALL}$ request.
 
-The kernel procedure digests initialization requests are implemented by imposing a boundary constraint in the first row of the $b_{chip}$ column.
-This is described in the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).
+The verifier computes the reduced product of the public-input digests, and the aux-finals boundary
+check enforces that the bus ends at that value.
 
-By using the bus to initialize the kernel ROM procedure digest in this way, the verifier only learns which procedures can be invoked but doesn't learn how often they were called, if at all.
+By binding the bus to the public-input digest set in this way, the verifier only learns which procedures can be invoked
+but doesn't learn how often they were called, if at all.
 
 The full set of constraints applied to the $b_{chip}$ are described as part of the [chiplets bus constraints](../chiplets/index.md#chiplets-bus-constraints).

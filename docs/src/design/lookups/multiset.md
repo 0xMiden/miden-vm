@@ -73,7 +73,7 @@ The values in this column contain a running product of the communication with th
 - Each request is “sent” by computing a lookup value from some information that's specific to the specialized component, the operation inputs, and the operation outputs, and then dividing it out of the running product column $b$.
 - Each chiplet response is “sent” by computing the same lookup value from the component-specific information, inputs, and outputs, and then multiplying it into the running product column $b$.
 
-Thus, if the requests and responses match, and the bus column $b$ is initialized to $1$, then $b$ will start and end with the value $1$. This condition is enforced by boundary constraints on column $b$.
+Thus, if the requests and responses match, and the bus column $b$ is initialized to $1$, then $b$ will start and end with the value $1$ (absent verifier-supplied messages). When verifier-supplied messages are present, the verifier computes the expected final value from those public inputs, and the aux-finals boundary check enforces that value.
 
 Note that the order of the requests and responses does not matter, as long as they are all included in $b$. In fact, requests and responses for the same operation will generally occur at different cycles. Additionally, there could be multiple requests sent in the same cycle, and there could also be a response provided at the same cycle that a request is received.
 

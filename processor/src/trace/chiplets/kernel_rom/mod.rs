@@ -94,9 +94,9 @@ impl KernelRom {
         debug_assert_eq!(TRACE_WIDTH, trace.width(), "inconsistent trace fragment width");
         let mut row = RowIndex::from(0);
         for access_info in self.access_map.values() {
-            // Always write an entry for this procedure hash responding to the requests in the
-            // requests in the virtual table. The verifier makes those requests by initializing
-            // the bus with the set of procedure hashes included in the public inputs.
+            // Always write an entry for this procedure hash emitting the init message that is
+            // balanced against verifier-supplied kernel digests (public inputs). The aux_finals
+            // boundary check enforces the expected final bus value.
             access_info.write_into_trace(trace, row, true);
             row += 1_u32;
 

@@ -232,6 +232,7 @@ where
         constraints::enforce_bus(builder, local, next);
     }
 
+    /// Verifier hook: check aux_finals against public inputs and randomness-derived messages.
     fn verify_aux_finals(
         &self,
         randomness: &[EF],
@@ -262,16 +263,13 @@ where
         let program_info = self.public_inputs.program_info();
         let program_hash_msg = program_hash_message(alphas, program_info.program_hash());
 
-        // Kernel ROM digests are reduced via multiset product.
+        // Kernel ROM digests are reduced via multiset product (var-len public inputs required).
         let kernel_procs = program_info.kernel_procedures();
-        let kernel_reduced = if var_len_public_inputs.is_empty() {
-            kernel_reduced_value(alphas, kernel_procs)
-        } else {
+        let kernel_reduced =
             match kernel_reduced_from_var_len(alphas, var_len_public_inputs, kernel_procs.len()) {
                 Some(value) => value,
                 None => return false,
-            }
-        };
+            };
 
         // Transcript initial/final states for log_precompile.
         let default_state_msg =
@@ -321,6 +319,7 @@ struct AuxFinals<EF> {
 }
 
 fn program_hash_message<EF: ExtensionField<Felt>>(alphas: &[EF], program_hash: &Word) -> EF {
+    // Build the program-hash bus message for the initial block-hash table row.
     // Matches semantics of BlockHashTableRow::collapse for the initial program hash row:
     // parent_id=0, is_first_child=0, is_loop_body=0.
     alphas[0]
@@ -330,19 +329,14 @@ fn program_hash_message<EF: ExtensionField<Felt>>(alphas: &[EF], program_hash: &
         + alphas[5] * program_hash[3]
 }
 
-fn kernel_reduced_value<EF: ExtensionField<Felt>>(alphas: &[EF], procs: &[Word]) -> EF {
-    let mut acc = EF::ONE;
-    for digest in procs {
-        acc *= kernel_proc_message(alphas, digest);
-    }
-    acc
-}
-
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
     alphas: &[EF],
     var_len_public_inputs: &[&[&[Felt]]],
     expected_len: usize,
 ) -> Option<EF> {
+    // Expect exactly one var-len group containing kernel procedure digests, each as 4 felts.
+    // Return None if the group is missing, has the wrong length, or contains malformed digests.
+    // On success, return the multiset product of the kernel-proc messages for those digests.
     if var_len_public_inputs.len() != 1 {
         return None;
     }
@@ -368,6 +362,7 @@ fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
 }
 
 fn kernel_proc_message<EF: ExtensionField<Felt>>(alphas: &[EF], digest: &Word) -> EF {
+    // Build the kernel-proc init message.
     alphas[0]
         + alphas[1] * trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL
         + alphas[2] * digest[0]

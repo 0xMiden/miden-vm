@@ -23,8 +23,9 @@ use crate::{PrimeField64, debug::BusDebugger};
 /// future. However, when we encounter the beginning of a SPLIT block, we only push the left or the
 /// right child, depending on the current value on the stack (since only one child gets executed in
 /// a SPLIT block). When we encounter an `END` operation, we remove the block from the table that
-/// corresponds to the block that just ended. The root block's hash is checked via aux_finals,
-/// since it doesn't have a parent and would never be added to the table otherwise.
+/// corresponds to the block that just ended. The root block's hash is supplied as a public input;
+/// the aux_finals boundary check enforces it since it doesn't have a parent and would never be
+/// added to the table otherwise.
 #[derive(Default)]
 pub struct BlockHashTableColumnBuilder {}
 

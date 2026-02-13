@@ -376,7 +376,7 @@ $$
 
 ## LOG_PRECOMPILE
 
-The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via an Poseidon2 sponge). Initialization and boundary enforcement are handled via variable‑length public inputs; see [Precompile flow](./precompiles.md) for a high‑level overview. This section concentrates on the stack interaction and bus messages.
+The `log_precompile` operation logs a precompile event by recording two user-provided words (`TAG` and `COMM`) into the precompile transcript (implemented via a Poseidon2 sponge). The final transcript state is supplied as a fixed public input; together with the default init state it determines the expected final bus value, which the aux-finals boundary check enforces. See [Precompile flow](./precompiles.md) for a high-level overview. This section concentrates on the stack interaction and bus messages.
 
 ### Operation Overview
 
@@ -471,14 +471,13 @@ $$
 b_{vtable}' \cdot v_{rem} = b_{vtable} \cdot v_{ins}
 $$
 
-To ensure the column accounts for the initial and final transcript state, the verifier initializes the bus with variable‑length public inputs (see kernel ROM chiplet). More specifically, it constrains the first value of the bus to be equal to
-
-$$
-b_{vtable,0} = \frac{v_{ins, init}}{v_{rem, last}}
-$$
-
-Usually, we initialize the transcript state to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running state from a previous execution. The final transcript state is provided to the verifier (as a variable‑length public input) and enforced via the boundary constraint.
-The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
+To account for the initial and final transcript state, the verifier derives the init/final messages
+from public inputs and computes the expected final bus value as $v_{rem,last} / v_{ins,init}$.
+The aux-finals boundary check enforces that value; there is no first-row boundary initialization.
+Usually, we initialize the transcript
+state to the empty word `[0,0,0,0]`, though it may also be used to extend an existing running state
+from a previous execution. The final transcript state is provided to the verifier as a fixed public
+input. The messages $v_{ins, init}$ and $v_{rem, last}$ are given by
 
 $$
 v_{ins,init} = \alpha_0 + \alpha_1 \cdot op_{log\_precompile},
