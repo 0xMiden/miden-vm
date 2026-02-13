@@ -98,5 +98,5 @@ getrandom = { version = "0.2", default-features = false, features = ["js"] }
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
 
 [patch.crates-io]
-p3-miden-air = { path = "/Users/al/Code/zz/p3-miden/p3-miden-air" }
-p3-miden-prover = { path = "/Users/al/Code/zz/p3-miden/p3-miden-prover" }
+p3-miden-air = { git = "https://github.com/0xMiden/p3-miden.git", branch = "al-aux-finals-simplifications" }
+p3-miden-prover = { git = "https://github.com/0xMiden/p3-miden.git", branch = "al-aux-finals-simplifications" }
