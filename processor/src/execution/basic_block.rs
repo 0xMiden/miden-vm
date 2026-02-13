@@ -330,6 +330,7 @@ where
                 // `finish_emit_op_execution()` below for execution to proceed properly.
                 return ControlFlow::Break(InternalBreakReason::Emit {
                     basic_block_node_id: node_id,
+                    op_idx: op_idx_in_block,
                     continuation: get_continuation_after_executing_operation(
                         basic_block,
                         node_id,
