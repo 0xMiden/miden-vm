@@ -44,7 +44,8 @@ where
     let condition = processor.stack().get(0);
 
     // drop the condition from the stack
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     // execute the loop body as long as the condition is true
     if condition == ONE {
@@ -139,7 +140,8 @@ where
 
         // Drop the condition from the stack (we know the loop was entered since condition is
         // ONE).
-        processor.stack_mut().decrement_size(tracer);
+        processor.stack_mut().decrement_size();
+        tracer.decrement_stack_size();
 
         continuation_stack.push_finish_loop_entered(current_node_id);
         continuation_stack.push_start_node(loop_node.body());
@@ -164,7 +166,8 @@ where
         // the loop body is responsible for pushing the condition back onto the stack, and therefore
         // the END instruction must drop it.
         if loop_was_entered {
-            processor.stack_mut().decrement_size(tracer);
+            processor.stack_mut().decrement_size();
+            tracer.decrement_stack_size();
         }
 
         // Finalize the clock cycle corresponding to the END operation.

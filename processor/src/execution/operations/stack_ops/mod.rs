@@ -23,8 +23,9 @@ where
     P: Processor,
     T: Tracer<Processor = P>,
 {
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, element);
+    tracer.increment_stack_size(processor);
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -38,8 +39,9 @@ where
     P: Processor,
     T: Tracer<Processor = P>,
 {
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, ZERO);
+    tracer.increment_stack_size(processor);
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -78,8 +80,9 @@ where
     T: Tracer<Processor = P>,
 {
     let to_dup = processor.stack().get(n);
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, to_dup);
+    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }
@@ -99,7 +102,8 @@ where
     T: Tracer<Processor = P>,
 {
     let condition = processor.stack().get(0);
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     match condition.as_canonical_u64() {
         0 => {
@@ -131,7 +135,8 @@ where
     T: Tracer<Processor = P>,
 {
     let condition = processor.stack().get(0);
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     match condition.as_canonical_u64() {
         0 => {
