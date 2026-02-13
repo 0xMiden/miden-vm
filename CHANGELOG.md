@@ -20,11 +20,8 @@
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
 - Fixed off-by-one error in cycle limit check that caused programs using exactly `max_cycles` cycles to fail ([#2635](https://github.com/0xMiden/miden-vm/pull/2635)).
-<<<<<<< fix/prover-padding-log
 - Fixed prover log message reporting `main_trace_len()` instead of `trace_len()` for the pre-padding length ([#2671](https://github.com/0xMiden/miden-vm/pull/2671)).
-=======
 - System event errors now include the operation index, so diagnostics point to the exact emit instruction instead of the first operation in the basic block ([#2672](https://github.com/0xMiden/miden-vm/pull/2672)).
->>>>>>> next
 
 #### Changes
 
