@@ -66,6 +66,7 @@ miden-verifier = { path = "./verifier", version = "0.22", default-features = fal
 miden-crypto = { version = "0.22", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
+p3-miden-air = { version = "0.4", default-features = false }
 
 # Constraints to resolve duplicates
 semver = "1.0"
@@ -95,3 +96,7 @@ getrandom = { version = "0.2", default-features = false, features = ["js"] }
 
 [workspace.lints.rust]
 unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }
+
+[patch.crates-io]
+p3-miden-air = { path = "/Users/al/Code/zz/p3-miden/p3-miden-air" }
+p3-miden-prover = { path = "/Users/al/Code/zz/p3-miden/p3-miden-prover" }

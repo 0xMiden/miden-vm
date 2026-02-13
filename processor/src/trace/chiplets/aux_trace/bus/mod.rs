@@ -33,7 +33,6 @@ use miden_core::{
         OPCODE_MSTOREW, OPCODE_MSTREAM, OPCODE_PIPE, OPCODE_RESPAN, OPCODE_SPAN, OPCODE_SPLIT,
         OPCODE_SYSCALL, OPCODE_U32AND, OPCODE_U32XOR,
     },
-    program::Kernel,
 };
 
 use super::Felt;
@@ -49,24 +48,21 @@ mod hasher;
 mod kernel;
 mod memory;
 
-use kernel::build_kernel_init_requests;
 pub use memory::{build_ace_memory_read_element_request, build_ace_memory_read_word_request};
 
 // BUS COLUMN BUILDER
 // ================================================================================================
 
 /// Describes how to construct the execution trace of the chiplets bus auxiliary trace column.
-pub struct BusColumnBuilder<'a> {
-    kernel: &'a Kernel,
-}
+pub struct BusColumnBuilder;
 
-impl<'a> BusColumnBuilder<'a> {
-    pub(super) fn new(kernel: &'a Kernel) -> Self {
-        Self { kernel }
+impl BusColumnBuilder {
+    pub(super) fn new() -> Self {
+        Self
     }
 }
 
-impl<E> AuxColumnBuilder<E> for BusColumnBuilder<'_>
+impl<E> AuxColumnBuilder<E> for BusColumnBuilder
 where
     E: ExtensionField<Felt>,
 {
@@ -165,15 +161,6 @@ where
         } else {
             E::ONE
         }
-    }
-
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        build_kernel_init_requests(self.kernel.proc_hashes(), alphas, _debugger)
     }
 }
 

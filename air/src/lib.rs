@@ -10,6 +10,7 @@ use alloc::vec::Vec;
 use core::borrow::Borrow;
 
 use miden_core::{
+    WORD_SIZE, Word,
     field::ExtensionField,
     precompile::PrecompileTranscriptState,
     program::{ProgramInfo, StackInputs, StackOutputs},
@@ -31,12 +32,24 @@ mod export {
         utils::ToElements,
     };
     pub use miden_crypto::stark::air::{Air, AirBuilder, BaseAir, MidenAir, MidenAirBuilder};
+    pub use p3_miden_air::BusType;
 }
 
 pub use export::*;
 
 // PUBLIC INPUTS
 // ================================================================================================
+
+const BUS_TYPES: [BusType; 8] = [
+    BusType::Multiset, // p1 block stack
+    BusType::Multiset, // p2 block hash
+    BusType::Multiset, // p3 op group
+    BusType::Multiset, // s_aux stack overflow
+    BusType::Logup,    // b_range
+    BusType::Multiset, // b_hash_kernel (v_table)
+    BusType::Multiset, // b_chiplets
+    BusType::Logup,    // v_wiring
+];
 
 #[derive(Debug, Clone)]
 pub struct PublicInputs {
@@ -132,25 +145,35 @@ impl Deserializable for PublicInputs {
 pub struct ProcessorAir<B = ()> {
     /// Auxiliary trace builder for generating auxiliary columns.
     aux_builder: Option<B>,
+    /// Public inputs cached for verifier-side checks.
+    public_inputs: PublicInputs,
 }
 
 impl Default for ProcessorAir<()> {
     fn default() -> Self {
-        Self::new()
+        Self::new(PublicInputs::new(
+            ProgramInfo::default(),
+            StackInputs::default(),
+            StackOutputs::default(),
+            PrecompileTranscriptState::default(),
+        ))
     }
 }
 
 impl ProcessorAir<()> {
     /// Creates a new ProcessorAir without auxiliary trace support.
-    pub fn new() -> Self {
-        Self { aux_builder: None }
+    pub fn new(public_inputs: PublicInputs) -> Self {
+        Self { aux_builder: None, public_inputs }
     }
 }
 
 impl<B> ProcessorAir<B> {
     /// Creates a new ProcessorAir with auxiliary trace support.
-    pub fn with_aux_builder(builder: B) -> Self {
-        Self { aux_builder: Some(builder) }
+    pub fn with_aux_builder(public_inputs: PublicInputs, builder: B) -> Self {
+        Self {
+            aux_builder: Some(builder),
+            public_inputs,
+        }
     }
 }
 
@@ -167,6 +190,10 @@ where
         // Return the number of extension field columns
         // The prover will interpret the returned base field data as EF columns
         AUX_TRACE_WIDTH
+    }
+
+    fn bus_types(&self) -> &[BusType] {
+        &BUS_TYPES
     }
 
     fn num_randomness(&self) -> usize {
@@ -204,4 +231,147 @@ where
         // Auxiliary (bus) constraints.
         constraints::enforce_bus(builder, local, next);
     }
+
+    fn verify_aux_finals(
+        &self,
+        randomness: &[EF],
+        aux_finals: &[EF],
+        _public_values: &[Felt],
+        var_len_public_inputs: &[&[&[Felt]]],
+    ) -> bool {
+        use crate::constraints::bus::indices;
+
+        if aux_finals.len() < AUX_TRACE_WIDTH || randomness.len() < trace::AUX_TRACE_RAND_ELEMENTS {
+            return false;
+        }
+
+        let alphas = randomness;
+
+        let aux = AuxFinals {
+            p1: aux_finals[indices::P1_BLOCK_STACK],
+            p2: aux_finals[indices::P2_BLOCK_HASH],
+            p3: aux_finals[indices::P3_OP_GROUP],
+            s_aux: aux_finals[indices::S_AUX_STACK],
+            b_range: aux_finals[indices::B_RANGE],
+            b_hash_kernel: aux_finals[indices::B_HASH_KERNEL],
+            b_chiplets: aux_finals[indices::B_CHIPLETS],
+            v_wiring: aux_finals[indices::V_WIRING],
+        };
+
+        // Program-specific bindings.
+        let program_info = self.public_inputs.program_info();
+        let program_hash_msg = program_hash_message(alphas, program_info.program_hash());
+
+        // Kernel ROM digests are reduced via multiset product.
+        let kernel_procs = program_info.kernel_procedures();
+        let kernel_reduced = if var_len_public_inputs.is_empty() {
+            kernel_reduced_value(alphas, kernel_procs)
+        } else {
+            match kernel_reduced_from_var_len(alphas, var_len_public_inputs, kernel_procs.len()) {
+                Some(value) => value,
+                None => return false,
+            }
+        };
+
+        // Transcript initial/final states for log_precompile.
+        let default_state_msg =
+            trace::log_precompile::transcript_message(alphas, PrecompileTranscriptState::default());
+        let final_state_msg = trace::log_precompile::transcript_message(
+            alphas,
+            self.public_inputs.pc_transcript_state(),
+        );
+
+        // Expected final identities for simple buses. First-row initialization constraints live
+        // in the wrapper AIR (AirWithBoundaryConstraints) on the p3-miden side.
+        let identity_finals_ok = aux.p1 == EF::ONE
+            && aux.p3 == EF::ONE
+            && aux.s_aux == EF::ONE
+            && aux.b_range == EF::ZERO
+            && aux.v_wiring == EF::ZERO;
+
+        // Bind the program hash to the last-row value of the block-hash table (p2).
+        let program_hash_ok = aux.p2 * program_hash_msg == EF::ONE;
+
+        // Balance hash-kernel and chiplets buses. This cancels ACE memory read requests against
+        // memory chiplet responses, then links the transcript (init -> final) and kernel digests.
+        // Soundness relies on the randomized message encoding: each message type has a unique
+        // label in its first tuple element (domain separation), so distinct messages collide only
+        // with negligible probability over random alphas.
+        let bus_balance_ok = aux.b_hash_kernel * aux.b_chiplets * default_state_msg
+            == kernel_reduced * final_state_msg;
+
+        identity_finals_ok && program_hash_ok && bus_balance_ok
+    }
+}
+
+// AUX FINALS HELPERS
+// ================================================================================================
+
+/// Aux-final values for each bus column used by `verify_aux_finals`.
+#[derive(Clone, Copy, Debug)]
+struct AuxFinals<EF> {
+    p1: EF,
+    p2: EF,
+    p3: EF,
+    s_aux: EF,
+    b_range: EF,
+    b_hash_kernel: EF,
+    b_chiplets: EF,
+    v_wiring: EF,
+}
+
+fn program_hash_message<EF: ExtensionField<Felt>>(alphas: &[EF], program_hash: &Word) -> EF {
+    // Matches semantics of BlockHashTableRow::collapse for the initial program hash row:
+    // parent_id=0, is_first_child=0, is_loop_body=0.
+    alphas[0]
+        + alphas[2] * program_hash[0]
+        + alphas[3] * program_hash[1]
+        + alphas[4] * program_hash[2]
+        + alphas[5] * program_hash[3]
+}
+
+fn kernel_reduced_value<EF: ExtensionField<Felt>>(alphas: &[EF], procs: &[Word]) -> EF {
+    let mut acc = EF::ONE;
+    for digest in procs {
+        acc *= kernel_proc_message(alphas, digest);
+    }
+    acc
+}
+
+fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
+    alphas: &[EF],
+    var_len_public_inputs: &[&[&[Felt]]],
+    expected_len: usize,
+) -> Option<EF> {
+    if var_len_public_inputs.len() != 1 {
+        return None;
+    }
+
+    let kernel_digests = var_len_public_inputs[0];
+
+    if kernel_digests.len() != expected_len {
+        return None;
+    }
+
+    let mut acc = EF::ONE;
+    for digest in kernel_digests.iter() {
+        let digest = *digest;
+        if digest.len() != WORD_SIZE {
+            return None;
+        }
+
+        let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
+        acc *= kernel_proc_message(alphas, &word);
+    }
+
+    Some(acc)
+}
+
+fn kernel_proc_message<EF: ExtensionField<Felt>>(alphas: &[EF], digest: &Word) -> EF {
+    alphas[0]
+        + alphas[1] * trace::chiplets::kernel_rom::KERNEL_PROC_INIT_LABEL
+        + alphas[2] * digest[0]
+        + alphas[3] * digest[1]
+        + alphas[4] * digest[2]
+        + alphas[5] * digest[3]
 }

@@ -4,39 +4,12 @@ use miden_air::trace::{
     MainTrace, RowIndex,
     chiplets::kernel_rom::{KERNEL_PROC_CALL_LABEL, KERNEL_PROC_INIT_LABEL},
 };
-use miden_core::{Felt, Word, field::ExtensionField};
+use miden_core::{Felt, field::ExtensionField};
 
 use crate::{
     debug::{BusDebugger, BusMessage},
     trace::chiplets::aux_trace::build_value,
 };
-
-// REQUESTS
-// ================================================================================================
-
-/// Builds the requests for each unique kernel procedure digest, to be provided via public inputs.
-pub(super) fn build_kernel_init_requests<E>(
-    proc_hashes: &[Word],
-    alphas: &[E],
-    _debugger: &mut BusDebugger<E>,
-) -> E
-where
-    E: ExtensionField<Felt>,
-{
-    let mut requests = E::ONE;
-    // Initialize the bus with the kernel rom hashes provided by the public inputs.
-    // The verifier computes this value, and is enforced with a boundary constraint in the
-    // first row.
-    for proc_hash in proc_hashes {
-        let message = KernelRomInitMessage { kernel_proc_digest: proc_hash.into() };
-
-        requests *= message.value(alphas);
-
-        #[cfg(any(test, feature = "bus-debugger"))]
-        _debugger.add_request(alloc::boxed::Box::new(message), alphas);
-    }
-    requests
-}
 
 // RESPONSES
 // ================================================================================================
@@ -44,10 +17,9 @@ where
 /// Builds the response from the kernel chiplet at `row`.
 ///
 /// # Details
-/// Each row responds to either
-/// - requests made by the verifier for checking that the ROM contains exactly the hashes given by
-///   public inputs, or,
-/// - requests by the decoder when it performs a SYSCALL.
+/// Each row responds to either:
+/// - a kernel procedure digest that must appear in the ROM (one response per unique procedure), or
+/// - a decoder request when it performs a SYSCALL.
 ///
 /// If a kernel procedure digest is requested `n` times by the decoder, it is repeated
 /// `n+1` times in the trace.
@@ -67,11 +39,10 @@ where
     let root2 = main_trace.chiplet_kernel_root_2(row);
     let root3 = main_trace.chiplet_kernel_root_3(row);
 
-    // The caller ensures this row is a kernel ROM row, so we just need to check if this is
-    // the first row for a unique procedure digest.
+    // First hash row for a digest: emit the init message used to verify kernel membership via
+    // aux_finals.
     if main_trace.chiplet_kernel_is_first_hash_row(row) {
-        // Respond to the requests performed by the verifier when they initialize the bus
-        // column with the unique proc hashes.
+        // Emit the digest for aux-final verification of kernel procedure membership.
         let message = KernelRomInitMessage {
             kernel_proc_digest: [root0, root1, root2, root3],
         };

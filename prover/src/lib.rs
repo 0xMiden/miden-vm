@@ -18,7 +18,7 @@ mod proving_options;
 
 // EXPORTS
 // ================================================================================================
-pub use miden_air::{DeserializationError, ProcessorAir, config};
+pub use miden_air::{DeserializationError, ProcessorAir, PublicInputs, config};
 pub use miden_core::proof::{ExecutionProof, HashFunction};
 use miden_crypto::stark;
 pub use miden_processor::{
@@ -78,11 +78,17 @@ pub async fn prove(
         execution_trace_to_row_major(&trace)
     };
 
-    // Build public values
-    let public_values = trace.to_public_values();
+    // Build public inputs/values
+    let public_inputs = PublicInputs::new(
+        trace.program_info().clone(),
+        trace.init_stack_state(),
+        *trace.stack_outputs(),
+        trace.final_precompile_transcript().state(),
+    );
+    let public_values = public_inputs.to_elements();
 
     // Create AIR with aux trace builders
-    let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+    let air = ProcessorAir::with_aux_builder(public_inputs, trace.aux_trace_builders().clone());
 
     // Generate STARK proof using unified miden-prover
     let proof_bytes = match hash_fn {

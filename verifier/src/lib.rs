@@ -134,7 +134,7 @@ fn verify_stark(
     let pub_inputs =
         PublicInputs::new(program_info, stack_inputs, stack_outputs, pc_transcript_state);
     let public_values = pub_inputs.to_elements();
-    let air = ProcessorAir::new();
+    let air = ProcessorAir::new(pub_inputs);
 
     match hash_fn {
         HashFunction::Blake3_256 => {

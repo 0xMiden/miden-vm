@@ -28,6 +28,7 @@ testing = []
 miden-core = { workspace = true, features = ["serde"] }
 miden-crypto.workspace = true
 miden-utils-indexing.workspace = true
+p3-miden-air.workspace = true
 
 # External dependencies
 thiserror.workspace = true

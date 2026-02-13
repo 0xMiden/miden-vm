@@ -221,8 +221,8 @@ impl ChipletsLengths {
 // AUXILIARY COLUMN BUILDER
 // ================================================================================================
 
-/// Defines a builder responsible for building a single column in an auxiliary segment of the
-/// execution trace.
+/// Defines a builder responsible for building a single auxiliary bus column in the execution
+/// trace.
 pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
@@ -246,33 +246,27 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
     // PROVIDED METHODS
     // --------------------------------------------------------------------------------------------
 
-    fn init_requests(
-        &self,
-        _main_trace: &MainTrace,
-        _alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
+    /// Specifies whether to enforce that all requests/responses are balanced in tests/debug mode.
+    /// Buses whose boundary is checked via aux_finals can opt out for now as the debugger doesn't
+    /// support non-trivial aux_finals values.
+    ///
+    /// TODO: extend the bus debugger to handle non-trivial aux_finals values.
+    #[cfg(any(test, feature = "bus-debugger"))]
+    fn enforce_bus_balance(&self) -> bool {
+        true
     }
 
-    fn init_responses(
-        &self,
-        _main_trace: &MainTrace,
-        _alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        E::ONE
-    }
-
-    /// Builds the chiplets bus auxiliary trace column.
+    /// Builds an auxiliary bus trace column as a running product of responses over requests.
+    /// The column is initialized to the multiset identity (1); final values are checked via
+    /// aux_finals in the verifier hook.
     fn build_aux_column(&self, main_trace: &MainTrace, alphas: &[E]) -> Vec<E> {
-        let mut bus_debugger = BusDebugger::new("chiplets bus".to_string());
+        let mut bus_debugger = BusDebugger::new("aux bus".to_string());
 
         let mut requests: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        requests[0] = self.init_requests(main_trace, alphas, &mut bus_debugger);
+        requests[0] = E::ONE;
 
         let mut responses_prod: Vec<E> = unsafe { uninit_vector(main_trace.num_rows()) };
-        responses_prod[0] = self.init_responses(main_trace, alphas, &mut bus_debugger);
+        responses_prod[0] = E::ONE;
 
         let mut requests_running_prod = requests[0];
 
@@ -297,7 +291,9 @@ pub(crate) trait AuxColumnBuilder<E: ExtensionField<Felt>> {
         }
 
         #[cfg(any(test, feature = "bus-debugger"))]
-        assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        if self.enforce_bus_balance() {
+            assert!(bus_debugger.is_empty(), "{bus_debugger}");
+        }
 
         result_aux_column
     }

@@ -23,21 +23,12 @@ use crate::{PrimeField64, debug::BusDebugger};
 /// future. However, when we encounter the beginning of a SPLIT block, we only push the left or the
 /// right child, depending on the current value on the stack (since only one child gets executed in
 /// a SPLIT block). When we encounter an `END` operation, we remove the block from the table that
-/// corresponds to the block that just ended. The table is initialized with the root block's hash,
-/// since it doesn't have a parent, and so would never be added to the table otherwise.
+/// corresponds to the block that just ended. The root block's hash is checked via aux_finals,
+/// since it doesn't have a parent and would never be added to the table otherwise.
 #[derive(Default)]
 pub struct BlockHashTableColumnBuilder {}
 
 impl<E: ExtensionField<Felt>> AuxColumnBuilder<E> for BlockHashTableColumnBuilder {
-    fn init_responses(
-        &self,
-        main_trace: &MainTrace,
-        alphas: &[E],
-        _debugger: &mut BusDebugger<E>,
-    ) -> E {
-        BlockHashTableRow::table_init(main_trace).collapse(alphas)
-    }
-
     /// Removes a row from the block hash table.
     fn get_requests_at(
         &self,
@@ -109,18 +100,6 @@ pub struct BlockHashTableRow {
 impl BlockHashTableRow {
     // CONSTRUCTORS
     // ----------------------------------------------------------------------------------------------
-
-    // Instantiates the initial row in the block hash table.
-    pub fn table_init(main_trace: &MainTrace) -> Self {
-        let program_hash =
-            main_trace.decoder_hasher_state_first_half(main_trace.last_program_row());
-        Self {
-            parent_block_id: ZERO,
-            child_block_hash: program_hash,
-            is_first_child: false,
-            is_loop_body: false,
-        }
-    }
 
     /// Computes the row to be removed from the block hash table when encountering an `END`
     /// operation.

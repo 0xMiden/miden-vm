@@ -205,7 +205,7 @@ mod fast_parallel {
     use miden_processor::{
         ExecutionOptions, FastProcessor, StackInputs, advice::AdviceInputs, trace::build_trace,
     };
-    use miden_prover::{ProcessorAir, config, execution_trace_to_row_major};
+    use miden_prover::{ProcessorAir, PublicInputs, config, execution_trace_to_row_major};
     use miden_verifier::verify;
     use miden_vm::DefaultHost;
 
@@ -251,10 +251,16 @@ mod fast_parallel {
 
         // Convert trace to row-major format for proving
         let trace_matrix = execution_trace_to_row_major(&trace);
-        let public_values = trace.to_public_values();
+        let public_inputs = PublicInputs::new(
+            trace.program_info().clone(),
+            trace.init_stack_state(),
+            *trace.stack_outputs(),
+            trace.final_precompile_transcript().state(),
+        );
+        let public_values = public_inputs.to_elements();
 
         // Create AIR with aux trace builders
-        let air = ProcessorAir::with_aux_builder(trace.aux_trace_builders().clone());
+        let air = ProcessorAir::with_aux_builder(public_inputs, trace.aux_trace_builders().clone());
 
         // Generate proof using Blake3_256
         let config = config::create_blake3_256_config();

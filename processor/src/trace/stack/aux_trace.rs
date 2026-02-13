@@ -27,7 +27,6 @@ impl AuxTraceBuilder {
     ) -> Vec<Vec<E>> {
         let p1 = self.build_aux_column(main_trace, rand_elements);
 
-        debug_assert_eq!(*p1.last().unwrap(), E::ONE);
         vec![p1]
     }
 }

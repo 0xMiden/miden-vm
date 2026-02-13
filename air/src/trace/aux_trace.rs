@@ -20,7 +20,7 @@ use crate::Felt;
 /// The trait breaks the cycle:
 /// - `air` defines the interface (this trait)
 /// - `processor` implements the interface (concrete aux builders)
-/// - `prover` injects the implementation: `ProcessorAir::with_aux_builder(impl)`
+/// - `prover` injects the implementation: `ProcessorAir::with_aux_builder(public_inputs, impl)`
 ///
 /// The trait works with row-major matrices (i.e., Plonky3 format).
 pub trait AuxTraceBuilder<EF>: Send + Sync {

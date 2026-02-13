@@ -1245,6 +1245,7 @@ dependencies = [
  "miden-core",
  "miden-crypto",
  "miden-utils-indexing",
+ "p3-miden-air",
  "proptest",
  "serde",
  "thiserror",
@@ -1984,8 +1985,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a88e6ee9c92ff6c0b64f1ec0d61eda72fb432bda45337d876c46bd43748508"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2015,8 +2014,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f05a61c10cc2d6a73e192ac34a9884e4f26bd877f3eaea441d7b7ebfdffdf6c7"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2036,8 +2033,6 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0a78b6a5b5f6bdc55439d343d2a0a2a8e7cb6544b03296f54d2214a84e91e130"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",
