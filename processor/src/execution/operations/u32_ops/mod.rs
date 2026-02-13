@@ -65,8 +65,10 @@ where
     };
     tracer.record_u32_range_checks(processor.system().clock(), top_lo, top_hi);
 
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, top_lo);
+    tracer.increment_stack_size(processor);
+
     processor.stack_mut().set(1, top_hi);
 
     Ok(OperationHelperRegisters::U32Split { lo: top_lo, hi: top_hi })
@@ -120,7 +122,8 @@ where
     tracer.record_u32_range_checks(processor.system().clock(), sum, carry);
 
     // write sum to the new top of the stack, and carry after
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
     processor.stack_mut().set(0, sum);
     processor.stack_mut().set(1, carry);
 
@@ -196,7 +199,8 @@ where
     tracer.record_u32_range_checks(processor.system().clock(), lo, hi);
 
     // write lo to the new top of the stack, and hi after
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
     processor.stack_mut().set(0, lo);
     processor.stack_mut().set(1, hi);
 
@@ -264,7 +268,8 @@ where
     let result = a.as_canonical_u64() & b.as_canonical_u64();
 
     // Update stack
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
     processor.stack_mut().set(0, Felt::new(result));
     Ok(OperationHelperRegisters::Empty)
 }
@@ -289,7 +294,8 @@ where
     let result = a.as_canonical_u64() ^ b.as_canonical_u64();
 
     // Update stack
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
     processor.stack_mut().set(0, Felt::new(result));
     Ok(OperationHelperRegisters::Empty)
 }

@@ -4,13 +4,13 @@ use miden_core::{ZERO, program::MIN_STACK_DEPTH, utils::range};
 
 use crate::{
     errors::OperationError,
-    fast::{ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE, Tracer},
+    fast::{ExecutionContextInfo, FastProcessor, INITIAL_STACK_TOP_IDX, STACK_BUFFER_SIZE},
 };
 
 impl FastProcessor {
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
-    pub(super) fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+    pub(super) fn save_context_and_truncate_stack(&mut self) {
         let overflow_stack = if self.stack_size() > MIN_STACK_DEPTH {
             // save the overflow stack, and zero out the buffer.
             //
@@ -32,8 +32,6 @@ impl FastProcessor {
             ctx: self.ctx,
             fn_hash: self.caller_hash,
         });
-
-        tracer.start_context();
     }
 
     /// Restores the execution context to the state it was in before the last `call`, `syscall` or
@@ -44,10 +42,7 @@ impl FastProcessor {
     /// # Errors
     /// - Returns an error if the overflow stack is larger than the space available in the stack
     ///   buffer.
-    pub(super) fn restore_context(
-        &mut self,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), OperationError> {
+    pub(super) fn restore_context(&mut self) -> Result<(), OperationError> {
         // when a call/dyncall/syscall node ends, stack depth must be exactly 16.
         if self.stack_size() > MIN_STACK_DEPTH {
             return Err(OperationError::InvalidStackDepthOnReturn { depth: self.stack_size() });
@@ -64,8 +59,6 @@ impl FastProcessor {
         // restore system parameters
         self.ctx = ctx_info.ctx;
         self.caller_hash = ctx_info.fn_hash;
-
-        tracer.restore_context();
 
         Ok(())
     }
