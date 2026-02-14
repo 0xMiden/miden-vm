@@ -2,12 +2,17 @@ use alloc::{sync::Arc, vec::Vec};
 use core::future::Future;
 
 use miden_core::{
-    AdviceMap, DebugOptions, EventId, EventName, Felt, Word, crypto::merkle::InnerNodeInfo,
-    mast::MastForest, precompile::PrecompileRequest,
+    Felt, Word,
+    advice::AdviceMap,
+    crypto::merkle::InnerNodeInfo,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
+    precompile::PrecompileRequest,
 };
 use miden_debug_types::{Location, SourceFile, SourceSpan};
 
-use crate::{AssertError, DebugError, EventError, ProcessState, TraceError};
+use crate::{DebugError, ProcessorState, TraceError};
 
 pub(super) mod advice;
 
@@ -16,7 +21,7 @@ pub mod debug;
 pub mod default;
 
 pub mod handlers;
-use handlers::DebugHandler;
+use handlers::{DebugHandler, EventError};
 
 mod mast_forest_store;
 pub use mast_forest_store::{MastForestStore, MemMastForestStore};
@@ -53,14 +58,13 @@ impl AdviceMutation {
 // HOST TRAIT
 // ================================================================================================
 
-/// Defines the common interface between [SyncHost] and [AsyncHost], by which the VM can interact
-/// with the host.
+/// Defines an interface by which the VM can interact with the host.
 ///
 /// There are three main categories of interactions between the VM and the host:
 /// 1. getting a library's MAST forest,
 /// 2. handling VM events (which can mutate the process' advice provider), and
 /// 3. handling debug and trace events.
-pub trait BaseHost {
+pub trait Host {
     // REQUIRED METHODS
     // --------------------------------------------------------------------------------------------
 
@@ -70,79 +74,8 @@ pub trait BaseHost {
         location: &Location,
     ) -> (SourceSpan, Option<Arc<SourceFile>>);
 
-    /// Handles the debug request from the VM.
-    fn on_debug(
-        &mut self,
-        process: &mut ProcessState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_debug(process, options)
-    }
-
-    /// Handles the trace emitted from the VM.
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
-        let mut handler = debug::DefaultDebugHandler::default();
-        handler.on_trace(process, trace_id)
-    }
-
-    /// Handles the failure of the assertion instruction.
-    fn on_assert_failed(
-        &mut self,
-        _process: &ProcessState,
-        _err_code: Felt,
-    ) -> Option<AssertError> {
-        None
-    }
-
-    /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
-    ///
-    /// Hosts that maintain an event registry can override this method to surface human-readable
-    /// names for diagnostics. The default implementation returns `None`.
-    fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
-        None
-    }
-}
-
-/// Defines an interface by which the VM can interact with the host.
-///
-/// There are four main categories of interactions between the VM and the host:
-/// 1. accessing the advice provider,
-/// 2. getting a library's MAST forest,
-/// 3. handling VM events (which can mutate the process' advice provider), and
-/// 4. handling debug and trace events.
-pub trait SyncHost: BaseHost {
-    // REQUIRED METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
-    /// this digest could not be found in this host.
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>>;
-
-    /// Invoked when the VM encounters an `EMIT` operation.
-    ///
-    /// The event ID is available at the top of the stack (position 0) when this handler is called.
-    /// This allows the handler to access both the event ID and any additional context data that
-    /// may have been pushed onto the stack prior to the emit operation.
-    ///
-    /// ## Implementation notes
-    /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
-    /// - Return errors without event names or IDs - the p will enrich them via
-    ///   [`BaseHost::resolve_event()`]
-    /// - System events (IDs 0-255) are handled by the VM before calling this method
-    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError>;
-}
-
-// ASYNC HOST trait
-// ================================================================================================
-
-/// Analogous to the [SyncHost] trait, but designed for asynchronous execution contexts.
-pub trait AsyncHost: BaseHost {
-    // REQUIRED METHODS
-    // --------------------------------------------------------------------------------------------
-
-    // Note: we don't use the `async` keyword in this method, since we need to specify the `+ Send`
-    // bound to the returned Future, and `async` doesn't allow us to do that.
+    // Note: we don't use the `async` keyword in get_mast_forest and on_event, since we need to
+    // specify the `+ Send` bound to the returned Future, and `async` doesn't allow us to do that.
 
     /// Returns MAST forest corresponding to the specified digest, or None if the MAST forest for
     /// this digest could not be found in this host.
@@ -158,12 +91,39 @@ pub trait AsyncHost: BaseHost {
     /// ## Implementation notes
     /// - Extract the event ID via `EventId::from_felt(process.get_stack_item(0))`
     /// - Return errors without event names or IDs - the caller will enrich them via
-    ///   [`BaseHost::resolve_event()`]
+    ///   [`Host::resolve_event()`]
     /// - System events (IDs 0-255) are handled by the VM before calling this method
     fn on_event(
         &mut self,
-        process: &ProcessState<'_>,
+        process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>>;
+
+    // PROVIDED METHODS
+    // --------------------------------------------------------------------------------------------
+
+    /// Handles the debug request from the VM.
+    fn on_debug(
+        &mut self,
+        process: &ProcessorState,
+        options: &DebugOptions,
+    ) -> Result<(), DebugError> {
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_debug(process, options)
+    }
+
+    /// Handles the trace emitted from the VM.
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+        let mut handler = debug::DefaultDebugHandler::default();
+        handler.on_trace(process, trace_id)
+    }
+
+    /// Returns the [`EventName`] registered for the provided [`EventId`], if any.
+    ///
+    /// Hosts that maintain an event registry can override this method to surface human-readable
+    /// names for diagnostics. The default implementation returns `None`.
+    fn resolve_event(&self, _event_id: EventId) -> Option<&EventName> {
+        None
+    }
 }
 
 /// Alias for a `Future`

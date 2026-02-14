@@ -1,7 +1,5 @@
-use pretty_assertions::assert_eq;
-
 use super::*;
-use crate::test_utils::test_consistency_host::TestConsistencyHost;
+use crate::test_utils::TestHost;
 
 #[test]
 fn test_advice_provider() {
@@ -121,11 +119,11 @@ fn test_advice_provider() {
         trace.12
 
         # Check that dyncalls are handled correctly
-        procref.dyncall_me mem_storew_be.4 dropw push.4 dyncall trace.13
-        procref.will_syscall mem_storew_be.8 dropw push.8 dyncall trace.14
+        procref.dyncall_me mem_storew_le.4 dropw push.4 dyncall trace.13
+        procref.will_syscall mem_storew_le.8 dropw push.8 dyncall trace.14
 
         # Check that dynexecs are handled correctly
-        procref.dynexec_me mem_storew_be.4 dropw push.4 dynexec trace.15
+        procref.dynexec_me mem_storew_le.4 dropw push.4 dynexec trace.15
 
         # Check that control flow operations are handled correctly
         exec.control_flow
@@ -134,8 +132,6 @@ fn test_advice_provider() {
         trace.22
     end
     ";
-
-    let stack_inputs = Vec::new();
 
     let (program, kernel_lib) = {
         let source_manager = Arc::new(DefaultSourceManager::default());
@@ -149,41 +145,16 @@ fn test_advice_provider() {
         (program, kernel_lib)
     };
 
-    // fast processor
-    let mut fast_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
-    let processor = FastProcessor::new_debug(&stack_inputs, AdviceInputs::default());
-    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap();
-
-    // slow processor
-    let mut slow_host = TestConsistencyHost::with_kernel_forest(kernel_lib.mast_forest().clone());
-    let mut slow_processor = Process::new(
-        kernel_lib.kernel().clone(),
-        StackInputs::new(stack_inputs).unwrap(),
-        AdviceInputs::default(),
-        ExecutionOptions::default().with_tracing(),
-    );
-    let slow_stack_outputs = slow_processor.execute(&program, &mut slow_host).unwrap();
+    let mut fast_host = TestHost::with_kernel_forest(kernel_lib.mast_forest().clone());
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
+    let fast_stack_outputs = processor.execute_sync(&program, &mut fast_host).unwrap().stack;
 
     // check outputs
-    assert_eq!(fast_stack_outputs, slow_stack_outputs);
+    insta::assert_debug_snapshot!("stack_outputs", fast_stack_outputs);
 
-    // check hosts. Check one trace event at a time to help debugging.
-    for (trace_id, fast_snapshots) in fast_host.snapshots().iter() {
-        let slow_snapshots = slow_host.snapshots().get(trace_id).unwrap_or_else(|| {
-            panic!("fast host has snapshot(s) for trace id {trace_id}, but slow host doesn't")
-        });
-        assert_eq!(fast_snapshots, slow_snapshots, "trace id: {trace_id}");
-    }
-    for (trace_id, slow_snapshots) in slow_host.snapshots().iter() {
-        let fast_snapshots = fast_host.snapshots().get(trace_id).unwrap_or_else(|| {
-            panic!("slow host has snapshot(s) for trace id {trace_id}, but fast host doesn't")
-        });
-        assert_eq!(fast_snapshots, slow_snapshots, "trace_id: {trace_id}");
-    }
-
-    // Still check the snapshots explicitly just in case we have a bug in the logic above.
-    assert_eq!(fast_host.snapshots(), slow_host.snapshots());
+    // check trace events
+    insta::assert_debug_snapshot!("trace_events", fast_host.snapshots());
 }
-
-// Host Implementation
-// ==============================================================================================

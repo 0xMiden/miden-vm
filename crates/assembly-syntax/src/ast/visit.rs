@@ -458,10 +458,11 @@ where
         PushSlice(imm, _) => visitor.visit_immediate_word_value(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
+        | U32WideningAddImm(imm)
         | U32WrappingSubImm(imm)
         | U32OverflowingSubImm(imm)
         | U32WrappingMulImm(imm)
-        | U32OverflowingMulImm(imm)
+        | U32WideningMulImm(imm)
         | U32DivImm(imm)
         | U32ModImm(imm)
         | U32DivModImm(imm)
@@ -483,24 +484,26 @@ where
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
         | Ext2Inv | U32Test | U32TestW | U32Assert | U32Assert2 | U32AssertW | U32Split
-        | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32OverflowingAdd3 | U32WrappingAdd3
-        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32OverflowingMul
-        | U32OverflowingMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
-        | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl | U32Popcnt | U32Clz | U32Ctz
-        | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte | U32Min | U32Max | Drop | DropW
-        | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5 | Dup6 | Dup7 | Dup8 | Dup9 | Dup10
-        | Dup11 | Dup12 | Dup13 | Dup14 | Dup15 | DupW0 | DupW1 | DupW2 | DupW3 | Swap1 | Swap2
-        | Swap3 | Swap4 | Swap5 | Swap6 | Swap7 | Swap8 | Swap9 | Swap10 | Swap11 | Swap12
-        | Swap13 | Swap14 | Swap15 | SwapW1 | SwapW2 | SwapW3 | SwapDw | MovUp2 | MovUp3
-        | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
-        | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
-        | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW
-        | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe
-        | MemStore | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
-        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | Breakpoint | HornerBase | HornerExt | CryptoStream | EvalCircuit
-        | LogPrecompile | Emit => ControlFlow::Continue(()),
+        | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32WideningAdd | U32OverflowingAdd3
+        | U32WideningAdd3 | U32WrappingAdd3 | U32WrappingSub | U32OverflowingSub
+        | U32WrappingMul | U32WideningMul | U32WideningMadd | U32WrappingMadd | U32Div | U32Mod
+        | U32DivMod | U32And | U32Or | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl
+        | U32Popcnt | U32Clz | U32Ctz | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte
+        | U32Min | U32Max | Drop | DropW | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5
+        | Dup6 | Dup7 | Dup8 | Dup9 | Dup10 | Dup11 | Dup12 | Dup13 | Dup14 | Dup15 | DupW0
+        | DupW1 | DupW2 | DupW3 | Swap1 | Swap2 | Swap3 | Swap4 | Swap5 | Swap6 | Swap7 | Swap8
+        | Swap9 | Swap10 | Swap11 | Swap12 | Swap13 | Swap14 | Swap15 | SwapW1 | SwapW2
+        | SwapW3 | SwapDw | MovUp2 | MovUp3 | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8
+        | MovUp9 | MovUp10 | MovUp11 | MovUp12 | MovUp13 | MovUp14 | MovUp15 | MovUpW2
+        | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5 | MovDn6 | MovDn7 | MovDn8 | MovDn9
+        | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
+        | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
+        | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
+        | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
+        | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | HornerBase
+        | HornerExt | CryptoStream | EvalCircuit | LogPrecompile | Emit => {
+            ControlFlow::Continue(())
+        },
     }
 }
 
@@ -1012,8 +1015,12 @@ where
             visitor.visit_mut_block(then_blk)?;
             visitor.visit_mut_block(else_blk)
         },
-        Op::While { body, .. } | Op::Repeat { body, .. } => visitor.visit_mut_block(body),
+        Op::While { body, .. } => visitor.visit_mut_block(body),
         Op::Inst(inst) => visitor.visit_mut_inst(inst),
+        Op::Repeat { count, body, .. } => {
+            visitor.visit_mut_immediate_u32(count)?;
+            visitor.visit_mut_block(body)
+        },
     }
 }
 
@@ -1043,10 +1050,11 @@ where
         PushSlice(imm, _) => visitor.visit_mut_immediate_word_value(imm),
         U32WrappingAddImm(imm)
         | U32OverflowingAddImm(imm)
+        | U32WideningAddImm(imm)
         | U32WrappingSubImm(imm)
         | U32OverflowingSubImm(imm)
         | U32WrappingMulImm(imm)
-        | U32OverflowingMulImm(imm)
+        | U32WideningMulImm(imm)
         | U32DivImm(imm)
         | U32ModImm(imm)
         | U32DivModImm(imm)
@@ -1068,24 +1076,26 @@ where
         | Inv | Incr | Pow2 | Exp | ExpBitLength(_) | Not | And | Or | Xor | Eq | Neq | Eqw
         | Lt | Lte | Gt | Gte | IsOdd | Ext2Add | Ext2Sub | Ext2Mul | Ext2Div | Ext2Neg
         | Ext2Inv | U32Test | U32TestW | U32Assert | U32Assert2 | U32AssertW | U32Split
-        | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32OverflowingAdd3 | U32WrappingAdd3
-        | U32WrappingSub | U32OverflowingSub | U32WrappingMul | U32OverflowingMul
-        | U32OverflowingMadd | U32WrappingMadd | U32Div | U32Mod | U32DivMod | U32And | U32Or
-        | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl | U32Popcnt | U32Clz | U32Ctz
-        | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte | U32Min | U32Max | Drop | DropW
-        | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5 | Dup6 | Dup7 | Dup8 | Dup9 | Dup10
-        | Dup11 | Dup12 | Dup13 | Dup14 | Dup15 | DupW0 | DupW1 | DupW2 | DupW3 | Swap1 | Swap2
-        | Swap3 | Swap4 | Swap5 | Swap6 | Swap7 | Swap8 | Swap9 | Swap10 | Swap11 | Swap12
-        | Swap13 | Swap14 | Swap15 | SwapW1 | SwapW2 | SwapW3 | SwapDw | MovUp2 | MovUp3
-        | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8 | MovUp9 | MovUp10 | MovUp11 | MovUp12
-        | MovUp13 | MovUp14 | MovUp15 | MovUpW2 | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5
-        | MovDn6 | MovDn7 | MovDn8 | MovDn9 | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14
-        | MovDn15 | MovDnW2 | MovDnW3 | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW
-        | PushFeltList(_) | Sdepth | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe
-        | MemStore | MemStoreWBe | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge
-        | HPerm | MTreeGet | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec
-        | DynCall | Breakpoint | HornerBase | HornerExt | EvalCircuit | CryptoStream
-        | LogPrecompile | Emit => ControlFlow::Continue(()),
+        | U32Cast | U32WrappingAdd | U32OverflowingAdd | U32WideningAdd | U32OverflowingAdd3
+        | U32WideningAdd3 | U32WrappingAdd3 | U32WrappingSub | U32OverflowingSub
+        | U32WrappingMul | U32WideningMul | U32WideningMadd | U32WrappingMadd | U32Div | U32Mod
+        | U32DivMod | U32And | U32Or | U32Xor | U32Not | U32Shr | U32Shl | U32Rotr | U32Rotl
+        | U32Popcnt | U32Clz | U32Ctz | U32Clo | U32Cto | U32Lt | U32Lte | U32Gt | U32Gte
+        | U32Min | U32Max | Drop | DropW | PadW | Dup0 | Dup1 | Dup2 | Dup3 | Dup4 | Dup5
+        | Dup6 | Dup7 | Dup8 | Dup9 | Dup10 | Dup11 | Dup12 | Dup13 | Dup14 | Dup15 | DupW0
+        | DupW1 | DupW2 | DupW3 | Swap1 | Swap2 | Swap3 | Swap4 | Swap5 | Swap6 | Swap7 | Swap8
+        | Swap9 | Swap10 | Swap11 | Swap12 | Swap13 | Swap14 | Swap15 | SwapW1 | SwapW2
+        | SwapW3 | SwapDw | MovUp2 | MovUp3 | MovUp4 | MovUp5 | MovUp6 | MovUp7 | MovUp8
+        | MovUp9 | MovUp10 | MovUp11 | MovUp12 | MovUp13 | MovUp14 | MovUp15 | MovUpW2
+        | MovUpW3 | MovDn2 | MovDn3 | MovDn4 | MovDn5 | MovDn6 | MovDn7 | MovDn8 | MovDn9
+        | MovDn10 | MovDn11 | MovDn12 | MovDn13 | MovDn14 | MovDn15 | MovDnW2 | MovDnW3
+        | Reversew | Reversedw | CSwap | CSwapW | CDrop | CDropW | PushFeltList(_) | Sdepth
+        | Caller | Clk | MemLoad | MemLoadWBe | MemLoadWLe | MemStore | MemStoreWBe
+        | MemStoreWLe | MemStream | AdvPipe | AdvLoadW | Hash | HMerge | HPerm | MTreeGet
+        | MTreeSet | MTreeMerge | MTreeVerify | FriExt2Fold4 | DynExec | DynCall | HornerBase
+        | HornerExt | EvalCircuit | CryptoStream | LogPrecompile | Emit => {
+            ControlFlow::Continue(())
+        },
     }
 }
 

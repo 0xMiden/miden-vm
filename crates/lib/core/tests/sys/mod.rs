@@ -1,43 +1,101 @@
 use std::sync::Arc;
 
-use miden_air::ProvingOptions;
 use miden_assembly::Assembler;
 use miden_core::{
-    EventId, EventName, Felt, ProgramInfo, Word,
+    Felt, WORD_SIZE, Word,
+    events::{EventId, EventName},
     precompile::{
         PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileTranscript,
         PrecompileVerifier, PrecompileVerifierRegistry,
     },
+    program::ProgramInfo,
+    proof::HashFunction,
 };
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    AdviceInputs, AdviceMutation, DefaultHost, EventError, EventHandler, ProcessState, Program,
-    StackInputs,
+    DefaultHost, ProcessorState, Program, StackInputs,
+    advice::{AdviceInputs, AdviceMutation},
+    event::{EventError, EventHandler},
 };
+use miden_prover::ProvingOptions;
 use miden_utils_testing::{MIN_STACK_DEPTH, proptest::prelude::*, rand::rand_vector};
 
 #[test]
 fn truncate_stack() {
     let source = "use miden::core::sys begin repeat.12 push.0 end exec.sys::truncate_stack end";
-    let test = build_test!(source, &[16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]);
-    test.expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
+    // Input [1, 2, ..., 16] -> stack with 1 at top
+    // After 12 push.0 and truncate: [0, 0, ..., 0, 1, 2, 3, 4]
+    build_test!(source, &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+        .expect_stack(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 2, 3, 4]);
+}
+
+#[test]
+fn reduce_kernel_digests_too_many_procs_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::sys::vm::public_inputs
+        begin
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+        end
+    ";
+
+    let num_kernel_proc_digests = 1024_usize;
+    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
+    let fixed_length_public_inputs = vec![0_u64; 40];
+    let kernel_procedures_digests = vec![0_u64; num_elements_kernel_proc_digests];
+    let auxiliary_rand_values = [0_u64; 4];
+
+    let mut advice_stack = vec![num_elements_kernel_proc_digests as u64];
+    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+    advice_stack.extend_from_slice(&kernel_procedures_digests);
+    advice_stack.extend_from_slice(&auxiliary_rand_values);
+    advice_stack.push(num_kernel_proc_digests as u64);
+
+    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
+    initial_stack.reverse();
+
+    let test = build_test!(source, &initial_stack, &advice_stack);
+    expect_assert_error_message!(test);
+}
+
+#[test]
+fn process_public_inputs_misaligned_var_len_has_message() {
+    let source = "
+        use miden::core::stark::random_coin
+        use miden::core::sys::vm::public_inputs
+        begin
+            exec.random_coin::init_seed
+            exec.public_inputs::process_public_inputs
+        end
+    ";
+
+    // Not divisible by 8, so the alignment assert in load_public_inputs should fire.
+    let num_var_len_pi = 1_u64;
+    let fixed_length_public_inputs = vec![0_u64; 40];
+    let mut advice_stack = vec![num_var_len_pi];
+    advice_stack.extend_from_slice(&fixed_length_public_inputs);
+
+    let mut initial_stack = vec![10, 27, 16, 200, 0x50010810, 40];
+    initial_stack.reverse();
+
+    let test = build_test!(source, &initial_stack, &advice_stack);
+    expect_assert_error_message!(test);
 }
 
 proptest! {
     #[test]
     fn truncate_stack_proptest(test_values in prop::collection::vec(any::<u64>(), MIN_STACK_DEPTH), n in 1_usize..100) {
-        let mut push_values = rand_vector::<u64>(n);
+        let push_values = rand_vector::<u64>(n);
         let mut source_vec = vec!["use miden::core::sys".to_string(), "begin".to_string()];
         for value in push_values.iter() {
-            let token = format!("push.{value}");
-            source_vec.push(token);
+            source_vec.push(format!("push.{value}"));
         }
         source_vec.push("exec.sys::truncate_stack".to_string());
         source_vec.push("end".to_string());
         let source = source_vec.join(" ");
-        let mut expected_values = test_values.clone();
-        expected_values.append(&mut push_values);
-        expected_values.reverse();
+        let mut expected_values: Vec<u64> = push_values.iter().rev().copied().collect();
+        expected_values.extend(test_values.iter());
         expected_values.truncate(MIN_STACK_DEPTH);
         build_test!(&source, &test_values).prop_expect_stack(&expected_values)?;
     }
@@ -107,15 +165,10 @@ fn log_precompile_request_procedure() {
     host.register_handler(EVENT_NAME, Arc::new(handler.clone()))
         .expect("failed to register dummy handler");
 
-    let options = ProvingOptions::with_96_bit_security(miden_air::HashFunction::Blake3_192);
-    let (stack_outputs, proof) = miden_utils_testing::prove(
-        &program,
-        stack_inputs.clone(),
-        advice_inputs,
-        &mut host,
-        options,
-    )
-    .expect("failed to generate proof for log_precompile helper");
+    let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
+    let (stack_outputs, proof) =
+        miden_utils_testing::prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
+            .expect("failed to generate proof for log_precompile helper");
 
     // Proof should include the single deferred request that we expect.
     assert_eq!(proof.precompile_requests().len(), 1);
@@ -158,7 +211,7 @@ struct DummyLogPrecompileHandler {
 }
 
 impl EventHandler for DummyLogPrecompileHandler {
-    fn on_event(&self, _process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, _process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         Ok(vec![AdviceMutation::extend_precompile_requests([PrecompileRequest::new(
             self.event_id,
             self.calldata.clone(),

@@ -13,10 +13,10 @@ This page provides a comprehensive reference for Miden Assembly instructions.
 
 | Instruction          | Stack Input   | Stack Output     | Cycles       | Notes                                                                                                         |
 | -------------------- | ------------- | ---------------- | ------------ | ------------------------------------------------------------------------------------------------------------- |
-| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 15 <br /> 16 | $$c = \begin{cases} 1, & \text{if } a \leq b  0, & \text{otherwise} \end{cases}$$                             |
-| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 14 <br /> 15 | $$c = \begin{cases} 1, & \text{if } a < b  0, & \text{otherwise} \end{cases}$$                                |
-| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 17 | $$c = \begin{cases} 1, & \text{if } a \geq b  0, & \text{otherwise} \end{cases}$$                             |
-| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 15 <br /> 16 | $$c = \begin{cases} 1, & \text{if } a > b  0, & \text{otherwise} \end{cases}$$                                |
+| `lte` <br /> `lte.b` | `[b, a, ...]` | `[c, ...]`       | 18 <br /> 19 | $$c = \begin{cases} 1, & \text{if } a \leq b  0, & \text{otherwise} \end{cases}$$                             |
+| `lt` <br /> `lt.b`   | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a < b  0, & \text{otherwise} \end{cases}$$                                |
+| `gte` <br /> `gte.b` | `[b, a, ...]` | `[c, ...]`       | 17 <br /> 18 | $$c = \begin{cases} 1, & \text{if } a \geq b  0, & \text{otherwise} \end{cases}$$                             |
+| `gt` <br /> `gt.b`   | `[b, a, ...]` | `[c, ...]`       | 16 <br /> 17 | $$c = \begin{cases} 1, & \text{if } a > b  0, & \text{otherwise} \end{cases}$$                                |
 | `eq` <br /> `eq.b`   | `[b, a, ...]` | `[c, ...]`       | 1 <br /> 1-2 | $$c = \begin{cases} 1, & \text{if } a = b  0, & \text{otherwise} \end{cases}$$                                |
 | `neq` <br /> `neq.b` | `[b, a, ...]` | `[c, ...]`       | 2 <br /> 2-3 | $$c = \begin{cases} 1, & \text{if } a \neq b  0, & \text{otherwise} \end{cases}$$                             |
 | `eqw`                | `[A, B, ...]` | `[c, A, B, ...]` | 15           | $$c = \begin{cases} 1, & \text{if } a_i = b_i\ \forall i \in \{0,1,2,3\}  0, & \text{otherwise} \end{cases}$$ |
@@ -78,7 +78,7 @@ Operations on 32-bit integers. Most instructions will fail or have undefined beh
 | `u32assert2` | `[b, a,...]` | `[b, a,...]`  | 1      | Fails if $a \geq 2^{32}$ or $b \geq 2^{32}$.                                                                     |
 | `u32assertw` | `[A, ...]`   | `[A, ...]`    | 6      | Fails if any element of $A$ is $\geq 2^{32}$.                                                                    |
 | `u32cast`    | `[a, ...]`   | `[b, ...]`    | 2      | $b = a \bmod 2^{32}$                                                                                             |
-| `u32split`   | `[a, ...]`   | `[c, b, ...]` | 1      | $b = a \bmod 2^{32}$, $c = \lfloor a / 2^{32} \rfloor$                                                           |
+| `u32split`   | `[a, ...]`   | `[b, c, ...]` | 1      | $b = a \bmod 2^{32}$, $c = \lfloor a / 2^{32} \rfloor$                                                           |
 
 _Note: Assertions can be parameterized with an error message (e.g., assert.err="Division by 0")._
 
@@ -86,17 +86,19 @@ _Note: Assertions can be parameterized with an error message (e.g., assert.err="
 
 | Instruction                                        | Stack Input      | Stack Output  | Cycles       | Notes                                                                                                                                                           |
 | -------------------------------------------------- | ---------------- | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `u32overflowing_add` <br /> `u32overflowing_add.b` | `[b, a, ...]`    | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a + b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } (a + b) \geq 2^{32}  0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$. |
-| `u32wrapping_add` <br /> `u32wrapping_add.b`       | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = (a + b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                               |
-| `u32overflowing_add3`                              | `[c, b, a, ...]` | `[e, d, ...]` | 1            | $d = (a+b+c) \bmod 2^{32}$, $e = \lfloor (a+b+c)/2^{32} \rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                       |
-| `u32wrapping_add3`                                 | `[c, b, a, ...]` | `[d, ...]`    | 2            | $d = (a+b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                                             |
+| `u32widening_add` <br /> `u32widening_add.b`       | `[b, a, ...]`    | `[c, d, ...]` | 1 <br /> 2-3 | $c = (a + b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } (a + b) \geq 2^{32}  0, & \text{otherwise} \end{cases}$$. The pair $[c, d]$ forms the 64-bit sum with $c$ as the low limb. Undefined if $\max(a,b) \geq 2^{32}$. |
+| `u32overflowing_add` <br /> `u32overflowing_add.b` | `[b, a, ...]`    | `[d, c, ...]` | 2 <br /> 3-4 | $c = (a + b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } (a + b) \geq 2^{32}  0, & \text{otherwise} \end{cases}$$. The pair $[c, d]$ forms the 64-bit sum with $c$ as the low limb. Undefined if $\max(a,b) \geq 2^{32}$. |
+| `u32wrapping_add` <br /> `u32wrapping_add.b`       | `[b, a, ...]`    | `[c, ...]`    | 3 <br /> 4-5 | $c = (a + b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                               |
+| `u32widening_add3`                                 | `[c, b, a, ...]` | `[d, e, ...]` | 1            | $d = (a+b+c) \bmod 2^{32}$, $e = \lfloor (a+b+c)/2^{32} \rfloor$. The pair $[d, e]$ forms the 64-bit sum with $d$ as the low limb. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                       |
+| `u32overflowing_add3`                              | `[c, b, a, ...]` | `[e, d, ...]` | 2            | $d = (a+b+c) \bmod 2^{32}$, $e = \lfloor (a+b+c)/2^{32} \rfloor$. The pair $[d, e]$ forms the 64-bit sum with $d$ as the low limb. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                       |
+| `u32wrapping_add3`                                 | `[c, b, a, ...]` | `[d, ...]`    | 3            | $d = (a+b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                                             |
 | `u32overflowing_sub` <br /> `u32overflowing_sub.b` | `[b, a, ...]`    | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a - b) \bmod 2^{32}$, $$d = \begin{cases} 1, & \text{if } a < b  0, & \text{otherwise} \end{cases}$$. Undefined if $\max(a,b) \geq 2^{32}$.               |
 | `u32wrapping_sub` <br /> `u32wrapping_sub.b`       | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = (a - b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                               |
-| `u32overflowing_mul` <br /> `u32overflowing_mul.b` | `[b, a, ...]`    | `[d, c, ...]` | 1 <br /> 2-3 | $c = (a \cdot b) \bmod 2^{32}$, $d = \lfloor(a \cdot b) / 2^{32}\rfloor$. Undefined if $\max(a,b) \geq 2^{32}$.                                                 |
+| `u32widening_mul` <br /> `u32widening_mul.b`       | `[b, a, ...]`    | `[c, d, ...]` | 1 <br /> 2-3 | $c = (a \cdot b) \bmod 2^{32}$, $d = \lfloor(a \cdot b) / 2^{32}\rfloor$. Undefined if $\max(a,b) \geq 2^{32}$.                                                 |
 | `u32wrapping_mul` <br /> `u32wrapping_mul.b`       | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = (a \cdot b) \bmod 2^{32}$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                           |
-| `u32overflowing_madd`                              | `[b, a, c, ...]` | `[e, d, ...]` | 1            | $d = (a \cdot b+c) \bmod 2^{32}$, $e = \lfloor(a \cdot b+c) / 2^{32}\rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                           |
-| `u32wrapping_madd`                                 | `[b, a, c, ...]` | `[d, ...]`    | 2            | $d = (a \cdot b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                                       |
-| `u32div` <br /> `u32div.b`                         | `[b, a, ...]`    | `[c, ...]`    | 2 <br /> 3-4 | $c = \lfloor a/b \rfloor$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                |
+| `u32widening_madd`                                 | `[b, a, c, ...]` | `[d, e, ...]` | 1            | $d = (a \cdot b+c) \bmod 2^{32}$, $e = \lfloor(a \cdot b+c) / 2^{32}\rfloor$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                           |
+| `u32wrapping_madd`                                 | `[b, a, c, ...]` | `[d, ...]`    | 3            | $d = (a \cdot b+c) \bmod 2^{32}$. Undefined if $\max(a,b,c) \geq 2^{32}$.                                                                                       |
+| `u32div` <br /> `u32div.b`                         | `[b, a, ...]`    | `[d, c, ...]` | 2 <br /> 3-4 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
 | `u32mod` <br /> `u32mod.b`                         | `[b, a, ...]`    | `[c, ...]`    | 3 <br /> 4-5 | $c = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                                                          |
 | `u32divmod` <br /> `u32divmod.b`                   | `[b, a, ...]`    | `[d, c, ...]` | 1 <br /> 2-3 | $c = \lfloor a/b \rfloor$, $d = a \bmod b$. Fails if $b=0$. Undefined if $\max(a,b) \geq 2^{32}$.                                                               |
 
@@ -166,6 +168,7 @@ Instructions for moving data between the stack and other sources like program co
 | Instruction | Stack Input | Stack Output     | Cycles | Notes                                                                                                                                                                                                     |
 | ----------- | ----------- | ---------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `push.a...` | `[ ... ]`   | `[c, b, a, ...]` | 1-2    | Pushes up to 16 field elements (decimal or hex) onto the stack. Hex words (32 bytes) are little-endian; short hex values are big-endian. Example: `push.0x1234.0x5678` or `push.0x34120000...78560000...` |
+| `push.[a,b,c,d]` | `[ ... ]` | `[a, b, c, d, ...]` | 4 | Pushes a word (4 field elements) onto the stack. Element `a` ends up on top. Example: `push.[1,2,3,4]` results in `[1, 2, 3, 4, ...]`. |
 
 ### Environment Inputs
 
@@ -203,10 +206,10 @@ _Insert into Advice Map:_
 | Instruction           | Stack Input          | Stack Output         | Notes                                                                                  |
 | --------------------- | -------------------- | -------------------- | -------------------------------------------------------------------------------------- |
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
-| `adv.insert_hdword`   | `[B, A, ... ]`       | `[B, A, ... ]`       | `K ← hash(A \|\| B, domain=0)`. `advice_map[K] ← [A,B]`.                               |
-| `adv.insert_hdword_d` | `[B, A, d, ... ]`    | `[B, A, d, ... ]`    | `K ← hash(A \|\| B, domain=d)`. `advice_map[K] ← [A,B]`.                               |
+| `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
+| `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
 | `adv.insert_hqword`   | `[D, C, B, A, ... ]` | `[D, C, B, A, ... ]` | `K ← hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] ← [A,B,C,D]`. |
-| `adv.insert_hperm`    | `[B, A, C, ...]`     | `[B, A, C, ...]`     | `K ← permute(C,A,B).digest`. `advice_map[K] ← [A,B]`.                                  |
+| `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
 
 ### Random Access Memory
 
@@ -222,7 +225,7 @@ Memory is 0-initialized. Addresses are absolute `[0, 2^32)`. Locals are stored a
 | `mem_store` <br /> `mem_store.a`         | `[a, v, ... ]`       | `[ ... ]`        | 2 <br /> 3-4 | `mem[a] ← v`. Pops `v` to `mem[a]`. If `a` on stack, it's popped. Fails if `a >= 2^32`.                                                                                                                                  |
 | `mem_storew_be` <br /> `mem_storew_be.a` | `[a, A, ... ]`       | `[A, ... ]`      | 1 <br /> 2-3 | `mem[a..a+3] ← A`. Stores word `A` in big-endian order (top stack element at `mem[a+3]`). If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4.                                                   |
 | `mem_storew_le` <br /> `mem_storew_le.a` | `[a, A, ... ]`       | `[A, ... ]`      | 9 <br /> 8-9 | `mem[a..a+3] ← A`. Stores word `A` in little-endian order (top stack element at `mem[a]`). Equivalent to `reversew mem_storew_be reversew`. If `a` on stack, it's popped. Fails if `a >= 2^32` or `a` not multiple of 4. |
-| `mem_stream`                             | `[C, B, A, a, ... ]` | `[E,D,A,a',...]` | 1            | `[E,D] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory to top of stack.                                                                                                                |
+| `mem_stream`                             | `[R0, R1, C, a, ...]` | `[D, E, C, a', ...]` | 1            | `[D, E] ← [mem[a..a+3], mem[a+4..a+7]]`. `a' ← a+8`. Reads 2 sequential words from memory, replacing R0 and R1 of the sponge state.                                                                       |
 
 #### Procedure Locals (Context-Specific)
 
@@ -239,17 +242,17 @@ Locals are not 0-initialized. Max $2^{16}$ locals per procedure, $2^{31} - 1$ to
 
 ## Cryptographic Operations
 
-Common cryptographic operations, including hashing and Merkle tree manipulations using Rescue Prime Optimized.
+Common cryptographic operations, including hashing and Merkle tree manipulations using Poseidon2.
 
 ### Hashing and Merkle Trees
 
 | Instruction    | Stack Input          | Stack Output     | Cycles | Notes                                                                                                                                                                                                 |
 | -------------- | -------------------- | ---------------- | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hash`         | `[A, ...]`           | `[B, ...]`       | 20     | `B ← hash(A)`. 1-to-1 Rescue Prime Optimized hash.                                                                                                                                                    |
-| `hperm`        | `[B, A, C, ...]`     | `[F, E, D, ...]` | 1      | `D,E,F ← permute(C,A,B)`. Rescue Prime Optimized permutation. `C`=capacity, `A,B`=rate, `E`=digest.                                                                                                   |
-| `hmerge`       | `[B, A, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Rescue Prime Optimized hash.                                                                                                                                                  |
-| `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 9      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
-| `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 29     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
+| `hash`         | `[A, ...]`           | `[B, ...]`       | 19     | `B ← hash(A)`. 1-to-1 Poseidon2 hash.                                                                                                                                                    |
+| `hperm`        | `[R0, R1, C, ...]`   | `[R0', R1', C', ...]` | 1      | Poseidon2 permutation. `R0,R1`=rate (R0 on top), `C`=capacity, `R0'`=digest.                                                                                                   |
+| `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Poseidon2 hash.                                                                                                                                                  |
+| `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
+| `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
 | `mtree_merge`  | `[R, L, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
 
@@ -324,7 +327,7 @@ Instructions for communicating with the host through events and tracing.
  | `emit.<event_id>`  | `[...]`           | `[...]`           | 3      | Emits an event with the specified `event_id` to the host. The net effect on the operand stack is no change (internally expands to `push.<event_id> emit drop`). Immediate `event_id` must be defined via `const.ID=event("...")` or inlined as `emit.event("...")`. Events allow programs to communicate contextual information to the host for triggering appropriate actions. Example: `emit.event("foo")` or `emit.MY_EVENT` |
 | `emit`             | `[event_id, ...]` | `[event_id, ...]` | 1      | Emits an event using the `event_id` from the top of the stack. The stack remains unchanged as the event_id is read without consuming it. This instruction reads the event ID from the stack but does not modify the stack depth. Example: with `push.1230` on stack, `emit` reads the event ID 1230 and executes the corresponding event handler. Note that event IDs in the range `0..256` are reserved for system events.     |
 | `trace.<trace_id>` | `[...]`           | `[...]`           | 0      | Emits a trace with the specified `trace_id` to the host. Does not change the state of the operand stack. The `trace_id` can be any 32-bit value specified either directly or via a [named constant](./code_organization.md#constants). Only active when programs are run with tracing flag (`-t` or `--trace`), otherwise ignored. Example: `trace.123` or `trace.TRACE_ID_1`                                                   |
-| `log_precompile`   | `[COMM, TAG, PAD, ...]` | `[R1, R0, CAP_NEXT, ...]` | 1      | Absorbs a precompile commitment into the transcript used for deferred verification. Takes a precompile commitment (`TAG` and `COMM`) from the stack and performs an RPO256 permutation to update the transcript capacity (sponge capacity). Outputs `[R1, R0, CAP_NEXT]`; callers normally drop all three words immediately. See “Precompile flow” for initialization details. |
+| `log_precompile`   | `[COMM, TAG, PAD, ...]` | `[R1, R0, CAP_NEXT, ...]` | 1      | Absorbs a precompile commitment into the transcript used for deferred verification. Takes a precompile commitment (`TAG` and `COMM`) from the stack and performs an Poseidon2 permutation to update the transcript capacity (sponge capacity). Outputs `[R1, R0, CAP_NEXT]`; callers normally drop all three words immediately. See “Precompile flow” for initialization details. |
 
 ## Debugging Operations
 

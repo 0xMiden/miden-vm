@@ -6,7 +6,7 @@ use crate::{
         MastForestContributor, MastNode, MastNodeId, Word,
         node::{MastNodeBuilder, MastNodeExt},
     },
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // MAST NODE INFO
@@ -48,9 +48,12 @@ impl MastNodeInfo {
     ) -> Result<MastNodeBuilder, DeserializationError> {
         match self.ty {
             MastNodeType::Block { ops_offset } => {
-                let operations = basic_block_data_decoder.decode_operations(ops_offset)?;
-                let builder = crate::mast::node::BasicBlockNodeBuilder::new(operations, Vec::new())
-                    .with_digest(self.digest);
+                let op_batches = basic_block_data_decoder.decode_operations(ops_offset)?;
+                let builder = crate::mast::node::BasicBlockNodeBuilder::from_op_batches(
+                    op_batches,
+                    Vec::new(), // decorators set later
+                    self.digest,
+                );
                 Ok(MastNodeBuilder::BasicBlock(builder))
             },
             MastNodeType::Join { left_child_id, right_child_id } => {
@@ -86,11 +89,12 @@ impl MastNodeInfo {
                 Ok(MastNodeBuilder::Call(builder))
             },
             MastNodeType::Dyn => {
-                let builder = crate::mast::node::DynNodeBuilder::new_dyn();
+                let builder = crate::mast::node::DynNodeBuilder::new_dyn().with_digest(self.digest);
                 Ok(MastNodeBuilder::Dyn(builder))
             },
             MastNodeType::Dyncall => {
-                let builder = crate::mast::node::DynNodeBuilder::new_dyncall();
+                let builder =
+                    crate::mast::node::DynNodeBuilder::new_dyncall().with_digest(self.digest);
                 Ok(MastNodeBuilder::Dyn(builder))
             },
             MastNodeType::External => {
@@ -116,6 +120,11 @@ impl Deserializable for MastNodeInfo {
         let digest = Word::read_from(source)?;
 
         Ok(Self { ty, digest })
+    }
+
+    /// Returns the minimum serialized size: 8 bytes for MastNodeType + 32 bytes for Word digest.
+    fn min_serialized_size() -> usize {
+        40
     }
 }
 
@@ -309,6 +318,11 @@ impl Deserializable for MastNodeType {
                 "Invalid tag for MAST node: {discriminant}"
             ))),
         }
+    }
+
+    /// Returns the fixed serialized size: always 8 bytes (u64).
+    fn min_serialized_size() -> usize {
+        8
     }
 }
 

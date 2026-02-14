@@ -27,17 +27,17 @@ doctest = false
 
 [[bench]]
 name = "build_trace"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
 name = "program_execution_for_trace"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
 name = "program_execution_fast"
-required-features = ["internal", "no_err_ctx"]
+required-features = ["internal"]
 harness = false
 
 [[bench]]
@@ -51,8 +51,7 @@ path = "tests/integration/main.rs"
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:rustyline", "dep:tracing-subscriber", "internal", "serde", "std"]
-metal = ["miden-prover/metal", "std"]
+executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -64,9 +63,6 @@ std = [
     "serde?/std",
     "serde_json?/std",
 ]
-# Removes proper error context from the error messages. Enable in production builds that need
-# maximal performance.
-no_err_ctx = ["miden-processor/no_err_ctx"]
 # For internal use, not meant to be used by users
 internal = ["dep:hex", "serde", "std"]
 
@@ -74,6 +70,7 @@ internal = ["dep:hex", "serde", "std"]
 # Miden dependencies
 miden-assembly.workspace = true
 miden-core.workspace = true
+miden-crypto.workspace = true
 miden-debug-types.workspace = true
 miden-processor.workspace = true
 miden-prover.workspace = true
@@ -82,10 +79,8 @@ miden-core-lib.workspace = true
 miden-verifier.workspace = true
 
 # External dependencies
-blake3.workspace = true
 clap = { version = "4.5", features = ["derive"], optional = true }
 hex = { version = "0.4", optional = true }
-rustyline = { version = "17.0", default-features = false, optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 tracing.workspace = true
@@ -94,13 +89,14 @@ tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallv
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }
+bincode = { version = "1.3" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 num-bigint = { version = "0.4" }
 predicates = { version = "3.1" }
 pretty_assertions = { version = "1.4" }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-winter-fri.workspace = true
 rand_chacha = { version = "0.9" }
 walkdir = { version = "2.5" }

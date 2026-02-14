@@ -1,6 +1,6 @@
-use miden_air::{
+use miden_air::trace::{
     RowIndex,
-    trace::chiplets::{
+    chiplets::{
         MEMORY_CLK_COL_IDX, MEMORY_CTX_COL_IDX, MEMORY_IDX0_COL_IDX, MEMORY_IDX1_COL_IDX,
         MEMORY_IS_READ_COL_IDX, MEMORY_IS_WORD_ACCESS_COL_IDX, MEMORY_V_COL_RANGE,
         MEMORY_WORD_COL_IDX,
@@ -11,12 +11,16 @@ use miden_air::{
         },
     },
 };
-use miden_core::WORD_SIZE;
+use miden_core::{
+    WORD_SIZE,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 use super::{
-    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, FieldElement,
-    NUM_RAND_ROWS, ONE, Operation, Trace, Word, ZERO, build_trace_from_ops, rand_array,
+    AUX_TRACE_RAND_ELEMENTS, CHIPLETS_BUS_AUX_TRACE_OFFSET, ExecutionTrace, Felt, HASH_CYCLE_LEN,
+    LAST_CYCLE_ROW, ONE, Operation, Word, ZERO, build_trace_from_ops, rand_array,
 };
+use crate::PrimeField64;
 
 /// Tests the generation of the `b_chip` bus column when only memory lookups are included. It
 /// ensures that trace generation is correct when all of the following are true.
@@ -33,7 +37,7 @@ use super::{
 fn b_chip_trace_mem() {
     const FOUR: Felt = Felt::new(4);
 
-    let stack = [1, 2, 3, 4, 0];
+    let stack = [0, 1, 2, 3, 4];
     let word = [ONE, Felt::new(2), Felt::new(3), Felt::new(4)];
     let operations = vec![
         Operation::MStoreW, // store [1, 2, 3, 4]
@@ -55,7 +59,6 @@ fn b_chip_trace_mem() {
     let rand_elements = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&rand_elements).unwrap();
     let b_chip = aux_columns.get_column(CHIPLETS_BUS_AUX_TRACE_OFFSET);
-
     assert_eq!(trace.length(), b_chip.len());
     assert_eq!(ONE, b_chip[0]);
 
@@ -73,7 +76,7 @@ fn b_chip_trace_mem() {
         ONE,
         word.into(),
     );
-    let mut expected = value.inv();
+    let mut expected = value.inverse();
     assert_eq!(expected, b_chip[2]);
 
     // Nothing changes after user operations that don't make requests to the Chiplets.
@@ -91,20 +94,11 @@ fn b_chip_trace_mem() {
         Felt::new(6),
         word[0],
     );
-    expected *= value.inv();
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[7]);
 
-    // At cycle 7 the hasher provides the result of the `SPAN` hash. Since this test is for changes
-    // from memory lookups, just set it explicitly and save the multiplied-in value for later.
-    assert_ne!(expected, b_chip[8]);
-    let span_result = b_chip[8] * b_chip[7].inv();
-    expected = b_chip[8];
-
-    // Memory responses will be provided during the memory segment of the Chiplets trace,
-    // which starts after the hash for the span block at row 8. There will be 6 rows, corresponding
-    // to the 5 memory operations (MStream requires 2 rows).
-
-    // At cycle 8 `MLoadW` is requested by the stack and `MStoreW` is provided by memory
+    // Nothing changes until the next memory request from the stack: `MLoadW` executed at cycle 8
+    // and included at row 9.
     let value = build_expected_bus_word_msg(
         &rand_elements,
         MEMORY_READ_WORD_LABEL,
@@ -113,20 +107,13 @@ fn b_chip_trace_mem() {
         Felt::new(8),
         word.into(),
     );
-    expected *= value.inv();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 8.into());
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[9]);
 
-    // At cycle 9, `MLoad` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 9.into());
+    // Nothing changes until the next memory request from the stack.
     assert_eq!(expected, b_chip[10]);
 
-    // At cycle 10,  `MLoadW` is provided by memory.
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 10.into());
-    assert_eq!(expected, b_chip[11]);
-
-    // At cycle 11, `MStore` is requested by the stack and the first read of `MStream` is provided
-    // by the memory.
+    // At cycle 11, `MStore` is requested by the stack and included at row 12.
     let value = build_expected_bus_element_msg(
         &rand_elements,
         MEMORY_WRITE_ELEMENT_LABEL,
@@ -135,16 +122,14 @@ fn b_chip_trace_mem() {
         Felt::new(11),
         ONE,
     );
-    expected *= value.inv();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 11.into());
+    expected *= value.inverse();
     assert_eq!(expected, b_chip[12]);
 
-    // At cycle 12, `MStore` is provided by the memory
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 12.into());
+    // Nothing changes until the next memory request from the stack.
     assert_eq!(expected, b_chip[13]);
 
     // At cycle 13, `MStream` is requested by the stack, and the second read of `MStream` is
-    // provided by the memory.
+    // requested for inclusion at row 14.
     let value1 = build_expected_bus_word_msg(
         &rand_elements,
         MEMORY_READ_WORD_LABEL,
@@ -161,18 +146,61 @@ fn b_chip_trace_mem() {
         Felt::new(13),
         [ONE, ZERO, ZERO, ZERO].into(),
     );
-    expected *= (value1 * value2).inv();
-    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, 13.into());
+    expected *= (value1 * value2).inverse();
     assert_eq!(expected, b_chip[14]);
 
-    // At cycle 14 the decoder requests the span hash. We set this as the inverse of the previously
-    // identified `span_result`, since this test is for consistency of the memory lookups.
+    // At cycle 14 the decoder requests the span hash. Capture the multiplicand; the hasher responds
+    // at the end of its cycle (row HASH_CYCLE_LEN).
     assert_ne!(expected, b_chip[15]);
-    expected *= span_result.inv();
-    assert_eq!(expected, b_chip[15]);
+    let span_request_mult = b_chip[15] * expected.inverse();
+    expected = b_chip[15];
+
+    // Nothing changes until the hasher provides the span hash result at the end of the hash cycle.
+    for row in 16..HASH_CYCLE_LEN {
+        assert_eq!(expected, b_chip[row]);
+    }
+
+    let memory_start = HASH_CYCLE_LEN;
+    assert_ne!(expected, b_chip[memory_start]);
+    let span_response_mult = b_chip[memory_start] * b_chip[LAST_CYCLE_ROW].inverse();
+    assert_eq!(span_request_mult * span_response_mult, ONE);
+    expected *= span_response_mult;
+    assert_eq!(expected, b_chip[memory_start]);
+
+    // Memory responses are provided during the memory segment after the hash cycle. There will be 6
+    // rows, corresponding to the 5 memory operations (MStream requires 2 rows).
+
+    // At cycle 8 `MLoadW` was requested by the stack; `MStoreW` is provided by memory here.
+    expected *= build_expected_bus_msg_from_trace(&trace, &rand_elements, memory_start.into());
+    assert_eq!(expected, b_chip[memory_start + 1]);
+
+    // At cycle 9, `MLoad` is provided by memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 1).into());
+    assert_eq!(expected, b_chip[memory_start + 2]);
+
+    // At cycle 10,  `MLoadW` is provided by memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 2).into());
+    assert_eq!(expected, b_chip[memory_start + 3]);
+
+    // At cycle 11, `MStore` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 3).into());
+    assert_eq!(expected, b_chip[memory_start + 4]);
+
+    // At cycle 12, the first read of `MStream` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 4).into());
+    assert_eq!(expected, b_chip[memory_start + 5]);
+
+    // At cycle 13, the second read of `MStream` is provided by the memory.
+    expected *=
+        build_expected_bus_msg_from_trace(&trace, &rand_elements, (memory_start + 5).into());
+    assert_eq!(expected, b_chip[memory_start + 6]);
 
     // The value in b_chip should be ONE now and for the rest of the trace.
-    for row in 15..trace.length() - NUM_RAND_ROWS {
+    for row in (memory_start + 6)..trace.length() {
         assert_eq!(ONE, b_chip[row]);
     }
 }
@@ -191,7 +219,7 @@ fn build_expected_bus_element_msg(
     assert!(op_label == MEMORY_READ_ELEMENT_LABEL || op_label == MEMORY_WRITE_ELEMENT_LABEL);
 
     alphas[0]
-        + alphas[1] * Felt::from(op_label)
+        + alphas[1] * Felt::from_u8(op_label)
         + alphas[2] * ctx
         + alphas[3] * addr
         + alphas[4] * clk
@@ -209,7 +237,7 @@ fn build_expected_bus_word_msg(
     assert!(op_label == MEMORY_READ_WORD_LABEL || op_label == MEMORY_WRITE_WORD_LABEL);
 
     alphas[0]
-        + alphas[1] * Felt::from(op_label)
+        + alphas[1] * Felt::from_u8(op_label)
         + alphas[2] * ctx
         + alphas[3] * addr
         + alphas[4] * clk
@@ -250,7 +278,7 @@ fn build_expected_bus_msg_from_trace(
         let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row];
         let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row];
 
-        word + idx1.mul_small(2) + idx0
+        word + idx1.double() + idx0
     };
     let clk = trace.main_trace.get_column(MEMORY_CLK_COL_IDX)[row];
 
@@ -261,8 +289,8 @@ fn build_expected_bus_msg_from_trace(
     }
 
     if element_or_word == MEMORY_ACCESS_ELEMENT {
-        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_int();
-        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_int();
+        let idx1 = trace.main_trace.get_column(MEMORY_IDX1_COL_IDX)[row].as_canonical_u64();
+        let idx0 = trace.main_trace.get_column(MEMORY_IDX0_COL_IDX)[row].as_canonical_u64();
         let idx = idx1 * 2 + idx0;
 
         build_expected_bus_element_msg(alphas, op_label, ctx, addr, clk, word[idx as usize])

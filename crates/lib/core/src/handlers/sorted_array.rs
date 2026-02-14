@@ -1,7 +1,11 @@
 use alloc::{vec, vec::Vec};
 
-use miden_core::{EventName, Felt, FieldElement, LexicographicWord, Word};
-use miden_processor::{AdviceMutation, EventError, MemoryError, ProcessState};
+use miden_core::{
+    Felt, LexicographicWord, Word,
+    events::EventName,
+    field::{PrimeCharacteristicRing, PrimeField64},
+};
+use miden_processor::{MemoryError, ProcessorState, advice::AdviceMutation, event::EventError};
 
 /// Event name for the lowerbound_array operation.
 pub const LOWERBOUND_ARRAY_EVENT_NAME: EventName =
@@ -31,7 +35,9 @@ enum KeySize {
 ///
 /// # Errors
 /// Returns an error if the provided word array is not sorted in non-decreasing order.
-pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+pub fn handle_lowerbound_array(
+    process: &ProcessorState,
+) -> Result<Vec<AdviceMutation>, EventError> {
     push_lowerbound_result(process, 4, KeySize::Full)
 }
 
@@ -53,11 +59,11 @@ pub fn handle_lowerbound_array(process: &ProcessState) -> Result<Vec<AdviceMutat
 /// # Errors
 /// Returns an error if the keys are not sorted in non-decreasing order.
 pub fn handle_lowerbound_key_value(
-    process: &ProcessState,
+    process: &ProcessorState,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     let use_full_key = process.get_stack_item(7);
 
-    let key_size = match use_full_key.as_int() {
+    let key_size = match use_full_key.as_canonical_u64() {
         0 => KeySize::Half,
         1 => KeySize::Full,
         _ => {
@@ -76,25 +82,23 @@ const START_ADDR_OFFSET: usize = 5;
 const END_ADDR_OFFSET: usize = 6;
 
 fn push_lowerbound_result(
-    process: &ProcessState,
+    process: &ProcessorState,
     stride: u32,
     key_size: KeySize,
 ) -> Result<Vec<AdviceMutation>, EventError> {
     // only support sorted arrays (stride = 4) and sorted key-value arrays (stride = 8)
     assert!(stride == 4 || stride == 8);
 
-    // Read inputs from the stack
-    let key = LexicographicWord::new(process.get_stack_word_be(KEY_OFFSET));
+    // Read inputs from the stack; keys are provided in structural / little-endian order.
+    let key = word_to_search_key(process.get_stack_word(KEY_OFFSET), key_size);
     let addr_range = process.get_mem_addr_range(START_ADDR_OFFSET, END_ADDR_OFFSET)?;
 
     // Validate the start_addr is word-aligned (multiple of 4)
     if addr_range.start % 4 != 0 {
-        return Err(MemoryError::unaligned_word_access(
-            addr_range.start,
-            process.ctx(),
-            Felt::from(process.clk()),
-            &(),
-        )
+        return Err(MemoryError::UnalignedWordAccess {
+            addr: addr_range.start,
+            ctx: process.ctx(),
+        }
         .into());
     }
 
@@ -115,8 +119,8 @@ fn push_lowerbound_result(
     // If range is empty, result is end_ptr
     if addr_range.is_empty() {
         return Ok(vec![AdviceMutation::extend_stack(vec![
-            Felt::from(false),
-            Felt::from(addr_range.end),
+            Felt::from_u32(addr_range.end),
+            Felt::from_bool(false),
         ])]);
     }
 
@@ -158,8 +162,8 @@ fn push_lowerbound_result(
     }
 
     Ok(vec![AdviceMutation::extend_stack(vec![
-        Felt::from(was_key_found),
-        Felt::from(result.unwrap_or(addr_range.end)),
+        Felt::from_u32(result.unwrap_or(addr_range.end)),
+        Felt::from_bool(was_key_found),
     ])])
 }
 
@@ -167,7 +171,8 @@ fn push_lowerbound_result(
 ///
 /// - If the `key_size` is [`KeySize::Full`], the word is returned untouched.
 /// - If the `key_size` is [`KeySize::Half`], the word is returned with the two least significant
-///   elements zeroized.
+///   elements (word[0] and word[1]) zeroized, keeping only the most significant half (word[2] and
+///   word[3]) for comparison. (In BE ordering, word[3] is most significant.)
 fn word_to_search_key(mut word: Word, key_size: KeySize) -> LexicographicWord {
     match key_size {
         KeySize::Full => LexicographicWord::new(word),

@@ -2,8 +2,9 @@ use alloc::string::String;
 use core::fmt;
 
 use miden_core::{
-    Felt, FieldElement, StarkField,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    Felt,
+    field::{PrimeCharacteristicRing, PrimeField64},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
@@ -108,7 +109,7 @@ impl crate::prettier::PrettyPrint for PushValue {
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct WordValue(pub [Felt; 4]);
 
@@ -116,7 +117,7 @@ impl fmt::Display for WordValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_list();
         for value in self.0 {
-            builder.entry(&value.as_int());
+            builder.entry(&value.as_canonical_u64());
         }
         builder.finish()
     }
@@ -146,18 +147,24 @@ impl PartialOrd for WordValue {
 impl Ord for WordValue {
     fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         let (WordValue([l0, l1, l2, l3]), WordValue([r0, r1, r2, r3])) = (self, other);
-        l0.as_int()
-            .cmp(&r0.as_int())
-            .then_with(|| l1.as_int().cmp(&r1.as_int()))
-            .then_with(|| l2.as_int().cmp(&r2.as_int()))
-            .then_with(|| l3.as_int().cmp(&r3.as_int()))
+        l0.as_canonical_u64()
+            .cmp(&r0.as_canonical_u64())
+            .then_with(|| l1.as_canonical_u64().cmp(&r1.as_canonical_u64()))
+            .then_with(|| l2.as_canonical_u64().cmp(&r2.as_canonical_u64()))
+            .then_with(|| l3.as_canonical_u64().cmp(&r3.as_canonical_u64()))
     }
 }
 
 impl core::hash::Hash for WordValue {
     fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
         let WordValue([a, b, c, d]) = self;
-        [a.as_int(), b.as_int(), c.as_int(), d.as_int()].hash(state)
+        [
+            a.as_canonical_u64(),
+            b.as_canonical_u64(),
+            c.as_canonical_u64(),
+            d.as_canonical_u64(),
+        ]
+        .hash(state)
     }
 }
 
@@ -205,7 +212,7 @@ impl Deserializable for WordValue {
 #[cfg_attr(feature = "serde", serde(untagged))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub enum IntValue {
     /// A tiny value
@@ -248,8 +255,16 @@ impl IntValue {
             Self::U8(value) => *value as u64,
             Self::U16(value) => *value as u64,
             Self::U32(value) => *value as u64,
-            Self::Felt(value) => value.as_int(),
+            Self::Felt(value) => value.as_canonical_u64(),
         }
+    }
+
+    /// Returns the value as a `u64`.
+    ///
+    /// This is an alias for [`as_int`](Self::as_int) that matches the `Felt` API,
+    /// allowing the generated grammar code to use a consistent method name.
+    pub fn as_canonical_u64(&self) -> u64 {
+        self.as_int()
     }
 
     pub fn checked_add(&self, rhs: Self) -> Option<Self> {
@@ -304,9 +319,9 @@ impl core::ops::Div<IntValue> for IntValue {
 impl PartialEq<Felt> for IntValue {
     fn eq(&self, other: &Felt) -> bool {
         match self {
-            Self::U8(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U16(lhs) => (*lhs as u64) == other.as_int(),
-            Self::U32(lhs) => (*lhs as u64) == other.as_int(),
+            Self::U8(lhs) => (*lhs as u64) == other.as_canonical_u64(),
+            Self::U16(lhs) => (*lhs as u64) == other.as_canonical_u64(),
+            Self::U32(lhs) => (*lhs as u64) == other.as_canonical_u64(),
             Self::Felt(lhs) => lhs == other,
         }
     }
@@ -318,7 +333,7 @@ impl fmt::Display for IntValue {
             Self::U8(value) => write!(f, "{value}"),
             Self::U16(value) => write!(f, "{value}"),
             Self::U32(value) => write!(f, "{value:#04x}"),
-            Self::Felt(value) => write!(f, "{:#08x}", &value.as_int().to_be()),
+            Self::Felt(value) => write!(f, "{:#08x}", &value.as_canonical_u64().to_be()),
         }
     }
 }
@@ -329,7 +344,7 @@ impl crate::prettier::PrettyPrint for IntValue {
             Self::U8(v) => v.render(),
             Self::U16(v) => v.render(),
             Self::U32(v) => v.render(),
-            Self::Felt(v) => u64::from(*v).render(),
+            Self::Felt(v) => v.as_canonical_u64().render(),
         }
     }
 }
@@ -353,7 +368,7 @@ impl Ord for IntValue {
             (Self::U32(l), Self::U32(r)) => l.cmp(r),
             (Self::U32(_), _) => Ordering::Less,
             (Self::Felt(_), Self::U8(_) | Self::U16(_) | Self::U32(_)) => Ordering::Greater,
-            (Self::Felt(l), Self::Felt(r)) => l.as_int().cmp(&r.as_int()),
+            (Self::Felt(l), Self::Felt(r)) => l.as_canonical_u64().cmp(&r.as_canonical_u64()),
         }
     }
 }
@@ -365,7 +380,7 @@ impl core::hash::Hash for IntValue {
             Self::U8(value) => value.hash(state),
             Self::U16(value) => value.hash(state),
             Self::U32(value) => value.hash(state),
-            Self::Felt(value) => value.as_int().hash(state),
+            Self::Felt(value) => value.as_canonical_u64().hash(state),
         }
     }
 }
@@ -379,7 +394,7 @@ impl Serializable for IntValue {
 impl Deserializable for IntValue {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
         let raw = source.read_u64()?;
-        if raw >= Felt::MODULUS {
+        if raw >= Felt::ORDER_U64 {
             Err(DeserializationError::InvalidValue(
                 "int value is greater than field modulus".into(),
             ))
@@ -400,8 +415,8 @@ impl proptest::arbitrary::Arbitrary for IntValue {
             num::u8::ANY.prop_map(IntValue::U8),
             // U16 values that don't overlap with U8 to preserve variant during serialization
             (u8::MAX as u16 + 1..=u16::MAX).prop_map(IntValue::U16),
-            // U32 values - full range
-            num::u32::ANY.prop_map(IntValue::U32),
+            // U32 values that don't overlap with U8/U16 to preserve variant during serialization
+            (u16::MAX as u32 + 1..=u32::MAX).prop_map(IntValue::U32),
             // Felt values - values that don't fit in u32 but are within field modulus
             (num::u64::ANY)
                 .prop_filter_map("valid felt value", |n| {
@@ -464,7 +479,6 @@ pub enum Token<'input> {
     AssertEqw,
     EvalCircuit,
     Begin,
-    Breakpoint,
     Byte,
     Caller,
     Call,
@@ -602,8 +616,10 @@ pub enum Token<'input> {
     U32Or,
     U32OverflowingAdd,
     U32OverflowingAdd3,
-    U32OverflowingMadd,
-    U32OverflowingMul,
+    U32WideningAdd,
+    U32WideningAdd3,
+    U32WideningMadd,
+    U32WideningMul,
     U32OverflowingSub,
     U32Popcnt,
     U32Clz,
@@ -691,7 +707,6 @@ impl fmt::Display for Token<'_> {
             Token::AssertEqw => write!(f, "assert_eqw"),
             Token::EvalCircuit => write!(f, "eval_circuit"),
             Token::Begin => write!(f, "begin"),
-            Token::Breakpoint => write!(f, "breakpoint"),
             Token::Byte => write!(f, "byte"),
             Token::Caller => write!(f, "caller"),
             Token::Call => write!(f, "call"),
@@ -828,8 +843,10 @@ impl fmt::Display for Token<'_> {
             Token::U32Or => write!(f, "u32or"),
             Token::U32OverflowingAdd => write!(f, "u32overflowing_add"),
             Token::U32OverflowingAdd3 => write!(f, "u32overflowing_add3"),
-            Token::U32OverflowingMadd => write!(f, "u32overflowing_madd"),
-            Token::U32OverflowingMul => write!(f, "u32overflowing_mul"),
+            Token::U32WideningAdd => write!(f, "u32widening_add"),
+            Token::U32WideningAdd3 => write!(f, "u32widening_add3"),
+            Token::U32WideningMadd => write!(f, "u32widening_madd"),
+            Token::U32WideningMul => write!(f, "u32widening_mul"),
             Token::U32OverflowingSub => write!(f, "u32overflowing_sub"),
             Token::U32Popcnt => write!(f, "u32popcnt"),
             Token::U32Clz => write!(f, "u32clz"),
@@ -923,7 +940,6 @@ impl<'input> Token<'input> {
                 | Token::AssertEq
                 | Token::AssertEqw
                 | Token::EvalCircuit
-                | Token::Breakpoint
                 | Token::Caller
                 | Token::Call
                 | Token::Cdrop
@@ -1033,8 +1049,10 @@ impl<'input> Token<'input> {
                 | Token::U32Or
                 | Token::U32OverflowingAdd
                 | Token::U32OverflowingAdd3
-                | Token::U32OverflowingMadd
-                | Token::U32OverflowingMul
+                | Token::U32WideningAdd
+                | Token::U32WideningAdd3
+                | Token::U32WideningMadd
+                | Token::U32WideningMul
                 | Token::U32OverflowingSub
                 | Token::U32Popcnt
                 | Token::U32Clz
@@ -1109,7 +1127,6 @@ impl<'input> Token<'input> {
         ("assert_eq", Token::AssertEq),
         ("assert_eqw", Token::AssertEqw),
         ("begin", Token::Begin),
-        ("breakpoint", Token::Breakpoint),
         ("byte", Token::Byte),
         ("caller", Token::Caller),
         ("call", Token::Call),
@@ -1246,8 +1263,10 @@ impl<'input> Token<'input> {
         ("u32or", Token::U32Or),
         ("u32overflowing_add", Token::U32OverflowingAdd),
         ("u32overflowing_add3", Token::U32OverflowingAdd3),
-        ("u32overflowing_madd", Token::U32OverflowingMadd),
-        ("u32overflowing_mul", Token::U32OverflowingMul),
+        ("u32widening_add", Token::U32WideningAdd),
+        ("u32widening_add3", Token::U32WideningAdd3),
+        ("u32widening_madd", Token::U32WideningMadd),
+        ("u32widening_mul", Token::U32WideningMul),
         ("u32overflowing_sub", Token::U32OverflowingSub),
         ("u32popcnt", Token::U32Popcnt),
         ("u32clz", Token::U32Clz),

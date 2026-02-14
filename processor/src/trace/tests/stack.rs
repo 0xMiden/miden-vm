@@ -1,11 +1,9 @@
 use alloc::vec::Vec;
 
 use miden_air::trace::{AUX_TRACE_RAND_ELEMENTS, STACK_AUX_TRACE_OFFSET};
+use miden_core::{ONE, ZERO, field::Field, operations::Operation};
 
-use super::{
-    Felt, FieldElement, NUM_RAND_ROWS, ONE, Operation, ZERO, build_trace_from_ops, rand_array,
-};
-use crate::stack::OverflowTableRow;
+use super::{super::stack::OverflowTableRow, Felt, build_trace_from_ops, rand_array};
 
 // CONSTANTS
 // ================================================================================================
@@ -32,7 +30,7 @@ fn p1_trace() {
         Operation::Pad,    // right shift, clk 10
         Operation::Drop,   // left shift, clk 11
     ];
-    let init_stack = (1..17).collect::<Vec<_>>();
+    let init_stack = (1..17).rev().collect::<Vec<_>>();
     let trace = build_trace_from_ops(ops, &init_stack);
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
@@ -63,7 +61,7 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[5]);
 
     // DROP removes a row from the overflow table
-    expected_value *= row_values[1].inv();
+    expected_value *= row_values[1].inverse();
     assert_eq!(expected_value, p1[6]);
 
     // PAD pushes the value onto the overflow table again
@@ -71,9 +69,9 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[7]);
 
     // two DROPs remove both values from the overflow table
-    expected_value *= row_values[2].inv();
+    expected_value *= row_values[2].inverse();
     assert_eq!(expected_value, p1[8]);
-    expected_value *= row_values[0].inv();
+    expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p1[9]);
 
     // at this point the table should be empty
@@ -87,12 +85,12 @@ fn p1_trace() {
     assert_eq!(expected_value, p1[11]);
 
     // and then the last DROP removes it from the overflow table
-    expected_value *= row_values[3].inv();
+    expected_value *= row_values[3].inverse();
     assert_eq!(expected_value, p1[12]);
 
     // at this point the table should be empty again, and it should stay empty until the end
     assert_eq!(expected_value, ONE);
-    for i in 13..(p1.len() - NUM_RAND_ROWS) {
+    for i in 13..(p1.len()) {
         assert_eq!(ONE, p1[i]);
     }
 }

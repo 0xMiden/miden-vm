@@ -86,7 +86,10 @@ impl PrettyPrint for Instruction {
             Self::U32WrappingAddImm(value) => inst_with_imm("u32wrapping_add", value),
             Self::U32OverflowingAdd => const_text("u32overflowing_add"),
             Self::U32OverflowingAddImm(value) => inst_with_imm("u32overflowing_add", value),
+            Self::U32WideningAdd => const_text("u32widening_add"),
+            Self::U32WideningAddImm(value) => inst_with_imm("u32widening_add", value),
             Self::U32OverflowingAdd3 => const_text("u32overflowing_add3"),
+            Self::U32WideningAdd3 => const_text("u32widening_add3"),
             Self::U32WrappingAdd3 => const_text("u32wrapping_add3"),
             Self::U32WrappingSub => const_text("u32wrapping_sub"),
             Self::U32WrappingSubImm(value) => inst_with_imm("u32wrapping_sub", value),
@@ -94,9 +97,9 @@ impl PrettyPrint for Instruction {
             Self::U32OverflowingSubImm(value) => inst_with_imm("u32overflowing_sub", value),
             Self::U32WrappingMul => const_text("u32wrapping_mul"),
             Self::U32WrappingMulImm(value) => inst_with_imm("u32wrapping_mul", value),
-            Self::U32OverflowingMul => const_text("u32overflowing_mul"),
-            Self::U32OverflowingMulImm(value) => inst_with_imm("u32overflowing_mul", value),
-            Self::U32OverflowingMadd => const_text("u32overflowing_madd"),
+            Self::U32WideningMul => const_text("u32widening_mul"),
+            Self::U32WideningMulImm(value) => inst_with_imm("u32widening_mul", value),
+            Self::U32WideningMadd => const_text("u32widening_madd"),
             Self::U32WrappingMadd => const_text("u32wrapping_madd"),
             Self::U32Div => const_text("u32div"),
             Self::U32DivImm(value) => inst_with_imm("u32div", value),
@@ -322,7 +325,6 @@ impl PrettyPrint for Instruction {
             },
 
             // ----- debug decorators -------------------------------------------------------------
-            Self::Breakpoint => const_text("breakpoint"),
             Self::Debug(options) => inst_with_imm("debug", options),
 
             // ----- event decorators -------------------------------------------------------------
@@ -378,7 +380,7 @@ fn inst_with_pretty_felt_params(inst: &'static str, params: &[crate::Felt]) -> D
 
 #[cfg(test)]
 mod tests {
-    use miden_core::crypto::hash::Rpo256;
+    use miden_core::crypto::hash::Poseidon2;
     use miden_debug_types::Span;
 
     use crate::{Felt, ast::*};
@@ -410,11 +412,11 @@ mod tests {
         );
         assert_eq!("push.3", instruction);
 
-        let digest = Rpo256::hash(b"miden::core::math::u64::add");
+        let digest = Poseidon2::hash(b"miden::core::math::u64::add");
         let target = InvocationTarget::MastRoot(Span::unknown(digest));
         let instruction = format!("{}", Instruction::Exec(target));
         assert_eq!(
-            "exec.0x6998a9e7f13f7e81edcabdbc895ec0141f8ce3e7abd061f1370852c082a028fa",
+            "exec.0x065c394c00227acff3545da5493cf1b79d9a9f5628db553d240edf8ef0cca04a",
             instruction
         );
     }

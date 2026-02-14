@@ -2,8 +2,8 @@ use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_core::{
-    AdviceMap,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    advice::AdviceMap,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceFile, SourceManager, SourceSpan, Span, Spanned};
 use miden_utils_diagnostics::Report;

@@ -1,3 +1,4 @@
+use miden_crypto::hash::blake::Blake3_256;
 use miden_utils_testing::{Felt, IntoBytes, group_slice_elements, rand::rand_array};
 
 #[test]
@@ -21,12 +22,10 @@ fn blake3_hash_64_bytes() {
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
-        .rev()
         .collect::<Vec<u64>>();
 
-    let hasher = blake3::hash(&ibytes);
-    let obytes = hasher.as_bytes();
-    let ofelts = group_slice_elements::<u8, 4>(obytes)
+    let obytes = Blake3_256::hash(&ibytes).as_bytes();
+    let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();
@@ -50,12 +49,10 @@ fn blake3_hash_32_bytes() {
     let ifelts = group_slice_elements::<u8, 4>(&ibytes)
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
-        .rev()
         .collect::<Vec<u64>>();
 
-    let hasher = blake3::hash(&ibytes);
-    let obytes = hasher.as_bytes();
-    let ofelts = group_slice_elements::<u8, 4>(obytes)
+    let obytes = Blake3_256::hash(&ibytes).as_bytes();
+    let ofelts = group_slice_elements::<u8, 4>(&obytes)
         .iter()
         .map(|&bytes| u32::from_le_bytes(bytes) as u64)
         .collect::<Vec<u64>>();

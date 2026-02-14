@@ -1,26 +1,27 @@
+use alloc::sync::Arc;
+use core::ops::ControlFlow;
+
 use miden_air::{
-    Felt, FieldElement, RowIndex,
-    trace::{chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS},
+    Felt,
+    trace::{RowIndex, chiplets::hasher::HasherState},
 };
 use miden_core::{
-    QuadFelt, WORD_SIZE, Word, ZERO,
-    crypto::{hash::Rpo256, merkle::MerklePath},
+    WORD_SIZE, Word, ZERO,
+    crypto::{hash::Poseidon2, merkle::MerklePath},
+    field::PrimeField64,
+    mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::{PrecompileTranscript, PrecompileTranscriptState},
 };
 
+use super::step::BreakReason;
 use crate::{
-    AdviceProvider, ContextId, ErrorContext, ExecutionError, ProcessState,
-    chiplets::{CircuitEvaluation, MAX_NUM_ACE_WIRES, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
-    errors::AceError,
-    fast::{FastProcessor, STACK_BUFFER_SIZE, Tracer, memory::Memory},
-    processor::{
-        HasherInterface, MemoryInterface, OperationHelperRegisters, Processor, StackInterface,
-        SystemInterface,
-    },
+    AdviceProvider, ContextId, ExecutionError, Host,
+    errors::OperationError,
+    fast::{FastProcessor, STACK_BUFFER_SIZE, memory::Memory},
+    processor::{HasherInterface, Processor, StackInterface, SystemInterface},
 };
 
 impl Processor for FastProcessor {
-    type HelperRegisters = NoopHelperRegisters;
     type System = Self;
     type Stack = Self;
     type AdviceProvider = AdviceProvider;
@@ -28,22 +29,27 @@ impl Processor for FastProcessor {
     type Hasher = Self;
 
     #[inline(always)]
-    fn stack(&mut self) -> &mut Self::Stack {
+    fn stack(&self) -> &Self::Stack {
         self
     }
 
     #[inline(always)]
-    fn state(&mut self) -> ProcessState<'_> {
-        self.state()
+    fn stack_mut(&mut self) -> &mut Self::Stack {
+        self
     }
 
     #[inline(always)]
-    fn advice_provider(&mut self) -> &mut Self::AdviceProvider {
+    fn advice_provider(&self) -> &Self::AdviceProvider {
+        &self.advice
+    }
+
+    #[inline(always)]
+    fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider {
         &mut self.advice
     }
 
     #[inline(always)]
-    fn memory(&mut self) -> &mut Self::Memory {
+    fn memory_mut(&mut self) -> &mut Self::Memory {
         &mut self.memory
     }
 
@@ -53,8 +59,23 @@ impl Processor for FastProcessor {
     }
 
     #[inline(always)]
-    fn system(&mut self) -> &mut Self::System {
+    fn system(&self) -> &Self::System {
         self
+    }
+
+    #[inline(always)]
+    fn system_mut(&mut self) -> &mut Self::System {
+        self
+    }
+
+    #[inline(always)]
+    fn save_context_and_truncate_stack(&mut self) {
+        self.save_context_and_truncate_stack();
+    }
+
+    #[inline(always)]
+    fn restore_context(&mut self) -> Result<(), OperationError> {
+        self.restore_context()
     }
 
     #[inline(always)]
@@ -67,58 +88,62 @@ impl Processor for FastProcessor {
         self.pc_transcript = PrecompileTranscript::from_state(state);
     }
 
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    ///
-    /// The inputs are composed of:
-    ///
-    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
-    ///    itself is arranged as:
-    ///
-    ///    a. `Read` section:
-    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
-    ///       2. Constants of the circuit which are elements in the quadratic extension field,
-    ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///    where each gate is encoded as a single base field element.
-    /// 2. the number of quadratic extension field elements read in the `READ` section,
-    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
-    ///
-    /// Stack transition:
-    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// Note that we do not record any memory reads in this operation (through a
-    /// [crate::fast::Tracer]), because the parallel trace generation skips the circuit
-    /// evaluation completely.
-    fn op_eval_circuit(
+    #[inline(always)]
+    fn execute_before_enter_decorators(
         &mut self,
-        err_ctx: &impl ErrorContext,
-        tracer: &mut impl Tracer,
-    ) -> Result<(), ExecutionError> {
-        let num_eval = self.stack_get(2);
-        let num_read = self.stack_get(1);
-        let ptr = self.stack_get(0);
-        let ctx = self.ctx;
-        let circuit_evaluation = eval_circuit_fast_(
-            ctx,
-            ptr,
-            self.clk,
-            num_read,
-            num_eval,
-            &mut self.memory,
-            err_ctx,
-            tracer,
-        )?;
-        self.ace.add_circuit_evaluation(self.clk, circuit_evaluation.clone());
-        tracer.record_circuit_evaluation(self.clk, circuit_evaluation);
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_before_enter_decorators(node_id, current_forest, host)
+    }
 
-        Ok(())
+    #[inline(always)]
+    fn execute_after_exit_decorators(
+        &mut self,
+        node_id: MastNodeId,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_after_exit_decorators(node_id, current_forest, host)
+    }
+
+    #[inline(always)]
+    fn execute_decorators_for_op(
+        &mut self,
+        node_id: MastNodeId,
+        op_idx_in_block: usize,
+        current_forest: &MastForest,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        if self.should_execute_decorators() {
+            #[cfg(test)]
+            self.record_decorator_retrieval();
+
+            for decorator in current_forest.decorators_for_op(node_id, op_idx_in_block) {
+                self.execute_decorator(decorator, host)?;
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    #[inline(always)]
+    fn execute_end_of_block_decorators(
+        &mut self,
+        basic_block_node: &BasicBlockNode,
+        node_id: MastNodeId,
+        current_forest: &Arc<MastForest>,
+        host: &mut impl Host,
+    ) -> ControlFlow<BreakReason> {
+        self.execute_end_of_block_decorators(basic_block_node, node_id, current_forest, host)
     }
 }
 
 impl HasherInterface for FastProcessor {
     #[inline(always)]
     fn permute(&mut self, mut input_state: HasherState) -> (Felt, HasherState) {
-        Rpo256::apply_permutation(&mut input_state);
+        Poseidon2::apply_permutation(&mut input_state);
 
         // Return a default value for the address, as it is not needed in trace generation.
         (ZERO, input_state)
@@ -131,10 +156,10 @@ impl HasherInterface for FastProcessor {
         value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<Felt, ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<Felt, OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
-        match path.verify(index.as_int(), value, &claimed_root) {
+        match path.verify(index.as_canonical_u64(), value, &claimed_root) {
             // Return a default value for the address, as it is not needed in trace generation.
             Ok(_) => Ok(ZERO),
             Err(_) => Err(on_err()),
@@ -149,17 +174,18 @@ impl HasherInterface for FastProcessor {
         new_value: Word,
         path: Option<&MerklePath>,
         index: Felt,
-        on_err: impl FnOnce() -> ExecutionError,
-    ) -> Result<(Felt, Word), ExecutionError> {
+        on_err: impl FnOnce() -> OperationError,
+    ) -> Result<(Felt, Word), OperationError> {
         let path = path.expect("fast processor expects a valid Merkle path");
 
         // Verify the old value against the claimed old root.
-        if path.verify(index.as_int(), old_value, &claimed_old_root).is_err() {
+        if path.verify(index.as_canonical_u64(), old_value, &claimed_old_root).is_err() {
             return Err(on_err());
         };
 
         // Compute the new root.
-        let new_root = path.compute_root(index.as_int(), new_value).map_err(|_| on_err())?;
+        let new_root =
+            path.compute_root(index.as_canonical_u64(), new_value).map_err(|_| on_err())?;
 
         Ok((ZERO, new_root))
     }
@@ -172,7 +198,7 @@ impl SystemInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn clk(&self) -> RowIndex {
+    fn clock(&self) -> RowIndex {
         self.clk
     }
 
@@ -180,17 +206,27 @@ impl SystemInterface for FastProcessor {
     fn ctx(&self) -> ContextId {
         self.ctx
     }
+
+    #[inline(always)]
+    fn increment_clock(&mut self) {
+        self.clk += 1_u32;
+    }
+
+    #[inline(always)]
+    fn set_caller_hash(&mut self, caller_hash: Word) {
+        self.caller_hash = caller_hash;
+    }
+
+    #[inline(always)]
+    fn set_ctx(&mut self, ctx: ContextId) {
+        self.ctx = ctx;
+    }
 }
 
 impl StackInterface for FastProcessor {
     #[inline(always)]
     fn top(&self) -> &[Felt] {
         self.stack_top()
-    }
-
-    #[inline(always)]
-    fn top_mut(&mut self) -> &mut [Felt] {
-        self.stack_top_mut()
     }
 
     #[inline(always)]
@@ -270,202 +306,17 @@ impl StackInterface for FastProcessor {
     }
 
     #[inline(always)]
-    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError> {
+    fn increment_size(&mut self) -> Result<(), ExecutionError> {
         if self.stack_top_idx < STACK_BUFFER_SIZE - 1 {
-            self.increment_stack_size(tracer);
+            self.increment_stack_size();
             Ok(())
         } else {
-            Err(ExecutionError::FailedToExecuteProgram("stack overflow"))
+            Err(ExecutionError::Internal("stack overflow"))
         }
     }
 
     #[inline(always)]
-    fn decrement_size(&mut self, tracer: &mut impl Tracer) {
-        self.decrement_stack_size(tracer)
+    fn decrement_size(&mut self) {
+        self.decrement_stack_size()
     }
-}
-
-pub struct NoopHelperRegisters;
-
-/// Dummy helpers implementation used in the fast processor, where we don't compute the helper
-/// registers. These are expected to be ignored.
-const DEFAULT_HELPERS: [Felt; NUM_USER_OP_HELPERS] = [ZERO; NUM_USER_OP_HELPERS];
-
-impl OperationHelperRegisters for NoopHelperRegisters {
-    #[inline(always)]
-    fn op_eq_registers(_a: Felt, _b: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32split_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_eqz_registers(_top: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_expacc_registers(_acc_update_val: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_fri_ext2fold4_registers(
-        _ev: QuadFelt,
-        _es: QuadFelt,
-        _x: Felt,
-        _x_inv: Felt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32add3_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32sub_registers(_second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32mul_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32madd_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32div_registers(_hi: Felt, _lo: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_u32assert2_registers(_first: Felt, _second: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_hperm_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_log_precompile_registers(_addr: Felt, _cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_merkle_path_registers(_addr: Felt) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_base_registers(
-        _alpha: QuadFelt,
-        _tmp0: QuadFelt,
-        _tmp1: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-
-    #[inline(always)]
-    fn op_horner_eval_ext_registers(
-        _alpha: QuadFelt,
-        _k0: Felt,
-        _k1: Felt,
-        _acc_tmp: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS] {
-        DEFAULT_HELPERS
-    }
-}
-
-// HELPERS
-// ================================================================================================
-
-/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with `[FastProcessor]`.
-#[expect(clippy::too_many_arguments)]
-pub fn eval_circuit_fast_(
-    ctx: ContextId,
-    ptr: Felt,
-    clk: RowIndex,
-    num_vars: Felt,
-    num_eval: Felt,
-    mem: &mut impl MemoryInterface,
-    err_ctx: &impl ErrorContext,
-    tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, ExecutionError> {
-    let num_vars = num_vars.as_int();
-    let num_eval = num_eval.as_int();
-
-    let num_wires = num_vars + num_eval;
-    if num_wires > MAX_NUM_ACE_WIRES as u64 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::TooManyWires(num_wires),
-        ));
-    }
-
-    // Ensure vars and instructions are word-aligned and non-empty. Note that variables are
-    // quadratic extension field elements while instructions are encoded as base field elements.
-    // Hence we can pack 2 variables and 4 instructions per word.
-    if !num_vars.is_multiple_of(2) || num_vars == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumVarIsNotWordAlignedOrIsEmpty(num_vars),
-        ));
-    }
-    if !num_eval.is_multiple_of(4) || num_eval == 0 {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::NumEvalIsNotWordAlignedOrIsEmpty(num_eval),
-        ));
-    }
-
-    // Ensure instructions are word-aligned and non-empty
-    let num_read_rows = num_vars as u32 / 2;
-    let num_eval_rows = num_eval as u32;
-
-    let mut evaluation_context = CircuitEvaluation::new(ctx, clk, num_read_rows, num_eval_rows);
-
-    let mut ptr = ptr;
-    // perform READ operations
-    // Note: we pass in a `NoopTracer`, because the parallel trace generation skips the circuit
-    // evaluation completely
-    for _ in 0..num_read_rows {
-        let word = mem.read_word(ctx, ptr, clk, err_ctx).map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_word(word, ptr, ctx, clk);
-        evaluation_context.do_read(ptr, word)?;
-        ptr += PTR_OFFSET_WORD;
-    }
-    // perform EVAL operations
-    for _ in 0..num_eval_rows {
-        let instruction =
-            mem.read_element(ctx, ptr, err_ctx).map_err(ExecutionError::MemoryError)?;
-        tracer.record_memory_read_element(instruction, ptr, ctx, clk);
-        evaluation_context.do_eval(ptr, instruction, err_ctx)?;
-        ptr += PTR_OFFSET_ELEM;
-    }
-
-    // Ensure the circuit evaluated to zero.
-    if !evaluation_context.output_value().is_some_and(|eval| eval == QuadFelt::ZERO) {
-        return Err(ExecutionError::failed_arithmetic_evaluation(
-            err_ctx,
-            AceError::CircuitNotEvaluateZero,
-        ));
-    }
-
-    Ok(evaluation_context)
 }

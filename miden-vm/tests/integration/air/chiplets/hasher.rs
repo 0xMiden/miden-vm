@@ -1,6 +1,6 @@
 use miden_utils_testing::{
-    Word, build_op_test,
-    crypto::{MerkleStore, MerkleTree, Rpo256, init_merkle_leaf, init_merkle_store},
+    PrimeField64, Word, build_op_test,
+    crypto::{MerkleStore, MerkleTree, Poseidon2, init_merkle_leaf, init_merkle_store},
     rand::rand_vector,
 };
 
@@ -29,12 +29,12 @@ fn mtree_get() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
-        index as u64,
         tree.depth() as u64,
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
     ];
 
     build_op_test!(asm_op, &stack_inputs, &[], store)
@@ -59,16 +59,16 @@ fn mtree_verify() {
     let tree = MerkleTree::new(leaves.clone()).unwrap();
 
     let stack_inputs = [
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
-        index as u64,
+        leaves[index][0].as_canonical_u64(),
+        leaves[index][1].as_canonical_u64(),
+        leaves[index][2].as_canonical_u64(),
+        leaves[index][3].as_canonical_u64(),
         tree.depth() as u64,
-        leaves[index][0].as_int(),
-        leaves[index][1].as_int(),
-        leaves[index][2].as_int(),
-        leaves[index][3].as_int(),
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
     ];
 
     build_op_test!(asm_op, &stack_inputs, &[], store)
@@ -85,7 +85,7 @@ fn mtree_merge() {
     let tree_b = MerkleTree::new(leaves_b.clone()).unwrap();
     let root_a = tree_a.root();
     let root_b = tree_b.root();
-    let root_merged = Rpo256::merge(&[root_a, root_b]);
+    let root_merged = Poseidon2::merge(&[root_a, root_b]);
     let mut store = MerkleStore::default();
     store.extend(tree_a.inner_nodes());
     store.extend(tree_b.inner_nodes());
@@ -93,23 +93,23 @@ fn mtree_merge() {
     let stack_inputs = vec![
         0xbeef,
         0xdead,
-        root_a[0].as_int(),
-        root_a[1].as_int(),
-        root_a[2].as_int(),
-        root_a[3].as_int(),
-        root_b[0].as_int(),
-        root_b[1].as_int(),
-        root_b[2].as_int(),
-        root_b[3].as_int(),
+        root_a[0].as_canonical_u64(),
+        root_a[1].as_canonical_u64(),
+        root_a[2].as_canonical_u64(),
+        root_a[3].as_canonical_u64(),
+        root_b[0].as_canonical_u64(),
+        root_b[1].as_canonical_u64(),
+        root_b[2].as_canonical_u64(),
+        root_b[3].as_canonical_u64(),
     ];
 
     let stack_outputs = vec![
         0xbeef,
         0xdead,
-        root_merged[0].as_int(),
-        root_merged[1].as_int(),
-        root_merged[2].as_int(),
-        root_merged[3].as_int(),
+        root_merged[0].as_canonical_u64(),
+        root_merged[1].as_canonical_u64(),
+        root_merged[2].as_canonical_u64(),
+        root_merged[3].as_canonical_u64(),
     ];
 
     build_op_test!(asm_op, &stack_inputs, &stack_outputs, store)
@@ -127,16 +127,16 @@ fn build_mtree_update_test_inputs() -> (Vec<u64>, MerkleStore, Vec<Word>) {
     new_leaves[index] = new_node;
 
     let stack_inputs = vec![
-        new_node[0].as_int(),
-        new_node[1].as_int(),
-        new_node[2].as_int(),
-        new_node[3].as_int(),
-        tree.root()[0].as_int(),
-        tree.root()[1].as_int(),
-        tree.root()[2].as_int(),
-        tree.root()[3].as_int(),
-        index as u64,
         tree.depth() as u64,
+        index as u64,
+        tree.root()[0].as_canonical_u64(),
+        tree.root()[1].as_canonical_u64(),
+        tree.root()[2].as_canonical_u64(),
+        tree.root()[3].as_canonical_u64(),
+        new_node[0].as_canonical_u64(),
+        new_node[1].as_canonical_u64(),
+        new_node[2].as_canonical_u64(),
+        new_node[3].as_canonical_u64(),
     ];
 
     (stack_inputs, store, leaves)

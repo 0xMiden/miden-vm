@@ -83,7 +83,10 @@ pub enum Instruction {
     U32WrappingAddImm(ImmU32),
     U32OverflowingAdd,
     U32OverflowingAddImm(ImmU32),
+    U32WideningAdd,
+    U32WideningAddImm(ImmU32),
     U32OverflowingAdd3,
+    U32WideningAdd3,
     U32WrappingAdd3,
     U32WrappingSub,
     U32WrappingSubImm(ImmU32),
@@ -91,9 +94,9 @@ pub enum Instruction {
     U32OverflowingSubImm(ImmU32),
     U32WrappingMul,
     U32WrappingMulImm(ImmU32),
-    U32OverflowingMul,
-    U32OverflowingMulImm(ImmU32),
-    U32OverflowingMadd,
+    U32WideningMul,
+    U32WideningMulImm(ImmU32),
+    U32WideningMadd,
     U32WrappingMadd,
     U32Div,
     U32DivImm(ImmU32),
@@ -271,20 +274,12 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
-    Breakpoint,
     Debug(DebugOptions),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
     EmitImm(ImmFelt),
     Trace(ImmU32),
-}
-
-impl Instruction {
-    /// Returns true if the instruction should yield a breakpoint.
-    pub const fn should_break(&self) -> bool {
-        matches!(self, Self::Breakpoint)
-    }
 }
 
 impl core::fmt::Display for Instruction {

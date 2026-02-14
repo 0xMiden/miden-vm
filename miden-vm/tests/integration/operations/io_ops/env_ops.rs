@@ -1,9 +1,11 @@
 use miden_core::{
-    FMP_INIT_VALUE, Operation,
+    FMP_INIT_VALUE,
+    field::PrimeField64,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
         MastNodeExt,
     },
+    operations::Operation,
 };
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_utils_testing::{MIN_STACK_DEPTH, StackInputs, Test, Word, build_op_test, build_test};
@@ -23,7 +25,7 @@ fn sdepth() {
 
     // --- multi-element stack --------------------------------------------------------------------
     let test = build_op_test!(test_op, &[2, 4, 6, 8, 10]);
-    test.expect_stack(&[MIN_STACK_DEPTH as u64, 10, 8, 6, 4, 2]);
+    test.expect_stack(&[MIN_STACK_DEPTH as u64, 2, 4, 6, 8, 10]);
 
     // --- overflowed stack -----------------------------------------------------------------------
     // push 2 values to increase the lenth of the stack beyond 16
@@ -41,7 +43,7 @@ fn sdepth() {
     "
     );
     let test = build_test!(&source, &[0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4, 5, 6, 7]);
-    test.expect_stack(&[18, 1, 1, 7, 6, 5, 4, 3, 2, 1, 0, 7, 6, 5, 4, 3]);
+    test.expect_stack(&[18, 1, 1, 0, 1, 2, 3, 4, 5, 6, 7, 0, 1, 2, 3, 4]);
 }
 
 // LOCADDR INSTRUCTION
@@ -49,7 +51,7 @@ fn sdepth() {
 
 #[test]
 fn locaddr() {
-    const FMP_INIT_VALUE_U64: u64 = FMP_INIT_VALUE.as_int();
+    let fmp_init_value_u64: u64 = FMP_INIT_VALUE.as_canonical_u64();
 
     // --- locaddr returns expected address -------------------------------------------------------
     let source = "
@@ -66,9 +68,10 @@ fn locaddr() {
     let test = build_test!(source, &[10]);
     // Note: internally, we round 5 up to 8 for word-aligned purposes, so the local addresses are
     // offset from 8 rather than 5.
-    // locaddr.0 → fmp - (8 - 0) = fmp - 8 → FMP_INIT_VALUE
-    // locaddr.4 → fmp - (8 - 4) = fmp - 4 → FMP_INIT_VALUE + 4
-    test.expect_stack(&[FMP_INIT_VALUE_U64 + 4, FMP_INIT_VALUE_U64, 10]);
+    // The ops push locaddr.0 then locaddr.4, then swapw dropw
+    // Stack after locaddr ops: [locaddr.4, locaddr.0, 10, ...]
+    // swapw dropw keeps first 3: [locaddr.4, locaddr.0, 10]
+    test.expect_stack(&[fmp_init_value_u64 + 4, fmp_init_value_u64, 10]);
 
     // --- accessing mem via locaddr updates the correct variables --------------------------------
     let source = "
@@ -80,7 +83,7 @@ fn locaddr() {
             mem_storew_be
             dropw
             loc_load.0
-            push.0.0.0.0
+            padw
             loc_loadw_be.4
         end
         begin
@@ -89,7 +92,7 @@ fn locaddr() {
         end";
 
     let test = build_test!(source, &[10, 1, 2, 3, 4, 5]);
-    test.expect_stack(&[4, 3, 2, 1, 5, 10]);
+    test.expect_stack(&[1, 2, 3, 4, 10, 5]);
 
     // --- locaddr returns expected addresses in nested procedures --------------------------------
     let source = format!(
@@ -118,14 +121,14 @@ fn locaddr() {
 
     let test = build_test!(source, &[10]);
     test.expect_stack(&[
-        FMP_INIT_VALUE_U64 + 8,
-        FMP_INIT_VALUE_U64 + 4,
-        FMP_INIT_VALUE_U64,
-        FMP_INIT_VALUE_U64 + 4,
-        FMP_INIT_VALUE_U64 + 16,
-        FMP_INIT_VALUE_U64 + 12,
-        FMP_INIT_VALUE_U64 + 8,
-        FMP_INIT_VALUE_U64,
+        fmp_init_value_u64 + 8,
+        fmp_init_value_u64 + 4,
+        fmp_init_value_u64,
+        fmp_init_value_u64 + 4,
+        fmp_init_value_u64 + 16,
+        fmp_init_value_u64 + 12,
+        fmp_init_value_u64 + 8,
+        fmp_init_value_u64,
         10,
     ]);
 
@@ -138,7 +141,7 @@ fn locaddr() {
             locaddr.4
             mem_storew_be
             dropw
-            push.0.0.0.0
+            padw
             loc_loadw_be.4
             loc_load.0
         end
@@ -157,7 +160,7 @@ fn locaddr() {
             swapdw dropw dropw
         end";
 
-    let test = build_test!(source, &[10, 1, 2, 3, 4, 5, 6, 7]);
+    let test = build_test!(source, &[7, 6, 5, 4, 3, 2, 1, 10]);
     test.expect_stack(&[7, 6, 5, 4, 3, 2, 1, 10]);
 }
 
@@ -191,9 +194,9 @@ fn caller() {
     ));
 
     // top 4 elements should be overwritten with the hash of `bar` procedure, but the 5th
-    // element should remain untouched
+    // element should remain untouched (position 4 in input [1,2,3,4,5] is 5)
     let bar_hash = build_bar_hash();
-    test.expect_stack(&[bar_hash[3], bar_hash[2], bar_hash[1], bar_hash[0], 1]);
+    test.expect_stack(&[bar_hash[0], bar_hash[1], bar_hash[2], bar_hash[3], 5]);
 
     test.prove_and_verify(vec![1, 2, 3, 4, 5], false);
 }
@@ -209,10 +212,10 @@ fn build_bar_hash() -> [u64; 4] {
         CallNodeBuilder::new_syscall(foo_root_id).build(&mast_forest).unwrap().into();
     let bar_hash: Word = bar_root.digest();
     [
-        bar_hash[0].as_int(),
-        bar_hash[1].as_int(),
-        bar_hash[2].as_int(),
-        bar_hash[3].as_int(),
+        bar_hash[0].as_canonical_u64(),
+        bar_hash[1].as_canonical_u64(),
+        bar_hash[2].as_canonical_u64(),
+        bar_hash[3].as_canonical_u64(),
     ]
 }
 

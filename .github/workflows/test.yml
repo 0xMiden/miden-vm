@@ -81,6 +81,21 @@ jobs:
             echo "No documentation changes in crates/lib/core/docs/ - OK"
           fi
 
+  run-examples:
+    name: run masm examples
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/next' }}
+      - name: Install rust
+        run: rustup update --no-self-update
+      - name: Run masm examples
+        run: make run-examples
+
   check-features:
     name: check all feature combinations
     runs-on: ubuntu-latest

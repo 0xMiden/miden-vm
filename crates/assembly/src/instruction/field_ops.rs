@@ -3,7 +3,11 @@ use miden_assembly_syntax::{
     debuginfo::{SourceSpan, Span},
     diagnostics::{RelatedError, RelatedLabel, Report},
 };
-use miden_core::{FieldElement, Operation::*, sys_events::SystemEvent};
+use miden_core::{
+    events::SystemEvent,
+    field::{Field, PrimeCharacteristicRing, PrimeField64},
+    operations::Operation::*,
+};
 
 use super::BasicBlockBuilder;
 use crate::{MAX_EXP_BITS, ONE, ProcedureContext, ZERO};
@@ -106,7 +110,7 @@ pub fn div_imm(
     } else if imm == ONE {
         span_builder.push_op(Noop);
     } else {
-        span_builder.push_ops([Push(imm.into_inner().inv()), Mul]);
+        span_builder.push_ops([Push(imm.into_inner().inverse()), Mul]);
     }
     Ok(())
 }
@@ -127,7 +131,7 @@ pub fn pow2(span_builder: &mut BasicBlockBuilder) {
 /// VM cycles: 16 cycles
 pub fn append_pow2_op(span_builder: &mut BasicBlockBuilder) {
     // push base 2 onto the stack: [exp, ...] -> [2, exp, ...]
-    span_builder.push_op(Push(2_u8.into()));
+    span_builder.push_op(Push(Felt::from_u8(2)));
     // introduce initial value of acc onto the stack: [2, exp, ...] -> [1, 2, exp, ...]
     span_builder.push_ops([Pad, Incr]);
     // arrange the top of the stack for EXPACC operation: [1, 2, exp, ...] -> [0, 2, 1, exp, ...]
@@ -199,12 +203,12 @@ pub fn exp_imm(
     pow: Felt,
     span: SourceSpan,
 ) -> Result<(), Report> {
-    if pow.as_int() <= 7 {
-        perform_exp_for_small_power(span_builder, pow.as_int());
+    if pow.as_canonical_u64() <= 7 {
+        perform_exp_for_small_power(span_builder, pow.as_canonical_u64());
         Ok(())
     } else {
         // compute the bits length of the exponent
-        let num_pow_bits = (64 - pow.as_int().leading_zeros()) as u8;
+        let num_pow_bits = (64 - pow.as_canonical_u64().leading_zeros()) as u8;
 
         // pushing the exponent onto the stack.
         span_builder.push_op(Push(pow));
@@ -353,15 +357,15 @@ pub fn eqw(span_builder: &mut BasicBlockBuilder) {
 /// than" comparison. The stack is expected to be arranged as [b, a, ...] (from the top). A value
 /// of 1 is pushed onto the stack if a < b. Otherwise, 0 is pushed.
 ///
-/// This operation takes 14 VM cycles.
+/// This operation takes 17 VM cycles.
 pub fn lt(span_builder: &mut BasicBlockBuilder) {
     // Split both elements into high and low bits
-    // 3 cycles
+    // 4 cycles
     split_elements(span_builder);
 
     // compare the high bit values and put comparison result flags on the stack for eq and lt
     // then reorder in preparation for the low-bit comparison (a_lo < b_lo)
-    // 6 cycles
+    // 8 cycles
     check_lt_high_bits(span_builder);
 
     // check a_lo < b_lo, resulting in 1 if true and 0 otherwise
@@ -377,15 +381,15 @@ pub fn lt(span_builder: &mut BasicBlockBuilder) {
 /// than or equal" comparison. The stack is expected to be arranged as [b, a, ...] (from the top).
 /// A value of 1 is pushed onto the stack if a <= b. Otherwise, 0 is pushed.
 ///
-/// This operation takes 15 VM cycles.
+/// This operation takes 18 VM cycles.
 pub fn lte(span_builder: &mut BasicBlockBuilder) {
     // Split both elements into high and low bits
-    // 3 cycles
+    // 4 cycles
     split_elements(span_builder);
 
     // compare the high bit values and put comparison result flags on the stack for eq and lt
     // then reorder in preparation for the low-bit comparison (a_lo <= b_lo)
-    // 6 cycles
+    // 8 cycles
     check_lt_high_bits(span_builder);
 
     // check a_lo <= b_lo, resulting in 1 if true and 0 otherwise
@@ -401,10 +405,10 @@ pub fn lte(span_builder: &mut BasicBlockBuilder) {
 /// than" comparison. The stack is expected to be arranged as [b, a, ...] (from the top). A value
 /// of 1 is pushed onto the stack if a > b. Otherwise, 0 is pushed.
 ///
-/// This operation takes 15 VM cycles.
+/// This operation takes 16 VM cycles.
 pub fn gt(span_builder: &mut BasicBlockBuilder) {
     // Split both elements into high and low bits
-    // 3 cycles
+    // 4 cycles
     split_elements(span_builder);
 
     // compare the high bit values and put comparison result flags on the stack for eq and gt
@@ -425,10 +429,10 @@ pub fn gt(span_builder: &mut BasicBlockBuilder) {
 /// than or equal" comparison. The stack is expected to be arranged as [b, a, ...] (from the top).
 /// A value of 1 is pushed onto the stack if a >= b. Otherwise, 0 is pushed.
 ///
-/// This operation takes 16 VM cycles.
+/// This operation takes 17 VM cycles.
 pub fn gte(span_builder: &mut BasicBlockBuilder) {
     // Split both elements into high and low bits
-    // 3 cycles
+    // 4 cycles
     split_elements(span_builder);
 
     // compare the high bit values and put comparison result flags on the stack for eq and gt
@@ -447,26 +451,32 @@ pub fn gte(span_builder: &mut BasicBlockBuilder) {
 
 /// Checks if the top element in the stack is an odd number or not.
 ///
-/// Vm cycles: 5
+/// Vm cycles: 6
 pub fn is_odd(span_builder: &mut BasicBlockBuilder) {
-    span_builder.push_ops([U32split, Drop, Pad, Incr, U32and]);
+    // U32split outputs [lo, hi], swap to [hi, lo] then drop hi to keep lo (contains LSB)
+    span_builder.push_ops([U32split, Swap, Drop, Pad, Incr, U32and]);
 }
 
 // COMPARISON OPERATION HELPER FUNCTIONS
 // ================================================================================================
 
-/// Splits the top 2 elements on the stack into low and high 32-bit values and swaps their order.
+/// Splits the top 2 elements on the stack into low and high 32-bit values.
 /// The expected starting state of the stack (from the top) is: [b, a, ...].
 ///
-/// After these operations, the stack state will be: [a_hi, a_lo, b_hi, b_lo, ...].
+/// After these operations, the stack state will be: [b_lo, b_hi, a_lo, a_hi, ...].
+/// This preserves the input order (b on top), with the low limb on top for each split value.
 ///
-/// This operation takes 3 cycles.
+/// This operation takes 4 cycles.
 fn split_elements(span_builder: &mut BasicBlockBuilder) {
-    // stack: [b, a, ...] => [b_hi, b_lo, a, ...]
+    // U32split outputs [lo, hi] with lo on top.
+
+    // stack: [b, a, ...] => [a, b, ...]
+    span_builder.push_op(Swap);
+    // => [a_lo, a_hi, b, ...]
     span_builder.push_op(U32split);
-    // => [a, b_hi, b_lo, ...]
+    // => [b, a_lo, a_hi, ...]
     span_builder.push_op(MovUp2);
-    // => [a_hi, a_lo, b_hi, b_lo, ...]
+    // => [b_lo, b_hi, a_lo, a_hi, ...]
     span_builder.push_op(U32split);
 }
 
@@ -499,8 +509,8 @@ fn check_lt_and_eq(span_builder: &mut BasicBlockBuilder) {
 
 /// This is a helper function for comparison operations that perform a less-than check a < b
 /// between two field elements a and b. It expects both elements to be already split into upper and
-/// lower 32-bit values and arranged on the stack (from the top) as:
-/// [a_hi, a_lo, bi_hi, b_lo, ...].
+/// lower 32-bit values and arranged on the stack (from the top) in LE order as:
+/// [b_lo, b_hi, a_lo, a_hi, ...].
 ///
 /// It pops the high bit values of both elements, compares them, and pushes 2 flags: one for
 /// less-than and one for equality. Then it moves the flags down the stack, leaving the low bits at
@@ -513,18 +523,26 @@ fn check_lt_and_eq(span_builder: &mut BasicBlockBuilder) {
 /// - hi_flag_eq: 1 if the high bit values were equal; 0 otherwise
 /// - hi_flag_lt: 1 if a's high-bit values were less than b's (a_hi < b_hi); 0 otherwise
 ///
-/// This operation takes 6 cycles.
+/// This operation takes 8 cycles.
 fn check_lt_high_bits(span_builder: &mut BasicBlockBuilder) {
-    // reorder the stack to check a_hi < b_hi
+    // reorder the stack to check a_hi < b_hi (need [b_hi, a_hi, ...] for U32sub)
+    // [b_lo, b_hi, a_lo, a_hi, ...] => [a_hi, b_lo, b_hi, a_lo, ...]
+    span_builder.push_op(MovUp3);
+    // => [b_hi, a_hi, b_lo, a_lo, ...]
     span_builder.push_op(MovUp2);
 
     // simultaneously check a_hi < b_hi and a_hi = b_hi, resulting in:
     // - an equality flag of 1 if a_hi = b_hi and 0 otherwise (at stack[0])
-    // - a less-than flag of 1 if a_hi > b_hi and 0 otherwise (at stack[1])
+    // - a less-than flag of 1 if a_hi < b_hi and 0 otherwise (at stack[1])
     check_lt_and_eq(span_builder);
 
     // reorder the stack to prepare for low-bit comparison (a_lo < b_lo)
-    span_builder.push_ops([MovUp2, MovUp3]);
+    // [eq_flag, lt_flag, b_lo, a_lo, ...] => [b_lo, eq_flag, lt_flag, a_lo, ...]
+    span_builder.push_op(MovUp2);
+    // => [a_lo, b_lo, eq_flag, lt_flag, ...]
+    span_builder.push_op(MovUp3);
+    // => [b_lo, a_lo, eq_flag, lt_flag, ...]
+    span_builder.push_op(Swap);
 }
 
 /// Appends operations to the span_builder block to emulate a "less than" conditional and check that
@@ -590,13 +608,13 @@ fn check_lte(span_builder: &mut BasicBlockBuilder) {
 
 /// This is a helper function for comparison operations that perform a greater-than check a > b
 /// between two field elements a and b. It expects both elements to be already split into upper and
-/// lower 32-bit values and arranged on the stack (from the top) as:
-/// [a_hi, a_lo, bi_hi, b_lo, ...].
+/// lower 32-bit values and arranged on the stack (from the top) in LE order as:
+/// [b_lo, b_hi, a_lo, a_hi, ...].
 ///
-/// We pop the high bit values of both elements, compare them, and push 2 flags: one for
-/// greater-than and one for equality. Then we move the flags down the stack, leaving the low bits
+/// It pops the high bit values of both elements, compares them, and pushes 2 flags: one for
+/// greater-than and one for equality. Then it moves the flags down the stack, leaving the low bits
 /// at the top of the stack in the orientation required for a greater-than check of the low bit
-/// values (a_lo > b_lo).
+/// values (b_lo < a_lo).
 ///
 /// After this operation, the stack will look as follows (from the top):
 /// - a_lo
@@ -604,10 +622,14 @@ fn check_lte(span_builder: &mut BasicBlockBuilder) {
 /// - hi_flag_eq: 1 if the high bit values were equal; 0 otherwise
 /// - hi_flag_gt: 1 if a's high-bit values were greater than b's (a_hi > b_hi); 0 otherwise
 ///
-/// This function takes 7 cycles.
+/// This operation takes 7 cycles.
 fn check_gt_high_bits(span_builder: &mut BasicBlockBuilder) {
-    // reorder the stack to check b_hi < a_hi
-    span_builder.push_ops([Swap, MovDn2]);
+    // reorder the stack to check a_hi > b_hi (need [a_hi, b_hi, ...] for U32sub to check b_hi <
+    // a_hi)
+    // [b_lo, b_hi, a_lo, a_hi, ...] => [b_hi, b_lo, a_lo, a_hi, ...]
+    span_builder.push_op(Swap);
+    // => [a_hi, b_hi, b_lo, a_lo, ...]
+    span_builder.push_op(MovUp3);
 
     // simultaneously check b_hi < a_hi and b_hi = a_hi, resulting in:
     // - an equality flag of 1 if a_hi = b_hi and 0 otherwise (at stack[0])
@@ -615,5 +637,8 @@ fn check_gt_high_bits(span_builder: &mut BasicBlockBuilder) {
     check_lt_and_eq(span_builder);
 
     // reorder the stack to prepare for low-bit comparison (b_lo < a_lo)
-    span_builder.push_ops([MovUp3, MovUp3]);
+    // [eq_flag, gt_flag, b_lo, a_lo, ...] => [b_lo, eq_flag, gt_flag, a_lo, ...]
+    span_builder.push_op(MovUp2);
+    // => [a_lo, b_lo, eq_flag, gt_flag, ...]
+    span_builder.push_op(MovUp3);
 }

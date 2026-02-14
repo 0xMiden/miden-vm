@@ -3,11 +3,10 @@ use alloc::{
     vec::Vec,
 };
 
-use miden_utils_indexing::Idx;
-
 use crate::{
     Word,
     mast::{MastForest, MastForestError, MastNode, MastNodeId, node::MastNodeExt},
+    utils::Idx,
 };
 
 type ForestIndex = usize;
@@ -306,17 +305,20 @@ pub(crate) enum MultiMastForestIteratorItem {
 #[cfg(test)]
 mod tests {
 
+    use miden_utils_testing::rand::rand_value;
+
     use super::*;
     use crate::{
-        Operation, Word,
+        Word,
         mast::{
             BasicBlockNodeBuilder, CallNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
             MastForestContributor, SplitNodeBuilder,
         },
+        operations::Operation,
     };
 
     fn random_digest() -> Word {
-        Word::new([winter_rand_utils::rand_value(); 4])
+        Word::new([rand_value(); 4])
     }
 
     #[test]

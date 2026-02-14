@@ -4,14 +4,11 @@ use alloc::vec::Vec;
 // ================================================================================================
 pub use miden_core::crypto::{
     dsa::*,
-    hash::Rpo256,
+    hash::Poseidon2,
     merkle::{
         EmptySubtreeRoots, LeafIndex, MerkleError, MerklePath, MerkleStore, MerkleTree, Mmr,
         MmrPeaks, NodeIndex, PartialMerkleTree, SimpleSmt, Smt,
     },
-};
-pub use winter_prover::crypto::{
-    BatchMerkleProof, DefaultRandomCoin as WinterRandomCoin, ElementHasher, Hasher, RandomCoin,
 };
 
 use super::{Felt, Word, ZERO};

@@ -1,96 +1,202 @@
-pub type u256 = struct { hi: u128, lo: u128 }
+pub type u256 = struct { lo: u128, hi: u128 }
 
+# ===== LIMB ORDER HELPERS ========================================================================
+
+#! Reorders the top u256 value between LE and BE limb order. This is an involution.
+#! Input/Output (LE <-> BE):
+#! [x0, x1, x2, x3, x4, x5, x6, x7, ...] <-> [x7, x6, x5, x4, x3, x2, x1, x0, ...]
+proc u256_le_to_be
+    reversew
+    swapw
+    reversew
+end
+
+#! Reorders two u256 values between LE and BE limb order.
+proc u256_le_to_be_pair
+    exec.u256_le_to_be
+    swapdw
+    exec.u256_le_to_be
+    swapdw
+end
+
+# ===== ADDITION ==================================================================================
+
+#! Adds rhs (b) to lhs (a) in BE limb order and returns (overflow, sum).
+#! Input stack: [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...]
+#! Output stack: [overflow, c7, c6, c5, c4, c3, c2, c1, c0, ...], where c = (a + b) % 2^256.
+proc add_with_carry_be(rhs: u256, lhs: u256) -> (i1, u256)
+    swapw.3
+    movup.3
+    movup.7
+    u32overflowing_add
+    movup.4
+    movup.7
+    u32overflowing_add3
+    movup.4
+    movup.6
+    u32overflowing_add3
+    movup.4
+    movup.5
+    u32overflowing_add3
+    movdn.12
+    swapw.2
+    movup.12
+    movup.4
+    movup.8
+    u32overflowing_add3
+    movup.4
+    movup.7
+    u32overflowing_add3
+    movup.4
+    movup.6
+    u32overflowing_add3
+    movup.4
+    movup.5
+    u32overflowing_add3
+end
+
+#! Performs addition of two unsigned 256 bit integers discarding the overflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
 pub proc wrapping_add(rhs: u256, lhs: u256) -> u256
-    swapw.3
-    movup.3
-    movup.7
-    u32overflowing_add
-    movup.4
-    movup.7
-    u32overflowing_add3
-    movup.4
-    movup.6
-    u32overflowing_add3
-    movup.4
-    movup.5
-    u32overflowing_add3
-    movdn.12
-    swapw.2
-    movup.12
-    movup.4
-    movup.8
-    u32overflowing_add3
-    movup.4
-    movup.7
-    u32overflowing_add3
-    movup.4
-    movup.6
-    u32overflowing_add3
-    movup.4
-    movup.5
-    u32overflowing_add3
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
     drop
+    exec.u256_le_to_be
 end
 
+#! Performs addition of two unsigned 256 bit integers preserving the overflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [overflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a + b) % 2^256.
+pub proc overflowing_add(rhs: u256, lhs: u256) -> (i1, u256)
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
+    movdn.8
+    exec.u256_le_to_be
+    movup.8
+end
+
+#! Performs addition of two unsigned 256 bit integers preserving the overflow with sum on top.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, overflow, ...], where c = (a + b) % 2^256.
+pub proc widening_add(rhs: u256, lhs: u256) -> (u256, i1)
+    exec.u256_le_to_be_pair
+    exec.add_with_carry_be
+    movdn.8
+    exec.u256_le_to_be
+end
+
+# ===== SUBTRACTION ===============================================================================
+
+#! Subtracts rhs (b) from lhs (a) in BE limb order.
+#! Input stack: [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...]
+proc sub_with_borrow_be(rhs: u256, lhs: u256) -> (i1, u256)
+    # rhs = b, lhs = a; see stack order above.
+    # u32overflowing_sub computes second - top; u32widening_add computes top + second.
+    # For each limb i: sum = b_i + borrow, diff = a_i - sum, borrow = borrow_sub + carry_sum.
+    swapw.3              # bring a0..a3 above b0..b3
+    movup.3              # a0 to top
+    movup.7              # b0 to top
+    u32overflowing_sub   # borrow0, diff0
+
+    # limb 1
+    movup.7              # b1
+    u32widening_add      # sum1, carry1
+    movup.5              # a1
+    swap                 # sum1 on top, a1 second
+    u32overflowing_sub   # borrow1, diff1
+    movup.2              # carry1
+    add                  # borrow1 += carry1
+
+    # limb 2
+    movup.6              # b2
+    u32widening_add
+    movup.5              # a2
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+
+    # limb 3
+    movup.5              # b3
+    u32widening_add
+    movup.5              # a3
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+
+    # limb 4
+    movup.12             # b4
+    u32widening_add
+    movup.9              # a4
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+
+    # limb 5
+    movup.11             # b5
+    u32widening_add
+    movup.9              # a5
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+
+    # limb 6
+    movup.10             # b6
+    u32widening_add
+    movup.9              # a6
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+
+    # limb 7
+    movup.9              # b7
+    u32widening_add
+    movup.9              # a7
+    swap
+    u32overflowing_sub
+    movup.2
+    add
+end
+
+#! Performs subtraction of two unsigned 256 bit integers discarding the underflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
 pub proc wrapping_sub(rhs: u256, lhs: u256) -> u256
-    swapw.3
-    movup.3
-    movup.7
-    u32overflowing_sub
-    movup.7
-    u32overflowing_add
-    movup.5
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movup.6
-    u32overflowing_add
-    movup.5
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movup.5
-    u32overflowing_add
-    movup.5
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movdn.12
-    swapw.2
-    movup.12
-    movup.4
-    u32overflowing_add
-    movup.8
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movup.4
-    u32overflowing_add
-    movup.7
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movup.4
-    u32overflowing_add
-    movup.6
-    movup.2
-    u32overflowing_sub
-    movup.2
-    add
-    movup.5
-    movup.5
-    movup.2
-    u32overflowing_add
+    # rhs = b, lhs = a; stack order is [b..., a..., ...].
+    exec.u256_le_to_be_pair
+    exec.sub_with_borrow_be
     drop
-    u32overflowing_sub
-    drop
+    exec.u256_le_to_be
 end
 
+#! Performs subtraction of two unsigned 256 bit integers preserving the underflow.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [underflow, c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = (a - b) % 2^256.
+pub proc overflowing_sub(rhs: u256, lhs: u256) -> (i1, u256)
+    # rhs = b, lhs = a; stack order is [b..., a..., ...].
+    exec.u256_le_to_be_pair
+    exec.sub_with_borrow_be
+    movdn.8
+    exec.u256_le_to_be
+    movup.8
+end
+
+# ===== BITWISE OPERATIONS ========================================================================
+
+#! Computes bitwise AND of two unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = a & b.
 pub proc and(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
@@ -120,6 +226,10 @@ pub proc and(rhs: u256, lhs: u256) -> u256
     u32and
 end
 
+#! Computes bitwise OR of two unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = a | b.
 pub proc or(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
@@ -149,6 +259,10 @@ pub proc or(rhs: u256, lhs: u256) -> u256
     u32or
 end
 
+#! Computes bitwise XOR of two unsigned 256 bit integers.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...]
+#!   -> [c0, c1, c2, c3, c4, c5, c6, c7, ...], where c = a ^ b.
 pub proc xor(rhs: u256, lhs: u256) -> u256
     swapw.3
     movup.3
@@ -178,6 +292,9 @@ pub proc xor(rhs: u256, lhs: u256) -> u256
     u32xor
 end
 
+#! Returns 1 if the top u256 value is zero; lower stack values are preserved.
+#! Stack transition looks as follows:
+#! [a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [is_zero, ...].
 pub proc eqz(rhs: u256, lhs: u256) -> i1
     eq.0
     repeat.7
@@ -187,7 +304,11 @@ pub proc eqz(rhs: u256, lhs: u256) -> i1
     end
 end
 
+#! Returns 1 if two unsigned 256 bit integers are equal.
+#! Stack transition looks as follows:
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [is_equal, ...].
 pub proc eq(rhs: u256, lhs: u256) -> i1
+    exec.u256_le_to_be_pair
     swapw.3
     eqw
     movdn.8
@@ -203,15 +324,26 @@ end
 
 # ===== MULTIPLICATION ============================================================================
 
+#! Multiplies and accumulates one 32-bit limb with carry (internal helper).
+#! Input: [k, c, b, a, ...] -> Output: [new_k, result, ...].
 proc mulstep
-    movdn.2
-    u32overflowing_madd
-    movdn.2
-    u32overflowing_add
-    movup.2
-    add
+    # Input: [k, c, b, a, ...]
+    #   k = carry from previous step
+    #   c = partial sum to accumulate into
+    #   b = multiplier limb
+    #   a = multiplicand limb
+    # Output: [new_k, result, ...]
+
+    movdn.2                    # [c, b, k, a, ...]
+    u32widening_madd           # [lo, hi, a, ...]  (computes c*b+k)
+    movup.2                    # [a, lo, hi, ...]
+    u32overflowing_add         # [carry, result, hi, ...]  (computes a+lo)
+    movup.2                    # [hi, carry, result, ...]
+    add                        # [new_k, result, ...]  (computes hi+carry)
 end
 
+#! Multiplies four limbs using mulstep (internal helper).
+#! Expects stack layout prepared by wrapping_mul.
 proc mulstep4
     movup.12
     dup.1
@@ -246,10 +378,11 @@ end
 #! Performs multiplication of two unsigned 256 bit integers discarding the overflow.
 #! The input values are assumed to be represented using 32 bit limbs, but this is not checked.
 #! Stack transition looks as follows:
-#! [b7, b6, b5, b4, b3, b2, b1, b0, a7, a6, a5, a4, a3, a2, a1, a0, ...] -> [c7, c6, c5, c4, c3, c2, c1, c0, ...]
+#! [b0, b1, b2, b3, b4, b5, b6, b7, a0, a1, a2, a3, a4, a5, a6, a7, ...] -> [c0, c1, c2, c3, c4, c5, c6, c7, ...]
 #! where c = (a * b) % 2^256, and a0, b0, and c0 are least significant 32-bit limbs of a, b, and c respectively.
 @locals(24)
 pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
+    exec.u256_le_to_be_pair
     # Memory storing setup
     loc_storew_be.0
     dropw
@@ -272,7 +405,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     # b[0]
     dropw
     swapw
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
     movdnw.2
     movup.12
@@ -284,7 +417,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     swapw
     loc_storew_be.16
     dropw
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     swapw
     movup.9
@@ -322,16 +455,16 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     dropw
 
     # b[1]
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     movup.7
     dropw
-    push.0.0.0.0
-    loc_loadw_be.12 push.0.0.0.0
+    padw
+    loc_loadw_be.12 padw
     loc_loadw_be.8 # load the xs
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
     movup.2
     movdn.3
@@ -343,7 +476,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     movdn.9
     swapw
     movdn.3
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
     push.0 dropw # only need p[0]
     movdn.3
@@ -351,7 +484,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     loc_storew_be.16
     dropw
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     movup.3
     drop
@@ -386,17 +519,17 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     dropw
 
     # b[2]
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     movup.7
     movup.7
     dropw
-    push.0.0.0.0
-    loc_loadw_be.12 push.0.0.0.0
+    padw
+    loc_loadw_be.12 padw
     loc_loadw_be.8 # load the xs
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
     swap
     movdn.3
@@ -409,7 +542,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     swapw
     movdn.3
     movdn.3
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
     drop drop
     movdn.3
@@ -417,7 +550,7 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     loc_storew_be.16
     dropw
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     movup.3
     movup.3
@@ -447,18 +580,18 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     dropw
 
     # b[3]
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
 
     movup.7 movup.7 movup.7
     dropw
-    push.0.0.0.0
-    loc_loadw_be.12 push.0.0.0.0
+    padw
+    loc_loadw_be.12 padw
     loc_loadw_be.8
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
     movdn.3
     push.0 dropw
@@ -470,14 +603,14 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
 
     swapw
     movup.3
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
     drop
     movup.3
 
     loc_storew_be.16
     dropw
-    push.0.0.0.0
+    padw
     loc_loadw_be.20
     movdn.3
     push.0 dropw
@@ -496,12 +629,12 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     push.0 dropw
 
     # b[4]
-    push.0.0.0.0
-    loc_loadw_be.12 push.0.0.0.0
+    padw
+    loc_loadw_be.12 padw
     loc_loadw_be.8 # load the xs
     # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     push.0 dropw # b[4]
 
@@ -509,9 +642,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     dropw drop drop # OPTIM: don't need a[4-7], but can't use mulstep4 if we don't load
 
     # b[5]
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     movup.2 movdn.3
     push.0 dropw
@@ -539,9 +672,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     drop
 
     # b[6]
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     swap
     movdn.3
@@ -563,9 +696,9 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     drop drop
 
     # b[7]
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
 
     movdn.3 push.0 dropw
@@ -578,7 +711,8 @@ pub proc wrapping_mul(rhs: u256, lhs: u256) -> u256
     movdn.3
     drop drop drop
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.16
     swapw
+    exec.u256_le_to_be
 end

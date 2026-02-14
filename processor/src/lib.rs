@@ -6,111 +6,346 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-use alloc::{sync::Arc, vec::Vec};
-use core::fmt::{Display, LowerHex};
-
-use miden_air::trace::{
-    CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, MIN_TRACE_LEN, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
-    SYS_TRACE_WIDTH,
+use alloc::vec::Vec;
+use core::{
+    fmt::{self, Display, LowerHex},
+    ops::ControlFlow,
 };
-pub use miden_air::{ExecutionOptions, ExecutionOptionsError, RowIndex};
-pub use miden_core::{
-    AssemblyOp, EMPTY_WORD, Felt, Kernel, ONE, Operation, Program, ProgramInfo, QuadExtension,
-    StackInputs, StackOutputs, WORD_SIZE, Word, ZERO,
-    crypto::merkle::SMT_DEPTH,
-    errors::InputError,
-    mast::{MastForest, MastNode, MastNodeExt, MastNodeId},
-    precompile::{PrecompileRequest, PrecompileTranscriptState},
-    sys_events::SystemEvent,
-    utils::DeserializationError,
+
+mod continuation_stack;
+mod debug;
+mod errors;
+mod execution;
+mod execution_options;
+mod fast;
+mod host;
+mod processor;
+mod tracer;
+
+use crate::{
+    advice::{AdviceInputs, AdviceProvider},
+    errors::MapExecErr,
+    field::{PrimeCharacteristicRing, PrimeField64},
+    processor::{Processor, SystemInterface},
+    trace::{ExecutionTrace, RowIndex},
 };
-use miden_core::{
-    Decorator, FieldElement,
-    mast::{
-        BasicBlockNode, CallNode, DynNode, ExternalNode, JoinNode, LoopNode, OpBatch, SplitNode,
-    },
-};
-use miden_debug_types::SourceSpan;
-pub use winter_prover::matrix::ColMatrix;
 
-pub(crate) mod continuation_stack;
-
-pub mod fast;
-use fast::FastProcessState;
-pub mod parallel;
-pub(crate) mod processor;
-
-mod operations;
-
-mod system;
-pub use system::ContextId;
-use system::System;
+#[cfg(any(test, feature = "testing"))]
+mod test_utils;
+#[cfg(any(test, feature = "testing"))]
+pub use test_utils::{ProcessorStateSnapshot, TestHost, TraceCollector};
 
 #[cfg(test)]
-mod test_utils;
-
-pub(crate) mod decoder;
-use decoder::Decoder;
-
-mod stack;
-use stack::Stack;
-
-mod range;
-use range::RangeChecker;
-
-mod host;
-
-pub use host::{
-    AdviceMutation, AsyncHost, BaseHost, FutureMaybeSend, MastForestStore, MemMastForestStore,
-    SyncHost,
-    advice::{AdviceError, AdviceInputs, AdviceProvider},
-    debug::DefaultDebugHandler,
-    default::{DefaultHost, HostLibrary},
-    handlers::{
-        AssertError, DebugError, DebugHandler, EventError, EventHandler, EventHandlerRegistry,
-        NoopEventHandler, TraceError,
-    },
-};
-
-mod chiplets;
-use chiplets::Chiplets;
-pub use chiplets::MemoryError;
-
-mod trace;
-use trace::TraceFragment;
-pub use trace::{ChipletsLengths, ExecutionTrace, NUM_RAND_ROWS, TraceLenSummary};
-
-mod errors;
-pub use errors::{ErrorContext, ErrorContextImpl, ExecutionError};
-
-pub mod utils;
-
-#[cfg(all(test, not(feature = "no_err_ctx")))]
 mod tests;
-
-mod debug;
-pub use debug::{AsmOpInfo, VmState, VmStateIterator};
 
 // RE-EXPORTS
 // ================================================================================================
 
-pub mod math {
-    pub use miden_core::{Felt, FieldElement, StarkField};
-    pub use winter_prover::math::fft;
-}
+pub use errors::{ExecutionError, MemoryError};
+pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
+pub use host::{
+    FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
+    debug::DefaultDebugHandler,
+    default::{DefaultHost, HostLibrary},
+    handlers::{DebugError, DebugHandler, TraceError},
+};
+pub use miden_core::{
+    EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
+    program::{
+        InputError, Kernel, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs,
+    },
+    serde, utils,
+};
 
-pub mod crypto {
-    pub use miden_core::crypto::{
-        hash::{Blake3_192, Blake3_256, ElementHasher, Hasher, Poseidon2, Rpo256, Rpx256},
-        merkle::{
-            MerkleError, MerklePath, MerkleStore, MerkleTree, NodeIndex, PartialMerkleTree,
-            SimpleSmt,
-        },
-        random::{RandomCoin, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin},
+pub mod advice {
+    pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
+
+    pub use super::host::{
+        AdviceMutation,
+        advice::{AdviceError, AdviceProvider},
     };
 }
 
-// TYPE ALIASES
+pub mod event {
+    pub use miden_core::events::*;
+
+    pub use crate::host::handlers::{
+        EventError, EventHandler, EventHandlerRegistry, NoopEventHandler,
+    };
+}
+
+pub mod operation {
+    pub use miden_core::operations::*;
+
+    pub use crate::errors::OperationError;
+}
+
+pub mod trace;
+
+// EXECUTORS
+// ================================================================================================
+
+/// Returns an execution trace resulting from executing the provided program against the provided
+/// inputs.
+///
+/// This is an async function that works on all platforms including wasm32.
+///
+/// The `host` parameter is used to provide the external environment to the program being executed,
+/// such as access to the advice provider and libraries that the program depends on.
+///
+/// # Errors
+/// Returns an error if program execution fails for any reason.
+#[tracing::instrument("execute_program", skip_all)]
+pub async fn execute(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    options: ExecutionOptions,
+) -> Result<ExecutionTrace, ExecutionError> {
+    let processor = FastProcessor::new_with_options(stack_inputs, advice_inputs, options);
+    let (execution_output, trace_generation_context) =
+        processor.execute_for_trace(program, host).await?;
+
+    let trace = trace::build_trace(execution_output, trace_generation_context, program.to_info());
+
+    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
+    Ok(trace)
+}
+
+/// Synchronous wrapper for the async `execute()` function.
+///
+/// This method is only available on non-wasm32 targets. On wasm32, use the async `execute()`
+/// method directly since wasm32 runs in the browser's event loop.
+///
+/// # Panics
+/// Panics if called from within an existing Tokio runtime. Use the async `execute()` method
+/// instead in async contexts.
+#[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument("execute_program_sync", skip_all)]
+pub fn execute_sync(
+    program: &Program,
+    stack_inputs: StackInputs,
+    advice_inputs: AdviceInputs,
+    host: &mut impl Host,
+    options: ExecutionOptions,
+) -> Result<ExecutionTrace, ExecutionError> {
+    match tokio::runtime::Handle::try_current() {
+        Ok(_handle) => {
+            // We're already inside a Tokio runtime - this is not supported because we cannot
+            // safely create a nested runtime or move the non-Send host reference to another thread
+            panic!(
+                "Cannot call execute_sync from within a Tokio runtime. \
+                 Use the async execute() method instead."
+            )
+        },
+        Err(_) => {
+            // No runtime exists - create one and use it
+            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            rt.block_on(execute(program, stack_inputs, advice_inputs, host, options))
+        },
+    }
+}
+
+// PROCESSOR STATE
+// ===============================================================================================
+
+/// A view into the current state of the processor.
+///
+/// This struct provides read access to the processor's state, including the stack, memory,
+/// advice provider, and execution context information.
+#[derive(Debug)]
+pub struct ProcessorState<'a> {
+    processor: &'a mut FastProcessor,
+}
+
+impl<'a> ProcessorState<'a> {
+    /// Returns a reference to the advice provider.
+    #[inline(always)]
+    pub fn advice_provider(&self) -> &AdviceProvider {
+        self.processor.advice_provider()
+    }
+
+    /// Returns a mutable reference to the advice provider.
+    #[inline(always)]
+    pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
+        self.processor.advice_provider_mut()
+    }
+
+    /// Returns the current clock cycle of a process.
+    #[inline(always)]
+    pub fn clock(&self) -> RowIndex {
+        self.processor.clock()
+    }
+
+    /// Returns the current execution context ID.
+    #[inline(always)]
+    pub fn ctx(&self) -> ContextId {
+        self.processor.ctx()
+    }
+
+    /// Returns the value located at the specified position on the stack at the current clock cycle.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
+    #[inline(always)]
+    pub fn get_stack_item(&self, pos: usize) -> Felt {
+        self.processor.stack_get(pos)
+    }
+
+    /// Returns a word starting at the specified element index on the stack.
+    ///
+    /// The word is formed by taking 4 consecutive elements starting from the specified index.
+    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
+    /// a word from elements 1-4, etc.
+    ///
+    /// Stack element N will be at position 0 of the word, N+1 at position 1, N+2 at position 2,
+    /// and N+3 at position 3. `word[0]` corresponds to the top of the stack.
+    ///
+    /// This method can access elements beyond the top 16 positions by using the overflow table.
+    /// Creating a word does not change the state of the stack.
+    #[inline(always)]
+    pub fn get_stack_word(&self, start_idx: usize) -> Word {
+        self.processor.stack_get_word(start_idx)
+    }
+
+    /// Returns stack state at the current clock cycle. This includes the top 16 items of the
+    /// stack + overflow entries.
+    #[inline(always)]
+    pub fn get_stack_state(&self) -> Vec<Felt> {
+        self.processor.stack().iter().rev().copied().collect()
+    }
+
+    /// Returns the element located at the specified context/address, or None if the address hasn't
+    /// been accessed previously.
+    #[inline(always)]
+    pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
+        self.processor.memory().read_element_impl(ctx, addr)
+    }
+
+    /// Returns the batch of elements starting at the specified context/address.
+    ///
+    /// # Errors
+    /// - If the address is not word aligned.
+    #[inline(always)]
+    pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
+        self.processor.memory().read_word_impl(ctx, addr)
+    }
+
+    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
+    /// without modifying the state of the stack), and verifies that memory range is valid.
+    pub fn get_mem_addr_range(
+        &self,
+        start_idx: usize,
+        end_idx: usize,
+    ) -> Result<core::ops::Range<u32>, MemoryError> {
+        let start_addr = self.get_stack_item(start_idx).as_canonical_u64();
+        let end_addr = self.get_stack_item(end_idx).as_canonical_u64();
+
+        if start_addr > u32::MAX as u64 {
+            return Err(MemoryError::AddressOutOfBounds { addr: start_addr });
+        }
+        if end_addr > u32::MAX as u64 {
+            return Err(MemoryError::AddressOutOfBounds { addr: end_addr });
+        }
+
+        if start_addr > end_addr {
+            return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
+        }
+
+        Ok(start_addr as u32..end_addr as u32)
+    }
+
+    /// Returns the entire memory state for the specified execution context at the current clock
+    /// cycle.
+    ///
+    /// The state is returned as a vector of (address, value) tuples, and includes addresses which
+    /// have been accessed at least once.
+    #[inline(always)]
+    pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
+        self.processor.memory().get_memory_state(ctx)
+    }
+}
+
+// STOPPER
+// ===============================================================================================
+
+/// A trait for types that determine whether execution should be stopped at a given point.
+pub trait Stopper {
+    type Processor;
+
+    /// Determines whether execution should be stopped.
+    ///
+    /// The `continuation_after_stop` is provided in cases where simply resuming execution from the
+    /// top of the continuation stack is not sufficient to continue execution correctly. For
+    /// example, when stopping execution in the middle of a basic block, we need to provide a
+    /// `ResumeBasicBlock` continuation to ensure that execution resumes at the correct operation
+    /// within the basic block (i.e. the operation right after the one that was last executed before
+    /// being stopped). No continuation is provided in case of error, since it is expected that
+    /// execution will not be resumed.
+    fn should_stop(
+        &self,
+        processor: &Self::Processor,
+        continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
+    ) -> ControlFlow<BreakReason>;
+}
+
+// EXECUTION CONTEXT
+// ================================================================================================
+
+/// Represents the ID of an execution context
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ContextId(u32);
+
+impl ContextId {
+    /// Returns the root context ID
+    pub fn root() -> Self {
+        Self(0)
+    }
+
+    /// Returns true if the context ID represents the root context
+    pub fn is_root(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl From<RowIndex> for ContextId {
+    fn from(value: RowIndex) -> Self {
+        Self(value.as_u32())
+    }
+}
+
+impl From<u32> for ContextId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ContextId> for u32 {
+    fn from(context_id: ContextId) -> Self {
+        context_id.0
+    }
+}
+
+impl From<ContextId> for u64 {
+    fn from(context_id: ContextId) -> Self {
+        context_id.0.into()
+    }
+}
+
+impl From<ContextId> for Felt {
+    fn from(context_id: ContextId) -> Self {
+        Felt::from_u32(context_id.0)
+    }
+}
+
+impl Display for ContextId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// MEMORY ADDRESS
 // ================================================================================================
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -153,888 +388,5 @@ impl core::ops::Add<u32> for MemoryAddress {
 
     fn add(self, rhs: u32) -> Self::Output {
         MemoryAddress(self.0 + rhs)
-    }
-}
-
-type SysTrace = [Vec<Felt>; SYS_TRACE_WIDTH];
-
-pub struct DecoderTrace {
-    trace: [Vec<Felt>; DECODER_TRACE_WIDTH],
-    aux_builder: decoder::AuxTraceBuilder,
-}
-
-pub struct StackTrace {
-    trace: [Vec<Felt>; STACK_TRACE_WIDTH],
-}
-
-pub struct RangeCheckTrace {
-    trace: [Vec<Felt>; RANGE_CHECK_TRACE_WIDTH],
-    aux_builder: range::AuxTraceBuilder,
-}
-
-pub struct ChipletsTrace {
-    trace: [Vec<Felt>; CHIPLETS_WIDTH],
-    aux_builder: chiplets::AuxTraceBuilder,
-}
-
-// EXECUTORS
-// ================================================================================================
-
-/// Returns an execution trace resulting from executing the provided program against the provided
-/// inputs.
-///
-/// The `host` parameter is used to provide the external environment to the program being executed,
-/// such as access to the advice provider and libraries that the program depends on.
-#[tracing::instrument("execute_program", skip_all)]
-pub fn execute(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-    options: ExecutionOptions,
-) -> Result<ExecutionTrace, ExecutionError> {
-    let mut process = Process::new(program.kernel().clone(), stack_inputs, advice_inputs, options);
-    let stack_outputs = process.execute(program, host)?;
-    let trace = ExecutionTrace::new(process, stack_outputs);
-    assert_eq!(&program.hash(), trace.program_hash(), "inconsistent program hash");
-    Ok(trace)
-}
-
-/// Returns an iterator which allows callers to step through the execution and inspect VM state at
-/// each execution step.
-pub fn execute_iter(
-    program: &Program,
-    stack_inputs: StackInputs,
-    advice_inputs: AdviceInputs,
-    host: &mut impl SyncHost,
-) -> VmStateIterator {
-    let mut process = Process::new_debug(program.kernel().clone(), stack_inputs, advice_inputs);
-    let result = process.execute(program, host);
-    if result.is_ok() {
-        assert_eq!(
-            program.hash(),
-            process.decoder.program_hash().into(),
-            "inconsistent program hash"
-        );
-    }
-    VmStateIterator::new(process, result)
-}
-
-// PROCESS
-// ================================================================================================
-
-/// A [Process] is the underlying execution engine for a Miden [Program].
-///
-/// Typically, you do not need to worry about, or use [Process] directly, instead you should prefer
-/// to use either [execute] or [execute_iter], which also handle setting up the process state,
-/// inputs, as well as compute the [ExecutionTrace] for the program.
-///
-/// However, for situations in which you want finer-grained control over those steps, you will need
-/// to construct an instance of [Process] using [Process::new], invoke [Process::execute], and then
-/// get the execution trace using [ExecutionTrace::new] using the outputs produced by execution.
-#[cfg(not(any(test, feature = "testing")))]
-pub struct Process {
-    advice: AdviceProvider,
-    system: System,
-    decoder: Decoder,
-    stack: Stack,
-    range: RangeChecker,
-    chiplets: Chiplets,
-    max_cycles: u32,
-    enable_tracing: bool,
-    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
-    pc_transcript_state: PrecompileTranscriptState,
-}
-
-#[cfg(any(test, feature = "testing"))]
-pub struct Process {
-    pub advice: AdviceProvider,
-    pub system: System,
-    pub decoder: Decoder,
-    pub stack: Stack,
-    pub range: RangeChecker,
-    pub chiplets: Chiplets,
-    pub max_cycles: u32,
-    pub enable_tracing: bool,
-    /// Precompile transcript state (sponge capacity) used by `log_precompile`.
-    pub pc_transcript_state: PrecompileTranscriptState,
-    /// Tracks decorator retrieval calls for testing.
-    #[cfg(test)]
-    pub decorator_retrieval_count: core::cell::Cell<usize>,
-}
-
-impl Process {
-    // CONSTRUCTORS
-    // --------------------------------------------------------------------------------------------
-    /// Creates a new process with the provided inputs.
-    pub fn new(
-        kernel: Kernel,
-        stack_inputs: StackInputs,
-        advice_inputs: AdviceInputs,
-        execution_options: ExecutionOptions,
-    ) -> Self {
-        Self::initialize(kernel, stack_inputs, advice_inputs, execution_options)
-    }
-
-    /// Creates a new process with provided inputs and debug options enabled.
-    pub fn new_debug(
-        kernel: Kernel,
-        stack_inputs: StackInputs,
-        advice_inputs: AdviceInputs,
-    ) -> Self {
-        Self::initialize(
-            kernel,
-            stack_inputs,
-            advice_inputs,
-            ExecutionOptions::default().with_tracing().with_debugging(true),
-        )
-    }
-
-    fn initialize(
-        kernel: Kernel,
-        stack: StackInputs,
-        advice_inputs: AdviceInputs,
-        execution_options: ExecutionOptions,
-    ) -> Self {
-        let in_debug_mode =
-            execution_options.enable_debugging() || execution_options.enable_tracing();
-        Self {
-            advice: advice_inputs.into(),
-            system: System::new(execution_options.expected_cycles() as usize),
-            decoder: Decoder::new(in_debug_mode),
-            stack: Stack::new(&stack, execution_options.expected_cycles() as usize, in_debug_mode),
-            range: RangeChecker::new(),
-            chiplets: Chiplets::new(kernel),
-            max_cycles: execution_options.max_cycles(),
-            enable_tracing: execution_options.enable_tracing(),
-            pc_transcript_state: PrecompileTranscriptState::default(),
-            #[cfg(test)]
-            decorator_retrieval_count: core::cell::Cell::new(0),
-        }
-    }
-
-    #[cfg(test)]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {
-        self.decorator_retrieval_count.set(self.decorator_retrieval_count.get() + 1);
-    }
-
-    #[cfg(not(test))]
-    #[inline(always)]
-    fn record_decorator_retrieval(&self) {}
-
-    // PROGRAM EXECUTOR
-    // --------------------------------------------------------------------------------------------
-
-    /// Executes the provided [`Program`] in this process.
-    pub fn execute(
-        &mut self,
-        program: &Program,
-        host: &mut impl SyncHost,
-    ) -> Result<StackOutputs, ExecutionError> {
-        if self.system.clk() != 0 {
-            return Err(ExecutionError::ProgramAlreadyExecuted);
-        }
-
-        self.advice
-            .extend_map(program.mast_forest().advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, RowIndex::from(0), &()))?;
-
-        self.execute_mast_node(program.entrypoint(), &program.mast_forest().clone(), host)?;
-
-        self.stack.build_stack_outputs()
-    }
-
-    // NODE EXECUTORS
-    // --------------------------------------------------------------------------------------------
-
-    fn execute_mast_node(
-        &mut self,
-        node_id: MastNodeId,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        let node = program
-            .get_node_by_id(node_id)
-            .ok_or(ExecutionError::MastNodeNotFoundInForest { node_id })?;
-
-        if self.decoder.in_debug_mode() {
-            self.record_decorator_retrieval();
-            for &decorator_id in node.before_enter(program) {
-                self.execute_decorator(&program[decorator_id], host)?;
-            }
-        }
-
-        match node {
-            MastNode::Block(node) => self.execute_basic_block_node(node_id, node, program, host)?,
-            MastNode::Join(node) => self.execute_join_node(node, program, host)?,
-            MastNode::Split(node) => self.execute_split_node(node, program, host)?,
-            MastNode::Loop(node) => self.execute_loop_node(node, program, host)?,
-            MastNode::Call(node) => {
-                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-                add_error_ctx_to_external_error(
-                    self.execute_call_node(node, program, host),
-                    err_ctx,
-                )?
-            },
-            MastNode::Dyn(node) => {
-                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-                add_error_ctx_to_external_error(
-                    self.execute_dyn_node(node, program, host),
-                    err_ctx,
-                )?
-            },
-            MastNode::External(external_node) => {
-                let (root_id, mast_forest) = self.resolve_external_node(external_node, host)?;
-
-                self.execute_mast_node(root_id, &mast_forest, host)?;
-            },
-        }
-
-        if self.decoder.in_debug_mode() {
-            self.record_decorator_retrieval();
-            for &decorator_id in node.after_exit(program) {
-                self.execute_decorator(&program[decorator_id], host)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Executes the specified [JoinNode].
-    #[inline(always)]
-    fn execute_join_node(
-        &mut self,
-        node: &JoinNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        self.start_join_node(node, program, host)?;
-
-        // execute first and then second child of the join block
-        self.execute_mast_node(node.first(), program, host)?;
-        self.execute_mast_node(node.second(), program, host)?;
-
-        self.end_join_node(node, program, host)
-    }
-
-    /// Executes the specified [SplitNode].
-    #[inline(always)]
-    fn execute_split_node(
-        &mut self,
-        node: &SplitNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        // start the SPLIT block; this also pops the stack and returns the popped element
-        let condition = self.start_split_node(node, program, host)?;
-
-        // execute either the true or the false branch of the split block based on the condition
-        if condition == ONE {
-            self.execute_mast_node(node.on_true(), program, host)?;
-        } else if condition == ZERO {
-            self.execute_mast_node(node.on_false(), program, host)?;
-        } else {
-            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-            return Err(ExecutionError::not_binary_value_if(condition, &err_ctx));
-        }
-
-        self.end_split_node(node, program, host)
-    }
-
-    /// Executes the specified [LoopNode].
-    #[inline(always)]
-    fn execute_loop_node(
-        &mut self,
-        node: &LoopNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        // start the LOOP block; this also pops the stack and returns the popped element
-        let condition = self.start_loop_node(node, program, host)?;
-
-        // if the top of the stack is ONE, execute the loop body; otherwise skip the loop body
-        if condition == ONE {
-            // execute the loop body at least once
-            self.execute_mast_node(node.body(), program, host)?;
-
-            // keep executing the loop body until the condition on the top of the stack is no
-            // longer ONE; each iteration of the loop is preceded by executing REPEAT operation
-            // which drops the condition from the stack
-            while self.stack.peek() == ONE {
-                self.decoder.repeat();
-                self.execute_op(Operation::Drop, program, host)?;
-                self.execute_mast_node(node.body(), program, host)?;
-            }
-
-            if self.stack.peek() != ZERO {
-                let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-                return Err(ExecutionError::not_binary_value_loop(self.stack.peek(), &err_ctx));
-            }
-
-            // end the LOOP block and drop the condition from the stack
-            self.end_loop_node(node, true, program, host)
-        } else if condition == ZERO {
-            // end the LOOP block, but don't drop the condition from the stack because it was
-            // already dropped when we started the LOOP block
-            self.end_loop_node(node, false, program, host)
-        } else {
-            let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-            Err(ExecutionError::not_binary_value_loop(condition, &err_ctx))
-        }
-    }
-
-    /// Executes the specified [CallNode].
-    #[inline(always)]
-    fn execute_call_node(
-        &mut self,
-        call_node: &CallNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        // if this is a syscall, make sure the call target exists in the kernel
-        if call_node.is_syscall() {
-            let callee = program.get_node_by_id(call_node.callee()).ok_or_else(|| {
-                ExecutionError::MastNodeNotFoundInForest { node_id: call_node.callee() }
-            })?;
-            let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
-            self.chiplets.kernel_rom.access_proc(callee.digest(), &err_ctx)?;
-        }
-        let err_ctx = err_ctx!(program, call_node, host, self.decoder.in_debug_mode());
-
-        self.start_call_node(call_node, program, host, &err_ctx)?;
-        self.execute_mast_node(call_node.callee(), program, host)?;
-        self.end_call_node(call_node, program, host, &err_ctx)
-    }
-
-    /// Executes the specified [miden_core::mast::DynNode].
-    ///
-    /// The MAST root of the callee is assumed to be at the top of the stack, and the callee is
-    /// expected to be either in the current `program` or in the host.
-    #[inline(always)]
-    fn execute_dyn_node(
-        &mut self,
-        node: &DynNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        let err_ctx = err_ctx!(program, node, host, self.decoder.in_debug_mode());
-
-        let callee_hash = if node.is_dyncall() {
-            self.start_dyncall_node(node, &err_ctx)?
-        } else {
-            self.start_dyn_node(node, program, host, &err_ctx)?
-        };
-
-        // if the callee is not in the program's MAST forest, try to find a MAST forest for it in
-        // the host (corresponding to an external library loaded in the host); if none are
-        // found, return an error.
-        match program.find_procedure_root(callee_hash) {
-            Some(callee_id) => self.execute_mast_node(callee_id, program, host)?,
-            None => {
-                let mast_forest = host
-                    .get_mast_forest(&callee_hash)
-                    .ok_or_else(|| ExecutionError::dynamic_node_not_found(callee_hash, &err_ctx))?;
-
-                // We limit the parts of the program that can be called externally to procedure
-                // roots, even though MAST doesn't have that restriction.
-                let root_id = mast_forest
-                    .find_procedure_root(callee_hash)
-                    .ok_or(ExecutionError::malfored_mast_forest_in_host(callee_hash, &()))?;
-
-                // Merge the advice map of this forest into the advice provider.
-                // Note that the map may be merged multiple times if a different procedure from the
-                // same forest is called.
-                // For now, only compiled libraries contain non-empty advice maps, so for most
-                // cases, this call will be cheap.
-                self.advice
-                    .extend_map(mast_forest.advice_map())
-                    .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
-
-                self.execute_mast_node(root_id, &mast_forest, host)?
-            },
-        }
-
-        if node.is_dyncall() {
-            self.end_dyncall_node(node, program, host, &err_ctx)
-        } else {
-            self.end_dyn_node(node, program, host)
-        }
-    }
-
-    /// Executes the specified [BasicBlockNode].
-    ///
-    /// # Arguments
-    /// * `node_id` - The ID of this basic block node in the `program` MAST forest. This should
-    ///   match the ID in `basic_block.decorators` when it's `Linked`.
-    #[inline(always)]
-    fn execute_basic_block_node(
-        &mut self,
-        node_id: MastNodeId,
-        basic_block: &BasicBlockNode,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        self.start_basic_block_node(basic_block, program, host)?;
-
-        let mut op_offset = 0;
-
-        // execute the first operation batch
-        self.execute_op_batch(basic_block, &basic_block.op_batches()[0], op_offset, program, host)?;
-        op_offset += basic_block.op_batches()[0].ops().len();
-
-        // if the span contains more operation batches, execute them. each additional batch is
-        // preceded by a RESPAN operation; executing RESPAN operation does not change the state
-        // of the stack
-        for op_batch in basic_block.op_batches().iter().skip(1) {
-            self.respan(op_batch);
-            self.execute_op(Operation::Noop, program, host)?;
-            self.execute_op_batch(basic_block, op_batch, op_offset, program, host)?;
-            op_offset += op_batch.ops().len();
-        }
-
-        self.end_basic_block_node(basic_block, program, host)?;
-
-        // Execute any decorators which have not been executed during span ops execution; this
-        // can happen for decorators appearing after all operations in a block. These decorators
-        // are executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond
-        // the last clock cycle of the BASIC BLOCK ops.
-        if self.decoder.in_debug_mode() {
-            let num_ops = basic_block.num_operations() as usize;
-            self.record_decorator_retrieval();
-            for decorator in program.decorators_for_op(node_id, num_ops) {
-                self.execute_decorator(decorator, host)?;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Executes all operations in an [OpBatch]. This also ensures that all alignment rules are
-    /// satisfied by executing NOOPs as needed. Specifically:
-    /// - If an operation group ends with an operation carrying an immediate value, a NOOP is
-    ///   executed after it.
-    /// - If the number of groups in a batch is not a power of 2, NOOPs are executed (one per group)
-    ///   to bring it up to the next power of two (e.g., 3 -> 4, 5 -> 8).
-    #[inline(always)]
-    fn execute_op_batch(
-        &mut self,
-        basic_block: &BasicBlockNode,
-        batch: &OpBatch,
-        op_offset: usize,
-        program: &MastForest,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        let end_indices = batch.end_indices();
-        let mut op_idx = 0;
-        let mut group_idx = 0;
-        let mut next_group_idx = 1;
-
-        // round up the number of groups to be processed to the next power of two; we do this
-        // because the processor requires the number of groups to be either 1, 2, 4, or 8; if
-        // the actual number of groups is smaller, we'll pad the batch with NOOPs at the end
-        let num_batch_groups = batch.num_groups().next_power_of_two();
-
-        // Get the node ID once since it doesn't change within the loop
-        let node_id = basic_block
-            .linked_id()
-            .expect("basic block node should be linked when executing operations");
-
-        // execute operations in the batch one by one
-        for (i, &op) in batch.ops().iter().enumerate() {
-            if self.decoder.in_debug_mode() {
-                let current_op_idx = i + op_offset;
-                self.record_decorator_retrieval();
-                for decorator in program.decorators_for_op(node_id, current_op_idx) {
-                    self.execute_decorator(decorator, host)?;
-                }
-            }
-
-            // decode and execute the operation
-            let err_ctx =
-                err_ctx!(program, basic_block, host, self.decoder.in_debug_mode(), i + op_offset);
-            self.decoder.execute_user_op(op, op_idx);
-            self.execute_op_with_error_ctx(op, program, host, &err_ctx)?;
-
-            // if the operation carries an immediate value, the value is stored at the next group
-            // pointer; so, we advance the pointer to the following group
-            let has_imm = op.imm_value().is_some();
-            if has_imm {
-                next_group_idx += 1;
-            }
-
-            // determine if we've executed all non-decorator operations in a group
-            if i + 1 == end_indices[group_idx] {
-                // move to the next group and reset operation index
-                group_idx = next_group_idx;
-                next_group_idx += 1;
-                op_idx = 0;
-
-                // if we haven't reached the end of the batch yet, set up the decoder for
-                // decoding the next operation group
-                if group_idx < num_batch_groups {
-                    self.decoder.start_op_group(batch.groups()[group_idx]);
-                }
-            } else {
-                // if we are not at the end of the group, just increment the operation index
-                op_idx += 1;
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Executes the specified decorator
-    fn execute_decorator(
-        &mut self,
-        decorator: &Decorator,
-        host: &mut impl SyncHost,
-    ) -> Result<(), ExecutionError> {
-        match decorator {
-            Decorator::Debug(options) => {
-                if self.decoder.in_debug_mode() {
-                    let process = &mut self.state();
-                    let clk = process.clk();
-                    host.on_debug(process, options)
-                        .map_err(|err| ExecutionError::DebugHandlerError { clk, err })?;
-                }
-            },
-            Decorator::AsmOp(assembly_op) => {
-                if self.decoder.in_debug_mode() {
-                    self.decoder.append_asmop(self.system.clk(), assembly_op.clone());
-                }
-            },
-            Decorator::Trace(id) => {
-                if self.enable_tracing {
-                    let process = &mut self.state();
-                    let clk = process.clk();
-                    host.on_trace(process, *id).map_err(|err| {
-                        ExecutionError::TraceHandlerError { clk, trace_id: *id, err }
-                    })?;
-                }
-            },
-        };
-        Ok(())
-    }
-
-    /// Resolves an external node reference to a procedure root using the [`MastForest`] store in
-    /// the provided host.
-    ///
-    /// The [`MastForest`] for the procedure is cached to avoid additional queries to the host.
-    fn resolve_external_node(
-        &mut self,
-        external_node: &ExternalNode,
-        host: &impl SyncHost,
-    ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let node_digest = external_node.digest();
-
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
-            .ok_or(ExecutionError::no_mast_forest_with_procedure(node_digest, &()))?;
-
-        // We limit the parts of the program that can be called externally to procedure
-        // roots, even though MAST doesn't have that restriction.
-        let root_id = mast_forest
-            .find_procedure_root(node_digest)
-            .ok_or(ExecutionError::malfored_mast_forest_in_host(node_digest, &()))?;
-
-        // if the node that we got by looking up an external reference is also an External
-        // node, we are about to enter into an infinite loop - so, return an error
-        if mast_forest[root_id].is_external() {
-            return Err(ExecutionError::CircularExternalNode(node_digest));
-        }
-
-        // Merge the advice map of this forest into the advice provider.
-        // Note that the map may be merged multiple times if a different procedure from the same
-        // forest is called.
-        // For now, only compiled libraries contain non-empty advice maps, so for most cases,
-        // this call will be cheap.
-        self.advice
-            .extend_map(mast_forest.advice_map())
-            .map_err(|err| ExecutionError::advice_error(err, self.system.clk(), &()))?;
-
-        Ok((root_id, mast_forest))
-    }
-
-    // PUBLIC ACCESSORS
-    // ================================================================================================
-
-    pub const fn kernel(&self) -> &Kernel {
-        self.chiplets.kernel_rom.kernel()
-    }
-
-    pub fn into_parts(
-        self,
-    ) -> (System, Decoder, Stack, RangeChecker, Chiplets, PrecompileTranscriptState) {
-        (
-            self.system,
-            self.decoder,
-            self.stack,
-            self.range,
-            self.chiplets,
-            self.pc_transcript_state,
-        )
-    }
-}
-
-#[derive(Debug)]
-pub struct SlowProcessState<'a> {
-    advice: &'a mut AdviceProvider,
-    system: &'a System,
-    stack: &'a Stack,
-    chiplets: &'a Chiplets,
-}
-
-// PROCESS STATE
-// ================================================================================================
-
-#[derive(Debug)]
-pub enum ProcessState<'a> {
-    Slow(SlowProcessState<'a>),
-    Fast(FastProcessState<'a>),
-    /// A process state that does nothing. Calling any of its methods results in a panic. It is
-    /// expected to be used in conjunction with the `NoopHost`.
-    Noop(()),
-}
-
-impl Process {
-    #[inline(always)]
-    pub fn state(&mut self) -> ProcessState<'_> {
-        ProcessState::Slow(SlowProcessState {
-            advice: &mut self.advice,
-            system: &self.system,
-            stack: &self.stack,
-            chiplets: &self.chiplets,
-        })
-    }
-}
-
-impl<'a> ProcessState<'a> {
-    /// Returns a reference to the advice provider.
-    #[inline(always)]
-    pub fn advice_provider(&self) -> &AdviceProvider {
-        match self {
-            ProcessState::Slow(state) => state.advice,
-            ProcessState::Fast(state) => &state.processor.advice,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns a mutable reference to the advice provider.
-    #[inline(always)]
-    pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        match self {
-            ProcessState::Slow(state) => state.advice,
-            ProcessState::Fast(state) => &mut state.processor.advice,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the current clock cycle of a process.
-    #[inline(always)]
-    pub fn clk(&self) -> RowIndex {
-        match self {
-            ProcessState::Slow(state) => state.system.clk(),
-            ProcessState::Fast(state) => state.processor.clk,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the current execution context ID.
-    #[inline(always)]
-    pub fn ctx(&self) -> ContextId {
-        match self {
-            ProcessState::Slow(state) => state.system.ctx(),
-            ProcessState::Fast(state) => state.processor.ctx,
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the value located at the specified position on the stack at the current clock cycle.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    #[inline(always)]
-    pub fn get_stack_item(&self, pos: usize) -> Felt {
-        match self {
-            ProcessState::Slow(state) => state.stack.get(pos),
-            ProcessState::Fast(state) => state.processor.stack_get(pos),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns a word starting at the specified element index on the stack in big-endian
-    /// (reversed) order.
-    ///
-    /// The word is formed by taking 4 consecutive elements starting from the specified index.
-    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
-    /// a word from elements 1-4, etc.
-    ///
-    /// In big-endian order, stack element N+3 will be at position 0 of the word, N+2 at
-    /// position 1, N+1 at position 2, and N at position 3. This matches the behavior of
-    /// `mem_loadw_be` where `mem[a+3]` ends up on top of the stack.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    /// Creating a word does not change the state of the stack.
-    #[inline(always)]
-    pub fn get_stack_word_be(&self, start_idx: usize) -> Word {
-        match self {
-            ProcessState::Slow(state) => state.stack.get_word(start_idx),
-            ProcessState::Fast(state) => state.processor.stack_get_word(start_idx),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns a word starting at the specified element index on the stack in little-endian
-    /// (memory) order.
-    ///
-    /// The word is formed by taking 4 consecutive elements starting from the specified index.
-    /// For example, start_idx=0 creates a word from stack elements 0-3, start_idx=1 creates
-    /// a word from elements 1-4, etc.
-    ///
-    /// In little-endian order, stack element N will be at position 0 of the word, N+1 at
-    /// position 1, N+2 at position 2, and N+3 at position 3. This matches the behavior of
-    /// `mem_loadw_le` where `mem[a]` ends up on top of the stack.
-    ///
-    /// This method can access elements beyond the top 16 positions by using the overflow table.
-    /// Creating a word does not change the state of the stack.
-    #[inline(always)]
-    pub fn get_stack_word_le(&self, start_idx: usize) -> Word {
-        let mut word = self.get_stack_word_be(start_idx);
-        word.reverse();
-        word
-    }
-
-    /// Returns a word starting at the specified element index on the stack.
-    ///
-    /// This is an alias for [`Self::get_stack_word_be`] for backward compatibility. For new code,
-    /// prefer using the explicit `get_stack_word_be()` or `get_stack_word_le()` to make the
-    /// ordering expectations clear.
-    ///
-    /// See [`Self::get_stack_word_be`] for detailed documentation.
-    #[deprecated(
-        since = "0.19.0",
-        note = "Use `get_stack_word_be()` or `get_stack_word_le()` to make endianness explicit"
-    )]
-    #[inline(always)]
-    pub fn get_stack_word(&self, start_idx: usize) -> Word {
-        self.get_stack_word_be(start_idx)
-    }
-
-    /// Returns stack state at the current clock cycle. This includes the top 16 items of the
-    /// stack + overflow entries.
-    #[inline(always)]
-    pub fn get_stack_state(&self) -> Vec<Felt> {
-        match self {
-            ProcessState::Slow(state) => state.stack.get_state_at(state.system.clk()),
-            ProcessState::Fast(state) => state.processor.stack().iter().rev().copied().collect(),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the element located at the specified context/address, or None if the address hasn't
-    /// been accessed previously.
-    #[inline(always)]
-    pub fn get_mem_value(&self, ctx: ContextId, addr: u32) -> Option<Felt> {
-        match self {
-            ProcessState::Slow(state) => state.chiplets.memory.get_value(ctx, addr),
-            ProcessState::Fast(state) => state.processor.memory.read_element_impl(ctx, addr),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Returns the batch of elements starting at the specified context/address.
-    ///
-    /// # Errors
-    /// - If the address is not word aligned.
-    #[inline(always)]
-    pub fn get_mem_word(&self, ctx: ContextId, addr: u32) -> Result<Option<Word>, MemoryError> {
-        match self {
-            ProcessState::Slow(state) => state.chiplets.memory.get_word(ctx, addr),
-            ProcessState::Fast(state) => {
-                state.processor.memory.read_word_impl(ctx, addr, None, &())
-            },
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-
-    /// Reads (start_addr, end_addr) tuple from the specified elements of the operand stack (
-    /// without modifying the state of the stack), and verifies that memory range is valid.
-    pub fn get_mem_addr_range(
-        &self,
-        start_idx: usize,
-        end_idx: usize,
-    ) -> Result<core::ops::Range<u32>, MemoryError> {
-        let start_addr = self.get_stack_item(start_idx).as_int();
-        let end_addr = self.get_stack_item(end_idx).as_int();
-
-        if start_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(start_addr, &()));
-        }
-        if end_addr > u32::MAX as u64 {
-            return Err(MemoryError::address_out_of_bounds(end_addr, &()));
-        }
-
-        if start_addr > end_addr {
-            return Err(MemoryError::InvalidMemoryRange { start_addr, end_addr });
-        }
-
-        Ok(start_addr as u32..end_addr as u32)
-    }
-
-    /// Returns the entire memory state for the specified execution context at the current clock
-    /// cycle.
-    ///
-    /// The state is returned as a vector of (address, value) tuples, and includes addresses which
-    /// have been accessed at least once.
-    #[inline(always)]
-    pub fn get_mem_state(&self, ctx: ContextId) -> Vec<(MemoryAddress, Felt)> {
-        match self {
-            ProcessState::Slow(state) => {
-                state.chiplets.memory.get_state_at(ctx, state.system.clk())
-            },
-            ProcessState::Fast(state) => state.processor.memory.get_memory_state(ctx),
-            ProcessState::Noop(()) => panic!("attempted to access Noop process state"),
-        }
-    }
-}
-
-impl<'a> From<&'a mut Process> for ProcessState<'a> {
-    fn from(process: &'a mut Process) -> Self {
-        process.state()
-    }
-}
-
-// HELPERS
-// ================================================================================================
-
-/// For errors generated from processing an `ExternalNode`, returns the same error except with
-/// proper error context.
-pub(crate) fn add_error_ctx_to_external_error(
-    result: Result<(), ExecutionError>,
-    err_ctx: impl ErrorContext,
-) -> Result<(), ExecutionError> {
-    match result {
-        Ok(_) => Ok(()),
-        // Add context information to any errors coming from executing an `ExternalNode`
-        Err(err) => match err {
-            ExecutionError::NoMastForestWithProcedure { label, source_file: _, root_digest }
-            | ExecutionError::MalformedMastForestInHost { label, source_file: _, root_digest } => {
-                if label == SourceSpan::UNKNOWN {
-                    let err_with_ctx =
-                        ExecutionError::no_mast_forest_with_procedure(root_digest, &err_ctx);
-                    Err(err_with_ctx)
-                } else {
-                    // If the source span was already populated, just return the error as-is. This
-                    // would occur when a call deeper down the call stack was responsible for the
-                    // error.
-                    Err(err)
-                }
-            },
-
-            _ => {
-                // do nothing
-                Err(err)
-            },
-        },
     }
 }

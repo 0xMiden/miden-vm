@@ -16,7 +16,7 @@ pub use miden_assembly_syntax::{
 };
 #[cfg(feature = "testing")]
 use miden_assembly_syntax::{ast::Form, debuginfo::SourceFile};
-use miden_core::Program;
+use miden_core::program::Program;
 
 use crate::assembler::Assembler;
 #[cfg(feature = "std")]

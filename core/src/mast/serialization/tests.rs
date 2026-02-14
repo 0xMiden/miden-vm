@@ -1,17 +1,17 @@
-use alloc::string::ToString;
-
-use miden_crypto::{Felt, ONE, Word};
-use miden_utils_indexing::Idx;
+use std::string::ToString;
 
 use super::*;
 use crate::{
-    AssemblyOp, DebugOptions, Decorator,
+    Felt, ONE, Word,
+    field::PrimeCharacteristicRing,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DynNodeBuilder, ExternalNodeBuilder,
         JoinNodeBuilder, LoopNodeBuilder, MastForestContributor, MastForestError, MastNodeExt,
-        SplitNodeBuilder, node::MastNodeErrorContext,
+        SplitNodeBuilder, UntrustedMastForest,
     },
-    operations::Operation,
+    operations::{DebugOptions, Decorator, Operation},
+    serde::SliceReader,
+    utils::Idx,
 };
 
 /// If this test fails to compile, it means that `Operation` or `Decorator` was changed. Make sure
@@ -116,8 +116,8 @@ fn confirm_operation_and_decorator_structure() {
         Operation::LogPrecompile => (),
     };
 
+    // Decorator variants - exhaustiveness check to ensure serialization coverage.
     match Decorator::Trace(0) {
-        Decorator::AsmOp(_) => (),
         Decorator::Debug(debug_options) => match debug_options {
             DebugOptions::StackAll => (),
             DebugOptions::StackTop(_) => (),
@@ -137,7 +137,7 @@ fn serialize_deserialize_all_nodes() {
     let basic_block_id = {
         let operations = vec![
             Operation::Noop,
-            Operation::Assert(Felt::from(42u32)),
+            Operation::Assert(Felt::from_u32(42)),
             Operation::SDepth,
             Operation::Caller,
             Operation::Clk,
@@ -166,7 +166,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::Ext2Mul,
             Operation::U32split,
             Operation::U32add,
-            Operation::U32assert2(Felt::from(222u32)),
+            Operation::U32assert2(Felt::from_u32(222)),
             Operation::U32add3,
             Operation::U32sub,
             Operation::U32mul,
@@ -219,7 +219,7 @@ fn serialize_deserialize_all_nodes() {
             Operation::MStream,
             Operation::Pipe,
             Operation::HPerm,
-            Operation::MpVerify(Felt::from(1022u32)),
+            Operation::MpVerify(Felt::from_u32(1022)),
             Operation::MrUpdate,
             Operation::FriE2F4,
             Operation::HornerBase,
@@ -229,21 +229,9 @@ fn serialize_deserialize_all_nodes() {
 
         let num_operations = operations.len();
 
+        // Note: AssemblyOps are now stored separately in DebugInfo's asm_op storage,
+        // not as decorators. See the asm_op module tests for AssemblyOp serialization.
         let decorators = vec![
-            (
-                0,
-                Decorator::AsmOp(AssemblyOp::new(
-                    Some(miden_debug_types::Location {
-                        uri: "test".into(),
-                        start: 42.into(),
-                        end: 43.into(),
-                    }),
-                    "context".to_string(),
-                    15,
-                    "op".to_string(),
-                    false,
-                )),
-            ),
             (0, Decorator::Debug(DebugOptions::StackAll)),
             (15, Decorator::Debug(DebugOptions::StackTop(255))),
             (15, Decorator::Debug(DebugOptions::MemAll)),
@@ -550,12 +538,1102 @@ fn mast_forest_basic_block_serialization_no_decorator_duplication() {
         "after_exit decorator should not be duplicated in indexed decorators"
     );
 
-    // Verify that all decorators() method returns all decorators (this is the full iterator)
-    let all_decorators: Vec<_> = deserialized_block.decorators(&forest).collect();
-    assert_eq!(all_decorators.len(), 3, "decorators() should return all 3 decorators");
+    // Note: The decorators() method test was removed as MastNodeErrorContext trait has been removed
+    // The decorator functionality is now accessed through MastForest.get_assembly_op() directly
+}
 
-    // Verify the order: before_enter, op-indexed, after_exit
-    assert_eq!(all_decorators[0].1, before_enter_deco, "First decorator should be before_enter");
-    assert_eq!(all_decorators[1].1, op_deco, "Second decorator should be op-indexed");
-    assert_eq!(all_decorators[2].1, after_exit_deco, "Third decorator should be after_exit");
+/// Tests that deserialization rejects ops_offset values beyond the basic_block_data buffer.
+#[test]
+fn mast_forest_deserialize_invalid_ops_offset_fails() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let serialized = forest.to_bytes();
+    let mut reader = SliceReader::new(&serialized);
+
+    let _: [u8; 8] = reader.read_array().unwrap(); // magic (4) + flags (1) + version (3)
+    let _node_count: usize = reader.read().unwrap();
+    let _decorator_count: usize = reader.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+
+    // Calculate offset to MastNodeInfo:
+    // magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
+    // roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data
+    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+
+    // Corrupt the ops_offset field with an out-of-bounds value
+    let block_discriminant: u64 = 3;
+    let corrupted_value = (block_discriminant << 60) | u32::MAX as u64;
+
+    let mut corrupted = serialized;
+    corrupted_value.write_into(&mut &mut corrupted[node_info_offset..node_info_offset + 8]);
+
+    let result = MastForest::read_from_bytes(&corrupted);
+    assert_matches!(result, Err(DeserializationError::InvalidValue(_)));
+}
+
+#[test]
+fn mast_forest_serialize_deserialize_procedure_names() {
+    let mut forest = MastForest::new();
+
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add, Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_procedure".into());
+
+    assert_eq!(forest.procedure_name(&digest), Some("test_procedure"));
+    assert_eq!(forest.debug_info.num_procedure_names(), 1);
+
+    let serialized = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+
+    assert_eq!(deserialized.procedure_name(&digest), Some("test_procedure"));
+    assert_eq!(deserialized.debug_info.num_procedure_names(), 1);
+    assert_eq!(forest, deserialized);
+}
+
+#[test]
+fn mast_forest_serialize_deserialize_multiple_procedure_names() {
+    let mut forest = MastForest::new();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block3_id = BasicBlockNodeBuilder::new(vec![Operation::U32sub], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    forest.make_root(block1_id);
+    forest.make_root(block2_id);
+    forest.make_root(block3_id);
+
+    let digest1 = forest[block1_id].digest();
+    let digest2 = forest[block2_id].digest();
+    let digest3 = forest[block3_id].digest();
+
+    forest.insert_procedure_name(digest1, "proc_add".into());
+    forest.insert_procedure_name(digest2, "proc_mul".into());
+    forest.insert_procedure_name(digest3, "proc_sub".into());
+
+    assert_eq!(forest.debug_info.num_procedure_names(), 3);
+
+    let serialized = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+
+    assert_eq!(deserialized.procedure_name(&digest1), Some("proc_add"));
+    assert_eq!(deserialized.procedure_name(&digest2), Some("proc_mul"));
+    assert_eq!(deserialized.procedure_name(&digest3), Some("proc_sub"));
+    assert_eq!(deserialized.debug_info.num_procedure_names(), 3);
+
+    assert_eq!(forest, deserialized);
+}
+
+// OPBATCH PRESERVATION TESTS
+// ================================================================================================
+
+/// Tests that OpBatch structure is preserved during round-trip serialization
+#[test]
+fn test_opbatch_roundtrip_preservation() {
+    let mut forest = MastForest::new();
+
+    let operations = vec![
+        Operation::Add,
+        Operation::Push(Felt::new(100)),
+        Operation::Push(Felt::new(200)),
+        Operation::Mul,
+    ];
+
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let original = forest[block_id].unwrap_basic_block();
+    let deserialized_forest = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
+    let deserialized = deserialized_forest[block_id].unwrap_basic_block();
+
+    assert_eq!(original.op_batches(), deserialized.op_batches());
+}
+
+/// Tests OpBatch preservation with multiple batches (>72 operations)
+#[test]
+fn test_multi_batch_roundtrip() {
+    let mut forest = MastForest::new();
+    let operations: Vec<_> = (0..80).map(|i| Operation::Push(Felt::new(i))).collect();
+
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    let original = forest[block_id].unwrap_basic_block();
+    assert!(original.op_batches().len() > 1, "Should have multiple batches");
+
+    let deserialized_forest = MastForest::read_from_bytes(&forest.to_bytes()).unwrap();
+    let deserialized = deserialized_forest[block_id].unwrap_basic_block();
+
+    assert_eq!(original.op_batches(), deserialized.op_batches());
+}
+
+/// Tests that decorator indices remain correct after round-trip with padded operations.
+#[test]
+fn test_decorator_indices_preserved_with_padding() {
+    let mut forest = MastForest::new();
+
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+    let operations = vec![
+        Operation::Add,
+        Operation::Mul,
+        Operation::Push(Felt::new(100)), // Will cause padding
+        Operation::Drop,
+    ];
+
+    // Add decorator at operation index 2 (the PUSH)
+    let decorators = vec![(2, decorator_id)];
+
+    let block_id = BasicBlockNodeBuilder::new(operations.clone(), decorators)
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Serialize and deserialize
+    let serialized = forest.to_bytes();
+    let deserialized_forest = MastForest::read_from_bytes(&serialized).unwrap();
+
+    // Verify decorator still points to correct operation
+    let original_node = forest[block_id].unwrap_basic_block();
+    let deserialized_node = deserialized_forest[block_id].unwrap_basic_block();
+
+    let original_decorators: Vec<_> = original_node.indexed_decorator_iter(&forest).collect();
+    let deserialized_decorators: Vec<_> =
+        deserialized_node.indexed_decorator_iter(&deserialized_forest).collect();
+
+    assert_eq!(
+        original_decorators, deserialized_decorators,
+        "Decorator indices should be preserved"
+    );
+
+    // Verify the decorator points to the PUSH operation
+    assert_eq!(deserialized_decorators.len(), 1, "Should have one decorator");
+    let (padded_idx, _) = deserialized_decorators[0];
+
+    // Get the operation at the decorator's index
+    let op_at_decorator = deserialized_node.operations().nth(padded_idx).unwrap();
+    assert!(
+        matches!(op_at_decorator, Operation::Push(_)),
+        "Decorator should point to PUSH operation"
+    );
+}
+
+// RAW VS BATCHED CONSTRUCTION EQUIVALENCE TESTS
+// ================================================================================================
+
+/// Tests that Raw and Batched construction paths produce semantically equivalent nodes.
+///
+/// This test verifies that a node constructed from raw operations and then deserialized
+/// (which uses the Batched path) produces the same semantic result.
+#[test]
+fn test_raw_vs_batched_construction_equivalence() {
+    let mut forest1 = MastForest::new();
+    let mut forest2 = MastForest::new();
+
+    let decorator_id1 = forest1.add_decorator(Decorator::Trace(1)).unwrap();
+    let _decorator_id2 = forest2.add_decorator(Decorator::Trace(1)).unwrap();
+
+    let operations =
+        vec![Operation::Add, Operation::Mul, Operation::Push(Felt::new(100)), Operation::Drop];
+
+    // Path 1: Raw construction
+    let block_id1 = BasicBlockNodeBuilder::new(operations.clone(), vec![(2, decorator_id1)])
+        .add_to_forest(&mut forest1)
+        .unwrap();
+
+    // Path 2: Serialize and deserialize (uses Batched construction)
+    let serialized = forest1.to_bytes();
+    let _deserialized_forest = MastForest::read_from_bytes(&serialized).unwrap();
+
+    // Manually construct using Batched path to test directly
+    let original_node = forest1[block_id1].unwrap_basic_block();
+    let op_batches = original_node.op_batches().to_vec();
+    let digest = original_node.digest();
+    let decorators: Vec<_> = original_node.indexed_decorator_iter(&forest1).collect();
+
+    let block_id2 = BasicBlockNodeBuilder::from_op_batches(op_batches, decorators, digest)
+        .add_to_forest(&mut forest2)
+        .unwrap();
+
+    // Verify nodes are semantically equivalent
+    let node1 = forest1[block_id1].unwrap_basic_block();
+    let node2 = forest2[block_id2].unwrap_basic_block();
+
+    // Check operations match
+    let ops1: Vec<_> = node1.operations().collect();
+    let ops2: Vec<_> = node2.operations().collect();
+    assert_eq!(ops1, ops2, "Operations should match");
+
+    // Check OpBatch structure matches
+    assert_eq!(node1.op_batches(), node2.op_batches(), "OpBatch structures should match");
+
+    // Check digest matches
+    assert_eq!(node1.digest(), node2.digest(), "Digests should match");
+
+    // Check decorators match
+    let decorators1: Vec<_> = node1.indexed_decorator_iter(&forest1).collect();
+    let decorators2: Vec<_> = node2.indexed_decorator_iter(&forest2).collect();
+    assert_eq!(decorators1, decorators2, "Decorators should match");
+}
+
+/// Tests that Raw and Batched construction produce the same digest.
+#[test]
+fn test_raw_batched_digest_equivalence() {
+    let operations = vec![
+        Operation::Add,
+        Operation::Mul,
+        Operation::Push(Felt::new(42)),
+        Operation::Drop,
+        Operation::Dup0,
+    ];
+
+    // Construct via Raw path
+    let mut forest1 = MastForest::new();
+    let block_id1 = BasicBlockNodeBuilder::new(operations.clone(), Vec::new())
+        .add_to_forest(&mut forest1)
+        .unwrap();
+    let digest1 = forest1[block_id1].unwrap_basic_block().digest();
+
+    // Construct via Batched path (via serialization round-trip)
+    let serialized = forest1.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&serialized).unwrap();
+    let digest2 = deserialized[block_id1].unwrap_basic_block().digest();
+
+    assert_eq!(digest1, digest2, "Digests from Raw and Batched paths should match");
+}
+
+/// Tests that Batched construction preserves the exact OpBatch structure.
+///
+/// This verifies that the Batched path doesn't inadvertently re-batch operations.
+#[test]
+fn test_batched_construction_preserves_structure() {
+    let mut forest = MastForest::new();
+
+    let operations = vec![
+        Operation::Add,
+        Operation::Mul,
+        Operation::Push(Felt::new(100)),
+        Operation::Push(Felt::new(200)),
+    ];
+
+    let block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Get the OpBatches from the original node
+    let original_node = forest[block_id].unwrap_basic_block();
+    let original_batches = original_node.op_batches().to_vec();
+    let original_digest = original_node.digest();
+
+    // Construct a new node using the Batched path
+    let mut forest2 = MastForest::new();
+    let block_id2 = BasicBlockNodeBuilder::from_op_batches(
+        original_batches.clone(),
+        Vec::new(),
+        original_digest,
+    )
+    .add_to_forest(&mut forest2)
+    .unwrap();
+
+    // Verify the OpBatch structure is exactly preserved
+    let new_node = forest2[block_id2].unwrap_basic_block();
+    assert_eq!(
+        original_batches,
+        new_node.op_batches(),
+        "OpBatch structure should be exactly preserved"
+    );
+}
+
+// PROPTEST-BASED ROUND-TRIP SERIALIZATION TESTS
+// ================================================================================================
+
+/// Test that the new header format uses flags=0x00 for full serialization.
+#[test]
+fn test_header_backward_compatible() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    // Check header structure: MAST (4 bytes) + flags (1 byte) + version (3 bytes)
+    assert_eq!(&bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(bytes[4], 0x00, "Flags should be 0x00 for full serialization");
+    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
+    assert_eq!(&bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+}
+
+/// Test that stripped serialization produces smaller output than full serialization.
+#[test]
+fn test_stripped_serialization_smaller_than_full() {
+    let mut forest = MastForest::new();
+
+    // Add decorators
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Add procedure name for more debug info
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_proc".into());
+
+    let full_bytes = forest.to_bytes();
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    assert!(
+        stripped_bytes.len() < full_bytes.len(),
+        "Stripped ({} bytes) should be smaller than full ({} bytes)",
+        stripped_bytes.len(),
+        full_bytes.len()
+    );
+}
+
+/// Test that stripped serialization round-trips correctly with empty DebugInfo.
+#[test]
+fn test_stripped_serialization_roundtrip() {
+    let mut forest = MastForest::new();
+
+    // Add decorators
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+
+    let operations = vec![Operation::Add, Operation::Mul, Operation::Drop];
+    let block_id = BasicBlockNodeBuilder::new(operations, vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Add procedure name and error code
+    let digest = forest[block_id].digest();
+    forest.insert_procedure_name(digest, "test_proc".into());
+    let _ = forest.register_error("test error".into());
+
+    // Serialize stripped
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Deserialize
+    let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+
+    // Verify structure is preserved
+    assert_eq!(forest.num_nodes(), restored.num_nodes());
+    assert_eq!(forest.procedure_roots().len(), restored.procedure_roots().len());
+
+    // Verify debug info is empty
+    assert!(
+        restored.debug_info.is_empty(),
+        "DebugInfo should be empty after stripped roundtrip"
+    );
+    assert_eq!(restored.decorators().len(), 0);
+    assert_eq!(restored.procedure_name(&digest), None);
+}
+
+/// Test that stripped serialization sets the correct header flags.
+#[test]
+fn test_stripped_header_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Check header structure
+    assert_eq!(&stripped_bytes[0..4], b"MAST", "Magic should be MAST");
+    assert_eq!(stripped_bytes[4], 0x01, "Flags should be 0x01 for stripped serialization");
+    // Version [0, 0, 2] includes: AssemblyOp removed from Decorator enum serialization
+    assert_eq!(&stripped_bytes[5..8], &[0, 0, 2], "Version should be [0, 0, 2]");
+}
+
+/// Test that node digests are preserved in stripped serialization.
+#[test]
+fn test_stripped_preserves_digests() {
+    let mut forest = MastForest::new();
+
+    let decorator_id = forest.add_decorator(Decorator::Trace(1)).unwrap();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join_id);
+
+    // Capture original digests
+    let original_digests: Vec<_> = forest.nodes().iter().map(|n| n.digest()).collect();
+
+    // Stripped roundtrip
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+    let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+
+    // Verify digests match
+    let restored_digests: Vec<_> = restored.nodes().iter().map(|n| n.digest()).collect();
+    assert_eq!(original_digests, restored_digests, "Node digests should be preserved");
+}
+
+/// Test that deserialization rejects unknown flags.
+#[test]
+fn test_deserialize_rejects_unknown_flags() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let mut bytes = forest.to_bytes();
+
+    // Set an unknown flag (bit 1)
+    bytes[4] = 0x02;
+
+    let result = MastForest::read_from_bytes(&bytes);
+    assert_matches!(
+        result,
+        Err(DeserializationError::InvalidValue(msg)) if msg.contains("reserved") || msg.contains("flags")
+    );
+}
+
+mod proptests {
+    use proptest::{prelude::*, strategy::Just};
+
+    use super::*;
+    use crate::{
+        mast::{BasicBlockNodeBuilder, MastForest, MastNode, arbitrary::MastForestParams},
+        operations::Decorator,
+    };
+
+    proptest! {
+        /// Property test: any MastForest should round-trip through serialization
+        #[test]
+        fn proptest_mast_forest_roundtrip(
+            forest in any_with::<MastForest>(MastForestParams {
+                decorators: 5,
+                blocks: 1..=5,
+                max_joins: 3,
+                max_splits: 2,
+                max_loops: 2,
+                max_calls: 2,
+                max_syscalls: 0, // Avoid syscalls in roundtrip tests
+                max_externals: 1,
+                max_dyns: 1,
+            })
+        ) {
+            // Serialize
+            let serialized = forest.to_bytes();
+
+            // Deserialize
+            let deserialized = MastForest::read_from_bytes(&serialized)
+                .expect("Deserialization should succeed");
+
+            // Verify node count
+            prop_assert_eq!(
+                forest.num_nodes(),
+                deserialized.num_nodes(),
+                "Node count should match"
+            );
+
+            // Verify all nodes match
+            for (idx, original) in forest.nodes().iter().enumerate() {
+                let node_id = crate::mast::MastNodeId::new_unchecked(idx as u32);
+                let deserialized_node = &deserialized[node_id];
+
+                // Check digests match
+                prop_assert_eq!(
+                    original.digest(),
+                    deserialized_node.digest(),
+                    "Node {:?} digest mismatch", node_id
+                );
+
+                // For basic blocks, verify OpBatch structure and decorators are preserved
+                if let MastNode::Block(original_block) = original
+                    && let MastNode::Block(deserialized_block) = deserialized_node
+                {
+                    prop_assert_eq!(
+                        original_block.op_batches(),
+                        deserialized_block.op_batches(),
+                        "Node {:?}: OpBatch mismatch", node_id
+                    );
+
+                    let orig_decorators: Vec<_> =
+                        original_block.indexed_decorator_iter(&forest).collect();
+                    let deser_decorators: Vec<_> =
+                        deserialized_block.indexed_decorator_iter(&deserialized).collect();
+
+                    prop_assert_eq!(
+                        orig_decorators.len(),
+                        deser_decorators.len(),
+                        "Node {:?}: Decorator count mismatch", node_id
+                    );
+
+                    for ((orig_idx, orig_dec_id), (deser_idx, deser_dec_id)) in
+                        orig_decorators.iter().zip(&deser_decorators)
+                    {
+                        prop_assert_eq!(orig_idx, deser_idx, "Node {:?}: Decorator index mismatch", node_id);
+                        prop_assert_eq!(
+                            forest.decorator_by_id(*orig_dec_id),
+                            deserialized.decorator_by_id(*deser_dec_id),
+                            "Node {:?}: Decorator content mismatch", node_id
+                        );
+                    }
+                }
+
+            }
+        }
+
+        /// Property test: multi-batch basic blocks should preserve exact structure
+        #[test]
+        fn proptest_multi_batch_roundtrip(
+            ops in prop::collection::vec(
+                prop::sample::select(vec![
+                    Operation::Add,
+                    Operation::Mul,
+                    Operation::Push(crate::Felt::new(42)),
+                    Operation::Drop,
+                    Operation::Dup0,
+                    Operation::Swap,
+                ]),
+                73..=150  // Generate 73-150 operations for multi-batch testing
+            )
+        ) {
+            // Create a forest and add the block
+            let mut forest = MastForest::new();
+
+            let block_id = BasicBlockNodeBuilder::new(ops, Vec::new())
+                .add_to_forest(&mut forest)
+                .unwrap();
+
+            let original_block = forest[block_id].unwrap_basic_block();
+            let original_batches = original_block.op_batches();
+
+            // Verify we have multiple batches
+            prop_assume!(original_batches.len() > 1, "Need multiple batches for this test");
+
+            // Serialize and deserialize
+            let serialized = forest.to_bytes();
+            let deserialized_forest = MastForest::read_from_bytes(&serialized)
+                .expect("Deserialization should succeed");
+
+            let deserialized_block = deserialized_forest[block_id].unwrap_basic_block();
+            let deserialized_batches = deserialized_block.op_batches();
+
+            // Verify batch count
+            prop_assert_eq!(
+                original_batches.len(),
+                deserialized_batches.len(),
+                "Batch count should match"
+            );
+
+            // Verify every batch field matches exactly
+            for (i, (orig_batch, deser_batch)) in
+                original_batches.iter().zip(deserialized_batches).enumerate()
+            {
+                prop_assert_eq!(
+                    orig_batch.ops(),
+                    deser_batch.ops(),
+                    "Batch {}: Operations should match exactly", i
+                );
+                prop_assert_eq!(
+                    orig_batch.indptr(),
+                    deser_batch.indptr(),
+                    "Batch {}: Indptr arrays should match exactly", i
+                );
+                prop_assert_eq!(
+                    orig_batch.padding(),
+                    deser_batch.padding(),
+                    "Batch {}: Padding metadata should match exactly", i
+                );
+                prop_assert_eq!(
+                    orig_batch.groups(),
+                    deser_batch.groups(),
+                    "Batch {}: Groups arrays should match exactly", i
+                );
+                prop_assert_eq!(
+                    orig_batch.num_groups(),
+                    deser_batch.num_groups(),
+                    "Batch {}: num_groups should match exactly", i
+                );
+            }
+        }
+
+        /// Property test: basic blocks with decorators should preserve decorator indices
+        #[test]
+        fn proptest_decorator_indices_roundtrip(
+            (ops, decorator_indices) in (
+                prop::collection::vec(
+                    prop::sample::select(vec![
+                        Operation::Add,
+                        Operation::Mul,
+                        Operation::Push(Felt::new(99)),
+                        Operation::Drop,
+                        Operation::Dup0,
+                    ]),
+                    10..=50
+                )
+            ).prop_flat_map(|ops| {
+                let ops_len = ops.len();
+                (
+                    Just(ops),
+                    prop::collection::vec((0..ops_len, 0..5_u32), 1..=10)
+                )
+            })
+        ) {
+            // Create a forest and add decorators
+            let mut forest = MastForest::new();
+            let decorator_id1 = forest.add_decorator(Decorator::Trace(1)).unwrap();
+            let decorator_id2 = forest.add_decorator(Decorator::Trace(2)).unwrap();
+            let decorator_id3 = forest.add_decorator(Decorator::Trace(3)).unwrap();
+            let decorator_id4 = forest.add_decorator(Decorator::Trace(4)).unwrap();
+            let decorator_id5 = forest.add_decorator(Decorator::Trace(5)).unwrap();
+            let decorator_ids = [decorator_id1, decorator_id2, decorator_id3, decorator_id4, decorator_id5];
+
+            // Map indices to actual decorator IDs and sort by index
+            let mut decorators: Vec<(usize, _)> = decorator_indices
+                .into_iter()
+                .map(|(idx, dec_id_idx)| (idx, decorator_ids[dec_id_idx as usize]))
+                .collect();
+            decorators.sort_by_key(|(idx, _)| *idx);
+            decorators.dedup_by_key(|(idx, _)| *idx);  // Remove duplicates
+
+            let block_id = BasicBlockNodeBuilder::new(ops, decorators)
+                .add_to_forest(&mut forest)
+                .unwrap();
+
+            let original_block = forest[block_id].unwrap_basic_block();
+
+            // Serialize and deserialize
+            let serialized = forest.to_bytes();
+            let deserialized_forest = MastForest::read_from_bytes(&serialized)
+                .expect("Deserialization should succeed");
+
+            let deserialized_block = deserialized_forest[block_id].unwrap_basic_block();
+
+            // Verify decorator indices and content match
+            let orig_decorators: Vec<_> =
+                original_block.indexed_decorator_iter(&forest).collect();
+            let deser_decorators: Vec<_> =
+                deserialized_block.indexed_decorator_iter(&deserialized_forest).collect();
+
+            prop_assert_eq!(
+                orig_decorators.len(),
+                deser_decorators.len(),
+                "Decorator count should match"
+            );
+
+            for ((orig_idx, orig_dec_id), (deser_idx, deser_dec_id)) in
+                orig_decorators.iter().zip(&deser_decorators)
+            {
+                prop_assert_eq!(
+                    orig_idx,
+                    deser_idx,
+                    "Decorator indices should match (padded form)"
+                );
+
+                prop_assert_eq!(
+                    forest.decorator_by_id(*orig_dec_id),
+                    deserialized_forest.decorator_by_id(*deser_dec_id),
+                    "Decorator content should match"
+                );
+            }
+        }
+
+        /// Property test: stripped serialization should preserve node structure
+        #[test]
+        fn proptest_stripped_roundtrip(
+            forest in any_with::<MastForest>(MastForestParams {
+                decorators: 10,
+                blocks: 1..=5,
+                max_joins: 3,
+                max_splits: 2,
+                max_loops: 2,
+                max_calls: 2,
+                max_syscalls: 0,
+                max_externals: 1,
+                max_dyns: 1,
+            })
+        ) {
+            // Stripped serialization
+            let mut stripped_bytes = Vec::new();
+            forest.write_stripped(&mut stripped_bytes);
+
+            // Deserialize
+            let restored = MastForest::read_from_bytes(&stripped_bytes)
+                .expect("Stripped deserialization should succeed");
+
+            // Verify node count matches
+            prop_assert_eq!(
+                forest.num_nodes(),
+                restored.num_nodes(),
+                "Node count should match"
+            );
+
+            // Verify all node digests match
+            for (idx, original) in forest.nodes().iter().enumerate() {
+                let node_id = crate::mast::MastNodeId::new_unchecked(idx as u32);
+                let restored_node = &restored[node_id];
+
+                prop_assert_eq!(
+                    original.digest(),
+                    restored_node.digest(),
+                    "Node {:?} digest mismatch", node_id
+                );
+            }
+
+            // Verify debug info is empty
+            prop_assert!(
+                restored.debug_info.is_empty(),
+                "DebugInfo should be empty after stripped roundtrip"
+            );
+        }
+    }
+}
+
+// COMPREHENSIVE DEBUGINFO ROUND-TRIP TESTS
+// ================================================================================================
+
+/// Test DebugInfo serialization with empty decorators (no decorators at all)
+#[test]
+fn test_debuginfo_serialization_empty() {
+    // Create forest with no decorators
+    let mut forest = MastForest::new();
+
+    // Add a simple basic block with no decorators
+    let ops = vec![Operation::Noop; 4];
+    let block_id = BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+    forest.make_root(block_id);
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify
+    assert_eq!(forest.num_nodes(), deserialized.num_nodes());
+    assert_eq!(forest.decorators().len(), 0);
+    assert_eq!(deserialized.decorators().len(), 0);
+}
+
+/// Test DebugInfo serialization with sparse decorators (20% of nodes have decorators)
+#[test]
+fn test_debuginfo_serialization_sparse() {
+    let mut forest = MastForest::new();
+
+    // Create 10 blocks, only 2 with decorators (20% sparse)
+    for i in 0..10 {
+        let ops = vec![Operation::Noop; 4];
+
+        if i % 5 == 0 {
+            // Add decorator at position 0 for nodes 0 and 5
+            let decorator_id = forest.add_decorator(Decorator::Trace(i)).unwrap();
+            BasicBlockNodeBuilder::new(ops, vec![(0, decorator_id)])
+                .add_to_forest(&mut forest)
+                .unwrap();
+        } else {
+            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+        }
+    }
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify decorator count
+    assert_eq!(forest.decorators().len(), 2);
+    assert_eq!(deserialized.decorators().len(), 2);
+
+    // Verify decorators are at correct nodes
+    for i in 0..10 {
+        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
+        let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
+
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+    }
+}
+
+/// Test DebugInfo serialization with dense decorators (80% of nodes have decorators)
+#[test]
+fn test_debuginfo_serialization_dense() {
+    let mut forest = MastForest::new();
+
+    // Create 10 blocks, 8 with decorators (80% dense)
+    for i in 0..10 {
+        let ops = vec![Operation::Noop; 4];
+
+        if i < 8 {
+            // Add decorator at position 0 for first 8 nodes
+            let decorator_id = forest.add_decorator(Decorator::Trace(i)).unwrap();
+            BasicBlockNodeBuilder::new(ops, vec![(0, decorator_id)])
+                .add_to_forest(&mut forest)
+                .unwrap();
+        } else {
+            BasicBlockNodeBuilder::new(ops, Vec::new()).add_to_forest(&mut forest).unwrap();
+        }
+    }
+
+    // Serialize and deserialize
+    let bytes = forest.to_bytes();
+    let deserialized = MastForest::read_from_bytes(&bytes).unwrap();
+
+    // Verify decorator count
+    assert_eq!(forest.decorators().len(), 8);
+    assert_eq!(deserialized.decorators().len(), 8);
+
+    // Verify decorators are at correct nodes
+    for i in 0..10 {
+        let node_id = crate::mast::MastNodeId::new_unchecked(i);
+        let orig_decorators = forest.decorator_indices_for_op(node_id, 0);
+        let deser_decorators = deserialized.decorator_indices_for_op(node_id, 0);
+
+        assert_eq!(orig_decorators, deser_decorators, "Decorators at node {} should match", i);
+
+        // Verify expected decorator presence
+        if i < 8 {
+            assert_eq!(orig_decorators.len(), 1, "Node {} should have 1 decorator", i);
+            assert_eq!(
+                deser_decorators.len(),
+                1,
+                "Node {} should have 1 decorator after deserialization",
+                i
+            );
+        } else {
+            assert_eq!(orig_decorators.len(), 0, "Node {} should have no decorators", i);
+            assert_eq!(
+                deser_decorators.len(),
+                0,
+                "Node {} should have no decorators after deserialization",
+                i
+            );
+        }
+    }
+}
+
+// UNTRUSTED MAST FOREST VALIDATION TESTS
+// ================================================================================================
+
+/// Test that UntrustedMastForest::validate succeeds for a valid forest.
+#[test]
+fn test_untrusted_forest_valid_roundtrip() {
+    let mut forest = MastForest::new();
+
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+    forest.make_root(join_id);
+
+    // Serialize
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    assert_eq!(forest, validated);
+}
+
+/// Test that UntrustedMastForest::validate detects forward references.
+#[test]
+fn test_untrusted_forest_detects_forward_reference() {
+    // Create a forest with forward references by swapping node order
+    let mut forest = MastForest::new();
+    let zero = BasicBlockNodeBuilder::new(vec![Operation::U32div], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let first = BasicBlockNodeBuilder::new(vec![Operation::U32add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let second = BasicBlockNodeBuilder::new(vec![Operation::U32and], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    JoinNodeBuilder::new([first, second]).add_to_forest(&mut forest).unwrap();
+
+    // Swap the Join node (index 3) with the first basic block (index 0)
+    // This creates a forest where Join(1, 2) is at index 0, referencing nodes 1 and 2
+    // which are forward references
+    forest.nodes.swap_remove(zero.to_usize());
+
+    // Serialize the corrupted forest
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and try to validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::ForwardReference(_, _)));
+}
+
+/// Test that UntrustedMastForest::validate detects hash mismatches.
+#[test]
+fn test_untrusted_forest_detects_hash_mismatch() {
+    let mut forest = MastForest::new();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    let bytes = forest.to_bytes();
+
+    // Corrupt the digest of the node by modifying bytes in the node info section
+    // Format: magic (4) + flags (1) + version (3) + node_count (8) + decorator_count (8) +
+    //         roots_len (8) + 1 root (4) + bb_data_len (8) + bb_data + node_info
+    //
+    // First, determine where the node info section starts
+    let mut reader = SliceReader::new(&bytes);
+    let _header: [u8; 8] = reader.read_array().unwrap();
+    let _node_count: usize = reader.read().unwrap();
+    let _decorator_count: usize = reader.read().unwrap();
+    let _roots: Vec<u32> = Deserializable::read_from(&mut reader).unwrap();
+    let basic_block_data: Vec<u8> = Deserializable::read_from(&mut reader).unwrap();
+
+    // Node info starts after: 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + bb_data.len()
+    let node_info_offset = 4 + 1 + 3 + 8 + 8 + 8 + 4 + 8 + basic_block_data.len();
+
+    // Node info format: type (8 bytes) + digest (32 bytes = 4 x 8 bytes)
+    // Corrupt one byte in the digest (byte 8-15 of node info)
+    let mut corrupted = bytes.clone();
+    corrupted[node_info_offset + 8] ^= 0xff; // Flip bits in first word of digest
+
+    // Deserialize as untrusted and try to validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&corrupted).unwrap();
+    let result = untrusted.validate();
+
+    assert_matches!(result, Err(MastForestError::HashMismatch { .. }));
+}
+
+/// Test that UntrustedMastForest::validate succeeds for forests with all node types.
+#[test]
+fn test_untrusted_forest_validates_all_node_types() {
+    let mut forest = MastForest::new();
+
+    // Create basic blocks
+    let block1_id = BasicBlockNodeBuilder::new(vec![Operation::Add], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+    let block2_id = BasicBlockNodeBuilder::new(vec![Operation::Mul], Vec::new())
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Join node
+    let join_id = JoinNodeBuilder::new([block1_id, block2_id]).add_to_forest(&mut forest).unwrap();
+
+    // Split node
+    let split_id = SplitNodeBuilder::new([block1_id, block2_id])
+        .add_to_forest(&mut forest)
+        .unwrap();
+
+    // Loop node
+    let loop_id = LoopNodeBuilder::new(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Call node
+    let call_id = CallNodeBuilder::new(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Syscall node
+    let syscall_id = CallNodeBuilder::new_syscall(block1_id).add_to_forest(&mut forest).unwrap();
+
+    // Dyn node
+    let dyn_id = DynNodeBuilder::new_dyn().add_to_forest(&mut forest).unwrap();
+
+    // Dyncall node
+    let dyncall_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
+
+    // External node (will be skipped in hash validation)
+    let external_id = ExternalNodeBuilder::new(Word::default()).add_to_forest(&mut forest).unwrap();
+
+    forest.make_root(join_id);
+    forest.make_root(split_id);
+    forest.make_root(loop_id);
+    forest.make_root(call_id);
+    forest.make_root(syscall_id);
+    forest.make_root(dyn_id);
+    forest.make_root(dyncall_id);
+    forest.make_root(external_id);
+
+    // Serialize
+    let bytes = forest.to_bytes();
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    assert_eq!(forest, validated);
+}
+
+/// Test that UntrustedMastForest::validate works with stripped serialization.
+#[test]
+fn test_untrusted_forest_validates_stripped() {
+    let mut forest = MastForest::new();
+
+    let decorator_id = forest.add_decorator(Decorator::Trace(42)).unwrap();
+    let block_id = BasicBlockNodeBuilder::new(vec![Operation::Add], vec![(0, decorator_id)])
+        .add_to_forest(&mut forest)
+        .unwrap();
+    forest.make_root(block_id);
+
+    // Serialize stripped (no debug info)
+    let mut stripped_bytes = Vec::new();
+    forest.write_stripped(&mut stripped_bytes);
+
+    // Deserialize as untrusted and validate
+    let untrusted = UntrustedMastForest::read_from_bytes(&stripped_bytes).unwrap();
+    let validated = untrusted.validate().unwrap();
+
+    // Structure should be preserved, but debug info should be empty
+    assert_eq!(forest.num_nodes(), validated.num_nodes());
+    assert!(validated.debug_info.is_empty());
+}
+
+/// Test that deserialization rejects node counts exceeding MAX_NODES.
+#[test]
+fn test_deserialization_rejects_excessive_node_count() {
+    // Craft a malicious payload with node_count exceeding MAX_NODES
+    let mut bytes = Vec::new();
+
+    // Write valid header
+    super::MAGIC.write_into(&mut bytes);
+    bytes.write_u8(0); // flags
+    super::VERSION.write_into(&mut bytes);
+
+    // Write excessive node count (MAX_NODES + 1)
+    let excessive_count: usize = MastForest::MAX_NODES + 1;
+    excessive_count.write_into(&mut bytes);
+
+    // Write decorator count
+    0usize.write_into(&mut bytes);
+
+    // Attempt to deserialize - should fail before any large allocation
+    let result = MastForest::read_from_bytes(&bytes);
+    assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert!(
+        err.to_string().contains("exceeds maximum"),
+        "Expected error about exceeding maximum, got: {err}"
+    );
 }

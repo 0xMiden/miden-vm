@@ -1,5 +1,5 @@
 use miden_air::Felt;
-use miden_crypto::aead::aead_rpo::{Nonce, SecretKey};
+use miden_crypto::aead::aead_poseidon2::{Nonce, SecretKey};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 
@@ -15,21 +15,21 @@ fn test_encrypt_zero_blocks_roundtrip() {
         push.0              # num_blocks
         push.2000           # dst_ptr
         push.1000           # src_ptr
-        push.5.6.7.8        # key
-        push.1.2.3.4        # nonce
+        push.[1,2,3,4]        # nonce
+        push.[5,6,7,8]        # key
 
         # Encrypt: writes encrypted padding at dst_ptr, returns tag(4) on stack
         exec.aead::encrypt
 
         # Store tag to memory at dst_ptr + 8 (immediately after encrypted padding)
-        push.2008 mem_storew_be dropw
+        push.2008 mem_storew_le dropw
 
         # Decrypt back with num_blocks=0; should succeed (empty plaintext)
         push.0              # num_blocks
         push.3000           # dst_ptr (plaintext output)
         push.2000           # src_ptr (ciphertext location)
-        push.5.6.7.8        # key
-        push.1.2.3.4        # nonce
+        push.[1,2,3,4]        # nonce
+        push.[5,6,7,8]        # key
         exec.aead::decrypt
     end
     "#;
@@ -74,15 +74,16 @@ fn test_encrypt_with_known_values() {
 
     begin
         # Store plaintext [10,11,12,13,14,15,16,17] at address 1000
-        push.10.11.12.13 push.1000 mem_storew_be dropw
-        push.14.15.16.17 push.1004 mem_storew_be dropw
+        push.[10,11,12,13] push.1000 mem_storew_le dropw
+        push.[14,15,16,17] push.1004 mem_storew_le dropw
 
         # Encrypt 1 block with key and nonce from reference
         push.1           # num_blocks = 1
         push.2000        # dst_ptr
         push.1000        # src_ptr
-        push.{key_elements:?}     # key
         push.{nonce_elements:?}     # nonce
+  
+        push.{key_elements:?}     # key
 
         exec.aead::encrypt
 
@@ -93,17 +94,22 @@ fn test_encrypt_with_known_values() {
         dropw dropw
 
         # Verify all 4 ciphertext words
-        push.2000 mem_loadw_be
-        push.{ciphertext_0:?} eqw assert dropw dropw
+        push.2000 mem_loadw_le
+        push.{ciphertext_0:?}
+        eqw assert dropw dropw
 
-        push.2004 mem_loadw_be
-        push.{ciphertext_1:?} eqw assert dropw dropw
 
-        push.2008 mem_loadw_be
-        push.{ciphertext_2:?} eqw assert dropw dropw
+        push.2004 mem_loadw_le
+        push.{ciphertext_1:?}
+        eqw assert dropw dropw
 
-        push.2012 mem_loadw_be
-        push.{ciphertext_3:?} eqw assert dropw dropw
+        push.2008 mem_loadw_le
+        push.{ciphertext_2:?}
+        eqw assert dropw dropw
+
+        push.2012 mem_loadw_le
+        push.{ciphertext_3:?}
+        eqw assert dropw dropw
     end
     ",
         ciphertext_0 = &ciphertext[0..4],
@@ -152,37 +158,38 @@ fn test_decrypt_with_known_values() {
 
     begin
         # Store ciphertext at address 1000 (data + padding + tag)
-        push.{ciphertext_0:?} push.1000 mem_storew_be dropw
-        push.{ciphertext_1:?} push.1004 mem_storew_be dropw
-        push.{ciphertext_2:?} push.1008 mem_storew_be dropw
-        push.{ciphertext_3:?} push.1012 mem_storew_be dropw
+        # Note: push.[...] puts first element on top (LE), mem_storew_le stores top to lowest addr
+        push.{ciphertext_0:?} push.1000 mem_storew_le dropw
+        push.{ciphertext_1:?} push.1004 mem_storew_le dropw
+        push.{ciphertext_2:?} push.1008 mem_storew_le dropw
+        push.{ciphertext_3:?} push.1012 mem_storew_le dropw
 
         # Store the tag at address 1016
-        push.{expected_tag:?} push.1016 mem_storew_be dropw
+        push.{expected_tag:?} push.1016 mem_storew_le dropw
 
-        # Decrypt: [nonce(4), key(4), src_ptr, dst_ptr, num_blocks]
+        # Decrypt: [key(4), nonce(4), src_ptr, dst_ptr, num_blocks]
         push.1           # num_blocks = 1 (data blocks only, padding is automatic)
         push.2000        # dst_ptr (where plaintext will be written)
         push.1000        # src_ptr (ciphertext location)
-        push.{key_elements:?}     # key
-        push.{nonce_elements:?}     # nonce
+        push.{nonce_elements:?}     # nonce (push.[...] is already LE)
+        push.{key_elements:?}       # key
 
         exec.aead::decrypt
         # => [tag(4), ...]
 
         # Verify decrypted plaintext matches original
-        padw push.2000 mem_loadw_be
-        push.10.11.12.13 eqw assert dropw dropw
+        padw push.2000 mem_loadw_le
+        push.[10,11,12,13] eqw assert dropw dropw
 
-        padw push.2004 mem_loadw_be
-        push.14.15.16.17 eqw assert dropw dropw
+        padw push.2004 mem_loadw_le
+        push.[14,15,16,17] eqw assert dropw dropw
 
         # Verify padding block [1,0,0,0,0,0,0,0]
-        padw push.2008 mem_loadw_be
-        push.1.0.0.0 eqw assert dropw dropw
+        padw push.2008 mem_loadw_le
+        push.[1,0,0,0] eqw assert dropw dropw
 
-        padw push.2012 mem_loadw_be
-        push.0.0.0.0 eqw assert dropw dropw
+        padw push.2012 mem_loadw_le
+        padw eqw assert dropw dropw
     end
     ",
         ciphertext_0 = &ciphertext[0..4],
@@ -232,20 +239,20 @@ fn test_decrypt_with_wrong_key() {
 
     begin
         # Store ciphertext at address 1000
-        push.{ciphertext_0:?} push.1000 mem_storew_be dropw
-        push.{ciphertext_1:?} push.1004 mem_storew_be dropw
-        push.{ciphertext_2:?} push.1008 mem_storew_be dropw
-        push.{ciphertext_3:?} push.1012 mem_storew_be dropw
+        push.{ciphertext_0:?} reversew push.1000 mem_storew_le dropw
+        push.{ciphertext_1:?} reversew push.1004 mem_storew_le dropw
+        push.{ciphertext_2:?} reversew push.1008 mem_storew_le dropw
+        push.{ciphertext_3:?} reversew push.1012 mem_storew_le dropw
 
         # Store the tag
-        push.{expected_tag:?} push.1016 mem_storew_be dropw
+        push.{expected_tag:?} push.1016 mem_storew_le dropw
 
         # Decrypt with WRONG KEY - should fail assertion
         push.2           # num_blocks = 2
         push.2000        # dst_ptr (where plaintext will be written)
         push.1000        # src_ptr (ciphertext location)
-        push.{wrong_key_elements:?}     # WRONG KEY!
-        push.{nonce_elements:?}     # nonce
+        push.{nonce_elements:?} reversew    # nonce
+        push.{wrong_key_elements:?} reversew    # WRONG KEY!
 
         exec.aead::decrypt
         # Should fail with assertion error before reaching here

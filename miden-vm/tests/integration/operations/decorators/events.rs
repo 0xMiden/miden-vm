@@ -1,6 +1,5 @@
 use miden_assembly::Assembler;
-use miden_processor::{AdviceInputs, ExecutionOptions, Program};
-use miden_prover::StackInputs;
+use miden_processor::{ExecutionOptions, Program, StackInputs, advice::AdviceInputs};
 
 use super::TestHost;
 
@@ -20,7 +19,7 @@ fn test_event_handling() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -50,7 +49,7 @@ fn test_trace_handling() {
     let mut host = TestHost::default();
 
     // execute program with disabled tracing
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -58,20 +57,21 @@ fn test_trace_handling() {
         ExecutionOptions::default(),
     )
     .unwrap();
-    let expected = Vec::<u32>::new();
-    assert_eq!(host.trace_handler, expected);
+    // No trace events should be recorded when tracing is disabled
+    assert!(host.get_execution_order().is_empty());
 
     // execute program with enabled tracing
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
-        ExecutionOptions::default().with_tracing(),
+        ExecutionOptions::default().with_tracing(true),
     )
     .unwrap();
-    let expected = vec![1, 2];
-    assert_eq!(host.trace_handler, expected);
+    // Extract trace IDs from execution order (ignoring clock cycles)
+    let trace_ids: Vec<u32> = host.get_execution_order().iter().map(|(id, _)| *id).collect();
+    assert_eq!(trace_ids, vec![1, 2]);
 }
 
 #[test]
@@ -87,7 +87,7 @@ fn test_debug_with_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -114,7 +114,7 @@ fn test_debug_without_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
@@ -142,7 +142,7 @@ fn test_parsing_debug_advice_stack() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute(
+    miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

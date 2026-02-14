@@ -5,11 +5,14 @@ use proptest::{arbitrary::Arbitrary, prelude::*};
 
 use super::*;
 use crate::{
-    AdviceMap, AssemblyOp, DebugOptions, Decorator, Felt, Kernel, Operation, Program, Word,
+    Felt, Word,
+    advice::AdviceMap,
     mast::{
         CallNodeBuilder, DecoratorId, DynNodeBuilder, ExternalNodeBuilder, JoinNodeBuilder,
         LoopNodeBuilder, SplitNodeBuilder,
     },
+    operations::{AssemblyOp, DebugOptions, Decorator, Operation},
+    program::{Kernel, Program},
 };
 
 // Strategy for operations without immediate values (non-control flow)
@@ -90,7 +93,6 @@ pub fn op_no_imm_strategy() -> impl Strategy<Value = Operation> {
 
 // Strategy for operations with immediate values
 pub fn op_with_imm_strategy() -> impl Strategy<Value = Operation> {
-    use crate::mast::Felt;
     prop_oneof![any::<u64>().prop_map(Felt::new).prop_map(Operation::Push)]
 }
 
@@ -610,9 +612,8 @@ impl Arbitrary for AssemblyOp {
             prop::collection::vec(any::<char>(), 1..=20)
                 .prop_map(|chars| chars.into_iter().collect()),
             any::<u8>(),
-            any::<bool>(),
         )
-            .prop_map(|(has_location, context_name, op, num_cycles, should_break)| {
+            .prop_map(|(has_location, context_name, op, num_cycles)| {
                 use miden_debug_types::{ByteIndex, Location, Uri};
 
                 let location = if has_location {
@@ -621,7 +622,7 @@ impl Arbitrary for AssemblyOp {
                     None
                 };
 
-                AssemblyOp::new(location, context_name, num_cycles, op, should_break)
+                AssemblyOp::new(location, context_name, num_cycles, op)
             })
             .boxed()
     }
@@ -633,7 +634,6 @@ impl Arbitrary for Decorator {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         prop_oneof![
-            any_with::<AssemblyOp>(()).prop_map(Decorator::AsmOp),
             any_with::<DebugOptions>(()).prop_map(Decorator::Debug),
             any::<u32>().prop_map(Decorator::Trace),
         ]
@@ -691,10 +691,6 @@ impl Arbitrary for Program {
             max_decorator_id_u32: 2,
         })
         .prop_map(|node| {
-            use alloc::sync::Arc;
-
-            use crate::Program;
-
             // Create a new MastForest
             let mut forest = MastForest::new();
 

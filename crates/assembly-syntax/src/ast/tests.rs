@@ -539,12 +539,14 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
 
         u32wrapping_add.5
         u32overflowing_add.5
+        u32widening_add.5
+        u32widening_add3
 
         u32wrapping_sub.1
         u32overflowing_sub.1
 
         u32wrapping_mul.2
-        u32overflowing_mul.2
+        u32widening_mul.2
 
     end"#
     );
@@ -552,10 +554,12 @@ fn test_ast_parsing_program_u32() -> Result<(), Report> {
         inst!(Push(Immediate::Value(Span::unknown(3u8.into())))),
         inst!(U32WrappingAddImm(5u32.into())),
         inst!(U32OverflowingAddImm(5u32.into())),
+        inst!(U32WideningAddImm(5u32.into())),
+        inst!(U32WideningAdd3),
         inst!(U32WrappingSubImm(1u32.into())),
         inst!(U32OverflowingSubImm(1u32.into())),
         inst!(U32WrappingMulImm(2u32.into())),
-        inst!(U32OverflowingMulImm(2u32.into()))
+        inst!(U32WideningMulImm(2u32.into()))
     ));
 
     assert_eq!(context.parse_forms(source)?, forms);
@@ -1290,7 +1294,7 @@ fn assert_parsing_line_invalid_op() {
 
         repeat.3
             push.2
-            u32overflowing_mulx
+            u32widening_mulx
         end
 
     end"
@@ -1300,9 +1304,9 @@ fn assert_parsing_line_invalid_op() {
         "invalid syntax",
         regex!(r#",-\[test[\d]+:28:13\]"#),
         "27 |             push.2",
-        "28 |             u32overflowing_mulx",
-        "   :             ^^^^^^^^^|^^^^^^^^^",
-        "   :                      `-- found a identifier here",
+        "28 |             u32widening_mulx",
+        "   :             ^^^^^^^^|^^^^^^^",
+        "   :                     `-- found a identifier here",
         "29 |         end",
         "   `----",
         r#" help: expected ".", or primitive opcode (e.g. "add"), or "end", or control flow opcode (e.g. "if.true")"#

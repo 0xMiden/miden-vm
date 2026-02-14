@@ -1,15 +1,21 @@
 use alloc::{sync::Arc, vec::Vec};
 
-use miden_core::{DebugOptions, EventId, EventName, Word, mast::MastForest};
-use miden_debug_types::{
-    DefaultSourceManager, Location, SourceFile, SourceManager, SourceManagerSync, SourceSpan,
+use miden_core::{
+    Word,
+    events::{EventId, EventName},
+    mast::MastForest,
+    operations::DebugOptions,
 };
+use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
+use super::{
+    FutureMaybeSend,
+    debug::DefaultDebugHandler,
+    handlers::{EventError, EventHandler, EventHandlerRegistry},
+};
 use crate::{
-    AdviceMutation, AsyncHost, BaseHost, DebugError, DebugHandler, EventHandler,
-    EventHandlerRegistry, ExecutionError, MastForestStore, MemMastForestStore, ProcessState,
-    SyncHost, TraceError,
-    host::{EventError, FutureMaybeSend, debug::DefaultDebugHandler},
+    DebugError, DebugHandler, ExecutionError, Host, MastForestStore, MemMastForestStore,
+    ProcessorState, TraceError, advice::AdviceMutation,
 };
 
 // DEFAULT HOST IMPLEMENTATION
@@ -78,7 +84,7 @@ where
     /// Registers a single [`EventHandler`] into this host.
     ///
     /// The handler can be either a closure or a free function with signature
-    /// `fn(&mut ProcessState) -> Result<(), EventHandler>`
+    /// `fn(&mut ProcessorState) -> Result<(), EventHandler>`
     pub fn register_handler(
         &mut self,
         event: EventName,
@@ -119,7 +125,7 @@ where
     }
 }
 
-impl<D, S> BaseHost for DefaultHost<D, S>
+impl<D, S> Host for DefaultHost<D, S>
 where
     D: DebugHandler,
     S: SourceManager,
@@ -133,64 +139,48 @@ where
         (span, maybe_file)
     }
 
-    fn on_debug(
-        &mut self,
-        process: &mut ProcessState,
-        options: &DebugOptions,
-    ) -> Result<(), DebugError> {
-        self.debug_handler.on_debug(process, options)
-    }
-
-    fn on_trace(&mut self, process: &mut ProcessState, trace_id: u32) -> Result<(), TraceError> {
-        self.debug_handler.on_trace(process, trace_id)
-    }
-
-    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
-        self.event_handlers.resolve_event(event_id)
-    }
-}
-
-impl<D, S> SyncHost for DefaultHost<D, S>
-where
-    D: DebugHandler,
-    S: SourceManager,
-{
-    fn get_mast_forest(&self, node_digest: &Word) -> Option<Arc<MastForest>> {
-        self.store.get(node_digest)
-    }
-
-    fn on_event(&mut self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let event_id = EventId::from_felt(process.get_stack_item(0));
-        if let Some(mutations) = self.event_handlers.handle_event(event_id, process)? {
-            // the event was handled by the registered event handlers; just return
-            return Ok(mutations);
-        }
-
-        // EventError is a `Box<dyn Error>` so we can define the error anonymously.
-        #[derive(Debug, thiserror::Error)]
-        #[error("no event handler registered")]
-        struct UnhandledEvent;
-
-        Err(UnhandledEvent.into())
-    }
-}
-
-impl<D, S> AsyncHost for DefaultHost<D, S>
-where
-    D: DebugHandler,
-    S: SourceManagerSync,
-{
     fn get_mast_forest(&self, node_digest: &Word) -> impl FutureMaybeSend<Option<Arc<MastForest>>> {
-        let result = <Self as SyncHost>::get_mast_forest(self, node_digest);
+        let result = self.store.get(node_digest);
         async move { result }
     }
 
     fn on_event(
         &mut self,
-        process: &ProcessState<'_>,
+        process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
-        let result = <Self as SyncHost>::on_event(self, process);
+        let event_id = EventId::from_felt(process.get_stack_item(0));
+        let result = match self.event_handlers.handle_event(event_id, process) {
+            Ok(Some(mutations)) => {
+                // the event was handled by the registered event handlers; just return
+                Ok(mutations)
+            },
+            Ok(None) => {
+                // EventError is a `Box<dyn Error>` so we can define the error anonymously.
+                #[derive(Debug, thiserror::Error)]
+                #[error("no event handler registered")]
+                struct UnhandledEvent;
+
+                Err(UnhandledEvent.into())
+            },
+            Err(e) => Err(e),
+        };
         async move { result }
+    }
+
+    fn on_debug(
+        &mut self,
+        process: &ProcessorState,
+        options: &DebugOptions,
+    ) -> Result<(), DebugError> {
+        self.debug_handler.on_debug(process, options)
+    }
+
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
+        self.debug_handler.on_trace(process, trace_id)
+    }
+
+    fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {
+        self.event_handlers.resolve_event(event_id)
     }
 }
 
@@ -200,7 +190,7 @@ where
 /// A Host which does nothing.
 pub struct NoopHost;
 
-impl BaseHost for NoopHost {
+impl Host for NoopHost {
     #[inline(always)]
     fn get_label_and_source_file(
         &self,
@@ -208,21 +198,7 @@ impl BaseHost for NoopHost {
     ) -> (SourceSpan, Option<Arc<SourceFile>>) {
         (SourceSpan::UNKNOWN, None)
     }
-}
 
-impl SyncHost for NoopHost {
-    #[inline(always)]
-    fn get_mast_forest(&self, _node_digest: &Word) -> Option<Arc<MastForest>> {
-        None
-    }
-
-    #[inline(always)]
-    fn on_event(&mut self, _process: &ProcessState<'_>) -> Result<Vec<AdviceMutation>, EventError> {
-        Ok(Vec::new())
-    }
-}
-
-impl AsyncHost for NoopHost {
     #[inline(always)]
     fn get_mast_forest(
         &self,
@@ -234,7 +210,7 @@ impl AsyncHost for NoopHost {
     #[inline(always)]
     fn on_event(
         &mut self,
-        _process: &ProcessState<'_>,
+        _process: &ProcessorState<'_>,
     ) -> impl FutureMaybeSend<Result<Vec<AdviceMutation>, EventError>> {
         async { Ok(Vec::new()) }
     }

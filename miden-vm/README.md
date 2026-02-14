@@ -4,17 +4,17 @@ This crate aggregates all components of the Miden VM in a single place. Specific
 
 ## Basic concepts
 
-An in-depth description of Miden VM is available in the full Miden VM [documentation](https://0xMiden.github.io/miden-vm/). In this section we cover only the basics to make the included examples easier to understand.
+An in-depth description of Miden VM is available in the full Miden VM [documentation](https://docs.miden.xyz/miden-vm/). In this section we cover only the basics to make the included examples easier to understand.
 
 ### Writing programs
 
 Our goal is to make Miden VM an easy compilation target for high-level languages such as Rust, Move, Sway, and others. We believe it is important to let people write programs in the languages of their choice. However, compilers to help with this have not been developed yet. Thus, for now, the primary way to write programs for Miden VM is to use [Miden assembly](../assembly).
 
-Miden assembler compiles assembly source code in a [program MAST](https://0xMiden.github.io/miden-vm/design/programs.html), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
+Miden assembler compiles assembly source code in a [program MAST](https://docs.miden.xyz/miden-vm/design/programs), which is represented by a `Program` struct. It is possible to construct a `Program` struct manually, but we don't recommend this approach because it is tedious, error-prone, and requires an in-depth understanding of VM internals. All examples throughout these docs use assembly syntax.
 
 #### Program hash
 
-All Miden programs can be reduced to a single 32-byte value, called program hash. Once a `Program` object is constructed, you can access this hash via `Program::hash()` method. This hash value is used by a verifier when they verify program execution. This ensures that the verifier verifies execution of a specific program (e.g. a program which the prover had committed to previously). The methodology for computing program hash is described [here](https://0xMiden.github.io/miden-vm/design/programs.html#program-hash-computation).
+All Miden programs can be reduced to a single 32-byte value, called program hash. Once a `Program` object is constructed, you can access this hash via `Program::hash()` method. This hash value is used by a verifier when they verify program execution. This ensures that the verifier verifies execution of a specific program (e.g. a program which the prover had committed to previously). The methodology for computing program hash is described [here](https://docs.miden.xyz/miden-vm/design/programs#program-hash-computation).
 
 ### Inputs / outputs
 
@@ -36,7 +36,7 @@ Miden crate exposes several functions which can be used to execute programs, gen
 
 ### Executing programs
 
-To execute a program on Miden VM, you can use either `execute()` or `execute_iter()` functions. The `execute()` function takes the following arguments:
+To execute a program on Miden VM, you can use `execute()` which takes the following arguments:
 
 - `program: &Program` - a reference to a Miden program to be executed.
 - `stack_inputs: StackInputs` - a set of public inputs with which to execute the program.
@@ -45,14 +45,15 @@ To execute a program on Miden VM, you can use either `execute()` or `execute_ite
 
 The function returns a `Result<ExecutionTrace, ExecutionError>` which will contain the execution trace of the program if the execution was successful, or an error, if the execution failed. Internally, the VM then passes this execution trace to the prover to generate a proof of a correct execution of the program.
 
-The `execute_iter()` function takes similar arguments (but without the `options`) and returns a `VmStateIterator` . This iterator can be used to iterate over the cycles of the executed program for debug purposes. In fact, when we execute a program using this function, a lot of the debug information is retained and we can get a precise picture of the VM's state at any cycle. Moreover, if the execution results in an error, the `VmStateIterator` can still be used to inspect VM states right up to the cycle at which the error occurred.
-
 For example:
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, execute, execute_iter, DefaultHost, Program, StackInputs};
-use miden_processor::ExecutionOptions;
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -73,20 +74,7 @@ let mut host = DefaultHost::default();
 let exec_options = ExecutionOptions::default();
 
 // execute the program with no inputs
-let trace = execute(&program, stack_inputs.clone(), advice_inputs.clone(), &mut host, exec_options).unwrap();
-
-// now, execute the same program in debug mode and iterate over VM states
-for vm_state in execute_iter(
-    &program,
-    stack_inputs,
-    advice_inputs,
-    &mut host,
-) {
-    match vm_state {
-        Ok(vm_state) => println!("{:?}", vm_state),
-        Err(_) => println!("something went terribly wrong!"),
-    }
-}
+let trace = execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
 ```
 
 ### Proving program execution
@@ -109,7 +97,12 @@ Here is a simple example of executing a program which pushes two numbers onto th
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs};
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    field::PrimeField64,
+    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+};
 
 // instantiate the assembler
 let mut assembler = Assembler::default();
@@ -118,7 +111,7 @@ let mut assembler = Assembler::default();
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
 // let's execute it and generate a STARK proof
-let (outputs, proof) = prove(
+let (outputs, proof) = prove_sync(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
@@ -128,7 +121,7 @@ let (outputs, proof) = prove(
 .unwrap();
 
 // the output should be 8
-assert_eq!(8, outputs.first().unwrap().as_int());
+assert_eq!(8, outputs.first().unwrap().as_canonical_u64());
 ```
 
 ### Verifying program execution
@@ -189,7 +182,12 @@ Notice that except for the first 2 operations which initialize the stack, the se
 
 ```rust
 use std::sync::Arc;
-use miden_vm::{assembly::DefaultSourceManager, AdviceInputs, Assembler, DefaultHost, Program, ProvingOptions, StackInputs};
+use miden_vm::{
+    advice::AdviceInputs,
+    assembly::DefaultSourceManager,
+    field::PrimeField64,
+    Assembler, DefaultHost, Program, ProvingOptions, StackInputs
+};
 
 // set the number of terms to compute
 let n = 50;
@@ -211,10 +209,10 @@ let program = assembler.assemble_program(&source).unwrap();
 let mut host = DefaultHost::default();
 
 // initialize the stack with values 0 and 1
-let stack_inputs = StackInputs::try_from_ints([0, 1]).unwrap();
+let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
 // execute the program
-let (outputs, proof) = miden_vm::prove(
+let (outputs, proof) = miden_vm::prove_sync(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
@@ -224,10 +222,10 @@ let (outputs, proof) = miden_vm::prove(
 .unwrap();
 
 // fetch the stack outputs, truncating to the first element
-let stack = outputs.stack_truncated(1);
+let stack = outputs.get_num_elements(1);
 
 // the output should be the 50th Fibonacci number
-assert_eq!(12586269025, stack[0].as_int());
+assert_eq!(12586269025, stack[0].as_canonical_u64());
 ```
 
 Above, we used public inputs to initialize the stack rather than using `push` operations. This makes the program a bit simpler, and also allows us to run the program from arbitrary starting points without changing program hash.
@@ -259,9 +257,6 @@ We also provide a number of `make` commands to simplify building Miden VM for va
 ```shell
 # build an executable for a generic target (concurrent)
 make exec
-
-# build an executable for Apple silicon (concurrent+metal)
-make exec-metal
 
 # build an executable for targets with AVX2 instructions (concurrent)
 make exec-avx2

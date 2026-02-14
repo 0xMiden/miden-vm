@@ -1,0 +1,99 @@
+name: workspace-release
+description: "Dry-run or publish Rust workspace crates using cargo"
+
+inputs:
+  mode:
+    description: "Release mode: dry-run or publish"
+    required: true
+    default: "dry-run"
+  verify-main-head:
+    description: "If true, ensure the triggering SHA matches main's HEAD"
+    required: false
+    default: "false"
+
+runs:
+  using: "composite"
+  steps:
+    # Optional: guard that release happens from latest main
+    - name: Verify tag matches main HEAD
+      if: ${{ inputs.verify-main-head == 'true' }}
+      shell: bash
+      run: |
+        git fetch origin main --depth=1
+        main_sha="$(git rev-parse origin/main)"
+        tag_sha="$(git rev-parse HEAD)"
+
+        echo "main_sha=$main_sha"
+        echo "tag_sha=$tag_sha"
+
+        if [ "$main_sha" != "$tag_sha" ]; then
+          echo "::error::The release/tag commit does not match origin/main HEAD. Aborting."
+          exit 1
+        fi
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry and git index
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Cleanup large tools for build space
+      uses: ./.github/actions/cleanup-runner
+
+    # Install cargo-msrv for MSRV checks
+    - name: Install cargo-msrv
+      shell: bash
+      run: cargo install cargo-msrv
+
+    # Keep your existing MSRV check
+    - name: Check MSRV
+      shell: bash
+      run: |
+        chmod +x scripts/check-msrv.sh
+        ./scripts/check-msrv.sh
+
+    # Clean packaging directory to avoid stale/corrupted tmp-registry state
+    - name: Clean packaging directory
+      shell: bash
+      run: |
+        echo "Cleaning target/package directory to ensure fresh state"
+        rm -rf target/package
+
+    # Clear cargo registry to ensure fresh resolution during verification.
+    # This prevents issues where cached metadata from previous runs
+    # might interfere with workspace dependency feature resolution
+    # during the verification step (related to cargo#14283, cargo#14789).
+    # Specifically, this ensures the temp registry used during workspace
+    # publish verification doesn't conflict with cached crates.io data.
+    - name: Clear cargo registry for fresh resolution
+      if: ${{ inputs.mode == 'dry-run' }}
+      shell: bash
+      run: |
+        echo "Clearing cargo registry for fresh resolution"
+        rm -rf ~/.cargo/registry/cache
+        rm -rf ~/.cargo/registry/index
+        rm -rf ~/.cargo/registry/src
+
+    # Dry-run vs real publish
+    - name: Dry-run workspace publish
+      if: ${{ inputs.mode == 'dry-run' }}
+      shell: bash
+      run: |
+        echo "Running cargo publish --workspace --dry-run"
+        cargo publish --workspace --dry-run
+
+    - name: Publish workspace crates
+      if: ${{ inputs.mode == 'publish' }}
+      shell: bash
+      env:
+        CARGO_REGISTRY_TOKEN: ${{ env.CARGO_REGISTRY_TOKEN }}
+      run: |
+        echo "Publishing workspace crates to crates.io"
+        cargo publish --workspace

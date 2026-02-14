@@ -14,8 +14,8 @@
 //! ### Precompile Verifier (Verification-Time)
 //! During verification, the [`PrecompileVerifier`] receives the stored request data (public key,
 //! digest, signature), re-performs the ECDSA verification, and generates a commitment
-//! `Rpo256(Rpo256(Rpo256(pk) || Rpo256(digest)) || Rpo256(sig))` with a tag containing the
-//! verification result that validates the computation was performed correctly. Here `pk`,
+//! `P2(P2(P2(pk) || P2(digest)) || P2(sig))`, where P2 stands for Poseidon2, with a tag containing
+//! the verification result that validates the computation was performed correctly. Here `pk`,
 //! `digest`, and `sig` are hashed as u32‑packed field elements before being merged.
 //!
 //! ### Commitment Tag Format
@@ -33,18 +33,25 @@
 use alloc::{vec, vec::Vec};
 
 use miden_core::{
-    EventName,
+    Felt,
+    events::EventName,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_crypto::{
     ZERO,
     dsa::ecdsa_k256_keccak::{PublicKey, Signature},
-    hash::rpo::Rpo256,
+    hash::poseidon2::Poseidon2,
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 
-use crate::handlers::{bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::read_memory_packed_u32;
 
 /// Qualified event name for the ECDSA signature verification event.
 pub const ECDSA_VERIFY_EVENT_NAME: EventName =
@@ -78,11 +85,11 @@ impl EventHandler for EcdsaPrecompile {
     /// - **Advice Stack**: Extended with verification result (1 for valid, 0 for invalid)
     /// - **Precompile Request**: Stores tag `[event_id, result, 0, 0]` and serialized request data
     ///   (pk || digest || sig) for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr_pk, ptr_digest, ptr_sig, ...]
-        let ptr_pk = process.get_stack_item(1).as_int();
-        let ptr_digest = process.get_stack_item(2).as_int();
-        let ptr_sig = process.get_stack_item(3).as_int();
+        let ptr_pk = process.get_stack_item(1).as_canonical_u64();
+        let ptr_digest = process.get_stack_item(2).as_canonical_u64();
+        let ptr_sig = process.get_stack_item(3).as_canonical_u64();
 
         let pk = {
             let data_type = DataType::PublicKey;
@@ -109,7 +116,7 @@ impl EventHandler for EcdsaPrecompile {
         let result = request.result();
 
         Ok(vec![
-            AdviceMutation::extend_stack([result.into()]),
+            AdviceMutation::extend_stack([Felt::from_bool(result)]),
             AdviceMutation::extend_precompile_requests([request.into()]),
         ])
     }
@@ -120,7 +127,7 @@ impl PrecompileVerifier for EcdsaPrecompile {
     ///
     /// Receives the serialized request data (public key || digest || signature) stored during
     /// execution (see [`EventHandler::on_event`]), re-performs the ECDSA verification, and
-    /// generates a commitment `RPO(RPO(RPO(pk) || RPO(digest)) || RPO(sig))` with tag
+    /// generates a commitment `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
     /// `[event_id, result, 0, 0]` that validates against the execution trace. Each of `pk`,
     /// `digest`, and `sig` is first converted to u32‑packed field elements before hashing.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
@@ -189,7 +196,7 @@ impl EcdsaRequest {
 
     /// Computes the precompile commitment for this request.
     ///
-    /// The commitment is `RPO(RPO(RPO(pk) || RPO(digest)) || RPO(sig))` with tag
+    /// The commitment is `P2(P2(P2(pk) || P2(digest)) || P2(sig))` with tag
     /// `[event_id, result, 0, 0]`, where `result` is 1 for valid signatures and 0 for
     /// invalid ones. Each component is hashed over u32‑packed field elements.
     ///
@@ -197,25 +204,25 @@ impl EcdsaRequest {
     /// the commitment generated during execution.
     pub fn as_precompile_commitment(&self) -> PrecompileCommitment {
         // Compute tag: [event_id, result, 0, 0]
-        let result = self.result().into();
+        let result = Felt::from_bool(self.result());
         let tag = [ECDSA_VERIFY_EVENT_NAME.to_event_id().as_felt(), result, ZERO, ZERO].into();
 
         // Convert serialized bytes to field elements and hash
         let pk_comm = {
-            let felts = bytes_to_packed_u32_felts(&self.pk.to_bytes());
-            Rpo256::hash_elements(&felts)
+            let felts = bytes_to_packed_u32_elements(&self.pk.to_bytes());
+            Poseidon2::hash_elements(&felts)
         };
         let digest_comm = {
             // `digest` is a 32‑byte array; hash its u32‑packed representation
-            let felts = bytes_to_packed_u32_felts(&self.digest);
-            Rpo256::hash_elements(&felts)
+            let felts = bytes_to_packed_u32_elements(&self.digest);
+            Poseidon2::hash_elements(&felts)
         };
         let sig_comm = {
-            let felts = bytes_to_packed_u32_felts(&self.sig.to_bytes());
-            Rpo256::hash_elements(&felts)
+            let felts = bytes_to_packed_u32_elements(&self.sig.to_bytes());
+            Poseidon2::hash_elements(&felts)
         };
 
-        let commitment = Rpo256::merge(&[Rpo256::merge(&[pk_comm, digest_comm]), sig_comm]);
+        let commitment = Poseidon2::merge(&[Poseidon2::merge(&[pk_comm, digest_comm]), sig_comm]);
 
         PrecompileCommitment::new(tag, commitment)
     }

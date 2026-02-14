@@ -2,8 +2,8 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
 use miden_core::{
-    FieldElement,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    field::PrimeCharacteristicRing,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 #[cfg(feature = "serde")]
@@ -369,6 +369,7 @@ impl proptest::arbitrary::Arbitrary for ConstantExpr {
 
 /// Represents the set of binary arithmetic operators supported in Miden Assembly syntax.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[repr(u8)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum ConstantOp {
     Add,

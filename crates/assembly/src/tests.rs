@@ -7,9 +7,13 @@ use std::{
 
 use miden_assembly_syntax::{ast::Path, diagnostics::WrapErr, library::LibraryExport};
 use miden_core::{
-    EventId, Operation, Program, Word, assert_matches,
+    Felt, Word, assert_matches,
+    events::EventId,
+    field::PrimeCharacteristicRing,
     mast::{MastNodeExt, MastNodeId},
-    utils::{Deserializable, Serializable},
+    operations::Operation,
+    program::Program,
+    serde::{Deserializable, Serializable},
 };
 use miden_mast_package::{
     MastArtifact, MastForest, Package, PackageExport, PackageKind, PackageManifest,
@@ -150,6 +154,16 @@ fn repeat_basic_blocks_merged() -> TestResult {
 
     // Also ensure that dead code elimination works properly
     assert_eq!(program.mast_forest().num_nodes(), 1);
+    Ok(())
+}
+
+/// Ensures `repeat` supports dynamic iteration counts provided via constants.
+#[test]
+fn repeat_dynamic_iteration_count() -> TestResult {
+    let context = TestContext::default();
+    let source = source_file!(&context, "const A = 5 begin repeat.A add end end");
+    let program = context.assemble(source)?;
+    insta::assert_snapshot!(program);
     Ok(())
 }
 
@@ -334,16 +348,16 @@ fn library_procedure_collision() -> Result<(), Report> {
     // make sure lib2 has the expected exports (i.e., bar1 and bar2)
     assert_eq!(lib2.num_exports(), 2);
 
-    // With debug mode always enabled (issue #1821), identical procedures get unique debug
-    // decorators, so they are no longer deduplicated. This is expected behavior.
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // The debug info (AssemblyOps) is stored separately and doesn't affect deduplication.
     let lib2_bar_bar1 = QualifiedProcedureName::from_str("lib2::bar::bar1").unwrap();
     let lib2_bar_bar2 = QualifiedProcedureName::from_str("lib2::bar::bar2").unwrap();
-    assert_ne!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
+    assert_eq!(lib2.get_export_node_id(&lib2_bar_bar1), lib2.get_export_node_id(&lib2_bar_bar2));
 
-    // With debug mode always enabled, we expect more nodes due to unique debug decorators
-    // NOTE: The MAST forest now has more nodes than before because identical procedures
-    // get unique debug decorators and cannot be deduplicated
-    assert_eq!(lib2.mast_forest().num_nodes(), 6);
+    // With deduplication restored, we expect fewer nodes than before when debug decorators
+    // prevented deduplication. The identical procedures now share the same node.
+    assert_eq!(lib2.mast_forest().num_nodes(), 5);
 
     Ok(())
 }
@@ -2720,11 +2734,11 @@ fn module_alias() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;
@@ -2790,11 +2804,11 @@ fn module_alias_unused_import() -> TestResult {
             swap
             movup.3
             u32assert2
-            u32overflowing_add
+            u32widening_add
             movup.3
             movup.3
             u32assert2
-            u32overflowing_add3
+            u32widening_add3
             eq.0
             assert
         end"#;
@@ -3324,6 +3338,34 @@ fn invalid_repeat() -> TestResult {
         r#" help: expected primitive opcode (e.g. "add"), or control flow opcode (e.g. "if.true")"#
     );
 
+    // Overflow iter count
+    let count: u64 = u32::MAX as u64 + 1;
+    let source = source_file!(
+        &context,
+        format!(
+            "\
+            const CONSTANT = {count}
+            begin
+                repeat.CONSTANT
+                    add
+                end
+            end
+            "
+        )
+    );
+    assert_assembler_diagnostic!(
+        context,
+        source,
+        "syntax error",
+        "help: see emitted diagnostics for details",
+        "invalid immediate: value is larger than expected range",
+        regex!(r#",-\[test[\d]+:3:24\]"#),
+        "2 |             begin",
+        "3 |                 repeat.CONSTANT",
+        "  :                        ^^^^^^^^",
+        "4 |                     add",
+        "  `----"
+    );
     Ok(())
 }
 
@@ -3594,11 +3636,10 @@ fn vendoring() -> TestResult {
 
     // Rigorous testing of vendoring functionality
 
-    // 1. Verify the vendored library has the expected structure with debug decorators
-    assert!(
-        !lib.mast_forest().decorators().is_empty(),
-        "Vendored library should have debug decorators"
-    );
+    // 1. The vendored library (lib) has `exec.::test::mod1::bar` which is a 0-cycle instruction.
+    // 0-cycle instructions like `exec` don't generate AssemblyOps because they don't execute
+    // any VM operations. The debug info may still have procedure names, error codes, etc.
+    // The vendor_lib (mod1) has actual instructions (push.1, push.2) which do have AssemblyOps.
 
     // 2. Create an equivalent expected library for structural comparison
     let expected_lib = {
@@ -3607,11 +3648,10 @@ fn vendoring() -> TestResult {
         Assembler::default().assemble_library([mod2]).unwrap()
     };
 
-    // 3. Verify that both libraries have the expected structure with debug decorators
-    //    (always-enabled mode)
+    // 3. Verify that the expected library (which has push.1) has AssemblyOps
     assert!(
-        !expected_lib.mast_forest().decorators().is_empty(),
-        "Expected library should have debug decorators"
+        expected_lib.mast_forest().debug_info().num_asm_ops() > 0,
+        "Expected library should have AssemblyOps for instruction tracking"
     );
 
     // 4. Verify we can create an assembler that successfully links the vendored library
@@ -3634,10 +3674,10 @@ fn vendoring() -> TestResult {
     );
     let assembled_program = assemble_result.unwrap();
 
-    // Verify the assembled program has debug decorators
+    // Verify the assembled program has debug info (AssemblyOps)
     assert!(
-        !assembled_program.mast_forest().decorators().is_empty(),
-        "Assembled program with library should have debug decorators"
+        assembled_program.mast_forest().debug_info().num_asm_ops() > 0,
+        "Assembled program with library should have AssemblyOps for instruction tracking"
     );
 
     // 6. Verify the vendored library contains the expected structure
@@ -3647,21 +3687,6 @@ fn vendoring() -> TestResult {
     // Verify there are root procedures (the first node is usually a root for libraries)
     let nodes = mast_forest.nodes();
     assert!(!nodes.is_empty(), "Vendored library should have root procedures");
-
-    // 7. Verify debug decorators are present and proper for tracking
-    let vendored_decorator_count = mast_forest.decorators().len();
-    assert!(vendored_decorator_count > 0, "Vendored library should have decorators");
-
-    // 8. Check that the library has expected procedures by examining MAST structure
-    // The vendored library should contain procedures from the vendor module
-    let has_debug_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_debug_decorators,
-        "Vendored library should have AsmOp decorators for instruction tracking"
-    );
 
     Ok(())
 }
@@ -3894,7 +3919,7 @@ fn nested_blocks() -> Result<(), Report> {
     // `Assembler::with_kernel_from_module()`.
     let syscall_foo_node_id = {
         let kernel_foo_node_id = expected_mast_forest_builder
-            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![])
+            .ensure_block(vec![Operation::Add], Vec::new(), vec![], vec![], vec![])
             .unwrap();
 
         expected_mast_forest_builder
@@ -3942,32 +3967,32 @@ fn nested_blocks() -> Result<(), Report> {
 
     // basic block representing foo::bar.baz procedure
     let exec_foo_bar_baz_node_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(29_u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(29))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let fmp_initialization = expected_mast_forest_builder
-        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![])
+        .ensure_block(fmp_initialization_sequence(), Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let before = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(2u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(2))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#true1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(3u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(3))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false1 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(5u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(5))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#if1 = expected_mast_forest_builder
         .ensure_split(r#true1, r#false1, vec![], vec![])
         .unwrap();
 
     let r#true3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(7u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(7))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#false3 = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(11u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(11))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
     let r#true2 = expected_mast_forest_builder
         .ensure_split(r#true3, r#false3, vec![], vec![])
@@ -3977,11 +4002,12 @@ fn nested_blocks() -> Result<(), Report> {
         let body_node_id = expected_mast_forest_builder
             .ensure_block(
                 vec![
-                    Operation::Push(17u32.into()),
-                    Operation::Push(19u32.into()),
-                    Operation::Push(23u32.into()),
+                    Operation::Push(Felt::from_u32(17)),
+                    Operation::Push(Felt::from_u32(19)),
+                    Operation::Push(Felt::from_u32(23)),
                 ],
                 Vec::new(),
+                vec![],
                 vec![],
                 vec![],
             )
@@ -3990,7 +4016,7 @@ fn nested_blocks() -> Result<(), Report> {
         expected_mast_forest_builder.ensure_loop(body_node_id, vec![], vec![]).unwrap()
     };
     let push_13_basic_block_id = expected_mast_forest_builder
-        .ensure_block(vec![Operation::Push(13u32.into())], Vec::new(), vec![], vec![])
+        .ensure_block(vec![Operation::Push(Felt::from_u32(13))], Vec::new(), vec![], vec![], vec![])
         .unwrap();
 
     let r#false2 = expected_mast_forest_builder
@@ -4001,14 +4027,17 @@ fn nested_blocks() -> Result<(), Report> {
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
-        .join_nodes(vec![
-            fmp_initialization,
-            before,
-            r#if1,
-            nested,
-            exec_foo_bar_baz_node_id,
-            syscall_foo_node_id,
-        ])
+        .join_nodes(
+            vec![
+                fmp_initialization,
+                before,
+                r#if1,
+                nested,
+                exec_foo_bar_baz_node_id,
+                syscall_foo_node_id,
+            ],
+            None,
+        )
         .unwrap();
 
     let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();
@@ -4135,9 +4164,11 @@ fn duplicate_procedure() {
     "#;
 
     let program = context.assemble(program_source).unwrap();
-    // With debug mode always enabled, each procedure gets unique debug decorators
-    // so they are no longer deduplicated. This is expected behavior per issue #1821.
-    assert_eq!(program.num_procedures(), 3);
+    // Now that AssemblyOps are stored separately in DebugInfo (not as Decorator::AsmOp),
+    // identical procedures ARE deduplicated because their MAST fingerprints are the same.
+    // foo and bar have identical code, so they share the same MAST node. The entrypoint
+    // is a separate procedure, so we have 2 procedures total.
+    assert_eq!(program.num_procedures(), 2);
 }
 
 #[test]
@@ -4460,21 +4491,10 @@ fn test_assembler_debug_info_present() {
     let library = assembler.assemble_library([module]).unwrap();
     let mast_forest = library.mast_forest();
 
-    // Debug info should be present since debug mode is always enabled
-    assert!(
-        !mast_forest.decorators().is_empty(),
-        "Debug info should be present with always-enabled debug mode"
-    );
-
-    // Specifically check for AsmOp decorators that track instruction execution
-    let has_asmop_decorators = mast_forest
-        .decorators()
-        .iter()
-        .any(|d| matches!(d, miden_core::Decorator::AsmOp(_)));
-    assert!(
-        has_asmop_decorators,
-        "AsmOp decorators should be present for tracking instructions"
-    );
+    // Debug info should be present since debug mode is always enabled.
+    // AssemblyOps are now stored separately in DebugInfo (not as Decorator::AsmOp).
+    let has_asm_ops = mast_forest.debug_info().num_asm_ops() > 0;
+    assert!(has_asm_ops, "AssemblyOps should be present for tracking instructions");
 }
 
 #[test]
@@ -4696,6 +4716,8 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
     );
 
     let kernel = Assembler::new(context.source_manager()).assemble_kernel(kernel)?;
+    let kernel_bar_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::bar").unwrap();
+    let kernel_foo_root = kernel.as_ref().get_procedure_root_by_path("::$kernel::foo").unwrap();
 
     let mut assembler = Assembler::with_kernel(context.source_manager(), kernel);
     assembler.compile_and_statically_link(lib)?;
@@ -4706,15 +4728,15 @@ fn test_syscall_resolution_uses_kernel_module() -> TestResult {
         format!("{}", entry.to_display(program.mast_forest()))
     };
 
-    let expected = r#"join
+    let expected = format!(
+        r#"join
     join
         basic_block push(2147483648) push(4294967294) mstore drop noop end
-        asmOp(syscall.::$kernel::foo, 1)
-        syscall.0xe302a447fba1cf164ca808752528232c78b12813da35ec07470c146ed5d3a5d9
+        syscall.{kernel_foo_root}
     end
-    asmOp(syscall.::$kernel::bar, 1)
-    syscall.0x2370cdbd7b7c69035d324820a11a4582fd9d42ac74711be2288bc0922fd698bf
-end"#;
+    syscall.{kernel_bar_root}
+end"#
+    );
     assert_eq!(mast, expected);
 
     Ok(())

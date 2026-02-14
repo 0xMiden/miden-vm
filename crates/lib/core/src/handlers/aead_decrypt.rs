@@ -2,33 +2,33 @@
 //!
 //! This module provides an event handler for decrypting AEAD ciphertext using non-deterministic
 //! advice. When the VM emits an AEAD_DECRYPT_EVENT, this handler reads the ciphertext from memory,
-//! performs decryption using the AEAD-RPO scheme, and pushes the plaintext onto the advice stack
-//! for the MASM decrypt procedure to load.
+//! performs decryption using the AEAD-Poseidon2 scheme, and pushes the plaintext onto the advice
+//! stack for the MASM decrypt procedure to load.
 
 use alloc::{vec, vec::Vec};
 
-use miden_core::EventName;
+use miden_core::{events::EventName, field::PrimeField64};
 use miden_crypto::aead::{
     DataType, EncryptionError,
-    aead_rpo::{AuthTag, EncryptedData, Nonce, SecretKey},
+    aead_poseidon2::{AuthTag, EncryptedData, Nonce, SecretKey},
 };
-use miden_processor::{AdviceMutation, EventError, ProcessState};
+use miden_processor::{ProcessorState, advice::AdviceMutation, event::EventError};
 
 use crate::handlers::read_memory_region;
 
 /// Qualified event name for the AEAD decrypt event.
-pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::aead::decrypt");
+pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("miden::core::crypto::aead::decrypt");
 
 /// Event handler for AEAD decryption.
 ///
 /// This handler is called when the VM emits an AEAD_DECRYPT_EVENT. It reads the full
 /// ciphertext (including padding block) and tag from memory, performs decryption and
-/// tag verification using AEAD-RPO, then pushes the plaintext onto the advice stack.
+/// tag verification using AEAD-Poseidon2, then pushes the plaintext onto the advice stack.
 ///
 /// Process:
 /// 1. Reads full ciphertext from memory at src_ptr ((num_blocks + 1) * 8 elements)
 /// 2. Reads authentication tag from memory at src_ptr + (num_blocks + 1) * 8
-/// 3. Constructs EncryptedData and decrypts using AEAD-RPO
+/// 3. Constructs EncryptedData and decrypts using AEAD-Poseidon2
 /// 4. Extracts only the data blocks (first num_blocks * 8 elements) from plaintext
 /// 5. Pushes the data blocks (WITHOUT padding) onto the advice stack in reverse order
 ///
@@ -47,8 +47,8 @@ pub const AEAD_DECRYPT_EVENT_NAME: EventName = EventName::new("stdlib::crypto::a
 /// 1. The MASM procedure re-verifies the tag when decrypting
 /// 2. The deterministic encryption creates a bijection between plaintext and ciphertext
 /// 3. A malicious prover cannot provide incorrect plaintext without causing tag mismatch
-pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-    // Stack: [event_id, nonce(4), key(4), src_ptr, dst_ptr, num_blocks, ...]
+pub fn handle_aead_decrypt(process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+    // Stack: [event_id, key(4), nonce(4), src_ptr, dst_ptr, num_blocks, ...]
     // where:
     //   src_ptr = ciphertext + encrypted_padding + tag location (input)
     //   dst_ptr = plaintext destination (output)
@@ -56,13 +56,14 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
 
     // Read parameters from stack
     // Note: Stack position 0 contains the Event ID when the handler is called,
-    // so the actual parameters start at position 1
-    // Also note: Words on the stack are stored in reverse element order
-    let nonce_word = process.get_stack_word_be(1);
-    let key_word = process.get_stack_word_be(5);
+    // so the actual parameters start at position 1. Words on the stack are
+    // interpreted in little-endian (memory) order, i.e. element at stack index N
+    // becomes the first limb of the word.
+    let key_word = process.get_stack_word(1);
+    let nonce_word = process.get_stack_word(5);
 
-    let src_ptr = process.get_stack_item(9).as_int();
-    let num_blocks = process.get_stack_item(11).as_int();
+    let src_ptr = process.get_stack_item(9).as_canonical_u64();
+    let num_blocks = process.get_stack_item(11).as_canonical_u64();
 
     // Read ciphertext from memory: (num_blocks + 1) * 8 elements (data + padding)
     let num_ciphertext_elements = (num_blocks + 1) * 8;
@@ -107,10 +108,9 @@ pub fn handle_aead_decrypt(process: &ProcessState) -> Result<Vec<AdviceMutation>
     let mut plaintext_data = plaintext_with_padding;
     plaintext_data.truncate(data_blocks_count);
 
-    // Push plaintext data (WITHOUT padding) onto advice stack
-    // The padding will be added by the MASM encrypt procedure during re-encryption
-    // Note: We push in reverse order so adv_pipe reads them in forward order
-    plaintext_data.reverse();
+    // Push plaintext data (WITHOUT padding) onto advice stack.
+    // Values are provided in structural order; `extend_stack` ensures the first element
+    // ends up at the top of the advice stack, matching `adv_pipe` expectations.
     let advice_stack_mutation = AdviceMutation::extend_stack(plaintext_data);
 
     Ok(vec![advice_stack_mutation])
@@ -140,6 +140,6 @@ mod tests {
 
     #[test]
     fn test_event_name() {
-        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "stdlib::crypto::aead::decrypt");
+        assert_eq!(AEAD_DECRYPT_EVENT_NAME.as_str(), "miden::core::crypto::aead::decrypt");
     }
 }

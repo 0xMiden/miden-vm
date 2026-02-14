@@ -28,7 +28,6 @@ path = "tests/main.rs"
 [features]
 default = ["std"]
 std = ["miden-assembly/std", "miden-utils-sync/std"]
-with-debug-info = []
 
 [dependencies]
 # Miden dependencies
@@ -39,14 +38,13 @@ miden-processor.workspace = true
 miden-utils-sync.workspace = true
 
 # External dependencies
-sha2.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
-blake3.workspace = true
 criterion.workspace = true
 miden-air.workspace = true
 miden-processor = { workspace = true, features = ["testing"] }
+miden-prover.workspace = true
 miden-utils-testing.workspace = true
 miden-verifier.workspace = true
 num = { version = "0.4" }
@@ -56,10 +54,6 @@ rand = { version = "0.9", default-features = false }
 rand_chacha = { version = "0.9", default-features = false }
 rstest = { version = "0.26" }
 serde_json.workspace = true
-sha2 = { version = "0.10" }
-sha3 = { version = "0.10" }
-winter-air.workspace = true
-winter-fri.workspace = true
 
 [build-dependencies]
 env_logger.workspace = true

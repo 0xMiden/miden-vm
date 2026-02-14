@@ -5,12 +5,13 @@ use alloc::{
     sync::Arc,
     vec::Vec,
 };
-use core::{marker::PhantomData, num::NonZeroU32, ops::Range};
+use core::{marker::PhantomData, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
+use miden_core::{Felt, field::{PrimeCharacteristicRing, PrimeField64}};
 
-use crate::{ast::{*, types::{AddressSpace, Type}}, Felt, FieldElement, StarkField, Word};
+use crate::{ast::{*, types::{AddressSpace, Type}}, Word};
 use super::{
     BinEncodedValue, IntValue, PushValue, Token, WordValue, ParseError, ParsingError,
     LiteralErrorKind, DocumentationType
@@ -78,7 +79,6 @@ extern {
         "assert_eq" => Token::AssertEq,
         "assert_eqw" => Token::AssertEqw,
         "begin" => Token::Begin,
-        "breakpoint" => Token::Breakpoint,
         "byte" => Token::Byte,
         "caller" => Token::Caller,
         "call" => Token::Call,
@@ -215,8 +215,10 @@ extern {
         "u32or" => Token::U32Or,
         "u32overflowing_add" => Token::U32OverflowingAdd,
         "u32overflowing_add3" => Token::U32OverflowingAdd3,
-        "u32overflowing_madd" => Token::U32OverflowingMadd,
-        "u32overflowing_mul" => Token::U32OverflowingMul,
+        "u32widening_add" => Token::U32WideningAdd,
+        "u32widening_add3" => Token::U32WideningAdd3,
+        "u32widening_madd" => Token::U32WideningMadd,
+        "u32widening_mul" => Token::U32WideningMul,
         "u32overflowing_sub" => Token::U32OverflowingSub,
         "u32popcnt" => Token::U32Popcnt,
         "u32clz" => Token::U32Clz,
@@ -947,16 +949,9 @@ While: Op = {
 }
 
 Repeat: Op = {
-    <l:@L> "repeat" "." <count:uint> <body:Block> "end" <r:@R> =>? {
-        let span = span!(source_id, l, r);
-        u32::try_from(count)
-            .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
-            .and_then(|count| {
-                NonZeroU32::try_from(count)
-                    .map(|count| Op::Repeat { span, count: count.get(), body })
-                    .map_err(|error| ParseError::User { error: ParsingError::ImmediateOutOfRange { span, range: 1..(u32::MAX as usize) } })
-            })
-    }
+  <l:@L> "repeat" <imm:Imm<U32>> <body:Block> "end" <r:@R> => {
+    Op::Repeat { span: span!(source_id, l, r), count: imm, body }
+  }
 }
 
 #[inline]
@@ -1038,7 +1033,8 @@ Inst: Instruction = {
     "swapdw" => Instruction::SwapDw,
     "u32cast" => Instruction::U32Cast,
     "u32overflowing_add3" => Instruction::U32OverflowingAdd3,
-    "u32overflowing_madd" => Instruction::U32OverflowingMadd,
+    "u32widening_add3" => Instruction::U32WideningAdd3,
+    "u32widening_madd" => Instruction::U32WideningMadd,
     "u32popcnt" => Instruction::U32Popcnt,
     "u32clz" => Instruction::U32Clz,
     "u32ctz" => Instruction::U32Ctz,
@@ -1116,7 +1112,6 @@ Call: Instruction = {
 
 #[inline]
 Debug: Instruction = {
-    "breakpoint" => Instruction::Breakpoint,
     "debug" "." "stack" <n:MaybeImm<U8>> => {
         match n {
             Some(n) => Instruction::Debug(DebugOptions::StackTop(n.map(|spanned| spanned.into_inner()))),
@@ -1149,7 +1144,7 @@ Debug: Instruction = {
     "emit" "." <name:ConstantName> => Instruction::EmitImm(Immediate::Constant(name)),
     // emit.event("...") inline hashing
     <l:@L> "emit" "." "event" "(" <s:string> ")" <r:@R> => {
-        let event_id = miden_core::EventId::from_name(s).as_felt();
+        let event_id = miden_core::events::EventId::from_name(s).as_felt();
         Instruction::EmitImm(Immediate::Value(Span::new(span!(source_id, l, r), event_id)))
     },
     "trace" <id:Imm<U32>> => Instruction::Trace(id),
@@ -1373,6 +1368,13 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingAdd))],
         }
     },
+    <l:@L> "u32widening_add" <imm:MaybeImm<U32>> <r:@R> => {
+        let span = span!(source_id, l, r);
+        match imm {
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningAddImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningAdd))],
+        }
+    },
     <l:@L> "u32overflowing_sub" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_id, l, r);
         match imm {
@@ -1380,11 +1382,11 @@ FoldableInstWithU32Immediate: SmallOpsVec = {
             None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingSub))],
         }
     },
-    <l:@L> "u32overflowing_mul" <imm:MaybeImm<U32>> <r:@R> => {
+    <l:@L> "u32widening_mul" <imm:MaybeImm<U32>> <r:@R> => {
         let span = span!(source_id, l, r);
         match imm {
-            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMulImm(imm)))],
-            None => smallvec![Op::Inst(Span::new(span, Instruction::U32OverflowingMul))],
+            Some(imm) => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningMulImm(imm)))],
+            None => smallvec![Op::Inst(Span::new(span, Instruction::U32WideningMul))],
         }
     },
     <l:@L> "u32shl" <imm:MaybeImm<Shift32>> <r:@R> => {
@@ -1878,7 +1880,7 @@ IntOrHexImm: Immediate<IntValue> = {
 
 IntValue: IntValue = {
     <l:@L> <n:uint> <r:@R> =>? {
-        if n >= Felt::MODULUS {
+        if n >= Felt::ORDER_U64 {
             return Err(ParseError::User { error: ParsingError::InvalidLiteral {
                 span: span!(source_id, l, r),
                 kind: LiteralErrorKind::FeltOverflow
@@ -2225,8 +2227,10 @@ Opcode: &'static str = {
     "u32or" => "u32or",
     "u32overflowing_add" => "u32overflowing_add",
     "u32overflowing_add3" => "u32overflowing_add3",
-    "u32overflowing_madd" => "u32overflowing_madd",
-    "u32overflowing_mul" => "u32overflowing_mul",
+    "u32widening_add" => "u32widening_add",
+    "u32widening_add3" => "u32widening_add3",
+    "u32widening_madd" => "u32widening_madd",
+    "u32widening_mul" => "u32widening_mul",
     "u32overflowing_sub" => "u32overflowing_sub",
     "u32popcnt" => "u32popcnt",
     "u32clz" => "u32clz",

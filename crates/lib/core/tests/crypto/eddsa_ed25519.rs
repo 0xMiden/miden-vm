@@ -9,24 +9,27 @@
 use core::convert::TryFrom;
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    Felt, Word,
+    events::EventName,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
     dsa::eddsa_ed25519::sign as eddsa_sign,
-    handlers::{
-        bytes_to_packed_u32_felts,
-        eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
-    },
+    handlers::eddsa_ed25519::{EddsaPrecompile, EddsaRequest},
 };
 use miden_crypto::{
     dsa::eddsa_25519_sha512::{PublicKey, SecretKey, Signature},
-    hash::rpo::Rpo256,
+    hash::{poseidon2::Poseidon2, sha2::Sha512},
 };
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 use rand::{SeedableRng, rngs::StdRng};
-use sha2::{Digest, Sha512};
 
 use crate::helpers::masm_store_felts;
 
@@ -65,7 +68,7 @@ fn test_eddsa_verify_prehash_cases() {
     let test = build_debug_test!(source, &[]);
     let output = test.execute().unwrap();
 
-    let result = output.stack_outputs().get_stack_item(0).unwrap();
+    let result = output.stack_outputs().get_element(0).unwrap();
     assert_eq!(result, Felt::ONE, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -93,7 +96,7 @@ fn test_eddsa_verify_prehash_cases() {
     let test = build_debug_test!(source, &[]);
     let output = test.execute().unwrap();
 
-    let result = output.stack_outputs().get_stack_item(0).unwrap();
+    let result = output.stack_outputs().get_element(0).unwrap();
     assert_eq!(result, Felt::ZERO, "verification result mismatch");
 
     let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -133,16 +136,17 @@ fn test_eddsa_verify_prehash_impl_commitment() {
         let output = test.execute().unwrap();
         let stack = output.stack_outputs();
 
-        let commitment = stack.get_stack_word_be(0).unwrap();
-        let tag = stack.get_stack_word_be(4).unwrap();
+        let commitment = stack.get_word(0).unwrap();
+        let tag = stack.get_word(4).unwrap();
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
 
         let verifier_commitment =
             EddsaPrecompile.verify(&request.to_bytes()).expect("verifier should succeed");
         assert_eq!(precompile_commitment, verifier_commitment);
 
-        let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid));
+        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
+        let result = stack.get_element(5).unwrap();
+        assert_eq!(result, Felt::from_bool(expected_valid));
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
@@ -163,27 +167,29 @@ fn test_eddsa_verify_with_message() {
     let secret_key = SecretKey::with_rng(&mut rng);
 
     // Compute public key commitment
-    let pk_felts = bytes_to_packed_u32_felts(&secret_key.public_key().to_bytes());
-    let pk_commitment = Rpo256::hash_elements(&pk_felts);
+    let pk_felts = bytes_to_packed_u32_elements(&secret_key.public_key().to_bytes());
+    let pk_commitment = Poseidon2::hash_elements(&pk_felts);
 
-    let stack_words = [message, pk_commitment];
-    let stack_inputs: Vec<_> =
-        Word::words_as_elements(&stack_words).iter().map(Felt::as_int).collect();
+    let advice: Vec<_> =
+        eddsa_sign(&secret_key, message).iter().map(Felt::as_canonical_u64).collect();
 
-    let advice: Vec<_> = eddsa_sign(&secret_key, message).iter().map(Felt::as_int).collect();
-
-    let source = "
+    // Use push.{word} syntax for correct LE stack layout
+    let source = format!(
+        "
             use miden::core::crypto::dsa::eddsa_ed25519
             use miden::core::sys
 
             begin
+                push.{message}
+                push.{pk_commitment}
                 exec.eddsa_ed25519::verify
 
                 exec.sys::truncate_stack
             end
-        ";
+        "
+    );
 
-    let test = build_debug_test!(source, &stack_inputs, &advice);
+    let test = build_debug_test!(&source, &[], &advice);
 
     let _ = test.execute().unwrap();
 }
@@ -206,25 +212,29 @@ impl EddsaSignatureHandler {
 }
 
 impl EventHandler for EddsaSignatureHandler {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let provided_pk_rpo = process.get_stack_word_be(1);
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
+        // Position 0 has the event ID, so pk_commitment starts at position 1
+        let provided_pk_commitment = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
             let pk = secret_key.public_key();
-            let pk_felts = bytes_to_packed_u32_felts(&pk.to_bytes());
-            Rpo256::hash_elements(&pk_felts)
+            let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
+            Poseidon2::hash_elements(&pk_felts)
         };
         assert_eq!(
-            provided_pk_rpo, pk_commitment,
+            provided_pk_commitment, pk_commitment,
             "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_rpo
+            pk_commitment, provided_pk_commitment
         );
 
-        let message = process.get_stack_word_be(5);
+        // Message starts at position 5 (after event_id + pk_commitment)
+        let message = process.get_stack_word(5);
         let calldata = eddsa_sign(&secret_key, message);
 
-        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+        // Use extend_stack to make elements available in order: pk first, then sig
+        Ok(vec![AdviceMutation::extend_stack(calldata)])
     }
 }
 
@@ -236,8 +246,8 @@ fn test_eddsa_verify_high_level_wrapper() {
     let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
 
     let pk_commitment = {
-        let pk_felts = bytes_to_packed_u32_felts(&public_key.to_bytes());
-        Rpo256::hash_elements(&pk_felts)
+        let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
+        Poseidon2::hash_elements(&pk_felts)
     };
 
     let source = format!(
@@ -285,8 +295,10 @@ fn generate_valid_data() -> EddsaTestData {
     let pk = secret_key.public_key();
     let message = Word::new([1, 2, 3, 4].map(Felt::new));
     let sig = secret_key.sign(message);
-    let message_bytes: Vec<_> =
-        message.into_iter().flat_map(|felt| felt.as_int().to_le_bytes()).collect();
+    let message_bytes: Vec<_> = message
+        .into_iter()
+        .flat_map(|felt| felt.as_canonical_u64().to_le_bytes())
+        .collect();
 
     EddsaTestData {
         pk,
@@ -309,25 +321,21 @@ fn generate_invalid_signature_data() -> EddsaTestData {
 }
 
 fn compute_k_digest_bytes(pk: &PublicKey, message: &[u8; 32], sig: &Signature) -> [u8; 64] {
-    let sig_bytes = sig.to_bytes();
-    let r_bytes = &sig_bytes[..32];
-    let pk_bytes = pk.to_bytes();
+    let mut bytes = sig.to_bytes()[..32].to_vec(); // extract r_bytes
+    bytes.append(&mut pk.to_bytes());
+    bytes.extend_from_slice(message);
 
-    let mut hasher = Sha512::new();
-    hasher.update(r_bytes);
-    hasher.update(pk_bytes);
-    hasher.update(message);
-    hasher.finalize().into()
+    Sha512::hash(&bytes).into()
 }
 
 // MASM GENERATION HELPERS
 // ================================================================================================
 
 fn generate_memory_store_masm(request: &EddsaRequest, message: &[u8; 32]) -> String {
-    let pk_felts = bytes_to_packed_u32_felts(&request.pk().to_bytes());
-    let k_digest_felts = bytes_to_packed_u32_felts(&request.k_digest().to_bytes());
-    let sig_felts = bytes_to_packed_u32_felts(&request.sig().to_bytes());
-    let msg_felts = bytes_to_packed_u32_felts(message);
+    let pk_felts = bytes_to_packed_u32_elements(&request.pk().to_bytes());
+    let k_digest_felts = bytes_to_packed_u32_elements(&request.k_digest().to_bytes());
+    let sig_felts = bytes_to_packed_u32_elements(&request.sig().to_bytes());
+    let msg_felts = bytes_to_packed_u32_elements(message);
 
     [
         masm_store_felts(&pk_felts, PK_ADDR),

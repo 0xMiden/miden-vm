@@ -18,7 +18,6 @@ pub struct AssemblyOp {
     context_name: String,
     op: String,
     num_cycles: u8,
-    should_break: bool,
 }
 
 impl AssemblyOp {
@@ -29,15 +28,8 @@ impl AssemblyOp {
         context_name: String,
         num_cycles: u8,
         op: String,
-        should_break: bool,
     ) -> Self {
-        Self {
-            location,
-            context_name,
-            op,
-            num_cycles,
-            should_break,
-        }
+        Self { location, context_name, op, num_cycles }
     }
 
     /// Returns the [Location] for this operation, if known
@@ -58,11 +50,6 @@ impl AssemblyOp {
     /// Returns the assembly instruction corresponding to this decorator.
     pub fn op(&self) -> &str {
         &self.op
-    }
-
-    /// Returns `true` if there is a breakpoint for the current operation.
-    pub const fn should_break(&self) -> bool {
-        self.should_break
     }
 
     // STATE MUTATORS

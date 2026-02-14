@@ -4,9 +4,9 @@ use alloc::{
 };
 use core::{fmt, ops::RangeInclusive};
 
-use miden_core::{DebugOptions, FMP_ADDR, Felt};
+use miden_core::{FMP_ADDR, Felt, operations::DebugOptions};
 
-use crate::{DebugError, ProcessState, TraceError, host::handlers::DebugHandler};
+use crate::{DebugError, PrimeField64, ProcessorState, TraceError, host::handlers::DebugHandler};
 
 // WRITER IMPLEMENTATIONS
 // ================================================================================================
@@ -56,7 +56,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
 impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
     fn on_debug(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         options: &DebugOptions,
     ) -> Result<(), DebugError> {
         match *options {
@@ -75,23 +75,21 @@ impl<W: fmt::Write + Sync> DebugHandler for DefaultDebugHandler<W> {
                 self.print_local_interval(process, n..=m, num_locals as u32)
             },
             DebugOptions::AdvStackTop(n) => {
-                // Reverse the advice stack so last element becomes index 0
+                // .stack() already returns elements from top (index 0) to bottom
                 let stack = process.advice_provider().stack();
-                let reversed_stack: Vec<_> = stack.iter().copied().rev().collect();
-
                 let count = if n == 0 { None } else { Some(n as usize) };
-                self.print_stack(&reversed_stack, count, "Advice stack", process)
+                self.print_stack(&stack, count, "Advice stack", process)
             },
         }
         .map_err(DebugError::from)
     }
 
-    fn on_trace(&mut self, process: &ProcessState, trace_id: u32) -> Result<(), TraceError> {
+    fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         writeln!(
             self.writer,
             "Trace with id {} emitted at step {} in context {}",
             trace_id,
-            process.clk(),
+            process.clock(),
             process.ctx()
         )
         .map_err(TraceError::from)
@@ -105,10 +103,10 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
         stack: &[Felt],
         n: Option<usize>,
         stack_type: &str,
-        process: &ProcessState,
+        process: &ProcessorState,
     ) -> fmt::Result {
         if stack.is_empty() {
-            writeln!(self.writer, "{stack_type} empty before step {}.", process.clk())?;
+            writeln!(self.writer, "{stack_type} empty before step {}.", process.clock())?;
             return Ok(());
         }
 
@@ -122,10 +120,10 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
                 self.writer,
                 "{stack_type} state in interval [0, {}] before step {}:",
                 num_items - 1,
-                process.clk()
+                process.clock()
             )?
         } else {
-            writeln!(self.writer, "{stack_type} state before step {}:", process.clk())?
+            writeln!(self.writer, "{stack_type} state before step {}:", process.clock())?
         }
 
         // Build stack items for display
@@ -149,13 +147,13 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     }
 
     /// Writes the whole memory state at the cycle `clk` in context `ctx`.
-    fn print_mem_all(&mut self, process: &ProcessState) -> fmt::Result {
+    fn print_mem_all(&mut self, process: &ProcessorState) -> fmt::Result {
         let mem = process.get_mem_state(process.ctx());
 
         writeln!(
             self.writer,
             "Memory state before step {} for the context {}:",
-            process.clk(),
+            process.clock(),
             process.ctx()
         )?;
 
@@ -171,7 +169,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// Writes memory values in the provided addresses interval.
     fn print_mem_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         range: RangeInclusive<u32>,
     ) -> fmt::Result {
         let start = *range.start();
@@ -183,7 +181,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "Memory state before step {} for the context {} at address {:#010x}: {value_str}",
-                process.clk(),
+                process.clock(),
                 process.ctx(),
                 start
             )
@@ -191,7 +189,7 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "Memory state before step {} for the context {} in the interval [{}, {}]:",
-                process.clk(),
+                process.clock(),
                 process.ctx(),
                 start,
                 end
@@ -214,16 +212,16 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
     /// The interval given is inclusive on *both* ends.
     fn print_local_interval(
         &mut self,
-        process: &ProcessState,
+        process: &ProcessorState,
         range: RangeInclusive<u16>,
         num_locals: u32,
     ) -> fmt::Result {
         let local_memory_offset = {
             let fmp = process
-                .get_mem_value(process.ctx(), FMP_ADDR.as_int() as u32)
+                .get_mem_value(process.ctx(), FMP_ADDR.as_canonical_u64() as u32)
                 .expect("FMP address is empty");
 
-            fmp.as_int() as u32 - num_locals
+            fmp.as_canonical_u64() as u32 - num_locals
         };
 
         let start = *range.start() as u32;
@@ -237,13 +235,13 @@ impl<W: fmt::Write + Sync> DefaultDebugHandler<W> {
             writeln!(
                 self.writer,
                 "State of procedure local {start} before step {}: {value_str}",
-                process.clk(),
+                process.clock(),
             )
         } else {
             writeln!(
                 self.writer,
                 "State of procedure locals [{start}, {end}] before step {}:",
-                process.clk()
+                process.clock()
             )?;
             let local_items: Vec<_> = range
                 .map(|local_idx| {

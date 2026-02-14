@@ -7,7 +7,7 @@ use alloc::{format, string::String, sync::Arc, vec::Vec};
 
 use miden_assembly_syntax::{Library, Report, ast::QualifiedProcedureName};
 pub use miden_assembly_syntax::{Version, VersionError};
-use miden_core::{Program, Word};
+use miden_core::{Word, program::Program};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -130,5 +130,17 @@ impl Package {
                 "invalid entrypoint: library does not export '{entrypoint}'"
             )))
         }
+    }
+
+    /// Returns the procedure name for the given MAST root digest, if present.
+    ///
+    /// This allows debuggers to resolve human-readable procedure names during execution.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.mast.mast_forest().procedure_name(digest)
+    }
+
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
+        self.mast.mast_forest().procedure_names()
     }
 }

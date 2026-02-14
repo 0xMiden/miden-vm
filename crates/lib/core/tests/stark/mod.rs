@@ -85,10 +85,10 @@ pub fn generate_recursive_verifier_data(
     let mut host = DefaultHost::default();
 
     let options =
-        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Rpo256);
+        ProvingOptions::new(27, 8, 0, FieldExtension::Quadratic, 4, 127, HashFunction::Poseidon2);
 
     let (stack_outputs, proof) =
-        prove(&program, stack_inputs.clone(), advice_inputs, &mut host, options).unwrap();
+        prove(&program, stack_inputs, advice_inputs, &mut host, options).unwrap();
 
     let program_info = ProgramInfo::from(program);
 
@@ -146,8 +146,7 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
 
     // 2) Generate the variable length public inputs, i.e., the kernel procedures digests
 
-    let num_elements_kernel_proc_digests =
-        num_kernel_proc_digests * (WORD_SIZE.next_multiple_of(8));
+    let num_elements_kernel_proc_digests = num_kernel_proc_digests * WORD_SIZE.next_multiple_of(8);
     let kernel_procedures_digests =
         generate_kernel_procedures_digests(&mut rng, num_kernel_proc_digests);
 
@@ -166,9 +165,9 @@ fn variable_length_public_inputs(#[case] num_kernel_proc_digests: usize) {
     // 5) Compute the expected randomness-reduced value of all the kernel procedures digests
 
     let beta =
-        QuadFelt::new(Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1]));
+        QuadFelt::new([Felt::new(auxiliary_rand_values[0]), Felt::new(auxiliary_rand_values[1])]);
     let alpha =
-        QuadFelt::new(Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3]));
+        QuadFelt::new([Felt::new(auxiliary_rand_values[2]), Felt::new(auxiliary_rand_values[3])]);
     let reduced_value_inv =
         reduce_kernel_procedures_digests(&kernel_procedures_digests, alpha, beta).inv();
     let [reduced_value_inv_0, reduced_value_inv_1] = reduced_value_inv.to_base_elements();
@@ -309,9 +308,9 @@ fn reduce_digest(digest: &[u64], alpha: QuadFelt, beta: QuadFelt) -> QuadFelt {
     alpha
         + KERNEL_OP_LABEL.into()
         + beta
-            * digest.iter().fold(QuadFelt::ZERO, |acc, coef| {
-                acc * beta + QuadFelt::new(Felt::new(*coef), ZERO)
-            })
+            * digest
+                .iter()
+                .fold(QuadFelt::ZERO, |acc, coef| acc * beta + QuadFelt::from(*coef))
 }
 
 // CONSTANTS

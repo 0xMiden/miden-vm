@@ -1,15 +1,16 @@
 use core::fmt;
 
+use miden_crypto::field::PrimeField64;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 mod decorators;
 pub use decorators::{AssemblyOp, DebugOptions, Decorator, DecoratorList};
-use opcode_constants::*;
+pub use opcode_constants::*;
 
 use crate::{
     Felt,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // OPERATIONS OP CODES
@@ -26,7 +27,7 @@ use crate::{
 /// - 11xxx--: operations where constraint degree can be up to 5. These include control flow
 ///   operations and some other operations requiring very high degree constraints.
 #[rustfmt::skip]
-pub(super) mod opcode_constants {
+mod opcode_constants {
     pub const OPCODE_NOOP: u8           = 0b0000_0000;
     pub const OPCODE_EQZ: u8            = 0b0000_0001;
     pub const OPCODE_NEG: u8            = 0b0000_0010;
@@ -518,7 +519,7 @@ pub enum Operation {
     /// - All other stack elements remain the same.
     Pipe = OPCODE_PIPE,
 
-    /// Encrypts data from source memory to destination memory using the RPO sponge keystream.
+    /// Encrypts data from source memory to destination memory using the Poseidon2 sponge keystream.
     ///
     /// Two consecutive words (8 elements) are loaded from source memory, each element is added
     /// to the corresponding element in the rate (top 8 stack elements), and the resulting
@@ -537,7 +538,7 @@ pub enum Operation {
     CryptoStream = OPCODE_CRYPTOSTREAM,
 
     // ----- cryptographic operations ------------------------------------------------------------
-    /// Performs a Rescue Prime Optimized permutation on the top 3 words of the operand stack,
+    /// Performs a Poseidon2 permutation on the top 3 words of the operand stack,
     /// where the top 2 words are the rate (words C and B), the deepest word is the capacity (word
     /// A), and the digest output is the middle word E.
     ///
@@ -827,7 +828,7 @@ impl Serializable for Operation {
             | Operation::U32assert2(err_code) => {
                 err_code.write_into(target);
             },
-            Operation::Push(value) => value.as_int().write_into(target),
+            Operation::Push(value) => value.as_canonical_u64().write_into(target),
 
             // Note: we explicitly write out all the operations so that whenever we make a
             // modification to the `Operation` enum, we get a compile error here. This
@@ -1037,5 +1038,13 @@ impl Deserializable for Operation {
         };
 
         Ok(operation)
+    }
+
+    /// Returns the minimum serialized size: 1 byte opcode.
+    ///
+    /// Some operations have additional payload (e.g., Push has 8 bytes for Felt),
+    /// but the minimum is just the opcode byte.
+    fn min_serialized_size() -> usize {
+        1
     }
 }

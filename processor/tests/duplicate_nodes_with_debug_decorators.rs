@@ -1,5 +1,7 @@
 use miden_assembly::testing::TestContext;
-use miden_processor::{AdviceInputs, DefaultHost, ExecutionOptions, Operation, StackInputs};
+use miden_processor::{
+    DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs, operation::Operation,
+};
 
 /// Ensures that equal MAST nodes don't get added twice to a MAST forest
 ///
@@ -22,9 +24,9 @@ fn duplicate_nodes_with_debug_decorators() {
     let program = context.assemble(program_source).unwrap();
     let mast_forest = program.mast_forest();
 
-    // With debug mode always enabled, we should have debug decorators
+    // With debug mode always enabled, we should have debug info
     assert!(
-        !mast_forest.decorators().is_empty(),
+        !mast_forest.debug_info().is_empty(),
         "Should have debug decorators with always-enabled debug mode"
     );
 
@@ -37,7 +39,7 @@ fn duplicate_nodes_with_debug_decorators() {
 
     // Verify the program can be executed (functional test)
     let mut host = DefaultHost::default();
-    let result = miden_processor::execute(
+    let result = miden_processor::execute_sync(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),

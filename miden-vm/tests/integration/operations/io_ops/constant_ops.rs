@@ -73,7 +73,8 @@ fn push_without_separator() {
     0100000000000000\
     0200000000000000\
     0300000000000000";
-    let expected = vec![3, 2, 1, 0];
+    // First word goes to position 0 (top)
+    let expected = vec![0, 1, 2, 3];
 
     let test = build_op_test!(asm_op);
     test.expect_stack(&expected);

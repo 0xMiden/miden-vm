@@ -1,14 +1,12 @@
-use miden_crypto::{Felt, ONE, Word};
-use miden_utils_indexing::Idx;
-
 use super::*;
 use crate::{
-    Decorator, Operation,
+    Felt, ONE, Word,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, DecoratorId, ExternalNodeBuilder, LoopNodeBuilder,
-        MastNodeErrorContext,
         node::{MastForestContributor, MastNodeExt},
     },
+    operations::{DebugOptions, Decorator, Operation},
+    utils::Idx,
 };
 
 fn block_foo() -> BasicBlockNodeBuilder {
@@ -155,7 +153,7 @@ fn mast_forest_merge_remap() {
 #[test]
 fn mast_forest_merge_duplicate() {
     let mut forest_a = MastForest::new();
-    forest_a.add_decorator(Decorator::Debug(crate::DebugOptions::MemAll)).unwrap();
+    forest_a.add_decorator(Decorator::Debug(DebugOptions::MemAll)).unwrap();
     forest_a.add_decorator(Decorator::Trace(25)).unwrap();
 
     let bar_block_id = block_bar().add_to_forest(&mut forest_a).unwrap();
@@ -437,10 +435,14 @@ fn mast_forest_merge_decorators() {
         panic!("expected basic block node");
     };
 
-    assert_eq!(
-        &merged_foo_block.decorators(&merged).collect::<Vec<_>>()[..],
-        &[(0, merged_deco1), (0, merged_deco2)]
-    );
+    // Test basic block decorators using new MastForest API
+    // The basic block should have Trace(1) and Trace(2) as before-enter decorators at index 0
+    let merged_foo_block_id = merged_foo_block.linked_id().unwrap();
+
+    // For basic blocks, we need to combine before_enter, operation-indexed, and after_exit
+    // decorators using the helper method
+    let all_decorators = merged.all_decorators(merged_foo_block_id);
+    assert_eq!(all_decorators, vec![(0, merged_deco1), (0, merged_deco2)]);
 
     // Asserts that there exists exactly one Loop Node with the given decorators.
     assert_eq!(

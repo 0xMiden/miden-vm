@@ -1,5 +1,35 @@
+//! MAST forest: a collection of procedures represented as Merkle trees.
+//!
+//! # Deserializing from untrusted sources
+//!
+//! When loading a `MastForest` from bytes you don't fully trust (network, user upload, etc.),
+//! use [`UntrustedMastForest`] instead of calling `MastForest::read_from_bytes` directly:
+//!
+//! ```ignore
+//! use miden_core::mast::UntrustedMastForest;
+//!
+//! let forest = UntrustedMastForest::read_from_bytes(&bytes)?
+//!     .validate()?;
+//! ```
+//!
+//! For maximum protection against denial-of-service attacks from malicious input, use
+//! [`UntrustedMastForest::read_from_bytes_with_budget`] which limits memory consumption:
+//!
+//! ```ignore
+//! use miden_core::mast::UntrustedMastForest;
+//!
+//! // Budget limits pre-allocation sizes and total bytes consumed
+//! let forest = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?
+//!     .validate()?;
+//! ```
+//!
+//! This recomputes all node hashes and checks structural invariants before returning a usable
+//! `MastForest`. Direct deserialization via `MastForest::read_from_bytes` trusts the serialized
+//! hashes and should only be used for data from trusted sources (e.g. compiled locally).
+
 use alloc::{
     collections::{BTreeMap, BTreeSet},
+    string::String,
     sync::Arc,
     vec::Vec,
 };
@@ -8,7 +38,7 @@ use core::{
     ops::{Index, IndexMut},
 };
 
-pub use miden_utils_indexing::{IndexVec, IndexedVecError};
+use miden_utils_sync::OnceLockCompat;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -19,20 +49,26 @@ pub use node::{
     BasicBlockNode, BasicBlockNodeBuilder, CallNode, CallNodeBuilder, DecoratedOpLink,
     DecoratorOpLinkIterator, DecoratorStore, DynNode, DynNodeBuilder, ExternalNode,
     ExternalNodeBuilder, JoinNode, JoinNodeBuilder, LoopNode, LoopNodeBuilder,
-    MastForestContributor, MastNode, MastNodeBuilder, MastNodeErrorContext, MastNodeExt,
-    OP_BATCH_SIZE, OP_GROUP_SIZE, OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
+    MastForestContributor, MastNode, MastNodeBuilder, MastNodeExt, OP_BATCH_SIZE, OP_GROUP_SIZE,
+    OpBatch, OperationOrDecorator, SplitNode, SplitNodeBuilder,
 };
 
 use crate::{
-    AdviceMap, Decorator, Felt, Idx, LexicographicWord, Word,
-    crypto::hash::Hasher,
-    utils::{ByteWriter, DeserializationError, Serializable, hash_string_to_word},
+    Felt, LexicographicWord, Word,
+    advice::AdviceMap,
+    field::PrimeField64,
+    operations::{AssemblyOp, Decorator},
+    serde::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    },
+    utils::{Idx, IndexVec, hash_string_to_word},
 };
 
 mod debuginfo;
 pub use debuginfo::{
-    DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError, NodeToDecoratorIds,
-    OpToDecoratorIds,
+    AsmOpIndexError, DebugInfo, DecoratedLinks, DecoratedLinksIter, DecoratorIndexError,
+    NodeToDecoratorIds, OpToAsmOpId, OpToDecoratorIds,
 };
 
 mod serialization;
@@ -58,9 +94,9 @@ mod tests;
 
 /// Represents one or more procedures, represented as a collection of [`MastNode`]s.
 ///
-/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A [`crate::Program`]
-/// can be built from a [`MastForest`] to specify an entrypoint.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+/// A [`MastForest`] does not have an entrypoint, and hence is not executable. A
+/// [`crate::program::Program`] can be built from a [`MastForest`] to specify an entrypoint.
+#[derive(Clone, Debug, Default)]
 pub struct MastForest {
     /// All of the nodes local to the trees comprising the MAST forest.
     nodes: IndexVec<MastNodeId, MastNode>,
@@ -74,6 +110,10 @@ pub struct MastForest {
     /// Debug information including decorators and error codes.
     /// Always present (as per issue #1821), but can be empty for stripped builds.
     debug_info: DebugInfo,
+
+    /// Cached commitment to this MAST forest (commitment to all roots).
+    /// This is computed lazily on first access and invalidated on any mutation.
+    commitment_cache: OnceLockCompat<Word>,
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -86,9 +126,24 @@ impl MastForest {
             roots: Vec::new(),
             advice_map: AdviceMap::default(),
             debug_info: DebugInfo::new(),
+            commitment_cache: OnceLockCompat::new(),
         }
     }
 }
+
+// ------------------------------------------------------------------------------------------------
+/// Equality implementations
+impl PartialEq for MastForest {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare all fields except commitment_cache, which is derived data
+        self.nodes == other.nodes
+            && self.roots == other.roots
+            && self.advice_map == other.advice_map
+            && self.debug_info == other.debug_info
+    }
+}
+
+impl Eq for MastForest {}
 
 // ------------------------------------------------------------------------------------------------
 /// State mutators
@@ -108,6 +163,8 @@ impl MastForest {
 
         if !self.roots.contains(&new_root_id) {
             self.roots.push(new_root_id);
+            // Invalidate the cached commitment since we modified the roots
+            self.commitment_cache.take();
         }
     }
 
@@ -132,38 +189,38 @@ impl MastForest {
 
         self.remap_and_add_nodes(retained_nodes, &id_remappings);
         self.remap_and_add_roots(old_root_ids, &id_remappings);
+
+        // Remap the asm_op_storage to use the new node IDs
+        self.debug_info.remap_asm_op_storage(&id_remappings);
+
+        // Invalidate the cached commitment since we modified the forest structure
+        self.commitment_cache.take();
+
         id_remappings
     }
 
-    /// Removes all decorators from this MAST forest.
+    /// Clears all [`DebugInfo`] from this forest: decorators, error codes, and procedure names.
     ///
-    /// This method modifies the forest in-place, removing all decorator information
-    /// including operation-indexed decorators, before-enter decorators, after-exit
-    /// decorators, and error codes while keeping the CSR structure valid.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use miden_core::mast::MastForest;
-    ///
-    /// let mut forest = MastForest::new();
-    /// // Add decorators and nodes to the forest
-    /// forest.strip_decorators(); // forest is now stripped
     /// ```
-    pub fn strip_decorators(&mut self) {
+    /// # use miden_core::mast::MastForest;
+    /// let mut forest = MastForest::new();
+    /// forest.clear_debug_info();
+    /// assert!(forest.decorators().is_empty());
+    /// ```
+    pub fn clear_debug_info(&mut self) {
         self.debug_info = DebugInfo::empty_for_nodes(self.nodes.len());
     }
 
     /// Compacts the forest by merging duplicate nodes.
     ///
     /// This operation performs node deduplication by merging the forest with itself.
-    /// The method assumes that decorators have already been stripped if that is desired.
-    /// The operation modifies the forest in-place, updating all node references as needed.
+    /// The method assumes that debug info has already been cleared if that is desired.
+    /// This method consumes the forest and returns a new compacted forest.
     ///
     /// The process works by:
     /// 1. Merging the forest with itself to deduplicate identical nodes
     /// 2. Updating internal node references and remappings
-    /// 3. Modifying the forest in-place with the compacted result
+    /// 3. Returning the compacted forest and root map
     ///
     /// # Examples
     ///
@@ -173,26 +230,21 @@ impl MastForest {
     /// let mut forest = MastForest::new();
     /// // Add nodes to the forest
     ///
-    /// // First strip decorators if needed
-    /// forest.strip_decorators();
+    /// // First clear debug info if needed
+    /// forest.clear_debug_info();
     ///
-    /// // Then compact the forest
-    /// let root_map = forest.compact();
+    /// // Then compact the forest (consumes the original)
+    /// let (compacted_forest, root_map) = forest.compact();
     ///
-    /// // Forest is now compacted with duplicate nodes merged
+    /// // compacted_forest is now compacted with duplicate nodes merged
     /// ```
-    pub fn compact(&mut self) -> MastForestRootMap {
+    pub fn compact(self) -> (MastForest, MastForestRootMap) {
         // Merge with itself to deduplicate nodes
         // Note: This cannot fail for a self-merge under normal conditions.
         // The only possible failures (TooManyNodes, TooManyDecorators) would require the
         // original forest to be at capacity limits, at which point compaction wouldn't help.
-        let (compacted_forest, root_map) = MastForest::merge([&*self])
-            .expect("Failed to compact MastForest: this should never happen during self-merge");
-
-        // Replace current forest with compacted version
-        *self = compacted_forest;
-
-        root_map
+        MastForest::merge([&self])
+            .expect("Failed to compact MastForest: this should never happen during self-merge")
     }
 
     /// Merges all `forests` into a new [`MastForest`].
@@ -384,7 +436,20 @@ impl MastForest {
     ) -> Word {
         let mut digests: Vec<Word> = node_ids.into_iter().map(|&id| self[id].digest()).collect();
         digests.sort_unstable_by_key(|word| LexicographicWord::from(*word));
-        miden_crypto::hash::rpo::Rpo256::merge_many(&digests)
+        miden_crypto::hash::poseidon2::Poseidon2::merge_many(&digests)
+    }
+
+    /// Returns the commitment to this MAST forest.
+    ///
+    /// The commitment is computed as the sequential hash of all procedure roots in the forest.
+    /// This value is cached after the first computation and reused for subsequent calls,
+    /// unless the forest is mutated (in which case the cache is invalidated).
+    ///
+    /// The commitment uniquely identifies the forest's structure, as each root's digest
+    /// transitively includes all of its descendants. Therefore, a commitment to all roots
+    /// is a commitment to the entire forest.
+    pub fn commitment(&self) -> Word {
+        *self.commitment_cache.get_or_init(|| self.compute_nodes_commitment(&self.roots))
     }
 
     /// Returns the number of nodes in this MAST forest.
@@ -403,6 +468,39 @@ impl MastForest {
 
     pub fn advice_map_mut(&mut self) -> &mut AdviceMap {
         &mut self.advice_map
+    }
+
+    // SERIALIZATION
+    // --------------------------------------------------------------------------------------------
+
+    /// Serializes this MastForest without debug information.
+    ///
+    /// This produces a smaller output by omitting decorators, error codes, and procedure names.
+    /// The resulting bytes can be deserialized with the standard [`Deserializable`] impl,
+    /// which auto-detects the format and creates an empty [`DebugInfo`].
+    ///
+    /// Use this for production builds where debug info is not needed.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use miden_core::{mast::MastForest, serde::Serializable};
+    ///
+    /// let forest = MastForest::new();
+    ///
+    /// // Full serialization (with debug info)
+    /// let full_bytes = forest.to_bytes();
+    ///
+    /// // Stripped serialization (without debug info)
+    /// let mut stripped_bytes = Vec::new();
+    /// forest.write_stripped(&mut stripped_bytes);
+    ///
+    /// // Both can be deserialized the same way
+    /// // let restored = MastForest::read_from_bytes(&stripped_bytes).unwrap();
+    /// ```
+    pub fn write_stripped<W: ByteWriter>(&self, target: &mut W) {
+        use serialization::StrippedMastForest;
+        StrippedMastForest(self).write_into(target);
     }
 }
 
@@ -495,6 +593,159 @@ impl MastForest {
     ) {
         self.debug_info.register_node_decorators(node_id, before_enter, after_exit);
     }
+
+    /// Returns the [`AssemblyOp`] associated with a node.
+    ///
+    /// For basic block nodes with a `target_op_idx`, returns the AssemblyOp for that operation.
+    /// For other nodes or when no `target_op_idx` is provided, returns the first AssemblyOp.
+    pub fn get_assembly_op(
+        &self,
+        node_id: MastNodeId,
+        target_op_idx: Option<usize>,
+    ) -> Option<&AssemblyOp> {
+        match target_op_idx {
+            Some(op_idx) => self.debug_info.asm_op_for_operation(node_id, op_idx),
+            None => self.debug_info.first_asm_op_for_node(node_id),
+        }
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Validation methods
+impl MastForest {
+    /// Validates that all BasicBlockNodes in this forest satisfy the core invariants:
+    /// 1. Power-of-two number of groups in each batch
+    /// 2. No operation group ends with an operation requiring an immediate value
+    /// 3. The last operation group in a batch cannot contain operations requiring immediate values
+    /// 4. OpBatch structural consistency (num_groups <= BATCH_SIZE, group size <= GROUP_SIZE,
+    ///    indptr integrity, bounds checking)
+    ///
+    /// This addresses the gap created by PR 2094, where padding NOOPs are now inserted
+    /// at assembly time rather than dynamically during execution, and adds comprehensive
+    /// structural validation to prevent deserialization-time panics.
+    pub fn validate(&self) -> Result<(), MastForestError> {
+        // Validate basic block batch invariants
+        for (node_id_idx, node) in self.nodes.iter().enumerate() {
+            let node_id =
+                MastNodeId::new_unchecked(node_id_idx.try_into().expect("too many nodes"));
+            if let MastNode::Block(basic_block) = node {
+                basic_block.validate_batch_invariants().map_err(|error_msg| {
+                    MastForestError::InvalidBatchPadding(node_id, error_msg)
+                })?;
+            }
+        }
+
+        // Validate that all procedure name digests correspond to procedure roots in the forest
+        for (digest, _) in self.debug_info.procedure_names() {
+            if self.find_procedure_root(digest).is_none() {
+                return Err(MastForestError::InvalidProcedureNameDigest(digest));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Validates topological ordering of nodes and recomputes all node hashes.
+    ///
+    /// This method iterates through all nodes in index order, verifying:
+    /// 1. All child references point to nodes with smaller indices (topological order)
+    /// 2. Each node's recomputed digest matches its stored digest
+    ///
+    /// # Errors
+    ///
+    /// Returns `MastForestError::ForwardReference` if any node references a child that
+    /// appears later in the forest.
+    ///
+    /// Returns `MastForestError::HashMismatch` if any node's recomputed digest doesn't
+    /// match its stored digest.
+    fn validate_node_hashes(&self) -> Result<(), MastForestError> {
+        use crate::chiplets::hasher;
+
+        /// Checks that child_id references a node that appears before node_id in topological order.
+        fn check_no_forward_ref(
+            node_id: MastNodeId,
+            child_id: MastNodeId,
+        ) -> Result<(), MastForestError> {
+            if child_id.0 >= node_id.0 {
+                return Err(MastForestError::ForwardReference(node_id, child_id));
+            }
+            Ok(())
+        }
+
+        for (node_idx, node) in self.nodes.iter().enumerate() {
+            let node_id = MastNodeId::new_unchecked(node_idx as u32);
+
+            // Check topological ordering and compute expected digest
+            let computed_digest = match node {
+                MastNode::Block(block) => {
+                    let op_groups: Vec<Felt> =
+                        block.op_batches().iter().flat_map(|batch| *batch.groups()).collect();
+                    hasher::hash_elements(&op_groups)
+                },
+                MastNode::Join(join) => {
+                    let left_id = join.first();
+                    let right_id = join.second();
+                    check_no_forward_ref(node_id, left_id)?;
+                    check_no_forward_ref(node_id, right_id)?;
+
+                    let left_digest = self.nodes[left_id].digest();
+                    let right_digest = self.nodes[right_id].digest();
+                    hasher::merge_in_domain(&[left_digest, right_digest], JoinNode::DOMAIN)
+                },
+                MastNode::Split(split) => {
+                    let true_id = split.on_true();
+                    let false_id = split.on_false();
+                    check_no_forward_ref(node_id, true_id)?;
+                    check_no_forward_ref(node_id, false_id)?;
+
+                    let true_digest = self.nodes[true_id].digest();
+                    let false_digest = self.nodes[false_id].digest();
+                    hasher::merge_in_domain(&[true_digest, false_digest], SplitNode::DOMAIN)
+                },
+                MastNode::Loop(loop_node) => {
+                    let body_id = loop_node.body();
+                    check_no_forward_ref(node_id, body_id)?;
+
+                    let body_digest = self.nodes[body_id].digest();
+                    hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN)
+                },
+                MastNode::Call(call) => {
+                    let callee_id = call.callee();
+                    check_no_forward_ref(node_id, callee_id)?;
+
+                    let callee_digest = self.nodes[callee_id].digest();
+                    let domain = if call.is_syscall() {
+                        CallNode::SYSCALL_DOMAIN
+                    } else {
+                        CallNode::CALL_DOMAIN
+                    };
+                    hasher::merge_in_domain(&[callee_digest, Word::default()], domain)
+                },
+                MastNode::Dyn(dyn_node) => {
+                    if dyn_node.is_dyncall() {
+                        DynNode::DYNCALL_DEFAULT_DIGEST
+                    } else {
+                        DynNode::DYN_DEFAULT_DIGEST
+                    }
+                },
+                MastNode::External(_) => {
+                    // External nodes have externally-provided digests that cannot be recomputed
+                    continue;
+                },
+            };
+
+            let stored_digest = node.digest();
+            if computed_digest != stored_digest {
+                return Err(MastForestError::HashMismatch {
+                    node_id,
+                    expected: stored_digest,
+                    computed: computed_digest,
+                });
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -502,7 +753,7 @@ impl MastForest {
 impl MastForest {
     /// Given an error code as a Felt, resolves it to its corresponding error message.
     pub fn resolve_error_message(&self, code: Felt) -> Option<Arc<str>> {
-        let key = u64::from(code);
+        let key = code.as_canonical_u64();
         self.debug_info.error_message(key)
     }
 
@@ -511,8 +762,102 @@ impl MastForest {
     pub fn register_error(&mut self, msg: Arc<str>) -> Felt {
         let code: Felt = error_code_from_msg(&msg);
         // we use u64 as keys for the map
-        self.debug_info.insert_error_code(code.as_int(), msg);
+        self.debug_info.insert_error_code(code.as_canonical_u64(), msg);
         code
+    }
+}
+
+// ------------------------------------------------------------------------------------------------
+/// Procedure name methods
+impl MastForest {
+    /// Returns the procedure name for the given MAST root digest, if present.
+    pub fn procedure_name(&self, digest: &Word) -> Option<&str> {
+        self.debug_info.procedure_name(digest)
+    }
+
+    /// Returns an iterator over all (digest, name) pairs of procedure names.
+    pub fn procedure_names(&self) -> impl Iterator<Item = (Word, &Arc<str>)> {
+        self.debug_info.procedure_names()
+    }
+
+    /// Inserts a procedure name for the given MAST root digest.
+    pub fn insert_procedure_name(&mut self, digest: Word, name: Arc<str>) {
+        assert!(
+            self.find_procedure_root(digest).is_some(),
+            "attempted to insert procedure name for digest that is not a procedure root"
+        );
+        self.debug_info.insert_procedure_name(digest, name);
+    }
+
+    /// Returns a reference to the debug info for this forest.
+    pub fn debug_info(&self) -> &DebugInfo {
+        &self.debug_info
+    }
+
+    /// Returns a mutable reference to the debug info.
+    ///
+    /// This is intended for use by the assembler to register AssemblyOps and other debug
+    /// information during compilation.
+    pub fn debug_info_mut(&mut self) -> &mut DebugInfo {
+        &mut self.debug_info
+    }
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+#[cfg(test)]
+impl MastForest {
+    /// Returns all decorators for a given node as a vector of (position, DecoratorId) tuples.
+    ///
+    /// This helper method combines before_enter, operation-indexed, and after_exit decorators
+    /// into a single collection, which is useful for testing decorator positions and ordering.
+    ///
+    /// **Performance Warning**: This method performs multiple allocations through collect() calls
+    /// and should not be relied upon for performance-critical code. It is intended for testing
+    /// only.
+    pub fn all_decorators(&self, node_id: MastNodeId) -> Vec<(usize, DecoratorId)> {
+        let node = &self[node_id];
+
+        // For non-basic blocks, just get before_enter and after_exit decorators at position 0
+        if !node.is_basic_block() {
+            let before_enter_decorators: Vec<_> = self
+                .before_enter_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (0, deco_id))
+                .collect();
+
+            let after_exit_decorators: Vec<_> = self
+                .after_exit_decorators(node_id)
+                .iter()
+                .map(|&deco_id| (1, deco_id))
+                .collect();
+
+            return [before_enter_decorators, after_exit_decorators].concat();
+        }
+
+        // For basic blocks, we need to handle operation-indexed decorators with proper positioning
+        let block = node.unwrap_basic_block();
+
+        // Before-enter decorators are at position 0
+        let before_enter_decorators: Vec<_> = self
+            .before_enter_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (0, deco_id))
+            .collect();
+
+        // Operation-indexed decorators with their actual positions
+        let op_indexed_decorators: Vec<_> =
+            self.decorator_links_for_node(node_id).unwrap().into_iter().collect();
+
+        // After-exit decorators are positioned after all operations
+        let after_exit_decorators: Vec<_> = self
+            .after_exit_decorators(node_id)
+            .iter()
+            .map(|&deco_id| (block.num_operations() as usize, deco_id))
+            .collect();
+
+        [before_enter_decorators, op_indexed_decorators, after_exit_decorators].concat()
     }
 }
 
@@ -597,7 +942,7 @@ impl MastNodeId {
     }
 
     /// Returns a new [`MastNodeId`] from the given `value` without checking its validity.
-    pub(crate) fn new_unchecked(value: u32) -> Self {
+    pub fn new_unchecked(value: u32) -> Self {
         Self(value)
     }
 
@@ -766,6 +1111,65 @@ impl Serializable for DecoratorId {
     }
 }
 
+impl Deserializable for DecoratorId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
+// ASM OP ID
+// ================================================================================================
+
+/// Unique identifier for an [`AssemblyOp`] within a [`MastForest`].
+///
+/// Unlike decorators (which are executed at runtime), AssemblyOps are metadata
+/// used only for error context and debugging tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+pub struct AsmOpId(u32);
+
+impl AsmOpId {
+    /// Creates a new [`AsmOpId`] with the provided inner value.
+    pub const fn new(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<u32> for AsmOpId {
+    fn from(value: u32) -> Self {
+        AsmOpId::new(value)
+    }
+}
+
+impl Idx for AsmOpId {}
+
+impl From<AsmOpId> for u32 {
+    fn from(id: AsmOpId) -> Self {
+        id.0
+    }
+}
+
+impl fmt::Display for AsmOpId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "AsmOpId({})", self.0)
+    }
+}
+
+impl Serializable for AsmOpId {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into(target)
+    }
+}
+
+impl Deserializable for AsmOpId {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = u32::read_from(source)?;
+        Ok(Self(value))
+    }
+}
+
 /// Derives an error code from an error message by hashing the message and returning the 0th element
 /// of the resulting [`Word`].
 pub fn error_code_from_msg(msg: impl AsRef<str>) -> Felt {
@@ -799,10 +1203,24 @@ pub enum MastForestError {
     DecoratorError(DecoratorIndexError),
     #[error("digest is required for deserialization")]
     DigestRequiredForDeserialization,
+    #[error("invalid batch in basic block node {0:?}: {1}")]
+    InvalidBatchPadding(MastNodeId, String),
+    #[error("procedure name references digest that is not a procedure root: {0:?}")]
+    InvalidProcedureNameDigest(Word),
+    #[error(
+        "node {0:?} references child {1:?} which comes after it in the forest (forward reference)"
+    )]
+    ForwardReference(MastNodeId, MastNodeId),
+    #[error("hash mismatch for node {node_id:?}: expected {expected:?}, computed {computed:?}")]
+    HashMismatch {
+        node_id: MastNodeId,
+        expected: Word,
+        computed: Word,
+    },
 }
 
 // Custom serde implementations for MastForest that handle linked decorators properly
-// by delegating to the existing winter-utils serialization which already handles
+// by delegating to the existing miden-crypto serialization which already handles
 // the conversion between linked and owned decorator formats.
 #[cfg(feature = "serde")]
 impl serde::Serialize for MastForest {
@@ -810,8 +1228,8 @@ impl serde::Serialize for MastForest {
     where
         S: serde::Serializer,
     {
-        // Use the existing winter-utils serialization which already handles linked decorators
-        let bytes = crate::utils::Serializable::to_bytes(self);
+        // Use the existing miden-crypto serialization which already handles linked decorators
+        let bytes = Serializable::to_bytes(self);
         serializer.serialize_bytes(&bytes)
     }
 }
@@ -822,9 +1240,141 @@ impl<'de> serde::Deserialize<'de> for MastForest {
     where
         D: serde::Deserializer<'de>,
     {
-        // Deserialize bytes, then use winter-utils Deserializable
+        // Deserialize bytes, then use miden-crypto Deserializable
         let bytes = Vec::<u8>::deserialize(deserializer)?;
-        let mut slice_reader = winter_utils::SliceReader::new(&bytes);
-        crate::utils::Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+        let mut slice_reader = SliceReader::new(&bytes);
+        Deserializable::read_from(&mut slice_reader).map_err(serde::de::Error::custom)
+    }
+}
+
+// UNTRUSTED MAST FOREST
+// ================================================================================================
+
+/// A [`MastForest`] deserialized from untrusted input that has not yet been validated.
+///
+/// This type wraps a `MastForest` that was deserialized from bytes but has not had its
+/// node hashes verified. Before using the forest, callers must call [`validate()`](Self::validate)
+/// to verify structural integrity and recompute all node hashes.
+///
+/// # Usage
+///
+/// ```ignore
+/// // Deserialize from untrusted bytes
+/// let untrusted = UntrustedMastForest::read_from_bytes(&bytes)?;
+///
+/// // Validate structure and hashes
+/// let forest = untrusted.validate()?;
+///
+/// // Now safe to use
+/// let root = forest.procedure_roots()[0];
+/// ```
+///
+/// # Security
+///
+/// This type exists to provide type-level safety for untrusted deserialization. The validation
+/// performed by [`validate()`](Self::validate) includes:
+///
+/// 1. **Structural validation**: Checks that basic block batch invariants are satisfied and
+///    procedure names reference valid roots.
+/// 2. **Topological ordering**: Verifies that all node references point to nodes that appear
+///    earlier in the forest (no forward references).
+/// 3. **Hash recomputation**: Recomputes the digest for every node and verifies it matches the
+///    stored digest.
+#[derive(Debug, Clone)]
+pub struct UntrustedMastForest(MastForest);
+
+impl UntrustedMastForest {
+    /// Validates the forest by checking structural invariants and recomputing all node hashes.
+    ///
+    /// This method performs a complete validation of the deserialized forest:
+    ///
+    /// 1. Validates structural invariants (batch padding, procedure names)
+    /// 2. Validates topological ordering (no forward references)
+    /// 3. Recomputes all node hashes and compares against stored digests
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(MastForest)` if validation succeeds
+    /// - `Err(MastForestError)` with details about the first validation failure
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Any basic block has invalid batch structure ([`MastForestError::InvalidBatchPadding`])
+    /// - Any procedure name references a non-root digest
+    ///   ([`MastForestError::InvalidProcedureNameDigest`])
+    /// - Any node references a child that appears later in the forest
+    ///   ([`MastForestError::ForwardReference`])
+    /// - Any node's recomputed hash doesn't match its stored digest
+    ///   ([`MastForestError::HashMismatch`])
+    pub fn validate(self) -> Result<MastForest, MastForestError> {
+        let forest = self.0;
+
+        // Step 1: Validate structural invariants (existing validate() checks)
+        forest.validate()?;
+
+        // Step 2: Validate topological ordering and recompute hashes
+        forest.validate_node_hashes()?;
+
+        Ok(forest)
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes.
+    ///
+    /// This method uses a [`BudgetedReader`] with a budget equal to the input size to protect
+    /// against denial-of-service attacks from malicious input.
+    ///
+    /// For stricter limits, use
+    /// [`read_from_bytes_with_budget`](Self::read_from_bytes_with_budget) with a custom budget.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Read from untrusted source
+    /// let untrusted = UntrustedMastForest::read_from_bytes(&bytes)?;
+    ///
+    /// // Validate before use
+    /// let forest = untrusted.validate()?;
+    /// ```
+    pub fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        Self::read_from_bytes_with_budget(bytes, bytes.len())
+    }
+
+    /// Deserializes an [`UntrustedMastForest`] from bytes with a byte budget.
+    ///
+    /// This method uses a [`BudgetedReader`] to limit memory consumption during deserialization,
+    /// protecting against denial-of-service attacks from malicious input that claims to contain
+    /// an excessive number of elements.
+    ///
+    /// # Arguments
+    ///
+    /// * `bytes` - The serialized forest bytes
+    /// * `budget` - Maximum bytes to consume during deserialization. Set this to `bytes.len()` for
+    ///   typical use cases, or lower to enforce stricter limits.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Read from untrusted source with budget equal to input size
+    /// let untrusted = UntrustedMastForest::read_from_bytes_with_budget(&bytes, bytes.len())?;
+    ///
+    /// // Validate before use
+    /// let forest = untrusted.validate()?;
+    /// ```
+    ///
+    /// # Security
+    ///
+    /// The budget limits:
+    /// - Pre-allocation sizes when deserializing collections (via `max_alloc`)
+    /// - Total bytes consumed during deserialization
+    ///
+    /// This prevents attacks where malicious input claims an unrealistic number of elements
+    /// (e.g., `len = 2^60`), causing excessive memory allocation before any data is read.
+    pub fn read_from_bytes_with_budget(
+        bytes: &[u8],
+        budget: usize,
+    ) -> Result<Self, DeserializationError> {
+        let mut reader = BudgetedReader::new(SliceReader::new(bytes), budget);
+        Self::read_from(&mut reader)
     }
 }

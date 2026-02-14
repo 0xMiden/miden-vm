@@ -1,6 +1,6 @@
 use alloc::vec::Vec;
 
-use miden_core::utils::{
+use miden_core::serde::{
     ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Spanned};
@@ -15,7 +15,7 @@ use crate::ast::Ident;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct MetaList {
     #[cfg_attr(feature = "serde", serde(skip, default))]

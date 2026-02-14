@@ -1,6 +1,5 @@
 ---
 source: crates/assembly/src/tests.rs
-assertion_line: 2369
 expression: program
 ---
 begin
@@ -11,17 +10,15 @@ begin
                 push(4294967294)
                 mstore
                 drop
-                asmOp(push.4, 1)
                 push(4)
-                asmOp(push.3, 1)
                 push(3)
                 noop
                 noop
                 noop
                 noop
             end
-            external.0xb9691da1d9b4b364aca0a0990e9f04c446a2faa622c8dd0d8831527dbec61393
+            external.0x63fc91874699cefb8f1add4642ce97d950b7fd0acd0f24512cdbde58c9cfb473
         end
-        external.0xcb08c107c81c582788cbf63c99f6b455e11b33bb98ca05fe1cfa17c087dfa8f1
+        external.0x06aeeabff4f4b6671fa30c5b9d64eeec7200e48a86c51982230956c6539ac309
     end
 end

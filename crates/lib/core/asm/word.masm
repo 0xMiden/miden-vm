@@ -15,7 +15,7 @@ end
 # CONVERSION UTILITIES
 #! Writes the components of a word to memory as eight u32 limbs in little-endian order.
 #!
-#! Inputs:  [w3, w2, w1, w0, out_ptr, ...]
+#! Inputs:  [w0, w1, w2, w3, out_ptr, ...]
 #! Outputs: [...]
 #!
 #! Where:
@@ -25,27 +25,24 @@ end
 #!
 #! Cycles: 8 * (split + store pair) ~= 176
 pub proc store_word_u32s_le
-    reversew
-    # => [w0, w1, w2, w3, out_ptr, ...]
-
-    u32split
-    # => [w0_hi, w0_lo, w1, w2, w3, out_ptr, ...]
+    swap u32split
+    # => [w1_lo, w1_hi, w0, w2, w3, out_ptr, ...]
 
     movup.2 u32split
-    # => [w1_hi, w1_lo, w0_hi, w0_lo, w2, w3, out_ptr, ...]
+    # => [w0_lo, w0_hi, w1_lo, w1_hi, w2, w3, out_ptr, ...]
 
     # Store w0 and w1 limbs, then drop them from the stack
-    dup.6 mem_storew_be dropw
+    dup.6 mem_storew_le dropw
     # => [w2, w3, out_ptr, ...]
 
-    u32split
-    # => [w2_hi, w2_lo, w3, out_ptr, ...]
+    swap u32split
+    # => [w3_lo, w3_hi, w2, out_ptr, ...]
 
     movup.2 u32split
-    # => [w3_hi, w3_lo, w2_hi, w2_lo, out_ptr, ...]
+    # => [w2_lo, w2_hi, w3_lo, w3_hi, out_ptr, ...]
 
     # Store w2 and w3 limbs at out_ptr+4
-    movup.4 add.4 mem_storew_be dropw
+    movup.4 add.4 mem_storew_le dropw
     # => [...]
 end
 
@@ -99,8 +96,8 @@ end
 #!     let mut cont = true;
 #!
 #!     for i in (0..4).rev() {
-#!         let gt = word1[i].as_int() > word2[i].as_int();
-#!         let eq = word1[i].as_int() == word2[i].as_int();
+#!         let gt = word1[i].as_canonical_u64() > word2[i].as_canonical_u64();
+#!         let eq = word1[i].as_canonical_u64() == word2[i].as_canonical_u64();
 #!         result |= gt & cont;
 #!         cont &= eq;
 #!     }
@@ -113,8 +110,9 @@ end
 #!
 #! Cycles: 117
 pub proc gt(rhs: word, lhs: word) -> i1
-    # => [r_3, r_2, r_1, r_0, l_3, l_2, l_1, l_0]
-    exec.arrange_words_adjacent
+    # Input words are in LE order (word[0] on top)
+    # => [r_0, r_1, r_2, r_3, l_0, l_1, l_2, l_3]
+    exec.arrange_words_adjacent_le
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
@@ -178,7 +176,9 @@ end
 #!
 #! Cycles: 117
 pub proc lt(rhs: word, lhs: word) -> i1
-    exec.arrange_words_adjacent
+    # Input words are in LE order (word[0] on top)
+    # => [r_0, r_1, r_2, r_3, l_0, l_1, l_2, l_3]
+    exec.arrange_words_adjacent_le
     # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 
     push.1.0
@@ -275,24 +275,26 @@ end
 # HELPER PROCEDURES
 # -------------------------------------------------------------------------------------------------
 
-#! Arranges the given words such that the corresponding elements are next to each other.
+#! Arranges LE words for comparison.
 #!
-#! Inputs:  [WORD1, WORD2]
-#! Outputs: [word2_3, word1_3, word2_2, word1_2, word2_1, word1_1, word2_0, word1_0]
+#! Inputs:  [r_0, r_1, r_2, r_3, l_0, l_1, l_2, l_3]
+#! Outputs: [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 #!
-#! Cycles: 8
-proc arrange_words_adjacent
-    # => [1_3, 1_2, 1_1, 1_0, 2_3, 2_2, 2_1, 2_0]
+#! Cycles: 13
+proc arrange_words_adjacent_le
+    # Get l_3 and r_3 to top (MSB pair)
+    movup.7 movup.4 swap
+    # => [l_3, r_3, r_0, r_1, r_2, l_0, l_1, l_2]
 
-    movup.3 movup.7
-    # => [2_0, 1_0, 1_3, 1_2, 1_1, 2_3, 2_2, 2_1]
+    # Get l_2 and r_2
+    movup.7 movdn.2 movup.5 movdn.3
+    # => [l_3, r_3, l_2, r_2, r_0, r_1, l_0, l_1]
 
-    movup.4 movup.7
-    # => [2_1, 1_1, 2_0, 1_0, 1_3, 1_2, 2_3, 2_2]
+    # Get l_1 and r_1
+    movup.7 movdn.4 movup.6 movdn.5
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, r_0, l_0]
 
-    movup.5 movup.7
-    # => [2_2, 1_2, 2_1, 1_1, 2_0, 1_0, 1_3, 2_3]
-
-    movup.6 movup.7
-    # => [2_3, 1_3, 2_2, 1_2, 2_1, 1_1, 2_0, 1_0]
+    # Get l_0 and r_0
+    movup.7 movdn.6
+    # => [l_3, r_3, l_2, r_2, l_1, r_1, l_0, r_0]
 end

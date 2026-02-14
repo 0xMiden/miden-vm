@@ -1,15 +1,19 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, Word};
-use miden_formatting::prettier::{Document, PrettyPrint, const_text, nl};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    OPCODE_DYN, OPCODE_DYNCALL,
-    mast::{DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNodeId},
+    Felt, Word,
+    mast::{
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
+        MastNodeId,
+    },
+    operations::{OPCODE_DYN, OPCODE_DYNCALL},
+    prettier::{Document, PrettyPrint, const_text, nl},
+    utils::LookupByIdx,
 };
 
 // DYN NODE
@@ -38,18 +42,18 @@ impl DynNode {
 impl DynNode {
     /// The default digest for a DynNode representing a dyncall operation.
     pub const DYNCALL_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(8751004906421739448),
-        Felt::new(13469709002495534233),
-        Felt::new(12584249374630430826),
-        Felt::new(7624899870831503004),
+        Felt::new(14319792288905293245),
+        Felt::new(11465345153771181037),
+        Felt::new(16104169334207009019),
+        Felt::new(2750797734633655770),
     ]);
 
     /// The default digest for a DynNode representing a dynexec operation.
     pub const DYN_DEFAULT_DIGEST: Word = Word::new([
-        Felt::new(8115106948140260551),
-        Felt::new(13491227816952616836),
-        Felt::new(15015806788322198710),
-        Felt::new(16575543461540527115),
+        Felt::new(13210061556570014836),
+        Felt::new(16003296542960478536),
+        Felt::new(6732564319544917702),
+        Felt::new(16687523027086140644),
     ]);
 }
 
@@ -67,23 +71,6 @@ impl DynNode {
         } else {
             Self::DYN_DOMAIN
         }
-    }
-}
-
-impl MastNodeErrorContext for DynNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -265,7 +252,7 @@ impl MastNodeExt for DynNode {
             let self_ptr = self as *const Self;
             let forest_node = &forest.nodes[id];
             let forest_node_ptr = match forest_node {
-                crate::mast::MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
+                MastNode::Dyn(dyn_node) => dyn_node as *const DynNode as *const (),
                 _ => panic!("Node type mismatch at {:?}", id),
             };
             let self_as_void = self_ptr as *const ();
@@ -394,8 +381,8 @@ impl MastForestContributor for DynNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        _hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        _hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // DynNode has no children, so we don't need hash_by_node_id
         // Use the fingerprint_from_parts helper function with empty children array
         crate::mast::node_fingerprint::fingerprint_from_parts(
@@ -415,35 +402,26 @@ impl MastForestContributor for DynNodeBuilder {
         )
     }
 
-    fn remap_children(
-        self,
-        _remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, _remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         // DynNode has no children to remap, but preserve the digest
         self
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
@@ -463,14 +441,11 @@ impl DynNodeBuilder {
     ///
     /// Note: This is not part of the `MastForestContributor` trait because it's only
     /// intended for internal use during deserialization.
-    ///
-    /// For DynNode, this is equivalent to the normal `add_to_forest` since dyn nodes
-    /// don't have child nodes to validate.
     pub(in crate::mast) fn add_to_forest_relaxed(
         self,
         forest: &mut MastForest,
     ) -> Result<MastNodeId, MastForestError> {
-        // Use the same digest computation as in build()
+        // Use the forced digest if provided, otherwise use the default digest
         let digest = if let Some(forced_digest) = self.digest {
             forced_digest
         } else if self.is_dyncall {
@@ -479,12 +454,11 @@ impl DynNodeBuilder {
             DynNode::DYN_DEFAULT_DIGEST
         };
 
+        // Determine the node ID that will be assigned
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
+        // Note: Decorators are already in forest.debug_info from deserialization
         // Move the data directly without intermediate cloning
         let node_id = forest
             .nodes
@@ -553,7 +527,7 @@ impl Default for DynNodeBuilderParams {
 
 #[cfg(test)]
 mod tests {
-    use miden_crypto::hash::rpo::Rpo256;
+    use miden_crypto::hash::poseidon2::Poseidon2;
 
     use super::*;
 
@@ -566,14 +540,17 @@ mod tests {
         let dyn_node = forest.get_node_by_id(dyn_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyn_node.digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
+            Poseidon2::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYN_DOMAIN)
         );
 
         let dyncall_node_id = DynNodeBuilder::new_dyncall().add_to_forest(&mut forest).unwrap();
         let dyncall_node = forest.get_node_by_id(dyncall_node_id).unwrap().unwrap_dyn();
         assert_eq!(
             dyncall_node.digest(),
-            Rpo256::merge_in_domain(&[Word::default(), Word::default()], DynNode::DYNCALL_DOMAIN)
+            Poseidon2::merge_in_domain(
+                &[Word::default(), Word::default()],
+                DynNode::DYNCALL_DOMAIN
+            )
         );
     }
 }

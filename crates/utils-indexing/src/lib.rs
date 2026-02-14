@@ -1,15 +1,17 @@
 //! Type-safe u32-indexed vector utilities for Miden
 //!
 //! This module provides utilities for working with u32-indexed vectors in a type-safe manner,
-//! including the `IndexVec` type and related functionality.
+//! including the [`IndexVec`] type and the [`CsrMatrix`] compressed sparse row storage.
 #![no_std]
 
 extern crate alloc;
 
+mod csr;
 #[doc = include_str!("../README.md")]
 use alloc::{collections::BTreeMap, vec, vec::Vec};
 use core::{fmt::Debug, marker::PhantomData, ops};
 
+pub use csr::{CsrMatrix, CsrValidationError};
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -304,6 +306,50 @@ impl<'a, I: Idx, T> IntoIterator for &'a IndexVec<I, T> {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl<I: Idx, T> TryFrom<Vec<T>> for IndexVec<I, T> {
+    type Error = IndexedVecError;
+
+    /// Create an IndexVec from a Vec.
+    ///
+    /// Returns an error if the Vec length exceeds u32::MAX.
+    fn try_from(raw: Vec<T>) -> Result<Self, Self::Error> {
+        if raw.len() > u32::MAX as usize {
+            return Err(IndexedVecError::TooManyItems);
+        }
+        Ok(Self { raw, _m: PhantomData })
+    }
+}
+
+// SERIALIZATION
+// ================================================================================================
+
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
+
+impl<I, T> Serializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Serializable,
+{
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.as_slice().write_into(target);
+    }
+}
+
+impl<I, T> Deserializable for IndexVec<I, T>
+where
+    I: Idx,
+    T: Deserializable,
+{
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let vec: Vec<T> = Deserializable::read_from(source)?;
+        IndexVec::try_from(vec).map_err(|_| {
+            DeserializationError::InvalidValue("IndexVec length exceeds u32::MAX".into())
+        })
     }
 }
 

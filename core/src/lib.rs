@@ -6,6 +6,9 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+// ASSERT MATCHES MACRO
+// ================================================================================================
+
 /// This is an implementation of `std::assert_matches::assert_matches`
 /// so it can be removed when that feature stabilizes upstream
 #[macro_export]
@@ -49,15 +52,34 @@ assertion failed: `(left matches right)`
     }
 }
 
+// EXPORTS
+// ================================================================================================
+
+pub use miden_crypto::{EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+
+pub mod advice;
 pub mod chiplets;
-pub mod errors;
+pub mod events;
+pub mod mast;
+pub mod operations;
+pub mod precompile;
+pub mod program;
+pub mod proof;
+pub mod utils;
 
-mod program;
-pub use program::{Program, ProgramInfo};
+pub mod field {
+    pub use miden_crypto::field::*;
 
-mod kernel;
-pub use kernel::Kernel;
-pub use miden_crypto::{EMPTY_WORD, ONE, WORD_SIZE, Word, ZERO, word::LexicographicWord};
+    pub type QuadFelt = BinomialExtensionField<super::Felt, 2>;
+}
+
+pub mod serde {
+    pub use miden_crypto::utils::{
+        BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+        SliceReader,
+    };
+}
+
 pub mod crypto {
     pub mod merkle {
         pub use miden_crypto::merkle::{
@@ -71,33 +93,23 @@ pub mod crypto {
 
     pub mod hash {
         pub use miden_crypto::hash::{
-            Digest, ElementHasher, Hasher,
-            blake::{Blake3_160, Blake3_192, Blake3_256, Blake3Digest},
+            blake::{Blake3_256, Blake3Digest},
+            keccak::Keccak256,
             poseidon2::Poseidon2,
             rpo::Rpo256,
             rpx::Rpx256,
+            sha2::{Sha256, Sha512},
         };
     }
 
     pub mod random {
-        pub use miden_crypto::rand::{
-            RandomCoin, RandomCoinError, RpoRandomCoin, RpxRandomCoin, WinterRandomCoin,
-        };
+        pub use miden_crypto::rand::{RpoRandomCoin, RpxRandomCoin};
     }
 
     pub mod dsa {
-        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_rpo};
+        pub use miden_crypto::dsa::{ecdsa_k256_keccak, eddsa_25519_sha512, falcon512_poseidon2};
     }
 }
-
-pub mod mast;
-
-pub use winter_math::{
-    ExtensionOf, FieldElement, StarkField, ToElements,
-    fields::{QuadExtension, f64::BaseElement as Felt},
-    polynom,
-};
-pub type QuadFelt = QuadExtension<Felt>;
 
 pub mod prettier {
     pub use miden_formatting::{prettier::*, pretty_via_display, pretty_via_to_string};
@@ -117,30 +129,6 @@ pub mod prettier {
         doc
     }
 }
-
-mod operations;
-pub use operations::{
-    AssemblyOp, DebugOptions, Decorator, DecoratorList, Operation, opcode_constants::*,
-};
-
-pub mod stack;
-pub use stack::{StackInputs, StackOutputs};
-
-mod event_id;
-pub use event_id::{EventId, EventName};
-
-pub mod sys_events;
-
-mod advice;
-pub use advice::map::AdviceMap;
-
-pub mod precompile;
-pub mod utils;
-
-// Re-export indexing functionality from the new standalone crate
-pub use miden_utils_indexing::{
-    DenseIdMap, Idx, IndexVec, IndexedVecError, LookupByIdx, newtype_id,
-};
 
 // CONSTANTS
 // ================================================================================================

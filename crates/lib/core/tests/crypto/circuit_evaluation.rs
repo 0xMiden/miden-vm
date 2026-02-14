@@ -1,5 +1,8 @@
-use miden_core::{Felt, FieldElement, ONE, QuadFelt, ZERO};
-use miden_utils_testing::rand::rand_value;
+use miden_core::{
+    Felt, ONE, ZERO,
+    field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+};
+use miden_utils_testing::rand::rand_quad_felt;
 
 #[test]
 fn circuit_evaluation_prove_verify() {
@@ -36,16 +39,18 @@ fn circuit_evaluation_prove_verify() {
     );
 
     // the circuit
-    let input_0: QuadFelt = rand_value();
+    let input_0 = rand_quad_felt();
     let input_1 = input_0 * (input_0 - QuadFelt::ONE);
     // inputs
+    let input_0_coeffs = input_0.as_basis_coefficients_slice();
+    let input_1_coeffs = input_1.as_basis_coefficients_slice();
     let mut data = vec![
         // id = 7, v = rand
-        input_0.base_element(0),
-        input_0.base_element(1),
+        input_0_coeffs[0],
+        input_0_coeffs[1],
         // id = 6, v = rand * (rand - 1) = result
-        input_1.base_element(0),
-        input_1.base_element(1),
+        input_1_coeffs[0],
+        input_1_coeffs[1],
     ];
 
     // constants
@@ -70,7 +75,7 @@ fn circuit_evaluation_prove_verify() {
 
     // finalize the advice stack
     let adv_stack = data.repeat(num_repetitions);
-    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_int()).collect();
+    let adv_stack: Vec<u64> = adv_stack.iter().map(|a| a.as_canonical_u64()).collect();
 
     let test = miden_utils_testing::build_test!(source, &[], &adv_stack);
     test.expect_stack(&[]);

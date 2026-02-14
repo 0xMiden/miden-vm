@@ -11,8 +11,8 @@
 //!
 //! ### Precompile Verifier (Verification-Time)
 //! During verification, the [`PrecompileVerifier`] receives the stored preimage bytes, recomputes
-//! the hash, and generates a commitment `RPO(RPO(input) || RPO(digest))` that validates the
-//! computation was performed correctly.
+//! the hash, and generates a commitment `P2(P2(input) || P2(digest))`, where P2 stands
+//! for Poseidon2, that validates the computation was performed correctly.
 //!
 //! ### Commitment Tag Format
 //! Each request is tagged as `[event_id, len_bytes, 0, 0]`. The `len_bytes` field prevents
@@ -27,13 +27,20 @@ use alloc::{vec, vec::Vec};
 use core::array;
 
 use miden_core::{
-    EventName, Felt, Word, ZERO,
+    Felt, Word, ZERO,
+    crypto::hash::{Keccak256, Poseidon2},
+    events::EventName,
+    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
+    utils::bytes_to_packed_u32_elements,
 };
-use miden_crypto::hash::{keccak::Keccak256, rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 
-use crate::handlers::{BYTES_PER_U32, bytes_to_packed_u32_felts, read_memory_packed_u32};
+use crate::handlers::{BYTES_PER_U32, read_memory_packed_u32};
 
 /// Event name for the keccak256 hash_bytes operation.
 pub const KECCAK_HASH_BYTES_EVENT_NAME: EventName =
@@ -56,10 +63,10 @@ impl EventHandler for KeccakPrecompile {
     /// - **Advice Stack**: Extended with digest `[h_0, ..., h_7]` (least significant u32 on top)
     /// - **Precompile Request**: Stores tag `[event_id, len_bytes, 0, 0]` and raw preimage bytes
     ///   for verification time
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
         // Stack: [event_id, ptr, len_bytes, ...]
-        let ptr = process.get_stack_item(1).as_int();
-        let len_bytes = process.get_stack_item(2).as_int();
+        let ptr = process.get_stack_item(1).as_canonical_u64();
+        let len_bytes = process.get_stack_item(2).as_canonical_u64();
 
         // Read input bytes from memory using the shared helper (u32-packed, LE, zero-padded)
         let input_bytes = read_memory_packed_u32(process, ptr, len_bytes as usize)?;
@@ -68,7 +75,7 @@ impl EventHandler for KeccakPrecompile {
         let preimage = KeccakPreimage::new(input_bytes);
         let digest = preimage.digest();
 
-        // Extend the stack with the digest [h_0, ..., h_7] so it can be popped in the right order
+        // Extend the stack with the digest [h_0, ..., h_7] for consumption via adv_pipe
         let advice_stack_extension = AdviceMutation::extend_stack(digest.0);
 
         // Store the precompile data for deferred verification.
@@ -86,7 +93,7 @@ impl PrecompileVerifier for KeccakPrecompile {
     /// Verifier for Keccak256 precompile computations at verification time.
     ///
     /// Receives the raw preimage bytes stored during execution (see [`EventHandler::on_event`]),
-    /// recomputes the Keccak256 hash, and generates a commitment `RPO(RPO(input) || RPO(digest))`
+    /// recomputes the Keccak256 hash, and generates a commitment `P2(P2(input) || P2(digest))`
     /// with tag `[event_id, len_bytes, 0, 0]` that validates against the execution trace.
     fn verify(&self, calldata: &[u8]) -> Result<PrecompileCommitment, PrecompileError> {
         let preimage = KeccakPreimage::new(calldata.to_vec());
@@ -113,12 +120,12 @@ impl KeccakFeltDigest {
             let limbs = array::from_fn(|j| bytes[BYTES_PER_U32 * i + j]);
             u32::from_le_bytes(limbs)
         });
-        Self(packed.map(Felt::from))
+        Self(packed.map(Felt::from_u32))
     }
 
-    /// Creates a commitment of the digest using Rpo256 over `[d_0, ..., d_7]`.
+    /// Creates a commitment of the digest using Poseidon2 over `[d_0, ..., d_7]`.
     pub fn to_commitment(&self) -> Word {
-        Rpo256::hash_elements(&self.0)
+        Poseidon2::hash_elements(&self.0)
     }
 }
 
@@ -152,18 +159,18 @@ impl KeccakPreimage {
     /// Each field element contains a u32 value representing 4 bytes in little-endian format.
     /// The last chunk is padded with zeros if the byte length is not a multiple of 4.
     ///
-    /// Produces the same u32‑packed format expected by RPO hashing in MASM wrappers.
+    /// Produces the same u32‑packed format expected by the MASM wrappers.
     pub fn as_felts(&self) -> Vec<Felt> {
-        bytes_to_packed_u32_felts(self.as_ref())
+        bytes_to_packed_u32_elements(self.as_ref())
     }
 
-    /// Computes the RPO hash of the input data in field element format.
+    /// Computes the Poseidon2 hash of the input data in field element format.
     ///
     /// This creates a cryptographic commitment to the input data that can be
     /// used for verification purposes. The input is first converted to field
     /// elements using the same packing format as the VM.
     pub fn input_commitment(&self) -> Word {
-        Rpo256::hash_elements(&self.as_felts())
+        Poseidon2::hash_elements(&self.as_felts())
     }
 
     /// Computes the Keccak256 hash of the preimage bytes.
@@ -176,15 +183,15 @@ impl KeccakPreimage {
         KeccakFeltDigest::from_bytes(&hash_u8)
     }
 
-    /// Computes the precompile commitment: `RPO(RPO(input) || RPO(keccak_hash))` with tag
+    /// Computes the precompile commitment: `P2(P2(input) || P2(keccak_hash))` with tag
     /// `[event_id, len_bytes, 0, 0]`.
     ///
     /// Generated by the [`PrecompileVerifier`] at verification time and validated against
-    /// commitments tracked during execution by the [`EventHandler`]. The double RPO hash binds
+    /// commitments tracked during execution by the [`EventHandler`]. The double hash binds
     /// input and output together, preventing tampering.
     pub fn precompile_commitment(&self) -> PrecompileCommitment {
         let tag = self.precompile_tag();
-        let comm = Rpo256::merge(&[self.input_commitment(), self.digest().to_commitment()]);
+        let comm = Poseidon2::merge(&[self.input_commitment(), self.digest().to_commitment()]);
         PrecompileCommitment::new(tag, comm)
     }
 
@@ -228,6 +235,8 @@ impl AsRef<[Felt]> for KeccakFeltDigest {
 
 #[cfg(test)]
 mod tests {
+    use miden_core::field::PrimeCharacteristicRing;
+
     use super::*;
 
     // KECCAK FELT DIGEST TESTS
@@ -252,7 +261,7 @@ mod tests {
             u32::from_le_bytes([25, 26, 27, 28]),
             u32::from_le_bytes([29, 30, 31, 32]),
         ]
-        .map(Felt::from);
+        .map(Felt::from_u32);
 
         assert_eq!(digest.0, expected);
     }
@@ -275,7 +284,7 @@ mod tests {
             let felts = preimage.as_felts();
             assert_eq!(felts.len(), expected_u32.len());
             for (felt, &u) in felts.iter().zip((*expected_u32).iter()) {
-                assert_eq!(*felt, Felt::from(u));
+                assert_eq!(*felt, Felt::from_u32(u));
             }
 
             if input.is_empty() {
@@ -288,8 +297,8 @@ mod tests {
         let preimage = KeccakPreimage::new(input);
         let felts = preimage.as_felts();
         assert_eq!(felts.len(), 8);
-        assert_eq!(felts[0], Felt::from(u32::from_le_bytes([1, 2, 3, 4])));
-        assert_eq!(felts[7], Felt::from(u32::from_le_bytes([29, 30, 31, 32])));
+        assert_eq!(felts[0], Felt::from_u32(u32::from_le_bytes([1, 2, 3, 4])));
+        assert_eq!(felts[7], Felt::from_u32(u32::from_le_bytes([29, 30, 31, 32])));
     }
 
     #[test]
@@ -315,18 +324,18 @@ mod tests {
 
         // Test input commitment
         let felts = preimage.as_felts();
-        let expected_input_commitment = Rpo256::hash_elements(&felts);
+        let expected_input_commitment = Poseidon2::hash_elements(&felts);
         assert_eq!(preimage.input_commitment(), expected_input_commitment);
 
         // Test digest commitment
         let digest = preimage.digest();
-        let expected_digest_commitment = Rpo256::hash_elements(digest.as_ref());
+        let expected_digest_commitment = Poseidon2::hash_elements(digest.as_ref());
         assert_eq!(digest.to_commitment(), expected_digest_commitment);
 
         // Test precompile commitment (double hash)
         let expected_precompile_commitment = PrecompileCommitment::new(
             preimage.precompile_tag(),
-            Rpo256::merge(&[preimage.input_commitment(), digest.to_commitment()]),
+            Poseidon2::merge(&[preimage.input_commitment(), digest.to_commitment()]),
         );
 
         assert_eq!(preimage.precompile_commitment(), expected_precompile_commitment);

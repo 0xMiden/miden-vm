@@ -6,19 +6,23 @@
 //! - Both valid and invalid signatures are handled correctly
 
 use miden_core::{
-    EventName, Felt, FieldElement, Word,
+    Felt, Word,
+    events::EventName,
+    field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileVerifier},
-    utils::{Deserializable, Serializable},
+    serde::{Deserializable, Serializable},
+    utils::bytes_to_packed_u32_elements,
 };
 use miden_core_lib::{
     dsa::ecdsa_k256_keccak::sign as ecdsa_sign,
-    handlers::{
-        bytes_to_packed_u32_felts,
-        ecdsa::{EcdsaPrecompile, EcdsaRequest},
-    },
+    handlers::ecdsa::{EcdsaPrecompile, EcdsaRequest},
 };
-use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::rpo::Rpo256};
-use miden_processor::{AdviceMutation, EventError, EventHandler, ProcessState};
+use miden_crypto::{dsa::ecdsa_k256_keccak::SecretKey, hash::poseidon2::Poseidon2};
+use miden_processor::{
+    ProcessorState,
+    advice::AdviceMutation,
+    event::{EventError, EventHandler},
+};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::helpers::masm_store_felts;
@@ -67,9 +71,8 @@ fn test_ecdsa_verify_cases() {
         let output = test.execute().unwrap();
 
         // Assert result
-        let result = output.stack_outputs().get_stack_item(0).unwrap();
-        let expected = if expected_valid { Felt::ONE } else { Felt::ZERO };
-        assert_eq!(result, expected);
+        let result = output.stack_outputs().get_element(0).unwrap();
+        assert_eq!(result, Felt::from_bool(expected_valid));
 
         // Verify the precompile request was logged with the right event ID
         let deferred = output.advice_provider().precompile_requests().to_vec();
@@ -112,9 +115,11 @@ fn test_ecdsa_verify_impl_commitment() {
         let output = test.execute().unwrap();
         let stack = output.stack_outputs();
 
-        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 6 = TAG[1]), ...]
-        let commitment = stack.get_stack_word_be(0).unwrap();
-        let tag = stack.get_stack_word_be(4).unwrap();
+        // Verify stack layout: [COMM (0-3), TAG (4-7), result (at position 8), ...]
+        // TAG = [event_id, result, 0, 0] where TAG[1]=result is at position 5
+        // Use get_stack_word to match LE stack convention
+        let commitment = stack.get_word(0).unwrap();
+        let tag = stack.get_word(4).unwrap();
         // Commitment and tag must match verifier output
         let precompile_commitment = PrecompileCommitment::new(tag, commitment);
         let verifier_commitment =
@@ -124,9 +129,13 @@ fn test_ecdsa_verify_impl_commitment() {
             "commitment on stack should match verifier output"
         );
 
-        // Verify result
-        let result = stack.get_stack_item(6).unwrap();
-        assert_eq!(result, Felt::from(expected_valid), "result does not match expected validity");
+        // Verify result - TAG[1] is at position 5 (TAG is at positions 4-7)
+        let result = stack.get_element(5).unwrap();
+        assert_eq!(
+            result,
+            Felt::from_bool(expected_valid),
+            "result does not match expected validity"
+        );
 
         let deferred = output.advice_provider().precompile_requests().to_vec();
         assert_eq!(deferred.len(), 1, "expected a single deferred request");
@@ -153,25 +162,29 @@ impl EcdsaSignatureHandler {
 }
 
 impl EventHandler for EcdsaSignatureHandler {
-    fn on_event(&self, process: &ProcessState) -> Result<Vec<AdviceMutation>, EventError> {
-        let provided_pk_rpo = process.get_stack_word_be(1);
+    fn on_event(&self, process: &ProcessorState) -> Result<Vec<AdviceMutation>, EventError> {
+        // Stack layout: [event_id, pk_commitment(1-4), message(5-8), ...]
+        // Position 0 has the event ID, so pk_commitment starts at position 1
+        let provided_pk_commitment = process.get_stack_word(1);
         let secret_key =
             SecretKey::read_from_bytes(&self.secret_key_bytes).expect("invalid test secret key");
         let pk_commitment = {
             let pk = secret_key.public_key();
-            let pk_felts = bytes_to_packed_u32_felts(&pk.to_bytes());
-            Rpo256::hash_elements(&pk_felts)
+            let pk_felts = bytes_to_packed_u32_elements(&pk.to_bytes());
+            Poseidon2::hash_elements(&pk_felts)
         };
         assert_eq!(
-            provided_pk_rpo, pk_commitment,
+            provided_pk_commitment, pk_commitment,
             "public key commitment mismatch: expected {:?}, got {:?}",
-            pk_commitment, provided_pk_rpo
+            pk_commitment, provided_pk_commitment
         );
 
-        let message = process.get_stack_word_be(5);
+        // Message starts at position 5 (after event_id + pk_commitment)
+        let message = process.get_stack_word(5);
         let calldata = ecdsa_sign(&secret_key, message);
 
-        Ok(vec![AdviceMutation::extend_stack(calldata.into_iter().rev())])
+        // Use extend_stack to make elements available in order: pk first, then sig
+        Ok(vec![AdviceMutation::extend_stack(calldata)])
     }
 }
 
@@ -183,8 +196,8 @@ fn test_ecdsa_verify_bis_wrapper() {
     let message = Word::from([Felt::new(11), Felt::new(22), Felt::new(33), Felt::new(44)]);
 
     let pk_commitment = {
-        let pk_felts = bytes_to_packed_u32_felts(&public_key.to_bytes());
-        Rpo256::hash_elements(&pk_felts)
+        let pk_felts = bytes_to_packed_u32_elements(&public_key.to_bytes());
+        Poseidon2::hash_elements(&pk_felts)
     };
 
     let source = format!(
@@ -192,8 +205,8 @@ fn test_ecdsa_verify_bis_wrapper() {
         use miden::core::crypto::dsa::ecdsa_k256_keccak
 
         begin
-            push.{message} push.{pk_commitment}
-            debug.stack
+            push.{message}
+            push.{pk_commitment}
             emit.event(\"{EVENT_ECDSA_SIG_TO_STACK}\")
             exec.ecdsa_k256_keccak::verify
         end
@@ -248,9 +261,9 @@ fn generate_invalid_signature_wrong_key() -> EcdsaRequest {
 /// - Digest: DIGEST_ADDR (32 bytes)
 /// - Signature: SIG_ADDR (66 bytes)
 fn generate_memory_store_masm(request: &EcdsaRequest) -> String {
-    let pk_words = bytes_to_packed_u32_felts(&request.pk().to_bytes());
-    let digest_words = bytes_to_packed_u32_felts(request.digest());
-    let sig_words = bytes_to_packed_u32_felts(&request.sig().to_bytes());
+    let pk_words = bytes_to_packed_u32_elements(&request.pk().to_bytes());
+    let digest_words = bytes_to_packed_u32_elements(request.digest());
+    let sig_words = bytes_to_packed_u32_elements(&request.sig().to_bytes());
 
     [
         masm_store_felts(&pk_words, PK_ADDR),

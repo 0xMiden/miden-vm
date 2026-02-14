@@ -1,0 +1,47 @@
+# Runs fuzz targets with short execution time for CI smoke testing.
+# This is not a replacement for dedicated fuzzing runs, but catches obvious regressions.
+# Runs on a schedule (daily) rather than every PR to save CI resources.
+
+name: fuzz
+
+concurrency:
+  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+on:
+  schedule:
+    # Run daily at 3 AM UTC (offset from crypto repo's 2 AM)
+    - cron: "0 3 * * *"
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz-miden-core:
+    name: fuzz miden-core (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - mast_forest_deserialize
+          - mast_forest_validate
+          - mast_node_info
+          - basic_block_data
+          - debug_info
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cleanup large tools for build space
+        uses: ./.github/actions/cleanup-runner
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzz target (smoke test)
+        run: |
+          # Build the fuzz target first
+          cargo fuzz build --fuzz-dir miden-core-fuzz ${{ matrix.target }}
+          # Run directly to avoid cargo-fuzz wrapper SIGPIPE issue
+          miden-core-fuzz/target/x86_64-unknown-linux-gnu/release/${{ matrix.target }} -max_total_time=60 -runs=10000

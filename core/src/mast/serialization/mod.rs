@@ -1,61 +1,49 @@
 //! The serialization format of MastForest is as follows:
 //!
 //! (Metadata)
-//! - MAGIC
-//! - VERSION
+//! - MAGIC (4 bytes) + FLAGS (1 byte) + VERSION (3 bytes)
 //!
-//! (sections metadata)
-//! - nodes length (`usize`)
-//! - decorator data section offset (`usize`) (not implemented, see issue #1580)
-//! - decorators length (`usize`)
+//! (Counts)
+//! - nodes count (`usize`)
+//! - decorators count (`usize`) - 0 if stripped, reserved for future use in lazy loading (#2504)
 //!
-//! (procedure roots section)
-//! - procedure roots (`Vec<MastNodeId>`)
+//! (Procedure roots section)
+//! - procedure roots (`Vec<u32>` as MastNodeId values)
 //!
-//! (basic block data section)
-//! - basic block data
+//! (Basic block data section)
+//! - basic block data (padded operations + batch metadata)
 //!
-//! (node info section)
+//! (Node info section)
 //! - MAST node infos (`Vec<MastNodeInfo>`)
 //!
-//! (advice map section)
-//! - Advice map (AdviceMap)
+//! (Advice map section)
+//! - Advice map (`AdviceMap`)
 //!
-//! (error_codes map section)
-//! - Error codes map (BTreeMap<u64, String>)
+//! (DebugInfo section - omitted if FLAGS bit 0 is set)
+//! - Decorator data (raw bytes for decorator payloads)
+//! - String table (deduplicated strings)
+//! - Decorator infos (`Vec<DecoratorInfo>`)
+//! - Error codes map (`BTreeMap<u64, String>`)
+//! - OpToDecoratorIds CSR (operation-indexed decorators, dense representation)
+//! - NodeToDecoratorIds CSR (before_enter and after_exit decorators, dense representation)
+//! - Procedure names map (`BTreeMap<Word, String>`)
 //!
-//! (decorator data section)
-//! - Decorator data
-//! - String table
+//! # Stripped Format
 //!
-//! (decorator info section)
-//! - decorator infos (`Vec<DecoratorInfo>`)
-//!
-//! (basic block decorator lists section)
-//! - basic block decorator lists (`Vec<(MastNodeId, Vec<(usize, DecoratorId)>)>`)
-//!
-//! (before enter and after exit decorators section)
-//! - before enter decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
-//! - after exit decorators (`Vec<(MastNodeId, Vec<DecoratorId>)>`)
+//! When serializing with [`MastForest::write_stripped`], the FLAGS byte has bit 0 set
+//! and the entire DebugInfo section is omitted. Deserialization auto-detects the format
+//! and creates an empty `DebugInfo` with valid CSR structures when reading stripped files.
 
-use alloc::{
-    collections::BTreeMap,
-    string::{String, ToString},
-    sync::Arc,
-    vec::Vec,
-};
+use alloc::vec::Vec;
 
-use decorator::{DecoratorDataBuilder, DecoratorInfo};
-use string_table::StringTable;
-
-use super::{DecoratedOpLink, DecoratorId, MastForest, MastNode, MastNodeId};
+use super::{MastForest, MastNode, MastNodeId};
 use crate::{
-    AdviceMap,
-    mast::{MastForestContributor, MastNodeBuilder},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    advice::AdviceMap,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
-mod decorator;
+pub(crate) mod asm_op;
+pub(crate) mod decorator;
 
 mod info;
 use info::MastNodeInfo;
@@ -63,9 +51,11 @@ use info::MastNodeInfo;
 mod basic_blocks;
 use basic_blocks::{BasicBlockDataBuilder, BasicBlockDataDecoder};
 
-use crate::DecoratorList;
+pub(crate) mod string_table;
+pub(crate) use string_table::StringTable;
 
-mod string_table;
+#[cfg(test)]
+mod seed_gen;
 
 #[cfg(test)]
 mod tests;
@@ -88,36 +78,72 @@ type StringIndex = usize;
 // CONSTANTS
 // ================================================================================================
 
-/// Magic string for detecting that a file is binary-encoded MAST.
-const MAGIC: &[u8; 5] = b"MAST\0";
+/// Magic bytes for detecting that a file is binary-encoded MAST.
+///
+/// The format uses 4 bytes for identification followed by a flags byte:
+/// - Bytes 0-3: `b"MAST"` - Magic identifier
+/// - Byte 4: Flags byte (see [`FLAG_STRIPPED`] and [`FLAGS_RESERVED_MASK`] constants)
+///
+/// This design repurposes the original null terminator (`b"MAST\0"`) as a flags byte,
+/// maintaining backward compatibility: old files have flags=0x00 (the null byte),
+/// which means "debug info present".
+const MAGIC: &[u8; 4] = b"MAST";
+
+/// Flag indicating debug info is stripped from the serialized MastForest.
+///
+/// When this bit is set in the flags byte, the DebugInfo section is omitted entirely.
+/// The deserializer will create an empty `DebugInfo` with valid CSR structures.
+const FLAG_STRIPPED: u8 = 0x01;
+
+/// Mask for reserved flag bits that must be zero.
+///
+/// Bits 1-7 are reserved for future use. If any are set, deserialization fails.
+const FLAGS_RESERVED_MASK: u8 = 0xfe;
 
 /// The format version.
 ///
 /// If future modifications are made to this format, the version should be incremented by 1. A
 /// version of `[255, 255, 255]` is reserved for future extensions that require extending the
 /// version field itself, but should be considered invalid for now.
-const VERSION: [u8; 3] = [0, 0, 0];
+///
+/// Version history:
+/// - [0, 0, 0]: Initial format
+/// - [0, 0, 1]: Added batch metadata to basic blocks (operations serialized in padded form with
+///   indptr, padding, and group metadata for exact OpBatch reconstruction). Direct decorator
+///   serialization in CSR format (eliminates per-node decorator sections and round-trip
+///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
+/// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
+///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
+///   Removed `breakpoint` instruction (#2655).
+const VERSION: [u8; 3] = [0, 0, 2];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION
 // ================================================================================================
 
 impl Serializable for MastForest {
     fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.write_into_with_options(target, false);
+    }
+}
+
+impl MastForest {
+    /// Internal serialization with options.
+    ///
+    /// When `stripped` is true, the DebugInfo section is omitted and the FLAGS byte
+    /// has bit 0 set.
+    fn write_into_with_options<W: ByteWriter>(&self, target: &mut W, stripped: bool) {
         let mut basic_block_data_builder = BasicBlockDataBuilder::new();
 
-        // Set up "before enter" and "after exit" decorators by `MastNodeId`
-        let mut before_enter_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
-        let mut after_exit_decorators: Vec<(usize, Vec<DecoratorId>)> = Vec::new();
-
-        let mut basic_block_decorators: Vec<(usize, Vec<DecoratedOpLink>)> = Vec::new();
-
-        // magic & version
+        // magic & flags
         target.write_bytes(MAGIC);
+        target.write_u8(if stripped { FLAG_STRIPPED } else { 0x00 });
+
+        // version
         target.write_bytes(&VERSION);
 
-        // decorator & node counts
+        // node & decorator counts
         target.write_usize(self.nodes.len());
-        target.write_usize(self.debug_info.num_decorators());
+        target.write_usize(if stripped { 0 } else { self.debug_info.num_decorators() });
 
         // roots
         let roots: Vec<u32> = self.roots.iter().copied().map(u32::from).collect();
@@ -128,28 +154,9 @@ impl Serializable for MastForest {
         let mast_node_infos: Vec<MastNodeInfo> = self
             .nodes
             .iter()
-            .enumerate()
-            .map(|(mast_node_id, mast_node)| {
-                let node_id = MastNodeId::new_unchecked(mast_node_id as u32);
-
-                // Use centralized NodeToDecoratorIds for node-level decorators
-                let before_decorators = self.before_enter_decorators(node_id);
-                if !before_decorators.is_empty() {
-                    before_enter_decorators.push((mast_node_id, before_decorators.to_vec()));
-                }
-
-                let after_decorators = self.after_exit_decorators(node_id);
-                if !after_decorators.is_empty() {
-                    after_exit_decorators.push((mast_node_id, after_decorators.to_vec()));
-                }
-
+            .map(|mast_node| {
                 let ops_offset = if let MastNode::Block(basic_block) = mast_node {
-                    let ops_offset = basic_block_data_builder.encode_basic_block(basic_block);
-
-                    basic_block_decorators
-                        .push((mast_node_id, basic_block.raw_op_indexed_decorators(self)));
-
-                    ops_offset
+                    basic_block_data_builder.encode_basic_block(basic_block)
                 } else {
                     0
                 };
@@ -167,44 +174,29 @@ impl Serializable for MastForest {
         }
 
         self.advice_map.write_into(target);
-        let error_codes: BTreeMap<u64, String> =
-            self.debug_info.error_codes().map(|(k, v)| (*k, v.to_string())).collect();
-        error_codes.write_into(target);
 
-        // write all decorator data below
-
-        let mut decorator_data_builder = DecoratorDataBuilder::new();
-        for decorator in self.debug_info.decorators() {
-            decorator_data_builder.add_decorator(decorator)
+        // Serialize DebugInfo only if not stripped
+        if !stripped {
+            self.debug_info.write_into(target);
         }
-
-        let (decorator_data, decorator_infos, string_table) = decorator_data_builder.finalize();
-
-        // decorator data buffers
-        decorator_data.write_into(target);
-        string_table.write_into(target);
-
-        // Write decorator infos
-        for decorator_info in decorator_infos {
-            decorator_info.write_into(target);
-        }
-
-        basic_block_decorators.write_into(target);
-
-        // Write "before enter" and "after exit" decorators
-        before_enter_decorators.write_into(target);
-        after_exit_decorators.write_into(target);
     }
 }
 
 impl Deserializable for MastForest {
     fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
-        read_and_validate_magic(source)?;
-        read_and_validate_version(source)?;
+        let flags = read_and_validate_header(source)?;
+        let is_stripped = flags & FLAG_STRIPPED != 0;
 
         // Reading sections metadata
         let node_count = source.read_usize()?;
-        let decorator_count = source.read_usize()?;
+        if node_count > MastForest::MAX_NODES {
+            return Err(DeserializationError::InvalidValue(format!(
+                "node count {} exceeds maximum allowed {}",
+                node_count,
+                MastForest::MAX_NODES
+            )));
+        }
+        let _decorator_count = source.read_usize()?; // Read for wire format compatibility
 
         // Reading procedure roots
         let roots: Vec<u32> = Deserializable::read_from(source)?;
@@ -216,68 +208,30 @@ impl Deserializable for MastForest {
 
         let advice_map = AdviceMap::read_from(source)?;
 
-        let error_codes: BTreeMap<u64, String> = Deserializable::read_from(source)?;
-        let error_codes: BTreeMap<u64, Arc<str>> =
-            error_codes.into_iter().map(|(k, v)| (k, Arc::from(v))).collect();
-
-        // Reading Decorators
-        let decorator_data: Vec<u8> = Deserializable::read_from(source)?;
-        let string_table: StringTable = Deserializable::read_from(source)?;
-        let decorator_infos = decorator_infos_iter(source, decorator_count);
+        // Deserialize DebugInfo or create empty one if stripped
+        let debug_info = if is_stripped {
+            super::DebugInfo::empty_for_nodes(node_count)
+        } else {
+            super::DebugInfo::read_from(source)?
+        };
 
         // Constructing MastForest
-        let mut mast_forest = {
+        let mast_forest = {
             let mut mast_forest = MastForest::new();
 
-            for decorator_info in decorator_infos {
-                let decorator_info = decorator_info?;
-                let decorator =
-                    decorator_info.try_into_decorator(&string_table, &decorator_data)?;
+            // Set the fully deserialized debug_info - it already contains all mappings
+            mast_forest.debug_info = debug_info;
 
-                mast_forest.add_decorator(decorator).map_err(|e| {
-                    DeserializationError::InvalidValue(format!(
-                        "failed to add decorator to MAST forest while deserializing: {e}",
-                    ))
-                })?;
-            }
-
-            // nodes
+            // Convert node infos to builders
             let basic_block_data_decoder = BasicBlockDataDecoder::new(&basic_block_data);
-            let mut mast_builders = mast_node_infos
+            let mast_builders = mast_node_infos
                 .into_iter()
                 .map(|node_info| {
                     node_info.try_into_mast_node_builder(node_count, &basic_block_data_decoder)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
 
-            let basic_block_decorators: Vec<(usize, DecoratorList)> =
-                read_block_decorators(source, mast_forest.debug_info.num_decorators())?;
-            for (node_id, decorator_list) in basic_block_decorators {
-                match &mut mast_builders[node_id] {
-                    MastNodeBuilder::BasicBlock(basic_block) => {
-                        basic_block.set_decorators(decorator_list);
-                    },
-                    other => {
-                        return Err(DeserializationError::InvalidValue(format!(
-                            "expected mast node with id {node_id} to be a basic block, found {other:?}"
-                        )));
-                    },
-                }
-            }
-
-            // read "before enter" and "after exit" decorators, and update the corresponding nodes
-            let before_enter_decorators: Vec<(usize, Vec<DecoratorId>)> =
-                read_before_after_decorators(source, mast_forest.debug_info.num_decorators())?;
-            for (node_id, decorator_ids) in before_enter_decorators {
-                mast_builders[node_id].append_before_enter(decorator_ids);
-            }
-
-            let after_exit_decorators: Vec<(usize, Vec<DecoratorId>)> =
-                read_before_after_decorators(source, mast_forest.debug_info.num_decorators())?;
-            for (node_id, decorator_ids) in after_exit_decorators {
-                mast_builders[node_id].append_after_exit(decorator_ids);
-            }
-
+            // Add all builders to forest using relaxed validation
             for mast_node_builder in mast_builders {
                 mast_node_builder.add_to_forest_relaxed(&mut mast_forest).map_err(|e| {
                     DeserializationError::InvalidValue(format!(
@@ -298,77 +252,47 @@ impl Deserializable for MastForest {
             mast_forest
         };
 
-        mast_forest.debug_info.clear_error_codes();
-        mast_forest
-            .debug_info
-            .extend_error_codes(error_codes.iter().map(|(k, v)| (*k, v.clone())));
+        // Note: Full validation of deserialized MastForests (e.g., checking that procedure name
+        // digests correspond to procedure roots) is intentionally not performed here.
+        // The serialized format is expected to come from a trusted source (e.g., the assembler
+        // or a verified package). Callers should use MastForest::validate() if validation of
+        // untrusted input is needed.
 
         Ok(mast_forest)
     }
 }
 
-fn read_and_validate_magic<R: ByteReader>(source: &mut R) -> Result<[u8; 5], DeserializationError> {
-    let magic: [u8; 5] = source.read_array()?;
+/// Reads and validates the MAST header (magic, flags, version).
+///
+/// Returns the flags byte on success.
+fn read_and_validate_header<R: ByteReader>(source: &mut R) -> Result<u8, DeserializationError> {
+    // Read magic
+    let magic: [u8; 4] = source.read_array()?;
     if magic != *MAGIC {
         return Err(DeserializationError::InvalidValue(format!(
             "Invalid magic bytes. Expected '{:?}', got '{:?}'",
             *MAGIC, magic
         )));
     }
-    Ok(magic)
-}
 
-fn read_and_validate_version<R: ByteReader>(
-    source: &mut R,
-) -> Result<[u8; 3], DeserializationError> {
+    // Read and validate flags
+    let flags: u8 = source.read_u8()?;
+    if flags & FLAGS_RESERVED_MASK != 0 {
+        return Err(DeserializationError::InvalidValue(format!(
+            "Unknown flags set in MAST header: {:#04x}. Reserved bits must be zero.",
+            flags & FLAGS_RESERVED_MASK
+        )));
+    }
+
+    // Read and validate version
     let version: [u8; 3] = source.read_array()?;
     if version != VERSION {
         return Err(DeserializationError::InvalidValue(format!(
             "Unsupported version. Got '{version:?}', but only '{VERSION:?}' is supported",
         )));
     }
-    Ok(version)
-}
 
-fn read_block_decorators<R: ByteReader>(
-    source: &mut R,
-    decorator_count: usize,
-) -> Result<Vec<(usize, DecoratorList)>, DeserializationError> {
-    let vec_len: usize = source.read()?;
-    let mut out_vec: Vec<_> = Vec::with_capacity(vec_len);
-
-    for _ in 0..vec_len {
-        let node_id: usize = source.read()?;
-
-        let decorator_vec_len: usize = source.read()?;
-        let mut inner_vec: Vec<DecoratedOpLink> = Vec::with_capacity(decorator_vec_len);
-        for _ in 0..decorator_vec_len {
-            let op_id: usize = source.read()?;
-            let decorator_id = DecoratorId::from_u32_bounded(source.read()?, decorator_count)?;
-            inner_vec.push((op_id, decorator_id));
-        }
-
-        out_vec.push((node_id, inner_vec));
-    }
-
-    Ok(out_vec)
-}
-
-fn decorator_infos_iter<'a, R>(
-    source: &'a mut R,
-    decorator_count: usize,
-) -> impl Iterator<Item = Result<DecoratorInfo, DeserializationError>> + 'a
-where
-    R: ByteReader + 'a,
-{
-    let mut remaining = decorator_count;
-    core::iter::from_fn(move || {
-        if remaining == 0 {
-            return None;
-        }
-        remaining -= 1;
-        Some(DecoratorInfo::read_from(source))
-    })
+    Ok(flags)
 }
 
 fn node_infos_iter<'a, R>(
@@ -388,30 +312,51 @@ where
     })
 }
 
-/// Reads the `before_enter_decorators` and `after_exit_decorators` of the serialized `MastForest`
-/// format.
-///
-/// Note that we need this custom format because we cannot implement `Deserializable` for
-/// `DecoratorId` (in favor of using [`DecoratorId::from_u32_bounded`]).
-fn read_before_after_decorators<R: ByteReader>(
-    source: &mut R,
-    decorator_count: usize,
-) -> Result<Vec<(usize, Vec<DecoratorId>)>, DeserializationError> {
-    let vec_len: usize = source.read()?;
-    let mut out_vec: Vec<_> = Vec::with_capacity(vec_len);
+// UNTRUSTED DESERIALIZATION
+// ================================================================================================
 
-    for _ in 0..vec_len {
-        let node_id: usize = source.read()?;
-
-        let inner_vec_len: usize = source.read()?;
-        let mut inner_vec: Vec<DecoratorId> = Vec::with_capacity(inner_vec_len);
-        for _ in 0..inner_vec_len {
-            let decorator_id = DecoratorId::from_u32_bounded(source.read()?, decorator_count)?;
-            inner_vec.push(decorator_id);
-        }
-
-        out_vec.push((node_id, inner_vec));
+impl Deserializable for super::UntrustedMastForest {
+    /// Deserializes an [`super::UntrustedMastForest`] from a byte reader.
+    ///
+    /// Note: This method does not apply budgeting. For untrusted input, prefer using
+    /// [`read_from_bytes`](Self::read_from_bytes) which applies budgeted deserialization.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let forest = MastForest::read_from(source)?;
+        Ok(super::UntrustedMastForest(forest))
     }
 
-    Ok(out_vec)
+    /// Deserializes an [`super::UntrustedMastForest`] from bytes using budgeted deserialization.
+    ///
+    /// This method uses a [`crate::serde::BudgetedReader`] with a budget equal to the input size
+    /// to protect against denial-of-service attacks from malicious input.
+    ///
+    /// After deserialization, callers should use [`super::UntrustedMastForest::validate()`]
+    /// to verify structural integrity and recompute all node hashes before using
+    /// the forest.
+    fn read_from_bytes(bytes: &[u8]) -> Result<Self, DeserializationError> {
+        super::UntrustedMastForest::read_from_bytes(bytes)
+    }
+}
+
+// STRIPPED SERIALIZATION
+// ================================================================================================
+
+/// Wrapper for serializing a [`MastForest`] without debug information.
+///
+/// This newtype enables an alternative serialization format that omits the DebugInfo section,
+/// producing smaller output files suitable for production deployment where debug info is not
+/// needed.
+///
+/// The resulting bytes can be deserialized with the standard [`Deserializable`] impl for
+/// [`MastForest`], which auto-detects the format via the flags byte in the header.
+pub(super) struct StrippedMastForest<'a>(pub(super) &'a MastForest);
+
+impl Serializable for StrippedMastForest<'_> {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        self.0.write_into_with_options(target, true);
+    }
 }

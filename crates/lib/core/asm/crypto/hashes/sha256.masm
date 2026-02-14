@@ -172,8 +172,7 @@ proc compute_message_schedule_word
     movup.2
     exec.small_sigma_0
 
-    u32overflowing_add3
-    drop
+    u32wrapping_add3
     u32wrapping_add
 end
 
@@ -195,15 +194,13 @@ proc consume_message_word
     movup.9
     movup.10
 
-    u32overflowing_add3
-    drop
+    u32wrapping_add3
 
     dup.5
     exec.cap_sigma_1
 
     movup.9
-    u32overflowing_add3
-    drop
+    u32wrapping_add3
 
     dup.3
     dup.3
@@ -282,9 +279,9 @@ proc prepare_message_schedule_and_consume
     swapw
 
     push.0x428a2f98
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[0]
 
@@ -343,9 +340,9 @@ proc prepare_message_schedule_and_consume
     movupw.2
 
     push.0x3956c25b
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[4]
 
@@ -400,9 +397,9 @@ proc prepare_message_schedule_and_consume
     movupw.3
 
     push.0xd807aa98
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[8]
 
@@ -461,9 +458,9 @@ proc prepare_message_schedule_and_consume
     movupw.2
 
     push.0x72be5d74
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[12]
 
@@ -522,9 +519,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xe49b69c1
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[16]
 
@@ -583,9 +580,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x2de92c6f
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[20]
 
@@ -644,9 +641,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x983e5152
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[24]
 
@@ -705,9 +702,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xc6e00bf3
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[28]
 
@@ -766,9 +763,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x27b70a85
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[32]
 
@@ -827,9 +824,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x650a7354
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[36]
 
@@ -888,9 +885,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xa2bfe8a1
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[40]
 
@@ -949,9 +946,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0xd192e819
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[44]
 
@@ -979,9 +976,9 @@ proc prepare_message_schedule_and_consume
     exec.rev_element_order
 
     push.0x19a4c116
-    push.0.0.0.0
+    padw
     loc_loadw_be.4
-    push.0.0.0.0
+    padw
     loc_loadw_be.0
     exec.consume_message_word # consume msg[48]
 
@@ -1057,10 +1054,10 @@ proc prepare_message_schedule_and_consume
     movdn.8
     exec.consume_message_word # consume msg[63]
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.12
 
-    push.0.0.0.0
+    padw
     loc_loadw_be.8
 
     repeat.8
@@ -1574,20 +1571,22 @@ pub proc hash_bytes
 
     # loc.2 (padded length): input_length + (55 - input_length) % 64 + 9
     push.55 loc_load.4 u32wrapping_sub push.63 u32and
-    loc_load.4 u32assert2 u32overflowing_add assertz u32assert u32overflowing_add.9 assertz loc_store.8
+    loc_load.4 u32assert2 u32overflowing_add assertz.err="range check failed: padding" u32assert u32overflowing_add.9 assertz.err="range check failed: padding" loc_store.8
 
     # loc.3 (last word address in padding): input_address + (padded_length / 4) - 4
     loc_load.8 u32assert u32div.4 loc_load.0 u32wrapping_add u32wrapping_sub.4 loc_store.12
 
     # loc.4 (u32 aligned padding byte): 0x80000000 >> ((input_length % 4) * 8)
-    loc_load.4 u32assert u32mod.4 u32assert u32overflowing_mul.8 assertz push.0x80000000 swap u32shr loc_store.16
+    # Note: u32widening_mul returns [lo, hi] with lo on top, swap to get hi for assertz.err="range check failed: padding"
+    loc_load.4 u32assert u32mod.4 u32assert u32widening_mul.8 swap assertz.err="range check failed: padding" push.0x80000000 swap u32shr loc_store.16
 
     # loc.5 (memory offset of first padding byte): (input_length / 4) % 4
     loc_load.4 u32assert u32div.4 u32mod.4 loc_store.20
 
+
     # loc.6 (memory address of first padding byte): input_address + (len / 16) * 4
     # Note: (len /16) * 4 is *not* the same as (len / 4), due to the division being a division + floor operation
-    loc_load.0 loc_load.4 u32assert u32div.16 u32assert2 mul.4 u32overflowing_add assertz loc_store.24
+    loc_load.0 loc_load.4 u32assert u32div.16 u32assert2 mul.4 u32overflowing_add assertz.err="range check failed: padding" loc_store.24
 
 
     # loc.7 (number of remaining 512-bit blocks to consume): padded_length / 64
@@ -1601,7 +1600,8 @@ pub proc hash_bytes
 
     # Set message length in bits at end of padding
     padw loc_load.12 mem_loadw_be
-    movup.3 drop loc_load.4 u32assert u32overflowing_mul.8 assertz movdn.3
+    # Note: u32widening_mul returns [lo, hi] with lo on top, swap to get hi for assertz.err="range check failed: padding"
+    movup.3 drop loc_load.4 u32assert u32widening_mul.8 swap assertz.err="range check failed: padding" movdn.3
     loc_load.12 mem_storew_be dropw
 
     # Sha256 init
@@ -1611,14 +1611,14 @@ pub proc hash_bytes
     # Consume sha256 blocks
     loc_load.28 u32assert neq.0
     while.true
-        padw loc_load.0 u32assert u32overflowing_add.12 assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.8 assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.4 assertz mem_loadw_be movdnw.2
-        padw loc_load.0 u32assert u32overflowing_add.0 assertz mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.12 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.8 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.4 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
+        padw loc_load.0 u32assert u32overflowing_add.0 assertz.err="range check failed: padding" mem_loadw_be movdnw.2
         exec.prepare_message_schedule_and_consume
 
-        loc_load.0 u32assert u32overflowing_add.16 assertz loc_store.0
-        loc_load.28 u32assert u32overflowing_sub.1 assertz dup loc_store.28
+        loc_load.0 u32assert u32overflowing_add.16 assertz.err="range check failed: padding" loc_store.0
+        loc_load.28 u32assert u32overflowing_sub.1 assertz.err="range check failed: padding" dup loc_store.28
         u32assert neq.0
     end
 end

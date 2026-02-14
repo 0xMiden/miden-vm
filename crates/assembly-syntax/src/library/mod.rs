@@ -1,9 +1,11 @@
 use alloc::{collections::BTreeMap, string::String, sync::Arc, vec::Vec};
 
 use miden_core::{
-    AdviceMap, Kernel, Word,
+    Word,
+    advice::AdviceMap,
     mast::{MastForest, MastNodeExt, MastNodeId},
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    program::Kernel,
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 use midenc_hir_type::{FunctionType, Type};
 #[cfg(feature = "arbitrary")]
@@ -413,7 +415,7 @@ impl Library {
 
         // NOTE: We catch panics due to i/o errors here due to the fact that the ByteWriter
         // trait does not provide fallible APIs, so WriteAdapter will panic if the underlying
-        // writes fail. This needs to be addressed in winterfell at some point
+        // writes fail. This needs to be addressed upstream at some point
         std::panic::catch_unwind(|| {
             let mut file = std::fs::File::create(path)?;
             self.write_into(&mut file);
@@ -803,7 +805,7 @@ impl Serializable for LibraryExport {
     }
 }
 
-/// A wrapper type for [FunctionType] that provides serialization support via the winter-utils
+/// A wrapper type for [FunctionType] that provides serialization support via the miden-crypto
 /// serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
@@ -821,7 +823,7 @@ impl Serializable for FunctionTypeSerializer<'_> {
     }
 }
 
-/// A wrapper type for [FunctionType] that provides deserialization support via the winter-utils
+/// A wrapper type for [FunctionType] that provides deserialization support via the miden-crypto
 /// serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
@@ -865,7 +867,7 @@ impl Deserializable for FunctionTypeDeserializer {
     }
 }
 
-/// A wrapper type for [Type] that provides serialization support via the winter-utils serializer.
+/// A wrapper type for [Type] that provides serialization support via the miden-crypto serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
 /// but in a future release we'll either rely on the `serde` serialization for these types, or
@@ -938,7 +940,7 @@ impl Serializable for TypeSerializer<'_> {
     }
 }
 
-/// A wrapper type for [Type] that provides deserialization support via the winter-utils serializer.
+/// A wrapper type for [Type] that provides deserialization support via the miden-crypto serializer.
 ///
 /// This is a temporary implementation to allow type information to be serialized with libraries,
 /// but in a future release we'll either rely on the `serde` serialization for these types, or
@@ -1043,8 +1045,8 @@ impl proptest::prelude::Arbitrary for Library {
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
         use miden_core::{
-            Operation,
             mast::{BasicBlockNodeBuilder, MastForestContributor},
+            operations::Operation,
         };
         use proptest::prelude::*;
 

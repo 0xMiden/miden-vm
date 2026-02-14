@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Felt, Word,
-    utils::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
 };
 
 // ADVICE MAP
@@ -28,7 +28,7 @@ use crate::{
 #[cfg_attr(feature = "serde", serde(transparent))]
 #[cfg_attr(
     all(feature = "arbitrary", test),
-    miden_test_serde_macros::serde_test(winter_serde(true))
+    miden_test_serde_macros::serde_test(binary_serde(true))
 )]
 pub struct AdviceMap(BTreeMap<Word, Arc<[Felt]>>);
 
@@ -188,11 +188,12 @@ impl Deserializable for AdviceMap {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::field::PrimeCharacteristicRing;
 
     #[test]
     fn test_advice_map_serialization() {
         let mut map1 = AdviceMap::default();
-        map1.insert(Word::default(), vec![Felt::from(1u32), Felt::from(2u32)]);
+        map1.insert(Word::default(), vec![Felt::from_u32(1), Felt::from_u32(2)]);
 
         let bytes = map1.to_bytes();
 

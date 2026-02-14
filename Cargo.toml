@@ -29,7 +29,7 @@ homepage = "https://miden.xyz"
 repository = "https://github.com/0xMiden/miden-vm"
 exclude = [".github/"]
 rust-version = "1.90"
-version = "0.20.6"
+version = "0.21.0"
 
 [profile.optimized]
 inherits = "release"
@@ -45,25 +45,25 @@ overflow-checks = true
 
 [workspace.dependencies]
 # Workspace crates
-miden-air = { path = "./air", version = "0.20", default-features = false }
-miden-assembly = { path = "./crates/assembly", version = "0.20", default-features = false }
-miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.20", default-features = false }
-miden-core = { path = "./core", version = "0.20", default-features = false }
-miden-debug-types = { path = "./crates/debug-types", version = "0.20", default-features = false }
-miden-mast-package = { path = "./crates/mast-package", version = "0.20", default-features = false }
-miden-processor = { path = "./processor", version = "0.20", default-features = false }
+miden-air = { path = "./air", version = "0.21", default-features = false }
+miden-assembly = { path = "./crates/assembly", version = "0.21", default-features = false }
+miden-assembly-syntax = { path = "./crates/assembly-syntax", version = "0.21", default-features = false }
+miden-core = { path = "./core", version = "0.21", default-features = false }
+miden-debug-types = { path = "./crates/debug-types", version = "0.21", default-features = false }
+miden-mast-package = { path = "./crates/mast-package", version = "0.21", default-features = false }
+miden-processor = { path = "./processor", version = "0.21", default-features = false }
 miden-test-serde-macros = { path = "./crates/test-serde-macros", default-features = false }
-miden-prover = { path = "./prover", version = "0.20", default-features = false }
-miden-core-lib = { path = "./crates/lib/core", version = "0.20", default-features = false }
-miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.20", default-features = false }
-miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.20", default-features = false }
-miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.20", default-features = false }
-miden-utils-sync = { path = "./crates/utils-sync", version = "0.20", default-features = false }
+miden-prover = { path = "./prover", version = "0.21", default-features = false }
+miden-core-lib = { path = "./crates/lib/core", version = "0.21", default-features = false }
+miden-utils-core-derive = { path = "./crates/utils-core-derive", version = "0.21", default-features = false }
+miden-utils-diagnostics = { path = "./crates/utils-diagnostics", version = "0.21", default-features = false }
+miden-utils-indexing = { path = "./crates/utils-indexing", version = "0.21", default-features = false }
+miden-utils-sync = { path = "./crates/utils-sync", version = "0.21", default-features = false }
 miden-utils-testing = { path = "./crates/test-utils", package = "miden-test-utils" }
-miden-verifier = { path = "./verifier", version = "0.20", default-features = false }
+miden-verifier = { path = "./verifier", version = "0.21", default-features = false }
 
 # Miden crates
-miden-crypto = { version = "0.19", default-features = false }
+miden-crypto = { version = "0.22", default-features = false }
 miden-formatting = { version = "0.1", default-features = false }
 midenc-hir-type = { version = "0.4", default-features = false }
 
@@ -73,28 +73,25 @@ syn = "1.0"
 windows-sys = "0.61"
 
 # Third-party crates
-blake3 = { version = "1.8" }
-criterion = { version = "0.7" }
-derive_more = { version = "2.0", features = ["from"] }
-env_logger = { version = "0.11" }
-insta = { version = "1.43", default-features = false, features = ["colors"] }
-itertools = { version = "0.14", default-features = false, features = ["use_alloc"] }
-log = { version = "0.4", default-features = false }
-paste = { version = "1.0", default-features = false }
-proptest = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
+criterion       = { version = "0.7" }
+derive_more     = { version = "2.0", features = ["from"] }
+env_logger      = { version = "0.11" }
+insta           = { version = "1.43", default-features = false, features = ["colors"] }
+itertools       = { version = "0.14", default-features = false, features = ["use_alloc"] }
+log             = { version = "0.4", default-features = false }
+paste           = { version = "1.0", default-features = false }
+proptest        = { version = "1.8", default-features = false, features = ["no_std", "alloc"] }
 proptest-derive = { version = "0.7", default-features = false }
-serde = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
-serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-serde-untagged = {version = "0.1" }
-sha2 = { version = "0.10", default-features = false }
-smallvec = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
-thiserror = { version = "2.0", default-features = false }
-tokio = { version = "1.48", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["attributes"] }
-winter-air = { version = "0.13", default-features = false }
-winter-fri = "0.13"
-winter-math = { version = "0.13", default-features = false }
-winter-prover = { version = "0.13", default-features = false }
-winter-rand-utils = "0.13"
-winter-utils = { version = "0.13", default-features = false }
-winter-verifier = { version = "0.13", default-features = false }
+rand            = { version = "0.9", default-features = false }
+serde           = { version = "1.0", default-features = false, features = ["alloc", "derive", "rc"] }
+serde_json      = { version = "1.0", default-features = false, features = ["alloc"] }
+smallvec        = { version = "1.15", default-features = false, features = ["union", "const_generics", "const_new"] }
+thiserror       = { version = "2.0", default-features = false }
+tokio           = { version = "1.48", default-features = false }
+tracing         = { version = "0.1", default-features = false, features = ["attributes"] }
+
+# WASM support
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
+
+[workspace.lints.rust]
+unexpected_cfgs = { check-cfg = ['cfg(fuzzing)'], level = "warn" }

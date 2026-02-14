@@ -1,8 +1,9 @@
-use miden_core::{Word, assert_matches};
-use miden_processor::{AdviceInputs, ContextId, DefaultHost, ExecutionError, Program};
+use miden_processor::{
+    ContextId, DefaultHost, FastProcessor, Felt, ONE, Program, StackInputs, Word, ZERO,
+    field::PrimeCharacteristicRing, trace::RowIndex,
+};
 use miden_utils_testing::{
-    ExecutionOptions, Felt, ONE, Process, StackInputs, ZERO, build_expected_hash,
-    build_expected_perm, felt_slice_to_ints,
+    AdviceStackBuilder, build_expected_hash, build_expected_perm, felt_slice_to_ints,
 };
 
 #[test]
@@ -33,63 +34,90 @@ fn test_memcopy_words() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let mut process = Process::new(
-        program.kernel().clone(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    process.execute(&program, &mut host).unwrap();
+    let processor = FastProcessor::new(StackInputs::default());
+    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+
+    let dummy_clk = RowIndex::from(0_usize);
 
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1000).unwrap(),
-        Some(Word::new([ZERO, ZERO, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(1000), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 1000"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1004).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(1004), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 1004"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1008).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(1008), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 1008"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1012).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(1012), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 1012"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 1016).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(1016), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 1016"
     );
 
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2000).unwrap(),
-        Some(Word::new([ZERO, ZERO, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(2000), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ZERO, ONE]),
         "Address 2000"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2004).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(2004), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ZERO]),
         "Address 2004"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2008).unwrap(),
-        Some(Word::new([ZERO, ZERO, ONE, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(2008), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ZERO, ONE, ONE]),
         "Address 2008"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2012).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ZERO])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(2012), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ZERO]),
         "Address 2012"
     );
     assert_eq!(
-        process.chiplets.memory.get_word(ContextId::root(), 2016).unwrap(),
-        Some(Word::new([ZERO, ONE, ZERO, ONE])),
+        exec_output
+            .memory
+            .read_word(ContextId::root(), Felt::from_u32(2016), dummy_clk)
+            .unwrap(),
+        Word::new([ZERO, ONE, ZERO, ONE]),
         "Address 2016"
     );
 }
@@ -122,18 +150,16 @@ fn test_memcopy_elements() {
 
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
-    let mut process = Process::new(
-        program.kernel().clone(),
-        StackInputs::default(),
-        AdviceInputs::default(),
-        ExecutionOptions::default(),
-    );
-    process.execute(&program, &mut host).unwrap();
+    let processor = FastProcessor::new(StackInputs::default());
+    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
 
-    for addr in 2002..2020 {
+    for addr in 2002_u32..2020_u32 {
         assert_eq!(
-            process.chiplets.memory.get_value(ContextId::root(), addr).unwrap(),
-            Felt::from(addr - 2000),
+            exec_output
+                .memory
+                .read_element(ContextId::root(), Felt::from_u32(addr))
+                .unwrap(),
+            Felt::from_u32(addr - 2000),
             "Address {}",
             addr
         );
@@ -163,7 +189,7 @@ fn test_pipe_double_words_to_memory() {
     let operand_stack = &[];
     let data = &[1, 2, 3, 4, 5, 6, 7, 8];
     let mut expected_stack =
-        felt_slice_to_ints(&build_expected_perm(&[0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8]));
+        felt_slice_to_ints(&build_expected_perm(&[1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0]));
     expected_stack.push(end_addr);
     build_test!(source, operand_stack, &data).expect_stack_and_memory(
         &expected_stack,
@@ -178,14 +204,14 @@ fn test_pipe_words_to_memory() {
     let one_word = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::rpo256
+        use miden::core::crypto::hashes::poseidon2
 
         begin
             push.{mem_addr} # target address
             push.1  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.rpo256::squeeze_digest
+            exec.poseidon2::squeeze_digest
 
             # truncate stack
             swapdw dropw dropw
@@ -205,14 +231,14 @@ fn test_pipe_words_to_memory() {
     let three_words = format!(
         "
         use miden::core::mem
-        use miden::core::crypto::hashes::rpo256
+        use miden::core::crypto::hashes::poseidon2
 
         begin
             push.{mem_addr} # target address
             push.3  # number of words
 
             exec.mem::pipe_words_to_memory
-            exec.rpo256::squeeze_digest
+            exec.poseidon2::squeeze_digest
 
             # truncate stack
             swapdw dropw dropw
@@ -237,7 +263,7 @@ fn test_pipe_preimage_to_memory() {
         "use miden::core::mem
 
         begin
-            adv_push.4 # push commitment to stack
+            padw adv_loadw # push commitment to stack
             push.{mem_addr}    # target address
             push.3     # number of words
 
@@ -247,10 +273,11 @@ fn test_pipe_preimage_to_memory() {
     );
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_loadw(build_expected_hash(data).into());
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     build_test!(three_words, operand_stack, &advice_stack).expect_stack_and_memory(
         &[1012],
         mem_addr,
@@ -264,7 +291,7 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     use miden::core::mem
 
     begin
-        adv_push.4  # push commitment to stack
+        padw adv_loadw  # push commitment to stack
         push.1000   # target address
         push.3      # number of words
 
@@ -273,11 +300,13 @@ fn test_pipe_preimage_to_memory_invalid_preimage() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack[0] += 1; // corrupt the expected hash
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut corrupted_hash = build_expected_hash(data);
+    corrupted_hash[0] += Felt::ONE; // corrupt the expected hash
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_loadw(corrupted_hash.into());
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     let res = build_test!(three_words, operand_stack, &advice_stack).execute();
     assert!(res.is_err());
 }
@@ -290,7 +319,7 @@ fn test_pipe_double_words_preimage_to_memory() {
         "use miden::core::mem
 
         begin
-            adv_push.4 # push commitment to stack
+            padw adv_loadw # push commitment to stack
             push.{mem_addr}    # target address
             push.4     # number of words
 
@@ -300,10 +329,11 @@ fn test_pipe_double_words_preimage_to_memory() {
     );
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_loadw(build_expected_hash(data).into());
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
     build_test!(four_words, operand_stack, &advice_stack).expect_stack_and_memory(
         &[mem_addr + (4u64 * 4u64)],
         mem_addr as u32,
@@ -317,7 +347,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     use miden::core::mem
 
     begin
-        adv_push.4  # push commitment to stack
+        padw adv_loadw  # push commitment to stack
         push.1000   # target address
         push.4      # number of words
 
@@ -326,13 +356,15 @@ fn test_pipe_double_words_preimage_to_memory_invalid_preimage() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack[0] += 1; // corrupt the expected hash
-    advice_stack.extend(data);
-    let execution_result = build_test!(four_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+    let mut corrupted_hash = build_expected_hash(data);
+    corrupted_hash[0] += Felt::ONE; // corrupt the expected hash
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_loadw(corrupted_hash.into());
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
+    let test = build_test!(four_words, operand_stack, &advice_stack);
+    expect_assert_error_message!(test);
 }
 
 #[test]
@@ -341,7 +373,7 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     use miden::core::mem
 
     begin
-        adv_push.4  # push commitment to stack
+        padw adv_loadw  # push commitment to stack
         push.1000   # target address
         push.3      # number of words
 
@@ -350,10 +382,11 @@ fn test_pipe_double_words_preimage_to_memory_invalid_count() {
     ";
 
     let operand_stack = &[];
-    let data = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
-    let mut advice_stack = felt_slice_to_ints(&build_expected_hash(data));
-    advice_stack.reverse();
-    advice_stack.extend(data);
-    let execution_result = build_test!(three_words, operand_stack, &advice_stack).execute();
-    assert_matches!(execution_result, Err(ExecutionError::FailedAssertion { .. }));
+    let data: &[u64] = &[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+    let mut builder = AdviceStackBuilder::new();
+    builder.push_for_adv_loadw(build_expected_hash(data).into());
+    builder.push_u64_slice(data);
+    let advice_stack = builder.build_vec_u64();
+    let test = build_test!(three_words, operand_stack, &advice_stack);
+    expect_assert_error_message!(test);
 }

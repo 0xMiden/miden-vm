@@ -1,19 +1,20 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::fmt;
 
-use miden_crypto::{Felt, Word};
-use miden_formatting::prettier::PrettyPrint;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use super::{MastForestContributor, MastNodeErrorContext, MastNodeExt};
+use super::{MastForestContributor, MastNodeExt};
 use crate::{
-    Idx, OPCODE_LOOP,
+    Felt, Word,
     chiplets::hasher,
     mast::{
-        DecoratedOpLink, DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode,
+        DecoratorId, DecoratorStore, MastForest, MastForestError, MastNode, MastNodeFingerprint,
         MastNodeId,
     },
+    operations::OPCODE_LOOP,
+    prettier::PrettyPrint,
+    utils::{Idx, LookupByIdx},
 };
 
 // LOOP NODE
@@ -44,23 +45,6 @@ impl LoopNode {
     /// Returns the ID of the node presenting the body of the loop.
     pub fn body(&self) -> MastNodeId {
         self.body
-    }
-}
-
-impl MastNodeErrorContext for LoopNode {
-    fn decorators<'a>(
-        &'a self,
-        forest: &'a MastForest,
-    ) -> impl Iterator<Item = DecoratedOpLink> + 'a {
-        // Use the decorator_store for efficient O(1) decorator access
-        let before_enter = self.decorator_store.before_enter(forest);
-        let after_exit = self.decorator_store.after_exit(forest);
-
-        // Convert decorators to DecoratedOpLink tuples
-        before_enter
-            .iter()
-            .map(|&deco_id| (0, deco_id))
-            .chain(after_exit.iter().map(|&deco_id| (1, deco_id)))
     }
 }
 
@@ -146,7 +130,7 @@ impl MastNodeExt for LoopNode {
     /// the domain defined by [Self::DOMAIN] - i..e,:
     /// ```
     /// # use miden_core::mast::LoopNode;
-    /// # use miden_crypto::{Word, hash::rpo::Rpo256 as Hasher};
+    /// # use miden_crypto::{Word, hash::poseidon2::Poseidon2 as Hasher};
     /// # let body_digest = Word::default();
     /// Hasher::merge_in_domain(&[body_digest, Word::default()], LoopNode::DOMAIN);
     /// ```
@@ -355,8 +339,8 @@ impl MastForestContributor for LoopNodeBuilder {
     fn fingerprint_for_node(
         &self,
         forest: &MastForest,
-        hash_by_node_id: &impl crate::LookupByIdx<MastNodeId, crate::mast::MastNodeFingerprint>,
-    ) -> Result<crate::mast::MastNodeFingerprint, MastForestError> {
+        hash_by_node_id: &impl LookupByIdx<MastNodeId, MastNodeFingerprint>,
+    ) -> Result<MastNodeFingerprint, MastForestError> {
         // Use the fingerprint_from_parts helper function
         crate::mast::node_fingerprint::fingerprint_from_parts(
             forest,
@@ -378,10 +362,7 @@ impl MastForestContributor for LoopNodeBuilder {
         )
     }
 
-    fn remap_children(
-        self,
-        remapping: &impl crate::LookupByIdx<crate::mast::MastNodeId, crate::mast::MastNodeId>,
-    ) -> Self {
+    fn remap_children(self, remapping: &impl LookupByIdx<MastNodeId, MastNodeId>) -> Self {
         LoopNodeBuilder {
             body: *remapping.get(self.body).unwrap_or(&self.body),
             before_enter: self.before_enter,
@@ -390,27 +371,21 @@ impl MastForestContributor for LoopNodeBuilder {
         }
     }
 
-    fn with_before_enter(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_before_enter(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.before_enter = decorators.into();
         self
     }
 
-    fn with_after_exit(mut self, decorators: impl Into<Vec<crate::mast::DecoratorId>>) -> Self {
+    fn with_after_exit(mut self, decorators: impl Into<Vec<DecoratorId>>) -> Self {
         self.after_exit = decorators.into();
         self
     }
 
-    fn append_before_enter(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_before_enter(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.before_enter.extend(decorators);
     }
 
-    fn append_after_exit(
-        &mut self,
-        decorators: impl IntoIterator<Item = crate::mast::DecoratorId>,
-    ) {
+    fn append_after_exit(&mut self, decorators: impl IntoIterator<Item = DecoratorId>) {
         self.after_exit.extend(decorators);
     }
 
@@ -442,9 +417,6 @@ impl LoopNodeBuilder {
 
         let future_node_id = MastNodeId::new_unchecked(forest.nodes.len() as u32);
 
-        // Store node-level decorators in the centralized NodeToDecoratorIds for efficient access
-        forest.register_node_decorators(future_node_id, &self.before_enter, &self.after_exit);
-
         // Create the node in the forest with Linked variant from the start
         // Move the data directly without intermediate cloning
         let node_id = forest
@@ -472,7 +444,7 @@ impl proptest::prelude::Arbitrary for LoopNodeBuilder {
         use proptest::prelude::*;
 
         (
-            any::<crate::mast::MastNodeId>(),
+            any::<MastNodeId>(),
             proptest::collection::vec(
                 super::arbitrary::decorator_id_strategy(params.max_decorator_id_u32),
                 0..=params.max_decorators,

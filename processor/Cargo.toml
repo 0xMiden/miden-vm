@@ -19,19 +19,15 @@ bench = false
 doctest = false
 
 [features]
-concurrent = ["std", "winter-prover/concurrent"]
+concurrent = ["std"]
 default = ["std"]
 std = [
     "miden-core/std",
     "miden-debug-types/std",
     "miden-utils-diagnostics/std",
-    "winter-prover/std",
     "thiserror/std",
 ]
 testing = ["miden-air/testing"]
-# Removes proper error context from the error messages. Enable in production builds that need
-# maximal performance.
-no_err_ctx = []
 # Like `testing`, but slows down the processor speed to make it easier to debug.
 bus-debugger = ["testing", "miden-air/testing"]
 
@@ -44,19 +40,25 @@ miden-utils-diagnostics.workspace = true
 miden-utils-indexing.workspace = true
 
 # External dependencies
+itertools.workspace = true
 paste.workspace = true
 rayon = { version = "1.10", default-features = false }
 tracing.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt"] }
-winter-prover.workspace = true
-itertools.workspace = true
+
+# Platform-specific tokio dependencies
+# On non-wasm targets, enable rt-multi-thread for better performance
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
+
+# On wasm32, only basic tokio features are supported
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
 
 [dev-dependencies]
 miden-assembly = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 insta.workspace = true
 pretty_assertions = { version = "1.4" }
+proptest.workspace = true
 rstest = { version = "0.26" }
-winter-fri.workspace = true
-winter-utils.workspace = true

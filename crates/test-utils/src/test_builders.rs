@@ -1,6 +1,34 @@
 // MACROS TO BUILD TESTS
 // ================================================================================================
 
+/// Creates a `Vec<u64>` for stack inputs where the first element will be on top of the stack.
+///
+/// This macro handles the reversal required by `StackInputs::try_from_ints`, which reverses
+/// its input internally. With this macro, you can specify stack inputs in intuitive order.
+///
+/// # Example
+///
+/// ```ignore
+/// // Stack will be [a, b, c, d, ...] with 'a' at position 0 (top)
+/// let inputs = stack![a, b, c, d];
+/// let test = build_op_test!("some_op", &inputs);
+/// ```
+///
+/// # Word Helper
+///
+/// To add a Word to the stack with `word[0]` on top, use the `word` helper:
+///
+/// ```ignore
+/// // Stack will be [w[0], w[1], w[2], w[3], ...] with w[0] on top
+/// let inputs = stack![word(my_word), other_value];
+/// ```
+#[macro_export]
+macro_rules! stack {
+    ($($elem:expr),* $(,)?) => {{
+        ::alloc::vec![$($elem as u64),*]
+    }};
+}
+
 /// Returns a Test struct in non debug mode from a string of one or more operations and any
 /// specified stack and advice inputs.
 ///
