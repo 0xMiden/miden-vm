@@ -11,16 +11,15 @@ use miden_air::trace::{
     },
 };
 
-use super::{RangeChecker, TraceFragment};
-use crate::{
-    EMPTY_WORD, Felt, MemoryAddress, ONE, PrimeField64, WORD_SIZE, Word, ZERO,
-    field::{Field, PrimeCharacteristicRing},
-    system::ContextId,
-    utils::{split_element_u32_into_u16, split_u32_into_u16},
+use super::{
+    super::utils::{split_element_u32_into_u16, split_u32_into_u16},
+    RangeChecker, TraceFragment,
 };
-
-mod errors;
-pub use errors::MemoryError;
+use crate::{
+    ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, PrimeField64, WORD_SIZE, Word,
+    ZERO,
+    field::{Field, PrimeCharacteristicRing},
+};
 
 mod segment;
 use segment::{MemoryOperation, MemorySegmentTrace};

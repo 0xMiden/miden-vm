@@ -37,10 +37,9 @@ pub use miden_processor::{
     trace::ExecutionTrace,
 };
 use miden_processor::{
-    DefaultDebugHandler, DefaultHost, Program,
+    DefaultDebugHandler, DefaultHost, ExecutionOutput, FastProcessor, Program,
     event::EventHandler,
-    fast::{ExecutionOutput, FastProcessor, execution_tracer::TraceGenerationContext},
-    trace::build_trace,
+    trace::{build_trace, execution_tracer::TraceGenerationContext},
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use miden_prover::prove_sync;

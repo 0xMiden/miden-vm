@@ -1,17 +1,16 @@
-use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{
-    Felt, ONE, ZERO,
-    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
-};
-
 use crate::{
+    Felt, ONE, ZERO,
     errors::OperationError,
-    processor::{OperationHelperRegisters, Processor, StackInterface},
-    tracer::Tracer,
+    field::{BasedVectorSpace, Field, PrimeField64, QuadFelt},
+    processor::{Processor, StackInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
 mod tests;
+
+// FRI OPERATIONS
+// ================================================================================================
 
 /// Performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2
 /// extension of the base field. Additionally, performs several computations which simplify
@@ -42,10 +41,14 @@ mod tests;
 /// operation has been executed, the top 10 elements of the stack can be considered to be
 /// "garbage".
 #[inline(always)]
-pub(super) fn op_fri_ext2fold4<P: Processor>(
+pub(super) fn op_fri_ext2fold4<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], OperationError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, OperationError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     // --- read all relevant variables from the stack ---------------------
     let query_values = get_query_values(processor);
     let folded_pos = processor.stack().get(8);
@@ -83,7 +86,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
 
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
-    let x = poe * f_tau * DOMAIN_OFFSET;
+    let x = poe * f_tau;
     let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
@@ -98,7 +101,8 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     let poe2 = poe * poe;
     let poe4 = poe2 * poe2;
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     processor.stack_mut().set(0, tmp0[1]);
     processor.stack_mut().set(1, tmp0[0]);
@@ -113,7 +117,7 @@ pub(super) fn op_fri_ext2fold4<P: Processor>(
     processor.stack_mut().set(13, folded_value[1]);
     processor.stack_mut().set(14, folded_value[0]);
 
-    Ok(P::HelperRegisters::op_fri_ext2fold4_registers(ev, es, x, x_inv))
+    Ok(OperationHelperRegisters::FriExt2Fold4 { ev, es, x, x_inv })
 }
 
 // HELPER METHODS
@@ -144,8 +148,6 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
 
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);
-
-const DOMAIN_OFFSET: Felt = Felt::GENERATOR;
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at

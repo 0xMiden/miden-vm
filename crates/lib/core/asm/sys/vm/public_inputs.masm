@@ -137,7 +137,7 @@ proc load_public_inputs
     ##    We also check the double-word alignment.
     u32divmod.8
     # => [rem, num_iter, R2, R1, C, ptr, ...]
-    push.0 assert_eq
+    push.0 assert_eq.err="range check failed: alignment"
     # => [num_iter, R2, R1, C, ptr, ...]
 
     ## c) Prepare the stack for hashing
@@ -219,7 +219,7 @@ end
 #! the start of the next group of variable public inputs to be reduced, if such a group exists.
 proc reduce_kernel_digests
     # Assert that the number of kernel procedures is at most 1023
-    dup u32lt.1024 assert
+    dup u32lt.1024 assert.err="range check failed: kernel count"
 
     # Store number of kernel procedures digests
     push.0.0 dup.2

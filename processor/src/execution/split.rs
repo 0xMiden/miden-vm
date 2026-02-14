@@ -1,36 +1,35 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    ONE, ZERO,
-    mast::{MastForest, MastNodeId, SplitNode},
-};
-
 use crate::{
-    Host, Stopper,
+    BreakReason, Host, ONE, Stopper, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    fast::step::BreakReason,
+    mast::{MastForest, MastNodeId, SplitNode},
     operation::OperationError,
     processor::{Processor, StackInterface},
     tracer::Tracer,
 };
 
+// SPLIT PROCESSING
+// ================================================================================================
+
 /// Executes a Split node from the start.
 #[inline(always)]
-pub(super) fn start_split_node<P, S>(
+pub(super) fn start_split_node<P, S, T>(
     processor: &mut P,
     split_node: &SplitNode,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -45,7 +44,8 @@ where
     let condition = processor.stack().get(0);
 
     // drop the condition from the stack
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     // execute the appropriate branch
     continuation_stack.push_finish_split(node_id);
@@ -63,23 +63,24 @@ where
     };
 
     // Finalize the clock cycle corresponding to the SPLIT operation.
-    finalize_clock_cycle(processor, tracer, stopper)
+    finalize_clock_cycle(processor, tracer, stopper, current_forest)
 }
 
 /// Executes the finish phase of a Split node.
 #[inline(always)]
-pub(super) fn finish_split_node<P, S>(
+pub(super) fn finish_split_node<P, S, T>(
     processor: &mut P,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -89,9 +90,13 @@ where
     );
 
     // Finalize the clock cycle corresponding to the END operation.
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-        Some(Continuation::AfterExitDecorators(node_id))
-    })?;
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        || Some(Continuation::AfterExitDecorators(node_id)),
+        current_forest,
+    )?;
 
     processor.execute_after_exit_decorators(node_id, current_forest, host)
 }

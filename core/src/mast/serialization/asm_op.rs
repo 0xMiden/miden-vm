@@ -3,7 +3,7 @@
 //! This module provides serialization/deserialization for [`AssemblyOp`] data that is stored
 //! separately in [`DebugInfo`](crate::mast::debuginfo::DebugInfo). The format uses:
 //!
-//! - A variable-length data blob for AssemblyOp payloads (num_cycles, should_break, location, etc.)
+//! - A variable-length data blob for AssemblyOp payloads (num_cycles, location, etc.)
 //! - A string table for deduplicating context names, op strings, and URIs
 //! - Fixed-width info records that index into the data blob
 //!
@@ -34,7 +34,6 @@ pub type AsmOpDataOffset = u32;
 ///
 /// ```text
 /// num_cycles: u8
-/// should_break: u8 (0 or 1)
 /// has_location: u8 (0 or 1)
 /// [if has_location]:
 ///     uri_idx: usize (index into string table)
@@ -69,7 +68,6 @@ impl AsmOpInfo {
         let mut reader = SliceReader::new(&asm_op_data[self.data_offset as usize..]);
 
         let num_cycles = reader.read_u8()?;
-        let should_break = reader.read_bool()?;
 
         let location = if reader.read_bool()? {
             let uri_idx = reader.read_usize()?;
@@ -87,7 +85,7 @@ impl AsmOpInfo {
         let op_idx = reader.read_usize()?;
         let op = string_table.read_string(op_idx)?;
 
-        Ok(AssemblyOp::new(location, context_name, num_cycles, op, should_break))
+        Ok(AssemblyOp::new(location, context_name, num_cycles, op))
     }
 }
 
@@ -138,9 +136,6 @@ impl AsmOpDataBuilder {
         // Serialize num_cycles (u8)
         self.asm_op_data.write_u8(asm_op.num_cycles());
 
-        // Serialize should_break (bool)
-        self.asm_op_data.write_bool(asm_op.should_break());
-
         // Serialize location
         if let Some(location) = asm_op.location() {
             self.asm_op_data.write_bool(true); // has_location = true
@@ -184,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_asm_op_roundtrip_no_location() {
-        let asm_op = AssemblyOp::new(None, "test_context".to_string(), 5, "add".to_string(), false);
+        let asm_op = AssemblyOp::new(None, "test_context".to_string(), 5, "add".to_string());
 
         let mut builder = AsmOpDataBuilder::new();
         builder.add_asm_op(&asm_op);
@@ -198,20 +193,14 @@ mod tests {
         assert_eq!(restored.context_name(), "test_context");
         assert_eq!(restored.op(), "add");
         assert_eq!(restored.num_cycles(), 5);
-        assert!(!restored.should_break());
     }
 
     #[test]
     fn test_asm_op_roundtrip_with_location() {
         let location =
             Location::new(Uri::new("test://file.masm"), ByteIndex::new(10), ByteIndex::new(20));
-        let asm_op = AssemblyOp::new(
-            Some(location.clone()),
-            "my_proc".to_string(),
-            3,
-            "mul".to_string(),
-            true,
-        );
+        let asm_op =
+            AssemblyOp::new(Some(location.clone()), "my_proc".to_string(), 3, "mul".to_string());
 
         let mut builder = AsmOpDataBuilder::new();
         builder.add_asm_op(&asm_op);
@@ -227,18 +216,14 @@ mod tests {
         assert_eq!(restored.context_name(), "my_proc");
         assert_eq!(restored.op(), "mul");
         assert_eq!(restored.num_cycles(), 3);
-        assert!(restored.should_break());
     }
 
     #[test]
     fn test_asm_op_string_deduplication() {
         // Add multiple asm_ops with the same context name to verify string deduplication
-        let asm_op1 =
-            AssemblyOp::new(None, "shared_context".to_string(), 1, "op1".to_string(), false);
-        let asm_op2 =
-            AssemblyOp::new(None, "shared_context".to_string(), 2, "op2".to_string(), false);
-        let asm_op3 =
-            AssemblyOp::new(None, "shared_context".to_string(), 3, "op1".to_string(), false);
+        let asm_op1 = AssemblyOp::new(None, "shared_context".to_string(), 1, "op1".to_string());
+        let asm_op2 = AssemblyOp::new(None, "shared_context".to_string(), 2, "op2".to_string());
+        let asm_op3 = AssemblyOp::new(None, "shared_context".to_string(), 3, "op1".to_string());
 
         let mut builder = AsmOpDataBuilder::new();
         builder.add_asm_op(&asm_op1);

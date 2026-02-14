@@ -1,18 +1,17 @@
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, sync::Arc};
 
 use miden_air::trace::{
     RowIndex,
     chiplets::hasher::{HasherState, STATE_WIDTH},
 };
-use miden_core::program::MIN_STACK_DEPTH;
 
 use crate::{
-    ContextId, Felt, ONE, Word, ZERO,
+    ContextId, Felt, MIN_STACK_DEPTH, ONE, Word, ZERO,
     advice::AdviceError,
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForest, MastNodeId, OpBatch},
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
@@ -89,7 +88,7 @@ pub struct SystemState {
 
 impl SystemState {
     /// Convenience constructor that creates a new `SystemState` from a `Processor`.
-    pub fn from_processor<P: Processor>(processor: &P) -> Self {
+    pub(crate) fn from_processor<P: Processor>(processor: &P) -> Self {
         Self {
             clk: processor.system().clock(),
             ctx: processor.system().ctx(),
@@ -117,17 +116,24 @@ impl DecoderState {
     /// current node in the block stack. Hence, the `current_addr` is set to the (replayed) address
     /// of the current node, and the `parent_addr` is set to the (replayed) address of the parent
     /// node (i.e. the node previously on top of the block stack).
-    pub fn replay_node_start(&mut self, replay: &mut ExecutionReplay) {
-        self.current_addr = replay.hasher.replay_block_address();
-        self.parent_addr = replay.block_stack.replay_node_start_parent_addr();
+    pub fn replay_node_start(
+        &mut self,
+        block_address_replay: &mut BlockAddressReplay,
+        block_stack_replay: &mut BlockStackReplay,
+    ) {
+        self.current_addr = block_address_replay.replay_block_address();
+        self.parent_addr = block_stack_replay.replay_node_start_parent_addr();
     }
 
     /// This function is called when we hit an `END` operation, signaling the end of execution for a
     /// node. It updates the decoder state to point to the previous node in the block stack (which
     /// could be renamed to "node stack"), and returns the address of the node that just ended,
     /// along with any flags associated with it.
-    pub fn replay_node_end(&mut self, replay: &mut ExecutionReplay) -> (Felt, NodeFlags) {
-        let node_end_data = replay.block_stack.replay_node_end();
+    pub fn replay_node_end(
+        &mut self,
+        block_stack_replay: &mut BlockStackReplay,
+    ) -> (Felt, NodeFlags) {
+        let node_end_data = block_stack_replay.replay_node_end();
 
         self.current_addr = node_end_data.prev_addr;
         self.parent_addr = node_end_data.prev_parent_addr;
@@ -191,7 +197,7 @@ impl StackState {
     }
 
     /// Returns the overflow address (b1 helper column) using the stack overflow replay
-    pub fn overflow_addr(&mut self) -> Felt {
+    pub fn overflow_addr(&self) -> Felt {
         self.last_overflow_addr
     }
 
@@ -237,21 +243,14 @@ impl StackState {
         Felt::new(denominator as u64)
     }
 
-    /// Starts a new execution context for this stack and returns a tuple consisting of the current
-    /// stack depth and the address of the overflow table row prior to starting the new context.
+    /// Starts a new execution context for this stack, resetting the stack depth to its minimum
+    /// value, and last overflow address to 0.
     ///
-    /// This has the effect of hiding the contents of the overflow table such that it appears as
-    /// if the overflow table in the new context is empty.
-    pub fn start_context(&mut self) -> (usize, Felt) {
-        // Return the current stack depth and overflow address at the start of a new context
-        let current_depth = self.stack_depth;
-        let current_overflow_addr = self.last_overflow_addr;
-
-        // Reset stack depth to minimum (parallel to Process Stack behavior)
+    /// This has the effect of hiding the contents of the overflow table such that it appears as if
+    /// the overflow table in the new context is empty.
+    pub fn start_context(&mut self) {
         self.stack_depth = MIN_STACK_DEPTH;
         self.last_overflow_addr = ZERO;
-
-        (current_depth, current_overflow_addr)
     }
 
     /// Restores the prior context for this stack.
@@ -277,11 +276,35 @@ impl StackState {
 #[derive(Debug, Default)]
 pub struct ExecutionReplay {
     pub block_stack: BlockStackReplay,
+    pub execution_context: ExecutionContextReplay,
     pub stack_overflow: StackOverflowReplay,
     pub memory_reads: MemoryReadsReplay,
     pub advice: AdviceReplay,
     pub hasher: HasherResponseReplay,
+    pub block_address: BlockAddressReplay,
     pub mast_forest_resolution: MastForestResolutionReplay,
+}
+
+// EXECUTION CONTEXT REPLAY
+// ================================================================================================
+
+#[derive(Debug, Default)]
+pub struct ExecutionContextReplay {
+    /// Extra data needed to recover the state on an END operation specifically for
+    /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
+    execution_contexts: VecDeque<ExecutionContextSystemInfo>,
+}
+
+impl ExecutionContextReplay {
+    /// Records an execution context system info for a CALL/SYSCALL/DYNCALL operation.
+    pub fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
+        self.execution_contexts.push_back(ctx_info);
+    }
+
+    /// Replays the next recorded execution context system info.
+    pub fn replay_execution_context(&mut self) -> ExecutionContextSystemInfo {
+        self.execution_contexts.pop_front().expect("No execution context recorded")
+    }
 }
 
 // BLOCK STACK REPLAY
@@ -294,9 +317,6 @@ pub struct BlockStackReplay {
     node_start_parent_addr: VecDeque<Felt>,
     /// The data needed to recover the state on an END operation.
     node_end: VecDeque<NodeEndData>,
-    /// Extra data needed to recover the state on an END operation specifically for
-    /// CALL/SYSCALL/DYNCALL nodes (which start/end a new execution context).
-    execution_contexts: VecDeque<ExecutionContextSystemInfo>,
 }
 
 impl BlockStackReplay {
@@ -305,7 +325,6 @@ impl BlockStackReplay {
         Self {
             node_start_parent_addr: VecDeque::new(),
             node_end: VecDeque::new(),
-            execution_contexts: VecDeque::new(),
         }
     }
 
@@ -332,11 +351,6 @@ impl BlockStackReplay {
         });
     }
 
-    /// Records an execution context system info for a CALL/SYSCALL/DYNCALL operation.
-    pub fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
-        self.execution_contexts.push_back(ctx_info);
-    }
-
     /// Replays the node's parent address
     pub fn replay_node_start_parent_addr(&mut self) -> Felt {
         self.node_start_parent_addr
@@ -347,11 +361,6 @@ impl BlockStackReplay {
     /// Replays the data needed to recover the state on an END operation.
     pub fn replay_node_end(&mut self) -> NodeEndData {
         self.node_end.pop_front().expect("No node address and flags recorded")
-    }
-
-    /// Replays the next recorded execution context system info.
-    pub fn replay_execution_context(&mut self) -> ExecutionContextSystemInfo {
-        self.execution_contexts.pop_front().expect("No execution context recorded")
     }
 }
 
@@ -786,8 +795,9 @@ impl AceReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
-    /// Records the procedure hash of a syscall.
-    pub fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
+    /// Records the evaluation of a circuit.
+    pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
+        let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
     }
 }
@@ -833,6 +843,29 @@ impl IntoIterator for RangeCheckerReplay {
     }
 }
 
+// BLOCK ADDRESS REPLAY
+// ================================================================================================
+
+#[derive(Debug, Default)]
+pub struct BlockAddressReplay {
+    /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
+    block_addresses: VecDeque<Felt>,
+}
+
+impl BlockAddressReplay {
+    /// Records the address associated with a `Hasher::hash_control_block` or
+    /// `Hasher::hash_basic_block` operation.
+    pub fn record_block_address(&mut self, addr: Felt) {
+        self.block_addresses.push_back(addr);
+    }
+
+    /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
+    /// the pre-recorded address
+    pub fn replay_block_address(&mut self) -> Felt {
+        self.block_addresses.pop_front().expect("No block address operations recorded")
+    }
+}
+
 // HASHER RESPONSE REPLAY
 // ================================================================================================
 
@@ -843,9 +876,6 @@ impl IntoIterator for RangeCheckerReplay {
 /// trace generation.
 #[derive(Debug, Default)]
 pub struct HasherResponseReplay {
-    /// Recorded hasher addresses from operations like hash_control_block, hash_basic_block, etc.
-    block_addresses: VecDeque<Felt>,
-
     /// Recorded hasher operations from permutation operations (HPerm).
     ///
     /// Each entry contains (address, output_state)
@@ -866,12 +896,6 @@ impl HasherResponseReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------------------
 
-    /// Records the address associated with a `Hasher::hash_control_block` or
-    /// `Hasher::hash_basic_block` operation.
-    pub fn record_block_address(&mut self, addr: Felt) {
-        self.block_addresses.push_back(addr);
-    }
-
     /// Records a `Hasher::permute` operation with its address and result (after applying the
     /// permutation)
     pub fn record_permute(&mut self, addr: Felt, hashed_state: [Felt; 12]) {
@@ -890,12 +914,6 @@ impl HasherResponseReplay {
 
     // ACCESSORS (used by parallel trace generators)
     // --------------------------------------------------------------------------------------------
-
-    /// Replays a `Hasher::hash_control_block` or `Hasher::hash_basic_block` operation, returning
-    /// the pre-recorded address
-    pub fn replay_block_address(&mut self) -> Felt {
-        self.block_addresses.pop_front().expect("No block address operations recorded")
-    }
 
     /// Replays a `Hasher::permute` operation, returning its address and result
     pub fn replay_permute(&mut self) -> (Felt, [Felt; 12]) {
@@ -965,7 +983,7 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<OpBatch>, Word)),
+    HashBasicBlock((Arc<MastForest>, MastNodeId, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -999,8 +1017,14 @@ impl HasherRequestReplay {
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
-    pub fn record_hash_basic_block(&mut self, op_batches: Vec<OpBatch>, expected_hash: Word) {
-        self.hasher_ops.push_back(HasherOp::HashBasicBlock((op_batches, expected_hash)));
+    pub fn record_hash_basic_block(
+        &mut self,
+        forest: Arc<MastForest>,
+        node_id: MastNodeId,
+        expected_hash: Word,
+    ) {
+        self.hasher_ops
+            .push_back(HasherOp::HashBasicBlock((forest, node_id, expected_hash)));
     }
 
     /// Records a `Hasher::build_merkle_root()` request.
@@ -1102,6 +1126,12 @@ impl StackOverflowReplay {
 
     // ACCESSORS
     // --------------------------------------------------------------------------------
+
+    /// Peeks at the next recorded pop_overflow operation, returning the previously recorded value
+    /// and `new_overflow_addr` without removing it from the queue.
+    pub fn peek_replay_pop_overflow(&self) -> Option<&(Felt, Felt)> {
+        self.overflow_values.front()
+    }
 
     /// Replays a pop_overflow operation, returning the previously recorded value and
     /// `new_overflow_addr`.

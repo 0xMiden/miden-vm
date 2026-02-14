@@ -1,42 +1,48 @@
-use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{
+use crate::{
     Felt, ONE, ZERO,
     field::{Field, PrimeField64},
-};
-
-use super::utils::assert_binary;
-use crate::{
     operation::OperationError,
-    processor::{OperationHelperRegisters, Processor, StackInterface},
-    tracer::Tracer,
+    processor::{Processor, StackInterface},
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
 mod tests;
 
-// OPERATION HANDLERS
+// FIELD OPERATIONS
 // ================================================================================================
 
 /// Pops two elements off the stack, adds them together, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_add<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| a + b, tracer)
+pub(super) fn op_add<P, T>(processor: &mut P, tracer: &mut T) -> OperationHelperRegisters
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
+    pop2_applyfn_push(processor, |a, b| a + b, tracer);
+    OperationHelperRegisters::Empty
 }
 
 /// Pops an element off the stack, computes its additive inverse, and pushes the result back
 /// onto the stack.
 #[inline(always)]
-pub(super) fn op_neg<P: Processor>(processor: &mut P) {
+pub(super) fn op_neg<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     let element = processor.stack().get(0);
     processor.stack_mut().set(0, -element);
+    OperationHelperRegisters::Empty
 }
 
 /// Pops two elements off the stack, multiplies them, and pushes the result back onto the
 /// stack.
 #[inline(always)]
-pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) {
-    pop2_applyfn_push(processor, |a, b| a * b, tracer)
+pub(super) fn op_mul<P, T>(processor: &mut P, tracer: &mut T) -> OperationHelperRegisters
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
+    pop2_applyfn_push(processor, |a, b| a * b, tracer);
+    OperationHelperRegisters::Empty
 }
 
 /// Pops an element off the stack, computes its multiplicative inverse, and pushes the result
@@ -45,19 +51,22 @@ pub(super) fn op_mul<P: Processor>(processor: &mut P, tracer: &mut impl Tracer) 
 /// # Errors
 /// Returns an error if the value on the top of the stack is ZERO.
 #[inline(always)]
-pub(super) fn op_inv<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
+pub(super) fn op_inv<P: Processor>(
+    processor: &mut P,
+) -> Result<OperationHelperRegisters, OperationError> {
     let top = processor.stack_mut().get_mut(0);
     if (*top) == ZERO {
         return Err(OperationError::DivideByZero);
     }
     *top = top.inverse();
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops an element off the stack, adds ONE to it, and pushes the result back onto the stack.
 #[inline(always)]
-pub(super) fn op_incr<P: Processor>(processor: &mut P) {
+pub(super) fn op_incr<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     *processor.stack_mut().get_mut(0) += ONE;
+    OperationHelperRegisters::Empty
 }
 
 /// Pops two elements off the stack, computes their boolean AND, and pushes the result back
@@ -67,10 +76,14 @@ pub(super) fn op_incr<P: Processor>(processor: &mut P) {
 /// Returns an error if either of the two elements on the top of the stack is not a binary
 /// value.
 #[inline(always)]
-pub(super) fn op_and<P: Processor>(
+pub(super) fn op_and<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), OperationError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, OperationError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     pop2_applyfn_push_op(
         processor,
         |a, b| {
@@ -80,7 +93,8 @@ pub(super) fn op_and<P: Processor>(
             if a == ONE && b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
         tracer,
-    )
+    )?;
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops two elements off the stack, computes their boolean OR, and pushes the result back
@@ -90,10 +104,14 @@ pub(super) fn op_and<P: Processor>(
 /// Returns an error if either of the two elements on the top of the stack is not a binary
 /// value.
 #[inline(always)]
-pub(super) fn op_or<P: Processor>(
+pub(super) fn op_or<P, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), OperationError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, OperationError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     pop2_applyfn_push_op(
         processor,
         |a, b| {
@@ -103,7 +121,8 @@ pub(super) fn op_or<P: Processor>(
             if a == ONE || b == ONE { Ok(ONE) } else { Ok(ZERO) }
         },
         tracer,
-    )
+    )?;
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops an element off the stack, computes its boolean NOT, and pushes the result back onto
@@ -112,7 +131,9 @@ pub(super) fn op_or<P: Processor>(
 /// # Errors
 /// Returns an error if the value on the top of the stack is not a binary value.
 #[inline(always)]
-pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationError> {
+pub(super) fn op_not<P: Processor>(
+    processor: &mut P,
+) -> Result<OperationHelperRegisters, OperationError> {
     let top = processor.stack_mut().get_mut(0);
     if *top == ZERO {
         *top = ONE;
@@ -121,32 +142,35 @@ pub(super) fn op_not<P: Processor>(processor: &mut P) -> Result<(), OperationErr
     } else {
         return Err(OperationError::NotBinaryValue { value: *top });
     }
-    Ok(())
+    Ok(OperationHelperRegisters::Empty)
 }
 
 /// Pops two elements off the stack and compares them. If the elements are equal, pushes ONE
 /// onto the stack, otherwise pushes ZERO onto the stack.
 #[inline(always)]
-pub(super) fn op_eq<P: Processor>(
-    processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
+pub(super) fn op_eq<P, T>(processor: &mut P, tracer: &mut T) -> OperationHelperRegisters
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
     // Directly manipulate the stack instead of using pop2_applyfn_push() since we need
     // to return user op helpers, which makes the abstraction less suitable here.
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     let result = if a == b { ONE } else { ZERO };
     processor.stack_mut().set(0, result);
 
-    P::HelperRegisters::op_eq_registers(a, b)
+    OperationHelperRegisters::Eq { stack_second: a, stack_first: b }
 }
 
 /// Pops an element off the stack and compares it to ZERO. If the element is ZERO, pushes ONE
 /// onto the stack, otherwise pushes ZERO onto the stack.
 #[inline(always)]
-pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
+pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     let top = processor.stack_mut().get_mut(0);
     let old_top = *top;
 
@@ -156,7 +180,7 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
         *top = ZERO;
     };
 
-    P::HelperRegisters::op_eqz_registers(old_top)
+    OperationHelperRegisters::Eqz { top: old_top }
 }
 
 /// Computes a single turn of exp accumulation for the given inputs. The top 4 elements in the
@@ -185,7 +209,7 @@ pub(super) fn op_eqz<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELP
 /// the first and third iterations (corresponding to the `1` bits in the binary representation
 /// of 5).
 #[inline(always)]
-pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_HELPERS] {
+pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     let old_base = processor.stack().get(1);
     let old_acc = processor.stack().get(2);
     let old_exp_int = processor.stack().get(3).as_canonical_u64();
@@ -207,7 +231,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
     processor.stack_mut().set(2, new_acc);
     processor.stack_mut().set(3, new_exp);
 
-    P::HelperRegisters::op_expacc_registers(acc_update_val)
+    OperationHelperRegisters::Expacc { acc_update_val }
 }
 
 /// Gets the top four values from the stack [b0, b1, a0, a1] (low coefficient at lower
@@ -217,7 +241,7 @@ pub(super) fn op_expacc<P: Processor>(processor: &mut P) -> [Felt; NUM_USER_OP_H
 /// x² - 7. It leaves b0, b1 in the first and second positions on the stack, sets c0 and c1
 /// to the third and fourth positions, and leaves the rest of the stack unchanged.
 #[inline(always)]
-pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
+pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) -> OperationHelperRegisters {
     const SEVEN: Felt = Felt::new(7);
     // get_word returns [s0, s1, s2, s3] where s0 is top of stack
     // Stack layout: s0=b0, s1=b1, s2=a0, s3=a1
@@ -231,6 +255,7 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
     let c0 = b0_times_a0 + SEVEN * b1_times_a1;
     processor.stack_mut().set(2, c0); // c0 (low) at position 2
     processor.stack_mut().set(3, c1); // c1 (high) at position 3
+    OperationHelperRegisters::Empty
 }
 
 // HELPERS
@@ -241,15 +266,17 @@ pub(super) fn op_ext2mul<P: Processor>(processor: &mut P) {
 ///
 /// The size of the stack is decremented by 1.
 #[inline(always)]
-fn pop2_applyfn_push<P: Processor>(
-    processor: &mut P,
-    f: impl FnOnce(Felt, Felt) -> Felt,
-    tracer: &mut impl Tracer,
-) {
+fn pop2_applyfn_push<P, T>(processor: &mut P, f: impl FnOnce(Felt, Felt) -> Felt, tracer: &mut T)
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     processor.stack_mut().set(0, f(a, b));
 }
 
@@ -258,16 +285,32 @@ fn pop2_applyfn_push<P: Processor>(
 ///
 /// The size of the stack is decremented by 1.
 #[inline(always)]
-fn pop2_applyfn_push_op<P: Processor>(
+fn pop2_applyfn_push_op<P, T>(
     processor: &mut P,
     f: impl FnOnce(Felt, Felt) -> Result<Felt, OperationError>,
-    tracer: &mut impl Tracer,
-) -> Result<(), OperationError> {
+    tracer: &mut T,
+) -> Result<(), OperationError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
     let b = processor.stack().get(0);
     let a = processor.stack().get(1);
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
+
     processor.stack_mut().set(0, f(a, b)?);
 
     Ok(())
+}
+
+/// Asserts that the given value is a binary value (0 or 1).
+#[inline(always)]
+fn assert_binary(value: Felt) -> Result<(), OperationError> {
+    if value != ZERO && value != ONE {
+        Err(OperationError::NotBinaryValue { value })
+    } else {
+        Ok(())
+    }
 }

@@ -1,6 +1,6 @@
 use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use miden_core_lib::CoreLibrary;
-use miden_processor::{advice::AdviceInputs, fast::FastProcessor};
+use miden_processor::{FastProcessor, advice::AdviceInputs};
 use miden_vm::{Assembler, DefaultHost, StackInputs, internal::InputFile};
 use tokio::runtime::Runtime;
 use walkdir::WalkDir;

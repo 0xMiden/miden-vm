@@ -1,25 +1,24 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    FMP_ADDR, FMP_INIT_VALUE,
-    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
-    program::Kernel,
-};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE};
 
 use crate::{
-    ContextId, Host, MapExecErr, Stopper,
+    BreakReason, ContextId, Host, Kernel, MapExecErr, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation},
-    fast::step::BreakReason,
+    execution::{finalize_clock_cycle, finalize_clock_cycle_with_continuation, get_next_ctx_id},
+    mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
     processor::{MemoryInterface, Processor, SystemInterface},
     tracer::Tracer,
 };
 
+// CALL NODE PROCESSORS
+// ================================================================================================
+
 /// Executes a Call node from the start.
 #[inline(always)]
-pub(super) fn start_call_node<P, S>(
+pub(super) fn start_call_node<P, S, T>(
     processor: &mut P,
     call_node: &CallNode,
     current_node_id: MastNodeId,
@@ -27,12 +26,13 @@ pub(super) fn start_call_node<P, S>(
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -44,7 +44,8 @@ where
     // Execute decorators that should be executed before entering the node
     processor.execute_before_enter_decorators(current_node_id, current_forest, host)?;
 
-    processor.save_context_and_truncate_stack(tracer);
+    tracer.start_context();
+    processor.save_context_and_truncate_stack();
 
     let callee_hash = current_forest[call_node.callee()].digest();
     if call_node.is_syscall() {
@@ -62,7 +63,7 @@ where
         // set the system registers to the syscall context
         processor.system_mut().set_ctx(ContextId::root());
     } else {
-        let new_ctx: ContextId = processor.next_ctx_id();
+        let new_ctx: ContextId = get_next_ctx_id(processor);
 
         // Set the system registers to the callee context.
         processor.system_mut().set_ctx(new_ctx);
@@ -90,23 +91,24 @@ where
     continuation_stack.push_start_node(call_node.callee());
 
     // Finalize the clock cycle corresponding to the CALL or SYSCALL operation.
-    finalize_clock_cycle(processor, tracer, stopper)
+    finalize_clock_cycle(processor, tracer, stopper, current_forest)
 }
 
 /// Executes the finish phase of a Call node.
 #[inline(always)]
-pub(super) fn finish_call_node<P, S>(
+pub(super) fn finish_call_node<P, S, T>(
     processor: &mut P,
     node_id: MastNodeId,
     current_forest: &Arc<MastForest>,
     continuation_stack: &mut ContinuationStack,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     tracer.start_clock_cycle(
         processor,
@@ -117,14 +119,19 @@ where
 
     // When returning from a call or a syscall, restore the context of the system registers and the
     // operand stack to what it was prior to the call.
-    if let Err(e) = processor.restore_context(tracer) {
+    if let Err(e) = processor.restore_context() {
         return ControlFlow::Break(BreakReason::Err(e.with_context(current_forest, node_id, host)));
     }
+    tracer.restore_context();
 
     // Finalize the clock cycle corresponding to the END operation.
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || {
-        Some(Continuation::AfterExitDecorators(node_id))
-    })?;
+    finalize_clock_cycle_with_continuation(
+        processor,
+        tracer,
+        stopper,
+        || Some(Continuation::AfterExitDecorators(node_id)),
+        current_forest,
+    )?;
 
     processor.execute_after_exit_decorators(node_id, current_forest, host)
 }

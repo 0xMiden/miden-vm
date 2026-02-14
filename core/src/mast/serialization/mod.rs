@@ -113,7 +113,8 @@ const FLAGS_RESERVED_MASK: u8 = 0xfe;
 ///   serialization in CSR format (eliminates per-node decorator sections and round-trip
 ///   conversions). Header changed from `MAST\0` to `MAST` + flags byte.
 /// - [0, 0, 2]: Removed AssemblyOp from Decorator enum serialization. AssemblyOps are now stored
-///   separately in DebugInfo.
+///   separately in DebugInfo. Removed `should_break` field from AssemblyOp serialization (#2646).
+///   Removed `breakpoint` instruction (#2655).
 const VERSION: [u8; 3] = [0, 0, 2];
 
 // MAST FOREST SERIALIZATION/DESERIALIZATION

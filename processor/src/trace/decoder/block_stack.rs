@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use miden_air::Felt;
 use miden_core::{ONE, Word, ZERO};
 
-use crate::system::ContextId;
+use crate::ContextId;
 
 // BLOCK STACK
 // ================================================================================================
@@ -41,7 +41,7 @@ impl BlockStack {
         }
 
         // determine additional info about the new block based on its parent
-        let (parent_addr, is_loop_body, is_first_child) = match self.blocks.last() {
+        let (parent_addr, is_loop_body, _is_first_child) = match self.blocks.last() {
             Some(parent) => match parent.block_type {
                 // if the parent block is a LOOP block, the new block must be a loop body
                 BlockType::Loop(loop_entered) => {
@@ -66,7 +66,6 @@ impl BlockStack {
             parent_addr,
             ctx_info,
             is_loop_body,
-            is_first_child,
         });
         parent_addr
     }
@@ -112,7 +111,6 @@ pub struct BlockInfo {
     pub parent_addr: Felt,
     pub ctx_info: Option<ExecutionContextInfo>,
     pub is_loop_body: bool,
-    pub is_first_child: bool, // TODO: remove this field
 }
 
 impl BlockInfo {

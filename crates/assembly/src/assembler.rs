@@ -889,8 +889,7 @@ impl Assembler {
         let location = proc_ctx.source_manager().location(*span).ok();
         let context_name = proc_ctx.path().to_string();
         let num_cycles = 0;
-        let should_break = false;
-        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string(), should_break)
+        AssemblyOp::new(location, context_name, num_cycles, op_name.to_string())
     }
 
     fn compile_body<'a, I>(
@@ -1066,7 +1065,8 @@ impl Assembler {
                 vec![],
             )?
         } else {
-            mast_forest_builder.join_nodes(body_node_ids)?
+            let asm_op = self.create_asmop_decorator(&proc_ctx.span(), "begin", proc_ctx);
+            mast_forest_builder.join_nodes(body_node_ids, Some(asm_op))?
         };
 
         // Make sure that any post decorators are added at the end of the procedure body

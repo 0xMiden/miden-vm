@@ -274,20 +274,12 @@ pub enum Instruction {
     ProcRef(InvocationTarget),
 
     // ----- debug decorators --------------------------------------------------------------------
-    Breakpoint,
     Debug(DebugOptions),
 
     // ----- event decorators --------------------------------------------------------------------
     Emit,
     EmitImm(ImmFelt),
     Trace(ImmU32),
-}
-
-impl Instruction {
-    /// Returns true if the instruction should yield a breakpoint.
-    pub const fn should_break(&self) -> bool {
-        matches!(self, Self::Breakpoint)
-    }
 }
 
 impl core::fmt::Display for Instruction {

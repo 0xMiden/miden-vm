@@ -6,9 +6,8 @@ use core::ops::ControlFlow;
 use miden_core::{mast::MastForest, program::Kernel};
 
 use crate::{
-    ExecutionError, Stopper,
+    ExecutionError, FastProcessor, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::FastProcessor,
 };
 
 // RESUME CONTEXT

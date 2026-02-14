@@ -8,7 +8,7 @@ extern crate std;
 use alloc::{string::ToString, vec::Vec};
 
 use ::serde::Serialize;
-use miden_processor::{Program, fast::FastProcessor, trace::build_trace};
+use miden_processor::{FastProcessor, Program, trace::build_trace};
 use tracing::instrument;
 
 // Trace conversion utilities
@@ -65,7 +65,7 @@ pub async fn prove(
         "Generated execution trace of {} columns and {} steps (padded from {})",
         miden_air::trace::TRACE_WIDTH,
         trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().main_trace_len()
+        trace.trace_len_summary().trace_len()
     );
 
     let stack_outputs = *trace.stack_outputs();

@@ -1,25 +1,21 @@
 use alloc::boxed::Box;
 
 use miden_air::trace::{
-    decoder::NUM_USER_OP_HELPERS,
+    chiplets::hasher::STATE_WIDTH,
     log_precompile::{STATE_CAP_RANGE, STATE_RATE_0_RANGE, STATE_RATE_1_RANGE},
 };
-use miden_core::{
-    Felt, Word, ZERO,
-    chiplets::hasher::STATE_WIDTH,
+
+use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT};
+use crate::{
+    ContextId, Felt, MemoryError, ONE, RowIndex, Word, ZERO,
+    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     field::{BasedVectorSpace, PrimeField64, QuadFelt},
     mast::MastForest,
-};
-
-use super::{DOUBLE_WORD_SIZE, WORD_SIZE_FELT, utils::validate_dual_word_stream_addrs};
-use crate::{
-    ONE,
-    errors::{CryptoError, MerklePathVerificationFailedInner, OperationError},
     processor::{
-        AdviceProviderInterface, HasherInterface, MemoryInterface, OperationHelperRegisters,
-        Processor, StackInterface, SystemInterface,
+        AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, StackInterface,
+        SystemInterface,
     },
-    tracer::Tracer,
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 #[cfg(test)]
@@ -41,10 +37,10 @@ mod tests;
 /// The top of the stack (`get(0)`) maps to `state[0]`, giving the sponge state
 /// `[R1, R2, CAP]` where R1[0] is at the top of the stack.
 #[inline(always)]
-pub(super) fn op_hperm<P: Processor>(
+pub(super) fn op_hperm<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
+    tracer: &mut T,
+) -> OperationHelperRegisters {
     // Build sponge state from stack: state[i] = stack.get(i)
     // Read first 8 elements using get_double_word, then remaining 4 elements
     let double_word: [Felt; 8] = processor.stack().get_double_word(0);
@@ -76,7 +72,7 @@ pub(super) fn op_hperm<P: Processor>(
     processor.stack_mut().set_word(8, &cap);
 
     tracer.record_hasher_permute(input_state, output_state);
-    P::HelperRegisters::op_hperm_registers(addr)
+    OperationHelperRegisters::HPerm { addr }
 }
 
 /// Verifies that a Merkle path from the specified node resolves to the specified root. The
@@ -99,12 +95,12 @@ pub(super) fn op_hperm<P: Processor>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mpverify<P: Processor>(
+pub(super) fn op_mpverify<P: Processor, T: Tracer>(
     processor: &mut P,
     err_code: Felt,
     program: &MastForest,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], CryptoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, CryptoError> {
     // read node value, depth, index and root value from the stack
     let node = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -132,7 +128,7 @@ pub(super) fn op_mpverify<P: Processor>(
         }
     })?;
 
-    Ok(P::HelperRegisters::op_merkle_path_registers(addr))
+    Ok(OperationHelperRegisters::MerklePath { addr })
 }
 
 /// Computes a new root of a Merkle tree where a node at the specified index is updated to
@@ -166,10 +162,10 @@ pub(super) fn op_mpverify<P: Processor>(
 ///   the specified root.
 /// - Path to the node at the specified depth and index is not known to the advice provider.
 #[inline(always)]
-pub(super) fn op_mrupdate<P: Processor>(
+pub(super) fn op_mrupdate<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], CryptoError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, CryptoError> {
     // read old node value, depth, index, tree root and new node values from the stack
     let old_value = processor.stack().get_word(0);
     let depth = processor.stack().get(4);
@@ -222,7 +218,7 @@ pub(super) fn op_mrupdate<P: Processor>(
     // Replace the old node value with computed new root.
     processor.stack_mut().set_word(0, &new_root);
 
-    Ok(P::HelperRegisters::op_merkle_path_registers(addr))
+    Ok(OperationHelperRegisters::MerklePath { addr })
 }
 
 // HORNER-BASED POLYNOMIAL EVALUATION OPERATIONS
@@ -278,10 +274,10 @@ pub(super) fn op_mrupdate<P: Processor>(
 /// - h₂, h₃: Level 2 intermediate result tmp1
 /// - h₄, h₅: Level 1 intermediate result tmp0
 #[inline(always)]
-pub(super) fn op_horner_eval_base<P: Processor>(
+pub(super) fn op_horner_eval_base<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], crate::MemoryError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, crate::MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -335,7 +331,7 @@ pub(super) fn op_horner_eval_base<P: Processor>(
     processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok(P::HelperRegisters::op_horner_eval_base_registers(alpha, tmp0, tmp1))
+    Ok(OperationHelperRegisters::HornerEvalBase { alpha, tmp0, tmp1 })
 }
 
 /// Performs 4 steps of the Horner evaluation method on a polynomial with coefficients over
@@ -383,10 +379,10 @@ pub(super) fn op_horner_eval_base<P: Processor>(
 ///
 /// The instruction uses helper registers to hold α and the intermediate value acc_tmp.
 #[inline(always)]
-pub(super) fn op_horner_eval_ext<P: Processor>(
+pub(super) fn op_horner_eval_ext<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<[Felt; NUM_USER_OP_HELPERS], crate::MemoryError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, crate::MemoryError> {
     // Stack positions: low coefficient closer to top (lower index)
     const ALPHA_ADDR_INDEX: usize = 13;
     const ACC_LOW_INDEX: usize = 14;
@@ -441,7 +437,7 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
     processor.stack_mut().set(ACC_LOW_INDEX, acc_new_base_elements[0]);
 
     // Return the user operation helpers
-    Ok(P::HelperRegisters::op_horner_eval_ext_registers(alpha, k0, k1, acc_tmp))
+    Ok(OperationHelperRegisters::HornerEvalExt { alpha, k0, k1, acc_tmp })
 }
 
 // LOG PRECOMPILE OPERATION
@@ -459,10 +455,10 @@ pub(super) fn op_horner_eval_ext<P: Processor>(
 ///   registers.
 /// - Stack elements are in LSB-first order (structural order).
 #[inline(always)]
-pub(super) fn op_log_precompile<P: Processor>(
+pub(super) fn op_log_precompile<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> [Felt; NUM_USER_OP_HELPERS] {
+    tracer: &mut T,
+) -> OperationHelperRegisters {
     // Read COMM and TAG from the stack
     let comm: Word = processor.stack().get_word(0);
     let tag: Word = processor.stack().get_word(4);
@@ -503,7 +499,7 @@ pub(super) fn op_log_precompile<P: Processor>(
     tracer.record_hasher_permute(hasher_state, output_state);
 
     // Return helper registers containing the hasher address and CAP_PREV
-    P::HelperRegisters::op_log_precompile_registers(addr, cap_prev)
+    OperationHelperRegisters::LogPrecompile { addr, cap_prev }
 }
 
 // STREAM CIPHER OPERATION
@@ -523,10 +519,10 @@ pub(super) fn op_log_precompile<P: Processor>(
 /// [rate(8), cap(4), src_ptr, dst_ptr, ...] -> [ciphertext(8), cap(4), src_ptr+8, dst_ptr+8,
 /// ...]
 #[inline(always)]
-pub(super) fn op_crypto_stream<P: Processor>(
+pub(super) fn op_crypto_stream<P: Processor, T: Tracer>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
-) -> Result<(), crate::MemoryError> {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, crate::MemoryError> {
     // Stack layout: [rate(8), capacity(4), src_ptr, dst_ptr, ...]
     const SRC_PTR_IDX: usize = 12;
     const DST_PTR_IDX: usize = 13;
@@ -583,6 +579,53 @@ pub(super) fn op_crypto_stream<P: Processor>(
     // Increment pointers by 8 (2 words)
     processor.stack_mut().set(SRC_PTR_IDX, src_addr + DOUBLE_WORD_SIZE);
     processor.stack_mut().set(DST_PTR_IDX, dst_addr + DOUBLE_WORD_SIZE);
+
+    Ok(OperationHelperRegisters::Empty)
+}
+
+// Note: assert_binary now returns OperationError, imported via crate::OperationError in the
+// function
+
+/// Validates that two 2-word (8-element) memory ranges starting at `src_addr` and `dst_addr`
+/// are within u32 bounds and do not overlap in the same cycle.
+///
+/// Uses half-open intervals: [addr, addr+8). If ranges overlap, returns an IllegalMemoryAccess
+/// error pointing at the first destination word that would be written.
+#[inline(always)]
+fn validate_dual_word_stream_addrs(
+    src_addr: Felt,
+    dst_addr: Felt,
+    ctx: ContextId,
+    clk: RowIndex,
+) -> Result<(), MemoryError> {
+    // Convert to u32 and check end-exclusive bounds
+    let src_addr_u64 = src_addr.as_canonical_u64();
+    let dst_addr_u64 = dst_addr.as_canonical_u64();
+
+    let src_addr_u32 = u32::try_from(src_addr_u64)
+        .map_err(|_| MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
+    let src_end = src_addr_u32
+        .checked_add(8)
+        .ok_or(MemoryError::AddressOutOfBounds { addr: src_addr_u64 })?;
+
+    let dst_addr_u32 = u32::try_from(dst_addr_u64)
+        .map_err(|_| MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
+    let dst_end = dst_addr_u32
+        .checked_add(8)
+        .ok_or(MemoryError::AddressOutOfBounds { addr: dst_addr_u64 })?;
+
+    // Check for overlap between [src, src+8) and [dst, dst+8)
+    if src_addr_u32 < dst_end && dst_addr_u32 < src_end {
+        let dst_word2 = dst_addr_u32 + 4; // safe since dst_end computed above
+        // We write dst first, then dst+4. Use the first that overlaps.
+        let overlap_first = (dst_addr_u32 >= src_addr_u32) && (dst_addr_u32 < src_end);
+        let offending_addr = if overlap_first { dst_addr_u32 } else { dst_word2 };
+        return Err(MemoryError::IllegalMemoryAccess {
+            ctx,
+            addr: offending_addr,
+            clk: Felt::from(clk),
+        });
+    }
 
     Ok(())
 }

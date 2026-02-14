@@ -17,9 +17,8 @@ use miden_utils_testing::{
 
 /// Tests in this file make sure that diagnostics presented to the user are as expected.
 use crate::{
-    DefaultHost, Kernel, ONE, Program, StackInputs, Word, ZERO,
+    DefaultHost, FastProcessor, Kernel, ONE, Program, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMap},
-    fast::FastProcessor,
     field::PrimeField64,
     operation::Operation,
 };
@@ -105,15 +104,13 @@ fn test_diagnostic_advice_map_key_not_found_1() {
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
     let err = build_test.execute().expect_err("expected error");
-    // Note: The source location points to the first operation in the basic block because
-    // system event errors currently don't have access to the specific operation index.
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapval",
-        "   :             ^^^^",
+        "   :                               ^^^^^^^^^^^^^^^",
         "4 |         end",
         "   `----"
     );
@@ -128,15 +125,13 @@ fn test_diagnostic_advice_map_key_not_found_2() {
 
     let build_test = build_test_by_mode!(true, source, &[1, 2]);
     let err = build_test.execute().expect_err("expected error");
-    // Note: The source location points to the first operation in the basic block because
-    // system event errors currently don't have access to the specific operation index.
     assert_diagnostic_lines!(
         err,
         "value for key 0x0100000000000000020000000000000000000000000000000000000000000000 not present in the advice map",
-        regex!(r#",-\[test[\d]+:3:13\]"#),
+        regex!(r#",-\[test[\d]+:3:31\]"#),
         " 2 |         begin",
         " 3 |             swap swap trace.2 adv.push_mapvaln",
-        "   :             ^^^^",
+        "   :                               ^^^^^^^^^^^^^^^^",
         "4 |         end",
         "   `----"
     );
@@ -759,6 +754,67 @@ fn test_diagnostic_no_mast_forest_with_procedure_call() {
         " 5 |             call.bar::dummy_proc",
         "   :             ^^^^^^^^^^^^^^^^^^^^",
         " 6 |         end",
+        "   `----"
+    );
+}
+
+#[test]
+fn test_diagnostic_no_mast_forest_with_procedure_join() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+
+    let lib_module = {
+        let module_name = "foo::bar";
+        let src = "
+        pub proc dummy_proc
+            push.1
+        end
+    ";
+        let uri = Uri::from("src.masm");
+        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
+        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        Module::parse(
+            PathBuf::new(module_name).unwrap(),
+            miden_assembly::ast::ModuleKind::Library,
+            source_file,
+            source_manager.clone(),
+        )
+        .unwrap()
+    };
+
+    let program_source = "
+        use foo::bar
+
+        begin
+            exec.bar::dummy_proc
+            call.bar::dummy_proc
+        end
+    ";
+
+    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+
+    let program = Assembler::new(source_manager.clone())
+        .with_dynamic_library(&library)
+        .unwrap()
+        .assemble_program(program_source)
+        .unwrap();
+
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
+    let err = processor.execute_sync(&program, &mut host).unwrap_err();
+    assert_diagnostic_lines!(
+        err,
+        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        regex!(r#",-\[::\$exec:4:9\]"#),
+        " 3 |",
+        " 4 | ,->         begin",
+        " 5 | |               exec.bar::dummy_proc",
+        " 6 | |               call.bar::dummy_proc",
+        " 7 | `->         end",
+        " 8 |",
         "   `----"
     );
 }

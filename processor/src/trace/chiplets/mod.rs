@@ -22,7 +22,6 @@ pub(crate) use hasher::init_state_from_words;
 
 mod memory;
 use memory::Memory;
-pub use memory::MemoryError;
 
 mod ace;
 use ace::AceHints;
@@ -213,7 +212,7 @@ impl Chiplets {
     // EXECUTION TRACE
     // --------------------------------------------------------------------------------------------
 
-    /// Adds all range checks required by the memory chiplet to the provided [RangeChecker]
+    /// Adds all range checks required by the memory chiplet to the provided `RangeChecker``
     /// instance.
     pub fn append_range_checks(&self, range_checker: &mut RangeChecker) {
         self.memory.append_range_checks(self.memory_start(), range_checker);

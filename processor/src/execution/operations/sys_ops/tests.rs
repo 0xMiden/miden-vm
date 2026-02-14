@@ -9,9 +9,8 @@ use miden_core::{
 use super::{op_assert, op_clk, op_sdepth};
 use crate::{
     execution::operations::stack_ops::op_push,
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, StackInterface, SystemInterface},
-    tracer::NoopTracer,
 };
 
 // TESTS
@@ -47,7 +46,7 @@ fn test_op_sdepth() {
     assert_eq!(MIN_STACK_DEPTH as u32 + 2, processor.stack_depth());
 
     // stack has 3 items - add a pad (push 0)
-    Processor::stack_mut(&mut processor).increment_size(&mut tracer).unwrap();
+    Processor::stack_mut(&mut processor).increment_size().unwrap();
     processor.stack_write(0, ZERO);
 
     op_sdepth(&mut processor, &mut tracer).unwrap();

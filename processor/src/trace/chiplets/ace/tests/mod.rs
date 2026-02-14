@@ -17,13 +17,13 @@ use miden_core::{
 
 use crate::{
     ContextId, PrimeField64,
-    fast::{Memory, eval_circuit_fast_},
+    execution::eval_circuit_impl,
+    fast::{Memory, NoopTracer},
     trace::chiplets::ace::{
         instruction::{Op, decode_instruction},
         tests::circuit::{Circuit, CircuitLayout, Instruction, NodeID},
         trace::CircuitEvaluation,
     },
-    tracer::NoopTracer,
 };
 
 mod circuit;
@@ -238,7 +238,7 @@ fn verify_eval_circuit(circuit: &EncodedCircuit, inputs: &[QuadFelt]) {
         ptr_curr += Felt::from_u8(4);
     }
 
-    eval_circuit_fast_(
+    eval_circuit_impl(
         ctx,
         ptr,
         clk + 1,

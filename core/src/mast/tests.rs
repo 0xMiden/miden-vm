@@ -839,7 +839,7 @@ fn test_mast_forest_get_assembly_op_basic_block() {
     let mut forest = MastForest::new();
 
     // Add an AssemblyOp to the DebugInfo's asm_op storage
-    let assembly_op = AssemblyOp::new(None, "test_context".into(), 1, "add".into(), false);
+    let assembly_op = AssemblyOp::new(None, "test_context".into(), 1, "add".into());
     let asm_op_id = forest.debug_info.add_asm_op(assembly_op.clone()).unwrap();
 
     // Add a basic block node
@@ -867,7 +867,6 @@ fn test_mast_forest_get_assembly_op_with_target_index() {
         "test_context".into(),
         3, // 3 cycles
         "complex_op".into(),
-        false,
     );
     let asm_op_id = forest.debug_info.add_asm_op(assembly_op.clone()).unwrap();
 
@@ -924,7 +923,7 @@ fn test_mast_forest_get_assembly_op_all_node_types() {
     // typically be found in the child basic block's operation indices.
 
     let mut forest = MastForest::new();
-    let assembly_op = AssemblyOp::new(None, "test_context".into(), 1, "test_op".into(), false);
+    let assembly_op = AssemblyOp::new(None, "test_context".into(), 1, "test_op".into());
     let asm_op_id = forest.debug_info.add_asm_op(assembly_op.clone()).unwrap();
 
     // Create a basic block with an AssemblyOp registered for its operations
@@ -978,7 +977,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     assert!(result.is_none(), "Node with no AssemblyOps registered should return None");
 
     // Test 2: Add AssemblyOp and register it for operations
-    let asm_op1 = AssemblyOp::new(None, "context1".into(), 1, "op1".into(), false);
+    let asm_op1 = AssemblyOp::new(None, "context1".into(), 1, "op1".into());
     let asm_op_id1 = forest.debug_info.add_asm_op(asm_op1.clone()).unwrap();
 
     let node_id2 = BasicBlockNodeBuilder::new(operations.clone(), vec![])
@@ -991,8 +990,8 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     assert_eq!(result2.unwrap(), &asm_op1);
 
     // Test 3: Multiple AssemblyOps for different operation indices
-    let asm_op2 = AssemblyOp::new(None, "context2".into(), 1, "op2".into(), false);
-    let asm_op3 = AssemblyOp::new(None, "context3".into(), 1, "op3".into(), false);
+    let asm_op2 = AssemblyOp::new(None, "context2".into(), 1, "op2".into());
+    let asm_op3 = AssemblyOp::new(None, "context3".into(), 1, "op3".into());
     let asm_op_id2 = forest.debug_info.add_asm_op(asm_op2.clone()).unwrap();
     let asm_op_id3 = forest.debug_info.add_asm_op(asm_op3.clone()).unwrap();
 
@@ -1030,7 +1029,7 @@ fn test_mast_forest_get_assembly_comprehensive_edge_cases() {
     );
 
     // Test 4: Same AssemblyOp ID at multiple indices (multi-cycle operation)
-    let asm_op_multi = AssemblyOp::new(None, "multi_cycle".into(), 3, "multi_op".into(), false);
+    let asm_op_multi = AssemblyOp::new(None, "multi_cycle".into(), 3, "multi_op".into());
     let asm_op_id_multi = forest.debug_info.add_asm_op(asm_op_multi.clone()).unwrap();
 
     let ops4 = vec![Operation::Push(Felt::new(1)), Operation::Add, Operation::Mul, Operation::Neg];
@@ -1197,7 +1196,7 @@ fn test_debug_info_asm_op_storage() {
     let mut debug_info = DebugInfo::new();
 
     // Add an AssemblyOp
-    let asm_op = AssemblyOp::new(None, "test".to_string(), 5, "add".to_string(), false);
+    let asm_op = AssemblyOp::new(None, "test".to_string(), 5, "add".to_string());
     let asm_op_id = debug_info.add_asm_op(asm_op).unwrap();
 
     // Register it for node 0, op 2 (assuming node has 5 operations)

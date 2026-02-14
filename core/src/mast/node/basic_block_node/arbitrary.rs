@@ -612,9 +612,8 @@ impl Arbitrary for AssemblyOp {
             prop::collection::vec(any::<char>(), 1..=20)
                 .prop_map(|chars| chars.into_iter().collect()),
             any::<u8>(),
-            any::<bool>(),
         )
-            .prop_map(|(has_location, context_name, op, num_cycles, should_break)| {
+            .prop_map(|(has_location, context_name, op, num_cycles)| {
                 use miden_debug_types::{ByteIndex, Location, Uri};
 
                 let location = if has_location {
@@ -623,7 +622,7 @@ impl Arbitrary for AssemblyOp {
                     None
                 };
 
-                AssemblyOp::new(location, context_name, num_cycles, op, should_break)
+                AssemblyOp::new(location, context_name, num_cycles, op)
             })
             .boxed()
     }

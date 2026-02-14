@@ -60,7 +60,7 @@ pub proc mod_12289
     u32overflowing_sub
     # => [borrow, diff, r, res_hi, res_lo, a_hi, a_lo, ...]
     # borrow = 1 when r < M (underflow). Assert borrow != 0, then drop diff.
-    assert drop
+    assert.err="comparison failed: modulus" drop
     # => [r, res_hi, res_lo, a_hi, a_lo, ...]
 
     dup
@@ -206,19 +206,19 @@ pub proc load_h_s2_and_product
         # Assert borrow != 0 (r < M), then drop diff
         dupw.1
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
 
         dupw
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
 
         horner_eval_base
 
@@ -247,19 +247,19 @@ pub proc load_h_s2_and_product
         # Assert borrow != 0 (r < M), then drop diff
         dupw.1
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
 
         dupw
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
         u32assert2
-        push.M u32overflowing_sub assert drop
-        push.M u32overflowing_sub assert drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
+        push.M u32overflowing_sub assert.err="comparison failed: modulus" drop
 
         horner_eval_base
         exec.poseidon2::permute
@@ -295,8 +295,8 @@ pub proc load_h_s2_and_product
     # => [tau0, tau1, tau0(D), tau1(D), D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
 
 
-    dup.2 assert_eq             # assert tau0 == tau0(D)
-    dup.2 assert_eq             # assert tau1 == tau1(D)
+    dup.2 assert_eq.err="comparison failed: tau"             # assert tau0 == tau0(D)
+    dup.2 assert_eq.err="comparison failed: tau"             # assert tau1 == tau1(D)
     # => [tau0, tau1, D[2], D[3], ptr, tau_inv_ptr, pi(tau)_0, pi(tau)_1, ...]
 
     movdn.5                     # move tau0 past D[2], D[3], ptr, tau_inv_ptr
@@ -671,7 +671,7 @@ pub proc verify
     #=> [norm_sq(s1) + norm_sq(s2), ...]
 
     push.SQUARE_NORM_BOUND
-    u32assert2 u32lt assert
+    u32assert2 u32lt assert.err="comparison failed: norm bound"
     #=> [...]                                       (Cycles: 8)
 end
 

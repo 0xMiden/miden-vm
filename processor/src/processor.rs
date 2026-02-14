@@ -1,21 +1,15 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_air::trace::{RowIndex, chiplets::hasher::HasherState, decoder::NUM_USER_OP_HELPERS};
-use miden_core::{
-    Felt, Word,
-    crypto::merkle::MerklePath,
-    field::QuadFelt,
-    mast::{BasicBlockNode, MastForest, MastNodeId},
-    precompile::PrecompileTranscriptState,
-};
+use miden_air::trace::{RowIndex, chiplets::hasher::HasherState};
 
 use crate::{
-    ContextId, ExecutionError, Host, MemoryError,
+    BreakReason, ContextId, ExecutionError, Felt, Host, MemoryError, Word,
     advice::AdviceError,
-    errors::{AceEvalError, OperationError},
-    fast::step::BreakReason,
-    tracer::Tracer,
+    crypto::merkle::MerklePath,
+    errors::OperationError,
+    mast::{BasicBlockNode, MastForest, MastNodeId},
+    precompile::PrecompileTranscriptState,
 };
 
 // PROCESSOR
@@ -23,17 +17,12 @@ use crate::{
 
 /// Abstract definition of a processor's components: system, stack, advice provider, memory, hasher,
 /// and operation helper register computation.
-pub trait Processor: Sized {
+pub(crate) trait Processor: Sized {
     type System: SystemInterface;
     type Stack: StackInterface;
     type AdviceProvider: AdviceProviderInterface;
     type Memory: MemoryInterface;
     type Hasher: HasherInterface;
-    type HelperRegisters: OperationHelperRegisters;
-
-    // --------------------------------------------------------------------------------------------
-    // REQUIRED METHODS
-    // --------------------------------------------------------------------------------------------
 
     /// Returns a reference to the internal stack.
     fn stack(&self) -> &Self::Stack;
@@ -53,9 +42,6 @@ pub trait Processor: Sized {
     /// Returns a mutable reference to the internal advice provider.
     fn advice_provider_mut(&mut self) -> &mut Self::AdviceProvider;
 
-    /// Returns a reference to the internal memory subsystem.
-    fn memory(&self) -> &Self::Memory;
-
     /// Returns a mutable reference to the internal memory subsystem.
     fn memory_mut(&mut self) -> &mut Self::Memory;
 
@@ -64,13 +50,11 @@ pub trait Processor: Sized {
 
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer);
+    fn save_context_and_truncate_stack(&mut self);
 
     /// Restores the execution context to the state it was in before the last `call`, `syscall` or
-    /// `dyncall`.
-    ///
-    /// This includes restoring the overflow stack and the system parameters.
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
+    /// `dyncall. This includes restoring the overflow stack and the system parameters.
+    fn restore_context(&mut self) -> Result<(), OperationError>;
 
     /// Returns the current precompile transcript state (sponge capacity).
     ///
@@ -81,29 +65,6 @@ pub trait Processor: Sized {
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    ///
-    /// The inputs are composed of:
-    ///
-    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
-    ///    itself is arranged as:
-    ///
-    ///    a. `Read` section:
-    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
-    ///       2. Constants of the circuit which are elements in the quadratic extension field,
-    ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///    where each gate is encoded as a single base field element.
-    /// 2. the number of quadratic extension field elements read in the `READ` section,
-    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
-    ///
-    /// Stack transition:
-    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// # Note
-    /// All processors need to support this operation.
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
@@ -141,26 +102,13 @@ pub trait Processor: Sized {
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason>;
-
-    // --------------------------------------------------------------------------------------------
-    // PROVIDED METHODS
-    // --------------------------------------------------------------------------------------------
-
-    /// Returns the next context ID that would be created given the current state.
-    ///
-    /// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
-    /// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
-    /// context.
-    fn next_ctx_id(&self) -> ContextId {
-        (self.system().clock() + 1).into()
-    }
 }
 
 // SYSTEM INTERFACE
 // ================================================================================================
 
 /// Trait representing the system state of the processor.
-pub trait SystemInterface {
+pub(crate) trait SystemInterface {
     // ACCESSORS
     // --------------------------------------------------------------------------------------------
 
@@ -196,7 +144,7 @@ pub trait SystemInterface {
 /// are always taken relative to the top element of the stack, meaning that `stack_get(0)` returns
 /// the top element, `stack_get(1)` returns the second element from the top, and so on. The stack is
 /// always at least 16 elements deep.
-pub trait StackInterface {
+pub(crate) trait StackInterface {
     /// Returns the top 16 elements of the stack, such that the top of the stack is at the last
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
@@ -291,21 +239,21 @@ pub trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size(&mut self, tracer: &mut impl Tracer) -> Result<(), ExecutionError>;
+    fn increment_size(&mut self) -> Result<(), ExecutionError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size(&mut self, tracer: &mut impl Tracer);
+    fn decrement_size(&mut self);
 }
 
 // ADVICE PROVIDER INTERFACE
 // ================================================================================================
 
 /// Trait representing an advice provider for the processor.
-pub trait AdviceProviderInterface {
+pub(crate) trait AdviceProviderInterface {
     /// Pops an element from the advice stack and returns it.
     fn pop_stack(&mut self) -> Result<Felt, AdviceError>;
 
@@ -359,7 +307,7 @@ pub trait AdviceProviderInterface {
 // ================================================================================================
 
 /// Trait representing the memory subsystem of the processor.
-pub trait MemoryInterface {
+pub(crate) trait MemoryInterface {
     /// Reads an element from memory at the provided address in the provided context.
     fn read_element(&mut self, ctx: ContextId, addr: Felt) -> Result<Felt, MemoryError>;
 
@@ -389,7 +337,7 @@ pub trait MemoryInterface {
 // ================================================================================================
 
 /// Trait representing the hasher subsystem of the processor.
-pub trait HasherInterface {
+pub(crate) trait HasherInterface {
     /// Applies a single permutation of the hash function to the provided state and records the
     /// execution trace of this computation.
     ///
@@ -443,84 +391,4 @@ pub trait HasherInterface {
         index: Felt,
         on_err: impl FnOnce() -> OperationError,
     ) -> Result<(Felt, Word), OperationError>;
-}
-
-// OPERATION HELPER REGISTERS
-// ================================================================================================
-
-/// Trait for computing helper registers for operations.
-///
-/// Concretely, the fast processor does not compute any helper registers, and thus returns a default
-/// value (all zeros). On the other hand, the trace generation helpers compute the actual helper
-/// registers to be included in the trace.
-pub trait OperationHelperRegisters {
-    /// The helper registers for the Eq operation.
-    fn op_eq_registers(a: Felt, b: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32split operation.
-    fn op_u32split_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the Eqz operation.
-    fn op_eqz_registers(top: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the Expacc operation.
-    fn op_expacc_registers(acc_update_val: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the FriExt2Fold4 operation.
-    fn op_fri_ext2fold4_registers(
-        ev: QuadFelt,
-        es: QuadFelt,
-        x: Felt,
-        x_inv: Felt,
-    ) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32add operation.
-    fn op_u32add_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32add3 operation.
-    fn op_u32add3_registers(sum: Felt, carry: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32sub operation.
-    fn op_u32sub_registers(second_new: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32mul operation.
-    fn op_u32mul_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32madd operation.
-    fn op_u32madd_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32div operation.
-    fn op_u32div_registers(lo: Felt, hi: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the U32assert2 operation.
-    fn op_u32assert2_registers(first: Felt, second: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the HPerm operation.
-    fn op_hperm_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the LogPrecompile operation.
-    /// Contains the hasher address and the previous capacity (CAP_PREV).
-    ///
-    /// Layout:
-    /// - `h0` = hasher trace row address at which the permutation starts
-    /// - `h1..h4` = `CAP_PREV[0..3]` (capacity elements in sequential order)
-    fn op_log_precompile_registers(addr: Felt, cap_prev: Word) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for the MPVerify and MrUpdate operation.
-    fn op_merkle_path_registers(addr: Felt) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for HornerEvalBase operations.
-    fn op_horner_eval_base_registers(
-        alpha: QuadFelt,
-        tmp0: QuadFelt,
-        tmp1: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS];
-
-    /// The helper registers for HornerEvalExt operations.
-    fn op_horner_eval_ext_registers(
-        alpha: QuadFelt,
-        k0: Felt,
-        k1: Felt,
-        acc_tmp: QuadFelt,
-    ) -> [Felt; NUM_USER_OP_HELPERS];
 }

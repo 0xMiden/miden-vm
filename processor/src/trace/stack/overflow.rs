@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use miden_air::trace::RowIndex;
 use miden_utils_indexing::IndexVec;
 
@@ -55,11 +53,6 @@ impl OverflowStack {
         self.overflow.is_empty()
     }
 
-    /// Returns an iterator over the elements in the overflow stack.
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = &OverflowStackEntry> {
-        self.overflow.as_slice().iter()
-    }
-
     // PUBLIC MUTATORS
     // --------------------------------------------------------------------------------------------
 
@@ -106,13 +99,6 @@ impl OverflowTable {
     // PUBLIC ACCESSORS
     // --------------------------------------------------------------------------------------------
 
-    /// Appends the values from the overflow stack corresponding to the current context to the end
-    /// of the provided vector.
-    pub fn append_into(&self, target: &mut Vec<Felt>) {
-        let current_overflow_stack = self.get_current_overflow_stack();
-        target.extend(current_overflow_stack.iter().rev().map(OverflowStackEntry::value));
-    }
-
     /// Returns the clock cycle at which the latest overflow table entry was added in the current
     /// context.
     ///
@@ -122,31 +108,6 @@ impl OverflowTable {
         self.get_current_overflow_stack()
             .last()
             .map_or(ZERO, |entry| Felt::from(entry.clk))
-    }
-
-    /// Returns the total number of elements in the overflow table across all stacks in all
-    /// contexts.
-    pub fn total_num_elements(&self) -> usize {
-        self.overflow.iter().map(OverflowStack::num_elements).sum::<usize>()
-    }
-
-    /// Returns the element at the specified index in the current overflow stack.
-    ///
-    /// The index is relative to the logical stack continuation, where index 0 corresponds to
-    /// the most recently pushed item (top of overflow stack), index 1 to the second most recent,
-    /// etc. Returns None if the index is out of bounds.
-    pub fn get_element_at(&self, index: usize) -> Option<Felt> {
-        let current_stack = self.get_current_overflow_stack();
-        let len = current_stack.num_elements();
-
-        if index >= len {
-            None
-        } else {
-            // The overflow stack stores items in push order, but logically we want to access
-            // them in reverse order (most recent first), so we reverse the index
-            let actual_index = RowIndex::from(len - 1 - index);
-            current_stack.overflow.get(actual_index).map(|entry| entry.value)
-        }
     }
 
     /// Returns the number of elements in the overflow stack for the current context.

@@ -4,8 +4,7 @@ use clap::Parser;
 use miden_assembly::diagnostics::{IntoDiagnostic, Report, WrapErr};
 use miden_core_lib::CoreLibrary;
 use miden_processor::{
-    DefaultHost, ExecutionOptions,
-    fast::FastProcessor,
+    DefaultHost, ExecutionOptions, FastProcessor,
     trace::{ExecutionTrace, build_trace},
 };
 use miden_vm::internal::InputFile;

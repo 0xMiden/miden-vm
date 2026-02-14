@@ -8,36 +8,32 @@ extern crate std;
 
 use alloc::vec::Vec;
 use core::{
-    fmt::{Display, LowerHex},
+    fmt::{self, Display, LowerHex},
     ops::ControlFlow,
 };
 
 mod continuation_stack;
 mod debug;
-mod decoder;
 mod errors;
 mod execution;
 mod execution_options;
+mod fast;
 mod host;
-mod stack;
-mod system;
-
-pub mod fast;
-pub mod processor;
-pub mod trace;
-pub mod tracer;
-pub mod utils;
+mod processor;
+mod tracer;
 
 use crate::{
     advice::{AdviceInputs, AdviceProvider},
-    fast::{FastProcessor, step::BreakReason},
-    field::PrimeField64,
+    errors::MapExecErr,
+    field::{PrimeCharacteristicRing, PrimeField64},
     processor::{Processor, SystemInterface},
     trace::{ExecutionTrace, RowIndex},
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 mod test_utils;
+#[cfg(any(test, feature = "testing"))]
+pub use test_utils::{ProcessorStateSnapshot, TestHost, TraceCollector};
 
 #[cfg(test)]
 mod tests;
@@ -45,8 +41,9 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
-pub use errors::{ExecutionError, MapExecErr, MapExecErrNoCtx, MapExecErrWithOpIdx};
+pub use errors::{ExecutionError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
+pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
@@ -55,11 +52,11 @@ pub use host::{
 };
 pub use miden_core::{
     EMPTY_WORD, Felt, ONE, WORD_SIZE, Word, ZERO, crypto, field, mast, precompile,
-    program::{InputError, Kernel, Program, ProgramInfo, StackInputs, StackOutputs},
-    serde,
+    program::{
+        InputError, Kernel, MIN_STACK_DEPTH, Program, ProgramInfo, StackInputs, StackOutputs,
+    },
+    serde, utils,
 };
-pub use system::ContextId;
-pub use trace::chiplets::MemoryError;
 
 pub mod advice {
     pub use miden_core::advice::{AdviceInputs, AdviceMap, AdviceStackBuilder};
@@ -84,51 +81,7 @@ pub mod operation {
     pub use crate::errors::OperationError;
 }
 
-// TYPE ALIASES
-// ================================================================================================
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MemoryAddress(u32);
-
-impl From<u32> for MemoryAddress {
-    fn from(addr: u32) -> Self {
-        MemoryAddress(addr)
-    }
-}
-
-impl From<MemoryAddress> for u32 {
-    fn from(value: MemoryAddress) -> Self {
-        value.0
-    }
-}
-
-impl Display for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
-impl LowerHex for MemoryAddress {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        LowerHex::fmt(&self.0, f)
-    }
-}
-
-impl core::ops::Add<MemoryAddress> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: MemoryAddress) -> Self::Output {
-        MemoryAddress(self.0 + rhs.0)
-    }
-}
-
-impl core::ops::Add<u32> for MemoryAddress {
-    type Output = Self;
-
-    fn add(self, rhs: u32) -> Self::Output {
-        MemoryAddress(self.0 + rhs)
-    }
-}
+pub mod trace;
 
 // EXECUTORS
 // ================================================================================================
@@ -319,7 +272,7 @@ impl<'a> ProcessorState<'a> {
 
 /// A trait for types that determine whether execution should be stopped at a given point.
 pub trait Stopper {
-    type Processor: Processor;
+    type Processor;
 
     /// Determines whether execution should be stopped.
     ///
@@ -335,4 +288,105 @@ pub trait Stopper {
         processor: &Self::Processor,
         continuation_after_stop: impl FnOnce() -> Option<continuation_stack::Continuation>,
     ) -> ControlFlow<BreakReason>;
+}
+
+// EXECUTION CONTEXT
+// ================================================================================================
+
+/// Represents the ID of an execution context
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ContextId(u32);
+
+impl ContextId {
+    /// Returns the root context ID
+    pub fn root() -> Self {
+        Self(0)
+    }
+
+    /// Returns true if the context ID represents the root context
+    pub fn is_root(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl From<RowIndex> for ContextId {
+    fn from(value: RowIndex) -> Self {
+        Self(value.as_u32())
+    }
+}
+
+impl From<u32> for ContextId {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<ContextId> for u32 {
+    fn from(context_id: ContextId) -> Self {
+        context_id.0
+    }
+}
+
+impl From<ContextId> for u64 {
+    fn from(context_id: ContextId) -> Self {
+        context_id.0.into()
+    }
+}
+
+impl From<ContextId> for Felt {
+    fn from(context_id: ContextId) -> Self {
+        Felt::from_u32(context_id.0)
+    }
+}
+
+impl Display for ContextId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// MEMORY ADDRESS
+// ================================================================================================
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub struct MemoryAddress(u32);
+
+impl From<u32> for MemoryAddress {
+    fn from(addr: u32) -> Self {
+        MemoryAddress(addr)
+    }
+}
+
+impl From<MemoryAddress> for u32 {
+    fn from(value: MemoryAddress) -> Self {
+        value.0
+    }
+}
+
+impl Display for MemoryAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl LowerHex for MemoryAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        LowerHex::fmt(&self.0, f)
+    }
+}
+
+impl core::ops::Add<MemoryAddress> for MemoryAddress {
+    type Output = Self;
+
+    fn add(self, rhs: MemoryAddress) -> Self::Output {
+        MemoryAddress(self.0 + rhs.0)
+    }
+}
+
+impl core::ops::Add<u32> for MemoryAddress {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        MemoryAddress(self.0 + rhs)
+    }
 }

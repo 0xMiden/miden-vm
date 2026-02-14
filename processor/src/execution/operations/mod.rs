@@ -1,30 +1,34 @@
-use miden_air::trace::decoder::NUM_USER_OP_HELPERS;
-use miden_core::{
-    Felt,
-    mast::{MastForest, MastNodeId},
-    operations::Operation,
-};
-
 use crate::{
-    ExecutionError, Host,
+    ExecutionError, Felt, Host,
     errors::MapExecErrWithOpIdx,
+    mast::{MastForest, MastNodeId},
+    operation::Operation,
     processor::{Processor, StackInterface},
-    tracer::Tracer,
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod crypto_ops;
+mod eval_circuit;
 mod field_ops;
 mod fri_ops;
 mod io_ops;
 mod stack_ops;
 mod sys_ops;
 mod u32_ops;
-mod utils;
+
+#[cfg(test)]
+pub(crate) use eval_circuit::eval_circuit_impl;
+
+// CONSTANTS
+// ================================================================================================
 
 /// WORD_SIZE, but as a `Felt`.
 const WORD_SIZE_FELT: Felt = Felt::new(4);
 /// The size of a double-word.
 const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
+
+// OPERATION HANDLER
+// ================================================================================================
 
 /// Executes the provided synchronous operation.
 ///
@@ -35,22 +39,22 @@ const DOUBLE_WORD_SIZE: Felt = Felt::new(8);
 /// - If a control flow operation is provided.
 /// - If an `Emit` operation is provided.
 #[inline(always)]
-pub fn execute_sync_op(
-    processor: &mut impl Processor,
+pub(crate) fn execute_op<P, T>(
+    processor: &mut P,
     op: &Operation,
+    op_idx: usize,
     current_forest: &MastForest,
     node_id: MastNodeId,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
-    op_idx: usize,
-) -> Result<Option<[Felt; NUM_USER_OP_HELPERS]>, ExecutionError> {
-    let mut user_op_helpers = None;
-
-    match op {
+    tracer: &mut T,
+) -> Result<OperationHelperRegisters, ExecutionError>
+where
+    P: Processor,
+    T: Tracer<Processor = P>,
+{
+    let user_op_helpers = match op {
         // ----- system operations ------------------------------------------------------------
-        Operation::Noop => {
-            // do nothing
-        },
+        Operation::Noop => OperationHelperRegisters::Empty,
         Operation::Assert(err_code) => {
             sys_ops::op_assert(processor, *err_code, current_forest, tracer)
                 .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
@@ -106,81 +110,51 @@ pub fn execute_sync_op(
             host,
             op_idx,
         )?,
-        Operation::Eq => {
-            let eq_helpers = field_ops::op_eq(processor, tracer);
-            user_op_helpers = Some(eq_helpers);
-        },
-        Operation::Eqz => {
-            let eqz_helpers = field_ops::op_eqz(processor);
-            user_op_helpers = Some(eqz_helpers);
-        },
-        Operation::Expacc => {
-            let expacc_helpers = field_ops::op_expacc(processor);
-            user_op_helpers = Some(expacc_helpers);
-        },
+        Operation::Eq => field_ops::op_eq(processor, tracer),
+        Operation::Eqz => field_ops::op_eqz(processor),
+        Operation::Expacc => field_ops::op_expacc(processor),
 
         // ----- ext2 operations --------------------------------------------------------------
         Operation::Ext2Mul => field_ops::op_ext2mul(processor),
 
         // ----- u32 operations ---------------------------------------------------------------
-        Operation::U32split => {
-            let u32split_helpers = u32_ops::op_u32split(processor, tracer)?;
-            user_op_helpers = Some(u32split_helpers);
-        },
-        Operation::U32add => {
-            let u32add_helpers = u32_ops::op_u32add(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32add_helpers);
-        },
-        Operation::U32add3 => {
-            let u32add3_helpers = u32_ops::op_u32add3(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32add3_helpers);
-        },
-        Operation::U32sub => {
-            let u32sub_helpers = u32_ops::op_u32sub(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32sub_helpers);
-        },
-        Operation::U32mul => {
-            let u32mul_helpers = u32_ops::op_u32mul(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32mul_helpers);
-        },
-        Operation::U32madd => {
-            let u32madd_helpers = u32_ops::op_u32madd(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32madd_helpers);
-        },
-        Operation::U32div => {
-            let u32div_helpers = u32_ops::op_u32div(processor, tracer).map_exec_err_with_op_idx(
-                current_forest,
-                node_id,
-                host,
-                op_idx,
-            )?;
-            user_op_helpers = Some(u32div_helpers);
-        },
+        Operation::U32split => u32_ops::op_u32split(processor, tracer)?,
+        Operation::U32add => u32_ops::op_u32add(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
+        Operation::U32add3 => u32_ops::op_u32add3(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
+        Operation::U32sub => u32_ops::op_u32sub(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
+        Operation::U32mul => u32_ops::op_u32mul(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
+        Operation::U32madd => u32_ops::op_u32madd(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
+        Operation::U32div => u32_ops::op_u32div(processor, tracer).map_exec_err_with_op_idx(
+            current_forest,
+            node_id,
+            host,
+            op_idx,
+        )?,
         Operation::U32and => u32_ops::op_u32and(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -193,15 +167,16 @@ pub fn execute_sync_op(
             host,
             op_idx,
         )?,
-        Operation::U32assert2(err_code) => {
-            let u32assert2_helpers = u32_ops::op_u32assert2(processor, *err_code, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(u32assert2_helpers);
-        },
+        Operation::U32assert2(err_code) => u32_ops::op_u32assert2(processor, *err_code, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
 
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor, tracer)?,
-        Operation::Drop => processor.stack_mut().decrement_size(tracer),
+        Operation::Drop => {
+            processor.stack_mut().decrement_size();
+            tracer.decrement_stack_size();
+            OperationHelperRegisters::Empty
+        },
         Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
         Operation::Dup1 => stack_ops::dup_nth(processor, 1, tracer)?,
         Operation::Dup2 => stack_ops::dup_nth(processor, 2, tracer)?,
@@ -215,24 +190,75 @@ pub fn execute_sync_op(
         Operation::Dup13 => stack_ops::dup_nth(processor, 13, tracer)?,
         Operation::Dup15 => stack_ops::dup_nth(processor, 15, tracer)?,
         Operation::Swap => stack_ops::op_swap(processor),
-        Operation::SwapW => processor.stack_mut().swapw_nth(1),
-        Operation::SwapW2 => processor.stack_mut().swapw_nth(2),
-        Operation::SwapW3 => processor.stack_mut().swapw_nth(3),
+        Operation::SwapW => {
+            processor.stack_mut().swapw_nth(1);
+            OperationHelperRegisters::Empty
+        },
+        Operation::SwapW2 => {
+            processor.stack_mut().swapw_nth(2);
+            OperationHelperRegisters::Empty
+        },
+        Operation::SwapW3 => {
+            processor.stack_mut().swapw_nth(3);
+            OperationHelperRegisters::Empty
+        },
         Operation::SwapDW => stack_ops::op_swap_double_word(processor),
-        Operation::MovUp2 => processor.stack_mut().rotate_left(3),
-        Operation::MovUp3 => processor.stack_mut().rotate_left(4),
-        Operation::MovUp4 => processor.stack_mut().rotate_left(5),
-        Operation::MovUp5 => processor.stack_mut().rotate_left(6),
-        Operation::MovUp6 => processor.stack_mut().rotate_left(7),
-        Operation::MovUp7 => processor.stack_mut().rotate_left(8),
-        Operation::MovUp8 => processor.stack_mut().rotate_left(9),
-        Operation::MovDn2 => processor.stack_mut().rotate_right(3),
-        Operation::MovDn3 => processor.stack_mut().rotate_right(4),
-        Operation::MovDn4 => processor.stack_mut().rotate_right(5),
-        Operation::MovDn5 => processor.stack_mut().rotate_right(6),
-        Operation::MovDn6 => processor.stack_mut().rotate_right(7),
-        Operation::MovDn7 => processor.stack_mut().rotate_right(8),
-        Operation::MovDn8 => processor.stack_mut().rotate_right(9),
+        Operation::MovUp2 => {
+            processor.stack_mut().rotate_left(3);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp3 => {
+            processor.stack_mut().rotate_left(4);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp4 => {
+            processor.stack_mut().rotate_left(5);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp5 => {
+            processor.stack_mut().rotate_left(6);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp6 => {
+            processor.stack_mut().rotate_left(7);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp7 => {
+            processor.stack_mut().rotate_left(8);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovUp8 => {
+            processor.stack_mut().rotate_left(9);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn2 => {
+            processor.stack_mut().rotate_right(3);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn3 => {
+            processor.stack_mut().rotate_right(4);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn4 => {
+            processor.stack_mut().rotate_right(5);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn5 => {
+            processor.stack_mut().rotate_right(6);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn6 => {
+            processor.stack_mut().rotate_right(7);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn7 => {
+            processor.stack_mut().rotate_right(8);
+            OperationHelperRegisters::Empty
+        },
+        Operation::MovDn8 => {
+            processor.stack_mut().rotate_right(9);
+            OperationHelperRegisters::Empty
+        },
         Operation::CSwap => stack_ops::op_cswap(processor, tracer).map_exec_err_with_op_idx(
             current_forest,
             node_id,
@@ -298,51 +324,32 @@ pub fn execute_sync_op(
         )?,
 
         // ----- cryptographic operations -----------------------------------------------------
-        Operation::HPerm => {
-            let hperm_helpers = crypto_ops::op_hperm(processor, tracer);
-            user_op_helpers = Some(hperm_helpers);
-        },
+        Operation::HPerm => crypto_ops::op_hperm(processor, tracer),
         Operation::MpVerify(err_code) => {
-            let mpverify_helpers =
-                crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
-                    .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(mpverify_helpers);
+            crypto_ops::op_mpverify(processor, *err_code, current_forest, tracer)
+                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?
         },
-        Operation::MrUpdate => {
-            let mrupdate_helpers = crypto_ops::op_mrupdate(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(mrupdate_helpers);
-        },
-        Operation::FriE2F4 => {
-            let frie2f4_helpers = fri_ops::op_fri_ext2fold4(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(frie2f4_helpers);
-        },
-        Operation::HornerBase => {
-            let horner_base_helpers = crypto_ops::op_horner_eval_base(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(horner_base_helpers);
-        },
-        Operation::HornerExt => {
-            let horner_ext_helpers = crypto_ops::op_horner_eval_ext(processor, tracer)
-                .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?;
-            user_op_helpers = Some(horner_ext_helpers);
-        },
+        Operation::MrUpdate => crypto_ops::op_mrupdate(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::FriE2F4 => fri_ops::op_fri_ext2fold4(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::HornerBase => crypto_ops::op_horner_eval_base(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
+        Operation::HornerExt => crypto_ops::op_horner_eval_ext(processor, tracer)
+            .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(tracer).map_exec_err_with_op_idx(
+            eval_circuit::op_eval_circuit(processor, tracer).map_exec_err_with_op_idx(
                 current_forest,
                 node_id,
                 host,
                 op_idx,
             )?;
+            OperationHelperRegisters::Empty
         },
-        Operation::LogPrecompile => {
-            let log_precompile_helpers = crypto_ops::op_log_precompile(processor, tracer);
-            user_op_helpers = Some(log_precompile_helpers);
-        },
+        Operation::LogPrecompile => crypto_ops::op_log_precompile(processor, tracer),
         Operation::CryptoStream => crypto_ops::op_crypto_stream(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
-    }
+    };
 
     Ok(user_op_helpers)
 }

@@ -7,9 +7,8 @@ use miden_core::{
 
 use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};
 use crate::{
-    fast::FastProcessor,
+    fast::{FastProcessor, NoopTracer},
     processor::{Processor, StackInterface},
-    tracer::NoopTracer,
 };
 
 // TESTS
@@ -74,19 +73,19 @@ fn test_op_drop() {
     op_push(&mut processor, Felt::new(2), &mut tracer).unwrap();
 
     // drop the first value
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size();
     let expected = build_expected(&[1]);
     assert_eq!(expected, processor.stack_top());
     assert_eq!(MIN_STACK_DEPTH as u32 + 1, processor.stack_depth());
 
     // drop the next value
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size();
     let expected = build_expected(&[]);
     assert_eq!(expected, processor.stack_top());
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
 
     // calling drop with a minimum stack depth should be ok
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size();
 }
 
 #[test]
@@ -107,7 +106,7 @@ fn test_op_dup() {
     // duplicating non-existent item from the min stack range should be ok (dup2)
     dup_nth(&mut processor, 2, &mut tracer).unwrap();
     // drop it again before continuing the tests and stack comparison
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size();
 
     // put 15 more items onto the stack
     let mut expected_arr = [ONE; 16];
@@ -134,10 +133,10 @@ fn test_op_dup() {
     assert_eq!(ONE, processor.stack_get(1));
 
     // remove 4 items off the stack
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
-    Processor::stack_mut(&mut processor).decrement_size(&mut tracer);
+    Processor::stack_mut(&mut processor).decrement_size();
+    Processor::stack_mut(&mut processor).decrement_size();
+    Processor::stack_mut(&mut processor).decrement_size();
+    Processor::stack_mut(&mut processor).decrement_size();
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 15, processor.stack_depth());
 

@@ -1,18 +1,12 @@
 use alloc::sync::Arc;
 use core::ops::ControlFlow;
 
-use miden_core::{
-    Word,
-    mast::{MastForest, MastNode, MastNodeId},
-    program::Kernel,
-};
-
 use crate::{
-    Host, Stopper,
+    BreakReason, ContextId, Host, Kernel, Stopper, Word,
     continuation_stack::{Continuation, ContinuationStack},
-    fast::step::BreakReason,
+    mast::{MastForest, MastNode, MastNodeId},
     processor::{Processor, SystemInterface},
-    tracer::Tracer,
+    tracer::{OperationHelperRegisters, Tracer},
 };
 
 mod basic_block;
@@ -21,17 +15,17 @@ mod r#dyn;
 mod external;
 mod join;
 mod r#loop;
-mod split;
-
 mod operations;
+mod split;
 
 // RE-EXPORTS
 // ================================================================================================
-
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
 pub(crate) use external::finish_load_mast_forest_from_external;
-pub(crate) use operations::execute_sync_op;
+#[cfg(test)]
+pub(crate) use operations::eval_circuit_impl;
+use operations::execute_op;
 
 // MAIN EXECUTION FUNCTION
 // ================================================================================================
@@ -47,7 +41,7 @@ pub(crate) use operations::execute_sync_op;
 /// # Tracing
 ///
 /// Different processor implementations will need to record different pieces of information as the
-/// the program is executed. For example, the [`crate::fast::FastProcessor::execute_for_trace`]
+/// the program is executed. For example, the [`crate::FastProcessor::execute_for_trace`]
 /// execution mode needs to build a [`crate::fast::execution_tracer::TraceGenerationContext`] which
 /// records information necessary to build the trace at each clock cycle, while the
 /// [`crate::parallel::core_trace_fragment::CoreTraceFragmentFiller`] needs to build the trace
@@ -89,7 +83,7 @@ pub(crate) use operations::execute_sync_op;
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, continuation } => {
+///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
 ///             // Handle Emit operation (e.g., call `Host::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -116,18 +110,19 @@ pub(crate) use operations::execute_sync_op;
 ///     }
 /// }
 /// ```
-pub(crate) fn execute_impl<P, S>(
+pub(crate) fn execute_impl<P, S, T>(
     processor: &mut P,
     continuation_stack: &mut ContinuationStack,
     current_forest: &mut Arc<MastForest>,
     kernel: &Kernel,
     host: &mut impl Host,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
 ) -> ControlFlow<InternalBreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     while let Some(continuation) = continuation_stack.pop_continuation() {
         match continuation {
@@ -394,6 +389,7 @@ pub enum InternalBreakReason {
     User(BreakReason),
     Emit {
         basic_block_node_id: MastNodeId,
+        op_idx: usize,
         continuation: Continuation,
     },
     LoadMastForestFromDyn {
@@ -420,16 +416,45 @@ impl From<BreakReason> for InternalBreakReason {
 /// Delegates to [`finalize_clock_cycle_with_continuation`] with a continuation closure that returns
 /// no continuation.
 #[inline(always)]
-fn finalize_clock_cycle<P, S>(
+fn finalize_clock_cycle<P, S, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
+    current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
-    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None)
+    finalize_clock_cycle_with_continuation(processor, tracer, stopper, || None, current_forest)
+}
+
+/// This function marks the end of a clock cycle.
+///
+/// Delegates to [`finalize_clock_cycle_with_continuation_and_op_helpers`] with the `Empty` variant
+/// of [`OperationHelperRegisters`].
+#[inline(always)]
+fn finalize_clock_cycle_with_continuation<P, S, T>(
+    processor: &mut P,
+    tracer: &mut T,
+    stopper: &S,
+    continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    current_forest: &Arc<MastForest>,
+) -> ControlFlow<BreakReason>
+where
+    P: Processor,
+    S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
+{
+    finalize_clock_cycle_with_continuation_and_op_helpers(
+        processor,
+        tracer,
+        stopper,
+        continuation_after_stop,
+        OperationHelperRegisters::Empty,
+        current_forest,
+    )
 }
 
 /// This function marks the end of a clock cycle.
@@ -440,6 +465,10 @@ where
 /// 3. Checks if execution should stop using the provided `stopper`, providing the computed
 ///    continuation (from `continuation_after_stop()`) to the `BreakReason::Stopped` variant.
 ///
+/// The `op_helper_registers` argument encodes the helper registers returned by [`execute_sync_op`]
+/// when executing synchronous operations; pass in the `Empty` variant otherwise. These registers
+/// are passed to the tracer when finalizing the clock cycle.
+///
 /// A continuation is computed using `continuation_after_stop()` in cases where simply resuming
 /// execution from the top of the continuation stack is not sufficient to continue execution
 /// correctly. For example, when stopping execution in the middle of a basic block, we need to
@@ -448,21 +477,33 @@ where
 /// before being stopped). No continuation is provided in case of error, since it is expected that
 /// execution will not be resumed.
 #[inline(always)]
-fn finalize_clock_cycle_with_continuation<P, S>(
+fn finalize_clock_cycle_with_continuation_and_op_helpers<P, S, T>(
     processor: &mut P,
-    tracer: &mut impl Tracer,
+    tracer: &mut T,
     stopper: &S,
     continuation_after_stop: impl FnOnce() -> Option<Continuation>,
+    op_helper_registers: OperationHelperRegisters,
+    current_forest: &Arc<MastForest>,
 ) -> ControlFlow<BreakReason>
 where
     P: Processor,
     S: Stopper<Processor = P>,
+    T: Tracer<Processor = P>,
 {
     // Signal the end of clock cycle to tracer (before incrementing processor clock).
-    tracer.finalize_clock_cycle();
+    tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);
 
     // Increment the processor clock.
     processor.system_mut().increment_clock();
 
     stopper.should_stop(processor, continuation_after_stop)
+}
+
+/// Returns the next context ID that would be created given the current state.
+///
+/// Note: This only applies to the context created upon a `CALL` or `DYNCALL` operation;
+/// specifically the `SYSCALL` operation doesn't apply as it always goes back to the root
+/// context.
+fn get_next_ctx_id(processor: &impl Processor) -> ContextId {
+    (processor.system().clock() + 1).into()
 }

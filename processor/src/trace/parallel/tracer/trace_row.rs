@@ -1,7 +1,5 @@
 //! Module which concerns itself with all the trace row building logic.
 
-use core::ops::ControlFlow;
-
 use miden_air::trace::{
     CLK_COL_IDX, CTX_COL_IDX, DECODER_TRACE_OFFSET, FN_HASH_OFFSET, STACK_TRACE_OFFSET,
     SYS_TRACE_WIDTH,
@@ -22,8 +20,10 @@ use miden_core::{
     operations::Operation,
 };
 
-use super::{BasicBlockContext, CoreTraceFragmentFiller};
-use crate::{decoder::block_stack::ExecutionContextInfo, processor::StackInterface};
+use super::{ExecutionContextInfo, StackState, SystemState};
+use crate::trace::parallel::{
+    core_trace_fragment::BasicBlockContext, tracer::CoreTraceGenerationTracer,
+};
 
 // DECODER ROW
 // ================================================================================================
@@ -103,11 +103,9 @@ impl DecoderRow {
         parent_addr: Felt,
         op_idx_in_group: usize,
         basic_block_ctx: &BasicBlockContext,
-        user_op_helpers: Option<[Felt; NUM_USER_OP_HELPERS]>,
+        user_op_helpers: [Felt; NUM_USER_OP_HELPERS],
     ) -> Self {
         let hasher_state: (Word, Word) = {
-            let user_op_helpers = user_op_helpers.unwrap_or([ZERO; NUM_USER_OP_HELPERS]);
-
             let word1 = [
                 basic_block_ctx.current_op_group,
                 parent_addr,
@@ -135,15 +133,17 @@ impl DecoderRow {
 // BASIC BLOCK TRACE ROW METHODS
 // ================================================================================================
 
-impl<'a> CoreTraceFragmentFiller<'a> {
-    /// Adds a trace row for SPAN start operation to the main trace fragment.
+impl<'a> CoreTraceGenerationTracer<'a> {
+    /// Fills a trace row for SPAN start operation to the main trace fragment.
     ///
     /// This method creates a trace row that corresponds to the SPAN operation that starts
     /// a basic block execution.
-    pub fn add_basic_block_start_trace_row(
+    pub fn fill_basic_block_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         basic_block_node: &BasicBlockNode,
-    ) -> ControlFlow<()> {
+    ) {
         let group_count_for_block = Felt::from_u32(basic_block_node.num_op_groups() as u32);
         let first_op_batch = basic_block_node
             .op_batches()
@@ -153,22 +153,24 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let decoder_row = DecoderRow::new_basic_block_batch(
             Operation::Span,
             first_op_batch,
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
             group_count_for_block,
         );
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
-    /// Adds a trace row for SPAN end operation to the main trace fragment.
+    /// Fills a trace row for SPAN end operation to the main trace fragment.
     ///
     /// This method creates a trace row that corresponds to the END operation that completes
     /// a basic block execution.
-    pub fn add_basic_block_end_trace_row(
+    pub fn fill_basic_block_end_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         basic_block_node: &BasicBlockNode,
-    ) -> ControlFlow<()> {
+    ) {
         let (ended_node_addr, flags) =
-            self.context.state.decoder.replay_node_end(&mut self.context.replay);
+            self.decoder_state.replay_node_end(&mut self.block_stack_replay);
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::End.op_code(),
@@ -176,7 +178,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             ended_node_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
     // RESPAN
@@ -187,83 +189,80 @@ impl<'a> CoreTraceFragmentFiller<'a> {
     ///
     /// This method updates the processor state and adds a corresponding trace row
     /// to the main trace fragment.
-    pub fn add_respan_trace_row(
+    pub fn fill_respan_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         op_batch: &OpBatch,
         basic_block_context: &mut BasicBlockContext,
-    ) -> ControlFlow<()> {
+    ) {
         // Add RESPAN trace row
         {
             let decoder_row = DecoderRow::new_basic_block_batch(
                 Operation::Respan,
                 op_batch,
-                self.context.state.decoder.current_addr,
+                self.decoder_state.current_addr,
                 basic_block_context.group_count_in_block,
             );
-            self.add_trace_row(decoder_row)?;
+            self.fill_trace_row(system, stack, decoder_row);
         }
 
         // Update block address for the upcoming block
-        self.context.state.decoder.current_addr += HASH_CYCLE_LEN_FELT;
+        self.decoder_state.current_addr += HASH_CYCLE_LEN_FELT;
 
         // Update basic block context
         basic_block_context.group_count_in_block -= ONE;
         basic_block_context.current_op_group = op_batch.groups()[0];
-
-        ControlFlow::Continue(())
     }
 
     /// Writes a trace row for an operation within a basic block.
     ///
     /// This must be called *after* the operation has been executed and the
     /// stack has been updated.
-    pub fn add_operation_trace_row(
+    pub fn fill_operation_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         operation: Operation,
         op_idx_in_group: usize,
-        user_op_helpers: Option<[Felt; NUM_USER_OP_HELPERS]>,
+        user_op_helpers: [Felt; NUM_USER_OP_HELPERS],
         basic_block_context: &mut BasicBlockContext,
-    ) -> ControlFlow<()> {
+    ) {
         // update operations left to be executed in the group
         basic_block_context.remove_operation_from_current_op_group();
 
         // Add trace row
         let decoder_row = DecoderRow::new_operation(
             operation,
-            self.context.state.decoder.current_addr,
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.current_addr,
+            self.decoder_state.parent_addr,
             op_idx_in_group,
             basic_block_context,
             user_op_helpers,
         );
-        self.add_trace_row(decoder_row)?;
-
-        // Update number of groups left if the operation had an immediate value
-        if operation.imm_value().is_some() {
-            basic_block_context.group_count_in_block -= ONE;
-        }
-
-        ControlFlow::Continue(())
+        self.fill_trace_row(system, stack, decoder_row);
     }
 }
 
 // CONTROL FLOW TRACE ROW METHODS
 // ================================================================================================
 
-impl<'a> CoreTraceFragmentFiller<'a> {
+impl<'a> CoreTraceGenerationTracer<'a> {
     // CALL operations
     // -------------------------------------------------------------------------------------------
 
-    /// Adds a trace row for the start of a CALL/SYSCALL operation.
-    pub fn add_call_start_trace_row(
+    /// Fills a trace row for the start of a CALL/SYSCALL operation.
+    pub fn fill_call_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         call_node: &CallNode,
-        program: &MastForest,
-    ) -> ControlFlow<()> {
+        current_forest: &MastForest,
+    ) {
         // For CALL/SYSCALL operations, the hasher state in start operations contains the callee
         // hash in the first half, and zeros in the second half (since CALL only has one
         // child)
-        let callee_hash: Word = program
+        let callee_hash: Word = current_forest
             .get_node_by_id(call_node.callee())
             .expect("callee should exist")
             .digest();
@@ -276,37 +275,44 @@ impl<'a> CoreTraceFragmentFiller<'a> {
                 Operation::Call.op_code()
             },
             (callee_hash, zero_hash),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
     // DYN operations
     // -------------------------------------------------------------------------------------------
 
-    /// Adds a trace row for the start of a DYN operation.
-    pub fn add_dyn_start_trace_row(&mut self, callee_hash: Word) -> ControlFlow<()> {
+    /// Fills a trace row for the start of a DYN operation.
+    pub fn fill_dyn_start_trace_row(
+        &mut self,
+        system: &SystemState,
+        stack: &StackState,
+        callee_hash: Word,
+    ) {
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Dyn.op_code(),
             (callee_hash, Word::default()),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
-    /// Adds a trace row for the start of a DYNCALL operation.
+    /// Fills a trace row for the start of a DYNCALL operation.
     ///
     /// The decoder hasher trace columns are populated with the callee hash, as well as the stack
     /// helper registers (specifically their state after shifting the stack left). We need to store
     /// those in the decoder trace so that the block stack table can access them (since in the next
     /// row, we start a new context, and hence the stack registers are reset to their default
     /// values).
-    pub fn add_dyncall_start_trace_row(
+    pub fn fill_dyncall_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         callee_hash: Word,
         ctx_info: ExecutionContextInfo,
-    ) -> ControlFlow<()> {
+    ) {
         let second_hasher_state: Word = [
             Felt::from_u32(ctx_info.parent_stack_depth),
             ctx_info.parent_next_overflow_addr,
@@ -318,26 +324,28 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Dyncall.op_code(),
             (callee_hash, second_hasher_state),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
     // JOIN operations
     // -------------------------------------------------------------------------------------------
 
-    /// Adds a trace row for starting a JOIN operation to the main trace fragment.
-    pub fn add_join_start_trace_row(
+    /// Fills a trace row for starting a JOIN operation to the main trace fragment.
+    pub fn fill_join_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         join_node: &JoinNode,
-        program: &MastForest,
-    ) -> ControlFlow<()> {
+        current_forest: &MastForest,
+    ) {
         // Get the child hashes for the hasher state
-        let child1_hash: Word = program
+        let child1_hash: Word = current_forest
             .get_node_by_id(join_node.first())
             .expect("first child should exist")
             .digest();
-        let child2_hash: Word = program
+        let child2_hash: Word = current_forest
             .get_node_by_id(join_node.second())
             .expect("second child should exist")
             .digest();
@@ -345,24 +353,26 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Join.op_code(),
             (child1_hash, child2_hash),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
     // LOOP operations
     // -------------------------------------------------------------------------------------------
 
-    /// Adds a trace row for the start of a LOOP operation.
-    pub fn add_loop_start_trace_row(
+    /// Fills a trace row for the start of a LOOP operation.
+    pub fn fill_loop_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         loop_node: &LoopNode,
-        program: &MastForest,
-    ) -> ControlFlow<()> {
+        current_forest: &MastForest,
+    ) {
         // For LOOP operations, the hasher state in start operations contains the loop body hash in
         // the first half.
-        let body_hash: Word = program
+        let body_hash: Word = current_forest
             .get_node_by_id(loop_node.body())
             .expect("loop body should exist")
             .digest();
@@ -371,22 +381,24 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Loop.op_code(),
             (body_hash, zero_hash),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
-    /// Adds a trace row for the start of a REPEAT operation.
-    pub fn add_loop_repeat_trace_row(
+    /// Fills a trace row for the start of a REPEAT operation.
+    pub fn fill_loop_repeat_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         loop_node: &LoopNode,
-        program: &MastForest,
+        current_forest: &MastForest,
         current_addr: Felt,
-    ) -> ControlFlow<()> {
+    ) {
         // For REPEAT operations, the hasher state in start operations contains the loop body hash
         // in the first half.
-        let body_hash: Word = program
+        let body_hash: Word = current_forest
             .get_node_by_id(loop_node.body())
             .expect("loop body should exist")
             .digest();
@@ -398,24 +410,26 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             current_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
     // SPLIT operations
     // -------------------------------------------------------------------------------------------
 
-    /// Adds a trace row for the start of a SPLIT operation.
-    pub fn add_split_start_trace_row(
+    /// Fills a trace row for the start of a SPLIT operation.
+    pub fn fill_split_start_trace_row(
         &mut self,
+        system: &SystemState,
+        stack: &StackState,
         split_node: &SplitNode,
-        program: &MastForest,
-    ) -> ControlFlow<()> {
+        current_forest: &MastForest,
+    ) {
         // Get the child hashes for the hasher state
-        let on_true_hash: Word = program
+        let on_true_hash: Word = current_forest
             .get_node_by_id(split_node.on_true())
             .expect("on_true child should exist")
             .digest();
-        let on_false_hash: Word = program
+        let on_false_hash: Word = current_forest
             .get_node_by_id(split_node.on_false())
             .expect("on_false child should exist")
             .digest();
@@ -423,19 +437,24 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         let decoder_row = DecoderRow::new_control_flow(
             Operation::Split.op_code(),
             (on_true_hash, on_false_hash),
-            self.context.state.decoder.parent_addr,
+            self.decoder_state.parent_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 
-    /// Adds a trace row for the end of a control block.
+    /// Fills a trace row for the end of a control block.
     ///
     /// This method also updates the decoder state by popping the block from the stack.
-    pub fn add_end_trace_row(&mut self, node_digest: Word) -> ControlFlow<()> {
+    pub fn fill_end_trace_row(
+        &mut self,
+        system: &SystemState,
+        stack: &StackState,
+        node_digest: Word,
+    ) {
         // Pop the block from stack and use its info for END operations
         let (ended_node_addr, flags) =
-            self.context.state.decoder.replay_node_end(&mut self.context.replay);
+            self.decoder_state.replay_node_end(&mut self.block_stack_replay);
 
         let decoder_row = DecoderRow::new_control_flow(
             Operation::End.op_code(),
@@ -443,38 +462,41 @@ impl<'a> CoreTraceFragmentFiller<'a> {
             ended_node_addr,
         );
 
-        self.add_trace_row(decoder_row)
+        self.fill_trace_row(system, stack, decoder_row)
     }
 }
 
 // HELPER METHODS
 // ================================================================================================
 
-impl<'a> CoreTraceFragmentFiller<'a> {
-    /// Adds a trace row for a control flow operation (JOIN/SPLIT start or end) to the main trace
+impl<'a> CoreTraceGenerationTracer<'a> {
+    /// Fills a trace row for a control flow operation (JOIN/SPLIT start or end) to the main trace
     /// fragment.
     ///
     /// This is a shared implementation that handles the common trace row generation logic
     /// for both JOIN and SPLIT operations. The operation-specific details are provided
     /// through the `config` parameter.
-    fn add_trace_row(&mut self, decoder_row: DecoderRow) -> ControlFlow<()> {
-        let row_idx = self.num_rows_built();
-
+    fn fill_trace_row(
+        &mut self,
+        system: &SystemState,
+        stack: &StackState,
+        decoder_row: DecoderRow,
+    ) {
         // System trace columns (identical for all control flow operations)
-        self.populate_system_trace_columns(row_idx);
+        self.populate_system_trace_columns(system, self.row_write_index);
 
         // Decoder trace columns
-        self.populate_decoder_trace_columns(row_idx, &decoder_row);
+        self.populate_decoder_trace_columns(self.row_write_index, &decoder_row);
 
         // Stack trace columns (identical for all control flow operations)
-        self.populate_stack_trace_columns(row_idx);
+        self.populate_stack_trace_columns(stack, self.row_write_index);
 
-        // Increment clock
-        self.increment_clk()
+        // Increment the row write index
+        self.row_write_index += 1;
     }
 
     /// Populates the system trace columns
-    fn populate_system_trace_columns(&mut self, row_idx: usize) {
+    fn populate_system_trace_columns(&mut self, system: &SystemState, row_idx: usize) {
         // If we have buffered system rows from the previous call, write them to the trace
         if let Some(system_rows) = self.system_rows {
             // Write buffered system rows to the trace at current row
@@ -486,12 +508,12 @@ impl<'a> CoreTraceFragmentFiller<'a> {
         // Now populate the buffer with current system state for the next row
         let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
 
-        new_system_rows[CLK_COL_IDX] = (self.context.state.system.clk + 1).into();
-        new_system_rows[CTX_COL_IDX] = self.context.state.system.ctx.into();
-        new_system_rows[FN_HASH_OFFSET] = self.context.state.system.fn_hash[0];
-        new_system_rows[FN_HASH_OFFSET + 1] = self.context.state.system.fn_hash[1];
-        new_system_rows[FN_HASH_OFFSET + 2] = self.context.state.system.fn_hash[2];
-        new_system_rows[FN_HASH_OFFSET + 3] = self.context.state.system.fn_hash[3];
+        new_system_rows[CLK_COL_IDX] = (system.clk + 1).into();
+        new_system_rows[CTX_COL_IDX] = system.ctx.into();
+        new_system_rows[FN_HASH_OFFSET] = system.fn_hash[0];
+        new_system_rows[FN_HASH_OFFSET + 1] = system.fn_hash[1];
+        new_system_rows[FN_HASH_OFFSET + 2] = system.fn_hash[2];
+        new_system_rows[FN_HASH_OFFSET + 3] = system.fn_hash[3];
 
         // Store the buffer for the next call
         self.system_rows = Some(new_system_rows);
@@ -551,7 +573,7 @@ impl<'a> CoreTraceFragmentFiller<'a> {
     }
 
     /// Populates the stack trace columns
-    fn populate_stack_trace_columns(&mut self, row_idx: usize) {
+    fn populate_stack_trace_columns(&mut self, stack: &StackState, row_idx: usize) {
         use miden_air::trace::STACK_TRACE_WIDTH;
 
         // If we have buffered stack rows from the previous call, write them to the trace
@@ -567,14 +589,14 @@ impl<'a> CoreTraceFragmentFiller<'a> {
 
         // Stack top (16 elements)
         for i in STACK_TOP_RANGE {
-            new_stack_rows[STACK_TOP_OFFSET + i] = self.get(i);
+            new_stack_rows[STACK_TOP_OFFSET + i] = stack.get(i);
         }
 
         // Stack helpers (b0, b1, h0)
         // Note: H0 will be inverted using batch inversion later
-        new_stack_rows[B0_COL_IDX] = Felt::new(self.context.state.stack.stack_depth() as u64); // b0
-        new_stack_rows[B1_COL_IDX] = self.context.state.stack.overflow_addr(); // b1
-        new_stack_rows[H0_COL_IDX] = self.context.state.stack.overflow_helper(); // h0
+        new_stack_rows[B0_COL_IDX] = Felt::new(stack.stack_depth() as u64); // b0
+        new_stack_rows[B1_COL_IDX] = stack.overflow_addr(); // b1
+        new_stack_rows[H0_COL_IDX] = stack.overflow_helper(); // h0
 
         // Store the buffer for the next call
         self.stack_rows = Some(new_stack_rows);

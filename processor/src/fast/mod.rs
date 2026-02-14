@@ -5,9 +5,13 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{Felt, trace::RowIndex};
+use miden_air::{
+    Felt,
+    trace::{RowIndex, chiplets::hasher::STATE_WIDTH},
+};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
+    crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
@@ -19,38 +23,31 @@ use tracing::instrument;
 use crate::{
     AdviceInputs, AdviceProvider, ContextId, ExecutionError, ExecutionOptions, Host,
     ProcessorState, Stopper,
-    continuation_stack::ContinuationStack,
+    continuation_stack::{Continuation, ContinuationStack},
     errors::{MapExecErr, MapExecErrNoCtx, OperationError},
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
-    fast::{
+    trace::{
+        chiplets::CircuitEvaluation,
         execution_tracer::{ExecutionTracer, TraceGenerationContext},
-        external::maybe_use_caller_error_context,
-        step::{BreakReason, NeverStopper, StepStopper},
     },
-    trace::chiplets::Ace,
-    tracer::{NoopTracer, Tracer},
+    tracer::{OperationHelperRegisters, Tracer},
 };
-
-pub mod execution_tracer;
-mod memory;
-pub use memory::Memory;
-
-mod operation;
-pub use operation::eval_circuit_fast_;
-
-pub(crate) mod step;
-pub use step::ResumeContext;
-
-pub mod trace_state;
 
 mod basic_block;
 mod call_and_dyn;
 mod external;
+mod memory;
+mod operation;
+mod step;
 
 pub use basic_block::SystemEventError;
+use external::maybe_use_caller_error_context;
+pub use memory::Memory;
+pub use step::{BreakReason, ResumeContext};
+use step::{NeverStopper, StepStopper};
 
 #[cfg(test)]
 mod tests;
@@ -135,9 +132,6 @@ pub struct FastProcessor {
     /// A map from (context_id, word_address) to the word stored starting at that memory location.
     memory: Memory,
 
-    /// A map storing metadata per call to the ACE chiplet.
-    ace: Ace,
-
     /// The call stack is used when starting a new execution context (from a `call`, `syscall` or
     /// `dyncall`) to keep track of the information needed to return to the previous context upon
     /// return. It is a stack since calls can be nested.
@@ -167,7 +161,7 @@ impl FastProcessor {
     ///
     /// # Example
     /// ```ignore
-    /// use miden_processor::fast::FastProcessor;
+    /// use miden_processor::FastProcessor;
     ///
     /// let processor = FastProcessor::new(stack_inputs)
     ///     .with_advice(advice_inputs)
@@ -241,7 +235,6 @@ impl FastProcessor {
             caller_hash: EMPTY_WORD,
             memory: Memory::new(),
             call_stack: Vec::new(),
-            ace: Ace::default(),
             options,
             pc_transcript: PrecompileTranscript::new(),
             #[cfg(test)]
@@ -434,12 +427,15 @@ impl FastProcessor {
 
     /// Executes the given program with the provided tracer and returns the stack outputs, and the
     /// advice provider.
-    pub async fn execute_with_tracer(
+    pub async fn execute_with_tracer<T>(
         mut self,
         program: &Program,
         host: &mut impl Host,
-        tracer: &mut impl Tracer,
-    ) -> Result<ExecutionOutput, ExecutionError> {
+        tracer: &mut T,
+    ) -> Result<ExecutionOutput, ExecutionError>
+    where
+        T: Tracer<Processor = Self>,
+    {
         let mut continuation_stack = ContinuationStack::new(program);
         let mut current_forest = program.mast_forest().clone();
 
@@ -518,31 +514,37 @@ impl FastProcessor {
     /// This function takes a `&mut self` (compared to `self` for the public execute functions) so
     /// that the processor state may be accessed after execution. It is incorrect to execute a
     /// second program using the same processor. This is mainly meant to be used in tests.
-    async fn execute_impl<S>(
+    async fn execute_impl<S, T>(
         &mut self,
         continuation_stack: &mut ContinuationStack,
         current_forest: &mut Arc<MastForest>,
         kernel: &Kernel,
         host: &mut impl Host,
-        tracer: &mut impl Tracer,
+        tracer: &mut T,
         stopper: &S,
     ) -> ControlFlow<BreakReason, StackOutputs>
     where
         S: Stopper<Processor = Self>,
+        T: Tracer<Processor = Self>,
     {
         while let ControlFlow::Break(internal_break_reason) =
             execute_impl(self, continuation_stack, current_forest, kernel, host, tracer, stopper)
         {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { basic_block_node_id, continuation } => {
-                    self.op_emit(host, current_forest, basic_block_node_id).await?;
+                InternalBreakReason::Emit {
+                    basic_block_node_id,
+                    op_idx,
+                    continuation,
+                } => {
+                    self.op_emit(host, current_forest, basic_block_node_id, op_idx).await?;
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
                     finish_emit_op_execution(
                         continuation,
                         self,
                         continuation_stack,
+                        current_forest,
                         tracer,
                         stopper,
                     )?;
@@ -759,9 +761,7 @@ impl FastProcessor {
     ///
     /// The bottom of the stack is never affected by this operation.
     #[inline(always)]
-    fn increment_stack_size(&mut self, tracer: &mut impl Tracer) {
-        tracer.increment_stack_size(self);
-
+    fn increment_stack_size(&mut self) {
         self.stack_top_idx += 1;
     }
 
@@ -770,7 +770,7 @@ impl FastProcessor {
     /// The bottom of the stack is only decremented in cases where the stack depth would become less
     /// than 16.
     #[inline(always)]
-    fn decrement_stack_size(&mut self, tracer: &mut impl Tracer) {
+    fn decrement_stack_size(&mut self) {
         if self.stack_top_idx == MIN_STACK_DEPTH {
             // We no longer have any room in the stack buffer to decrement the stack size (which
             // would cause the `stack_bot_idx` to go below 0). We therefore reset the stack to its
@@ -780,8 +780,6 @@ impl FastProcessor {
 
         self.stack_top_idx -= 1;
         self.stack_bot_idx = min(self.stack_bot_idx, self.stack_top_idx - MIN_STACK_DEPTH);
-
-        tracer.decrement_stack_size();
     }
 
     /// Resets the stack in the buffer to a new position, preserving the top 16 elements of the
@@ -1017,4 +1015,177 @@ struct ExecutionContextInfo {
     overflow_stack: Vec<Felt>,
     ctx: ContextId,
     fn_hash: Word,
+}
+
+// NOOP TRACER
+// ================================================================================================
+
+/// A [Tracer] that does nothing.
+pub struct NoopTracer;
+
+impl Tracer for NoopTracer {
+    type Processor = FastProcessor;
+
+    #[inline(always)]
+    fn start_clock_cycle(
+        &mut self,
+        _processor: &FastProcessor,
+        _continuation: Continuation,
+        _continuation_stack: &ContinuationStack,
+        _current_forest: &Arc<MastForest>,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_hasher_permute(
+        &mut self,
+        _input_state: [Felt; STATE_WIDTH],
+        _output_state: [Felt; STATE_WIDTH],
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_hasher_build_merkle_root(
+        &mut self,
+        _node: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _output_root: Word,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_hasher_update_merkle_root(
+        &mut self,
+        _old_node: Word,
+        _new_node: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _old_root: Word,
+        _new_root: Word,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_read_element(
+        &mut self,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_read_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_write_element(
+        &mut self,
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_memory_write_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_advice_pop_stack(&mut self, _value: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_advice_pop_stack_word(&mut self, _word: Word) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_advice_pop_stack_dword(&mut self, _words: [Word; 2]) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32and(&mut self, _a: Felt, _b: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn finalize_clock_cycle(
+        &mut self,
+        _processor: &FastProcessor,
+        _op_helper_registers: OperationHelperRegisters,
+        _current_forest: &Arc<MastForest>,
+    ) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn decrement_stack_size(&mut self) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn start_context(&mut self) {
+        // do nothing
+    }
+
+    #[inline(always)]
+    fn restore_context(&mut self) {
+        // do nothing
+    }
 }

@@ -308,7 +308,15 @@ impl MastForestBuilder {
 /// Joining nodes
 impl MastForestBuilder {
     /// Builds a tree of `JOIN` operations to combine the provided MAST node IDs.
-    pub fn join_nodes(&mut self, node_ids: Vec<MastNodeId>) -> Result<MastNodeId, Report> {
+    ///
+    /// If `asm_op` is provided, each created `JoinNode` will have the given [`AssemblyOp`]
+    /// registered, enabling source-location diagnostics for errors that occur within join
+    /// contexts (e.g., when an `ExternalNode` fails to resolve).
+    pub fn join_nodes(
+        &mut self,
+        node_ids: Vec<MastNodeId>,
+        asm_op: Option<AssemblyOp>,
+    ) -> Result<MastNodeId, Report> {
         debug_assert!(!node_ids.is_empty(), "cannot combine empty MAST node id list");
 
         let mut node_ids = self.merge_contiguous_basic_blocks(node_ids)?;
@@ -329,6 +337,10 @@ impl MastForestBuilder {
                 (source_mast_node_iter.next(), source_mast_node_iter.next())
             {
                 let join_mast_node_id = self.ensure_join(left, right, vec![], vec![])?;
+
+                if let Some(ref asm_op) = asm_op {
+                    self.register_node_asm_op(join_mast_node_id, asm_op.clone())?;
+                }
 
                 node_ids.push(join_mast_node_id);
             }
