@@ -4027,14 +4027,17 @@ fn nested_blocks() -> Result<(), Report> {
         .unwrap();
 
     let combined_node_id = expected_mast_forest_builder
-        .join_nodes(vec![
-            fmp_initialization,
-            before,
-            r#if1,
-            nested,
-            exec_foo_bar_baz_node_id,
-            syscall_foo_node_id,
-        ])
+        .join_nodes(
+            vec![
+                fmp_initialization,
+                before,
+                r#if1,
+                nested,
+                exec_foo_bar_baz_node_id,
+                syscall_foo_node_id,
+            ],
+            None,
+        )
         .unwrap();
 
     let (mut expected_mast_forest, node_remapping) = expected_mast_forest_builder.build();

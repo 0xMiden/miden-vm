@@ -1,4 +1,4 @@
-label: "Miden Standard Library"
+label: "Miden Core Library"
 # Determines where this documentation section appears relative to other sections in the parent folder
 position: 2
 collapsed: true

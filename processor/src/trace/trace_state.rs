@@ -1,4 +1,4 @@
-use alloc::{collections::VecDeque, sync::Arc, vec::Vec};
+use alloc::{collections::VecDeque, sync::Arc};
 
 use miden_air::trace::{
     RowIndex,
@@ -11,7 +11,7 @@ use crate::{
     continuation_stack::ContinuationStack,
     crypto::merkle::MerklePath,
     errors::OperationError,
-    mast::{MastForest, MastNodeId, OpBatch},
+    mast::{MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
     processor::{
         AdviceProviderInterface, HasherInterface, MemoryInterface, Processor, SystemInterface,
@@ -795,8 +795,9 @@ impl AceReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
-    /// Records the procedure hash of a syscall.
-    pub fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
+    /// Records the evaluation of a circuit.
+    pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
+        let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
     }
 }
@@ -982,7 +983,7 @@ impl HasherInterface for HasherResponseReplay {
 pub enum HasherOp {
     Permute([Felt; STATE_WIDTH]),
     HashControlBlock((Word, Word, Felt, Word)),
-    HashBasicBlock((Vec<OpBatch>, Word)),
+    HashBasicBlock((Arc<MastForest>, MastNodeId, Word)),
     BuildMerkleRoot((Word, MerklePath, Felt)),
     UpdateMerkleRoot((Word, Word, MerklePath, Felt)),
 }
@@ -1016,8 +1017,14 @@ impl HasherRequestReplay {
     }
 
     /// Records a `Hasher::hash_basic_block()` request.
-    pub fn record_hash_basic_block(&mut self, op_batches: Vec<OpBatch>, expected_hash: Word) {
-        self.hasher_ops.push_back(HasherOp::HashBasicBlock((op_batches, expected_hash)));
+    pub fn record_hash_basic_block(
+        &mut self,
+        forest: Arc<MastForest>,
+        node_id: MastNodeId,
+        expected_hash: Word,
+    ) {
+        self.hasher_ops
+            .push_back(HasherOp::HashBasicBlock((forest, node_id, expected_hash)));
     }
 
     /// Records a `Hasher::build_merkle_root()` request.

@@ -18,14 +18,13 @@ use super::super::trace_state::{
 use crate::{
     BreakReason, ContextId, ExecutionError, Host, Stopper,
     continuation_stack::{Continuation, ContinuationStack},
-    errors::{AceEvalError, OperationError},
+    errors::OperationError,
     execution::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
     host::default::NoopHost,
     processor::{Processor, StackInterface, SystemInterface},
-    trace::parallel::core_trace_fragment::eval_circuit_parallel_,
     tracer::Tracer,
 };
 
@@ -141,7 +140,11 @@ impl ReplayProcessor {
         {
             match internal_break_reason {
                 InternalBreakReason::User(break_reason) => return ControlFlow::Break(break_reason),
-                InternalBreakReason::Emit { basic_block_node_id: _, continuation } => {
+                InternalBreakReason::Emit {
+                    basic_block_node_id: _,
+                    op_idx: _,
+                    continuation,
+                } => {
                     // do nothing - in replay processor we don't need to emit anything
 
                     // Call `finish_emit_op_execution()`, as per the sans-IO contract.
@@ -226,8 +229,6 @@ impl SystemInterface for ReplayProcessor {
 }
 
 impl StackInterface for ReplayProcessor {
-    type Processor = Self;
-
     fn top(&self) -> &[Felt] {
         &self.stack.stack_top
     }
@@ -322,10 +323,7 @@ impl StackInterface for ReplayProcessor {
         self.stack.stack_top[rotation_bot_index] = new_stack_bot_element;
     }
 
-    fn increment_size<T>(&mut self, _tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self>,
-    {
+    fn increment_size(&mut self) -> Result<(), ExecutionError> {
         const SENTINEL_VALUE: Felt = Felt::new(Felt::ORDER_U64 - 1);
 
         // push the last element on the overflow table
@@ -347,10 +345,7 @@ impl StackInterface for ReplayProcessor {
         Ok(())
     }
 
-    fn decrement_size<T>(&mut self, _tracer: &mut T)
-    where
-        T: Tracer<Processor = Self>,
-    {
+    fn decrement_size(&mut self) {
         // Shift all other elements up
         for write_idx in 0..(MIN_STACK_DEPTH - 1) {
             let read_idx = write_idx + 1;
@@ -407,12 +402,11 @@ impl Processor for ReplayProcessor {
         &mut self.hasher_response_replay
     }
 
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer) {
+    fn save_context_and_truncate_stack(&mut self) {
         self.stack.start_context();
-        tracer.start_context();
     }
 
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError> {
+    fn restore_context(&mut self) -> Result<(), OperationError> {
         let ctx_info = self.execution_context_replay.replay_execution_context();
 
         // Restore system state
@@ -421,9 +415,6 @@ impl Processor for ReplayProcessor {
 
         // Restore stack state
         self.stack.restore_context(&mut self.stack_overflow_replay);
-
-        // Update tracer
-        tracer.restore_context();
 
         Ok(())
     }
@@ -434,25 +425,6 @@ impl Processor for ReplayProcessor {
 
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState) {
         self.system.pc_transcript_state = state;
-    }
-
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError> {
-        let num_eval = self.stack().get(2);
-        let num_read = self.stack().get(1);
-        let ptr = self.stack().get(0);
-        let ctx = self.system().ctx();
-
-        let _circuit_evaluation = eval_circuit_parallel_(
-            ctx,
-            ptr,
-            self.system().clock(),
-            num_read,
-            num_eval,
-            self.memory_mut(),
-            tracer,
-        )?;
-
-        Ok(())
     }
 
     fn execute_before_enter_decorators(

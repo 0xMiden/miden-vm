@@ -3,7 +3,7 @@
 //! This module provides serialization/deserialization for [`AssemblyOp`] data that is stored
 //! separately in [`DebugInfo`](crate::mast::debuginfo::DebugInfo). The format uses:
 //!
-//! - A variable-length data blob for AssemblyOp payloads (num_cycles, should_break, location, etc.)
+//! - A variable-length data blob for AssemblyOp payloads (num_cycles, location, etc.)
 //! - A string table for deduplicating context names, op strings, and URIs
 //! - Fixed-width info records that index into the data blob
 //!
@@ -34,7 +34,6 @@ pub type AsmOpDataOffset = u32;
 ///
 /// ```text
 /// num_cycles: u8
-/// should_break: u8 (0 or 1)
 /// has_location: u8 (0 or 1)
 /// [if has_location]:
 ///     uri_idx: usize (index into string table)

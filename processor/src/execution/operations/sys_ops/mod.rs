@@ -32,7 +32,8 @@ where
         let err_msg = program.resolve_error_message(err_code);
         return Err(OperationError::FailedAssertion { err_code, err_msg });
     }
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -47,8 +48,9 @@ where
     T: Tracer<Processor = P>,
 {
     let depth = processor.stack().depth();
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, Felt::from_u32(depth));
+    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }
@@ -79,8 +81,9 @@ where
     T: Tracer<Processor = P>,
 {
     let clk: Felt = processor.system().clock().into();
-    processor.stack_mut().increment_size(tracer)?;
+    processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, clk);
+    tracer.increment_stack_size(processor);
 
     Ok(OperationHelperRegisters::Empty)
 }
