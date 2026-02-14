@@ -32,7 +32,40 @@ use crate::handlers::{
 // STANDARD LIBRARY
 // ================================================================================================
 
-/// TODO: add docs
+/// The Miden core library, providing a set of optimized procedures for Miden programs.
+///
+/// This library wraps a [`Library`] containing highly-optimized and battle-tested implementations
+/// of commonly-used primitives. Procedures in the core library can be called from any Miden
+/// program and are always serialized as 32 bytes, reducing the amount of code that needs to be
+/// shared between parties for proving and verifying program execution.
+///
+/// # Usage
+///
+/// The core library is typically used with an [`Assembler`] to enable core library procedures
+/// in compiled programs:
+///
+/// ```rust,ignore
+/// use miden_assembly::Assembler;
+/// use miden_core_lib::CoreLibrary;
+///
+/// let assembler = Assembler::new(source_manager)
+///     .with_dynamic_library(&CoreLibrary::default())
+///     .unwrap();
+/// ```
+///
+/// For program execution, you'll also need to register the event handlers:
+///
+/// ```rust,ignore
+/// let core_lib = CoreLibrary::default();
+/// let handlers = core_lib.handlers();
+/// // Register handlers with your host...
+/// ```
+///
+/// For proof verification, use [`verifier_registry()`](Self::verifier_registry) to get the
+/// precompile verifiers required to validate core library precompile requests.
+///
+/// [`Library`]: miden_assembly::Library
+/// [`Assembler`]: miden_assembly::Assembler
 #[derive(Clone)]
 pub struct CoreLibrary(Library);
 
