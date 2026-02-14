@@ -795,8 +795,9 @@ impl AceReplay {
     // MUTATIONS (populated by the fast processor)
     // --------------------------------------------------------------------------------
 
-    /// Records the procedure hash of a syscall.
-    pub fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
+    /// Records the evaluation of a circuit.
+    pub fn record_circuit_evaluation(&mut self, circuit_eval: CircuitEvaluation) {
+        let clk = RowIndex::from(circuit_eval.clk());
         self.circuit_evaluations.push_back((clk, circuit_eval));
     }
 }

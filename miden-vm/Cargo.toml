@@ -92,6 +92,7 @@ assert_cmd = { version = "2.1" }
 bincode = { version = "1.3" }
 criterion = { workspace = true, features = ["async_tokio"] }
 escargot = { version = "0.5" }
+miden-processor = { workspace = true, features = ["testing"] }
 miden-utils-testing.workspace = true
 num-bigint = { version = "0.4" }
 predicates = { version = "3.1" }

@@ -1,18 +1,11 @@
-use miden_air::{
-    Felt,
-    trace::{RowIndex, decoder::NUM_OP_BITS},
-};
+use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
 use miden_core::{
     field::{PrimeCharacteristicRing, PrimeField64},
     mast::BasicBlockNode,
     operations::OPCODE_PUSH,
 };
 
-use super::{super::chiplets::CircuitEvaluation, CORE_TRACE_WIDTH};
-use crate::{
-    ContextId, errors::AceEvalError, fast::eval_circuit_fast, processor::MemoryInterface,
-    tracer::Tracer,
-};
+use super::CORE_TRACE_WIDTH;
 
 #[cfg(test)]
 mod tests;
@@ -27,25 +20,6 @@ mod tests;
 #[derive(Debug)]
 pub struct CoreTraceFragment<'a> {
     pub columns: [&'a mut [Felt]; CORE_TRACE_WIDTH],
-}
-
-// HELPERS
-// ================================================================================================
-
-/// Identical to `[chiplets::ace::eval_circuit]` but adapted for use with
-/// `[CoreTraceFragmentGenerator]`.
-pub(crate) fn eval_circuit_parallel_(
-    ctx: ContextId,
-    ptr: Felt,
-    clk: RowIndex,
-    num_vars: Felt,
-    num_eval: Felt,
-    memory: &mut impl MemoryInterface,
-    tracer: &mut impl Tracer,
-) -> Result<CircuitEvaluation, AceEvalError> {
-    // Delegate to the fast implementation with the processor's memory interface.
-    // This eliminates ~70 lines of duplicated code while maintaining identical functionality.
-    eval_circuit_fast(ctx, ptr, clk, num_vars, num_eval, memory, tracer)
 }
 
 // BASIC BLOCK CONTEXT

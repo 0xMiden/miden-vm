@@ -21,9 +21,12 @@
 - Fixed a bug where trace generation would fail if a core trace fragment started on the `END` operation of a loop that was not entered ([#2587](https://github.com/0xMiden/miden-vm/pull/2587)).
 - Renamed snapshot test files to use `__` instead of `::` for Windows compatibility ([#2580](https://github.com/0xMiden/miden-vm/pull/2580)).
 - Fixed off-by-one error in cycle limit check that caused programs using exactly `max_cycles` cycles to fail ([#2635](https://github.com/0xMiden/miden-vm/pull/2635)).
+- Fixed prover log message reporting `main_trace_len()` instead of `trace_len()` for the pre-padding length ([#2671](https://github.com/0xMiden/miden-vm/pull/2671)).
+- System event errors now include the operation index, so diagnostics point to the exact emit instruction instead of the first operation in the basic block ([#2672](https://github.com/0xMiden/miden-vm/pull/2672)).
 
 #### Changes
 
+- [BREAKING] Removed `breakpoint` instruction from assembly ([#2655](https://github.com/0xMiden/miden-vm/pull/2655)).
 - [BREAKING] Added builder methods (`with_advice()`, `with_debugging()`, `with_tracing()`, `with_options()`) directly on `FastProcessor` for fluent configuration. Removed deprecated `new_with_advice_inputs()` and `new_debug()` constructors ([#2602](https://github.com/0xMiden/miden-vm/issues/2602), [#2625](https://github.com/0xMiden/miden-vm/pull/2625)).
 - Changed `assert_u32` helper function to return `u32` instead of `Felt` ([#2575](https://github.com/0xMiden/miden-vm/issues/2575)).
 - Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
@@ -68,6 +71,9 @@
 - [BREAKING] Migrate parallel trace generation to use the common `execute_impl()` ([#2642](https://github.com/0xMiden/miden-vm/pull/2642)).
 - [BREAKING] Removed unused `should_break` field from `AssemblyOp` decorator ([#2646](https://github.com/0xMiden/miden-vm/pull/2646)).
 - [BREAKING] Updated processor module structure ([#2651](https://github.com/0xMiden/miden-vm/pull/2651)).
+- Removed FRI domain offset from `fri_ext2fold4` operation for Plonky3 compatibility ([#2670](https://github.com/0xMiden/miden-vm/pull/2670)).
+- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
+- [BREAKING] Remove `Tracer` arguments from `Processor` methods ([#2676](https://github.com/0xMiden/miden-vm/pull/2676)).
 
 ## 0.20.6 (2026-02-04)
 

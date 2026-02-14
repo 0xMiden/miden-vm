@@ -8,12 +8,16 @@ use crate::{
 };
 
 mod crypto_ops;
+mod eval_circuit;
 mod field_ops;
 mod fri_ops;
 mod io_ops;
 mod stack_ops;
 mod sys_ops;
 mod u32_ops;
+
+#[cfg(test)]
+pub(crate) use eval_circuit::eval_circuit_impl;
 
 // CONSTANTS
 // ================================================================================================
@@ -169,7 +173,8 @@ where
         // ----- stack manipulation -----------------------------------------------------------
         Operation::Pad => stack_ops::op_pad(processor, tracer)?,
         Operation::Drop => {
-            processor.stack_mut().decrement_size(tracer);
+            processor.stack_mut().decrement_size();
+            tracer.decrement_stack_size();
             OperationHelperRegisters::Empty
         },
         Operation::Dup0 => stack_ops::dup_nth(processor, 0, tracer)?,
@@ -333,7 +338,7 @@ where
         Operation::HornerExt => crypto_ops::op_horner_eval_ext(processor, tracer)
             .map_exec_err_with_op_idx(current_forest, node_id, host, op_idx)?,
         Operation::EvalCircuit => {
-            processor.op_eval_circuit(tracer).map_exec_err_with_op_idx(
+            eval_circuit::op_eval_circuit(processor, tracer).map_exec_err_with_op_idx(
                 current_forest,
                 node_id,
                 host,

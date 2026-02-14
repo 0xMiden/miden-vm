@@ -86,7 +86,7 @@ where
 
     // --- fold query values ----------------------------------------------
     let f_tau = get_tau_factor(d_seg);
-    let x = poe * f_tau * DOMAIN_OFFSET;
+    let x = poe * f_tau;
     let x_inv = x.inverse();
 
     let (ev, es) = compute_evaluation_points(alpha, x_inv);
@@ -101,7 +101,8 @@ where
     let poe2 = poe * poe;
     let poe4 = poe2 * poe2;
 
-    processor.stack_mut().decrement_size(tracer);
+    processor.stack_mut().decrement_size();
+    tracer.decrement_stack_size();
 
     processor.stack_mut().set(0, tmp0[1]);
     processor.stack_mut().set(1, tmp0[0]);
@@ -147,8 +148,6 @@ fn get_query_values<P: Processor>(processor: &mut P) -> [QuadFelt; 4] {
 
 const EIGHT: Felt = Felt::new(8);
 const TWO_INV: Felt = Felt::new(9223372034707292161);
-
-const DOMAIN_OFFSET: Felt = Felt::GENERATOR;
 
 // Pre-computed powers of 1/tau, where tau is the generator of multiplicative subgroup of size 4
 // (i.e., tau is the 4th root of unity). Correctness of these constants is checked in the test at
