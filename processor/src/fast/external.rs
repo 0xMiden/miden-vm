@@ -59,8 +59,6 @@ pub(super) fn maybe_use_caller_error_context(
     };
 
     // Extract parent node ID from all continuations that can lead to an external node execution.
-    //
-    // Note that the assembler current doesn't attach `AssemblyOp` decorators to Join nodes.
     let parent_node_id = match top_continuation {
         Continuation::FinishCall(parent_node_id)
         | Continuation::FinishJoin(parent_node_id)

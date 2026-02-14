@@ -1065,7 +1065,8 @@ impl Assembler {
                 vec![],
             )?
         } else {
-            mast_forest_builder.join_nodes(body_node_ids)?
+            let asm_op = self.create_asmop_decorator(&proc_ctx.span(), "begin", proc_ctx);
+            mast_forest_builder.join_nodes(body_node_ids, Some(asm_op))?
         };
 
         // Make sure that any post decorators are added at the end of the procedure body

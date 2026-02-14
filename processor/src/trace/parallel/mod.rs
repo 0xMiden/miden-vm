@@ -463,8 +463,9 @@ fn initialize_chiplets(
             HasherOp::HashControlBlock((h1, h2, domain, expected_hash)) => {
                 let _ = chiplets.hasher.hash_control_block(h1, h2, domain, expected_hash);
             },
-            HasherOp::HashBasicBlock((op_batches, expected_hash)) => {
-                let _ = chiplets.hasher.hash_basic_block(&op_batches, expected_hash);
+            HasherOp::HashBasicBlock((forest, node_id, expected_hash)) => {
+                let op_batches = forest[node_id].unwrap_basic_block().op_batches();
+                let _ = chiplets.hasher.hash_basic_block(op_batches, expected_hash);
             },
             HasherOp::BuildMerkleRoot((value, path, index)) => {
                 let _ = chiplets.hasher.build_merkle_root(value, &path, index);
