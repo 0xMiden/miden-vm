@@ -37,7 +37,8 @@ use crate::handlers::{
 /// This library wraps a [`Library`] containing highly-optimized and battle-tested implementations
 /// of commonly-used primitives. When the core library is dynamically linked during assembly time,
 /// procedures can be called from any Miden program and are serialized as 32 bytes, reducing the
-/// amount of code that needs to be shared between parties for proving and verifying program execution.
+/// amount of code that needs to be shared between parties for proving and verifying program
+/// execution.
 ///
 /// # Contents
 ///
@@ -46,8 +47,8 @@ use crate::handlers::{
 /// - **Cryptographic primitives**: Hash functions (Keccak256, SHA-512), digital signature
 ///   verification (ECDSA, EdDSA-Ed25519), and authenticated encryption (AEAD decryption).
 /// - **Mathematical operations**: Division operations for u64 and Falcon signatures.
-/// - **Data structures**: Sparse Merkle Tree operations and sorted array utilities with
-///   lower-bound search capabilities.
+/// - **Data structures**: Sparse Merkle Tree operations and sorted array utilities with lower-bound
+///   search capabilities.
 ///
 /// Many of these operations are implemented as **precompiles** - special procedures that execute
 /// outside the Miden VM but are verified as part of the proof. Precompiles allow for efficient
