@@ -1672,6 +1672,39 @@ fn link_time_const_evaluation_invalid_constant() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn imported_computed_constants_with_non_pub_dependencies() -> TestResult {
+    // Test for issue #2696: Imported computed constants fail assembly when they depend on non-pub
+    // constants
+    let context = TestContext::default();
+    let memory = r#"
+        const ACCOUNT_ID_AND_NONCE_OFFSET=4
+        pub const ACCOUNT_ID_SUFFIX_OFFSET = ACCOUNT_ID_AND_NONCE_OFFSET + 2
+    "#;
+    let memory = parse_module!(&context, "lib::memory", memory);
+
+    let lib = Assembler::new(context.source_manager()).assemble_library([memory])?;
+
+    let source = source_file!(
+        &context,
+        "\
+        use lib::memory::ACCOUNT_ID_SUFFIX_OFFSET
+        begin
+            push.ACCOUNT_ID_SUFFIX_OFFSET
+        end"
+    );
+
+    // This should succeed - the constant should be evaluable even though it depends on a non-pub
+    // constant
+    let program = Assembler::new(context.source_manager())
+        .with_dynamic_library(lib)?
+        .assemble_program(source)?;
+    insta::assert_snapshot!(program);
+
+    Ok(())
+}
+
 // DECORATORS
 // ================================================================================================
 
