@@ -147,7 +147,12 @@ pub fn prove_sync(
         },
         Err(_) => {
             // No runtime exists - create one and use it
-            let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+            let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+                ExecutionError::ProofSerializationError(format!(
+                    "Failed to create Tokio runtime: {}",
+                    e
+                ))
+            })?;
             rt.block_on(prove(program, stack_inputs, advice_inputs, host, options))
         },
     }
