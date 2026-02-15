@@ -225,7 +225,7 @@ impl CircuitEvaluation {
                 .expect("the m0 multiplicities were not constructed properly");
             let m_1 = multiplicities_iter
                 .next()
-                .expect("the m0 multiplicities were not constructed properly");
+                .expect("the m1 multiplicities were not constructed properly");
             columns[M_0_IDX][row_index] = m_0;
             columns[M_1_IDX][row_index] = m_1;
         }

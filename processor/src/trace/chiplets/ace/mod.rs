@@ -28,7 +28,7 @@ pub const MAX_NUM_ACE_WIRES: u32 = instruction::MAX_ID;
 /// [`CircuitEvaluation`] per call. This is then used to generate the full trace of the ACE chiplet.
 #[derive(Debug, Default)]
 pub struct Ace {
-    pub(crate) circuit_evaluations: BTreeMap<RowIndex, CircuitEvaluation>,
+    circuit_evaluations: BTreeMap<RowIndex, CircuitEvaluation>,
 }
 
 impl Ace {

@@ -42,7 +42,7 @@ impl TryFrom<MidenVmCli> for Cli {
                         .map(|command_name| {
                             format!(
                                 "Called the CLI with an unknown alias '{}'",
-                                command_name.clone().into_string().unwrap_or("".to_string())
+                                command_name.to_string_lossy()
                             )
                         })
                         .unwrap_or(String::from("Called the CLI under an empty alias"));
