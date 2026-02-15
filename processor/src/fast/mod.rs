@@ -817,7 +817,12 @@ impl FastProcessor {
         resume_ctx: ResumeContext,
     ) -> Result<Option<ResumeContext>, ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+            ExecutionError::ProofSerializationError(format!(
+                "Failed to create Tokio runtime: {}",
+                e
+            ))
+        })?;
 
         let execution_output = rt.block_on(self.step(host, resume_ctx))?;
 
@@ -832,7 +837,12 @@ impl FastProcessor {
         host: &mut impl Host,
     ) -> Result<StackOutputs, ExecutionError> {
         // Create a new Tokio runtime and block on the async execution
-        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+            ExecutionError::ProofSerializationError(format!(
+                "Failed to create Tokio runtime: {}",
+                e
+            ))
+        })?;
         let mut current_resume_ctx = self.get_initial_resume_context(program).unwrap();
 
         rt.block_on(async {
@@ -888,7 +898,12 @@ impl FastProcessor {
             },
             Err(_) => {
                 // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+                    ExecutionError::ProofSerializationError(format!(
+                        "Failed to create Tokio runtime: {}",
+                        e
+                    ))
+                })?;
                 rt.block_on(self.execute(program, host))
             },
         }
@@ -921,7 +936,12 @@ impl FastProcessor {
             },
             Err(_) => {
                 // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+                    ExecutionError::ProofSerializationError(format!(
+                        "Failed to create Tokio runtime: {}",
+                        e
+                    ))
+                })?;
                 rt.block_on(self.execute_for_trace(program, host))
             },
         }
@@ -981,7 +1001,12 @@ impl FastProcessor {
             },
             Err(_) => {
                 // No runtime exists - create one and use it
-                let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+                let rt = tokio::runtime::Builder::new_current_thread().build().map_err(|e| {
+                    ExecutionError::ProofSerializationError(format!(
+                        "Failed to create Tokio runtime: {}",
+                        e
+                    ))
+                })?;
                 rt.block_on(execute_fut)
             },
         }
