@@ -262,19 +262,6 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             },
         };
 
-        let constant_module = gid.module;
-        // If this constant is from a different module and we're not already evaluating
-        // a constant from that module, push it onto the stack so that dependencies are
-        // resolved in the correct context. This needs to happen before we return Miss,
-        // so that when the evaluation starts and get() is called recursively, the stack
-        // is already set up.
-        if constant_module != self.module_id {
-            let mut modules = self.evaluating_constant_modules.borrow_mut();
-            if modules.last() != Some(&constant_module) {
-                modules.push(constant_module);
-            }
-        }
-
         let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
