@@ -24,6 +24,7 @@
 - Fixed prover log message reporting `main_trace_len()` instead of `trace_len()` for the pre-padding length ([#2671](https://github.com/0xMiden/miden-vm/pull/2671)).
 - System event errors now include the operation index, so diagnostics point to the exact emit instruction instead of the first operation in the basic block ([#2672](https://github.com/0xMiden/miden-vm/pull/2672)).
 - Generate `AssemblyOp` decorators for `JoinNode`s so that error diagnostics can point to the `begin...end` block ([#2674](https://github.com/0xMiden/miden-vm/pull/2674)).
+- Fixed assembly failure when importing computed constants that depend on non-public constants from their defining module ([#2696](https://github.com/0xMiden/miden-vm/issues/2696)).
 
 #### Changes
 
