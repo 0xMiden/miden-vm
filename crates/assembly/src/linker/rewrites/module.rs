@@ -262,6 +262,21 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             },
         };
 
+        let constant_module = gid.module;
+        // If this constant is from a different module and the stack is empty (meaning we're
+        // starting to evaluate a constant from another module), push it onto the stack.
+        // This ensures that when dependencies are resolved recursively, they use the correct
+        // module context. The stack will be managed by on_eval_start/on_eval_completed for
+        // proper cleanup.
+        if constant_module != self.module_id {
+            let mut modules = self.evaluating_constant_modules.borrow_mut();
+            if modules.is_empty() {
+                // Only push if stack is empty - this means we're starting to evaluate
+                // a constant from another module, not resolving a dependency
+                modules.push(constant_module);
+            }
+        }
+
         let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
