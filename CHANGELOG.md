@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.22.0 (TBD)
+
 ## 0.21.0 (2026-02-14)
 
 #### Major breaking changes
