@@ -248,16 +248,9 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             kind: None,
         };
         let resolution = self.resolver.resolve_local(&context, &name)?;
-        let (gid, constant_module) = match resolution {
-            SymbolResolution::Exact { gid, .. } => {
-                // If we got an Exact resolution, use the module where the constant is defined
-                // for resolving dependencies, not the module where it's used
-                (gid, gid.module)
-            },
-            SymbolResolution::Local(item) => {
-                let gid = resolution_module + item.into_inner();
-                (gid, resolution_module)
-            },
+        let gid = match resolution {
+            SymbolResolution::Exact { gid, .. } => gid,
+            SymbolResolution::Local(item) => resolution_module + item.into_inner(),
             SymbolResolution::External(path) => {
                 return self.get_by_path(path.as_deref());
             },
@@ -268,14 +261,6 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 });
             },
         };
-        
-        // If the constant is from a different module and we're not already evaluating
-        // a constant from that module, we need to use that module's context for
-        // resolving dependencies. However, we can't modify the stack here (get takes &self),
-        // so we'll rely on on_eval_start to set it up. But we need to ensure that when
-        // dependencies are resolved, they use the correct module context.
-        // The stack will be set up by on_eval_start, which is called after get().
-        // For now, we'll return Miss and let the evaluation proceed.
         
         let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
@@ -362,12 +347,19 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             }
         } else {
             // If path resolution fails, try resolving as a name (for imported constants)
+            // Use self.module_id for initial resolution, as imported constants are resolved
+            // in the context of the module where they're used
+            let name_context = SymbolResolutionContext {
+                span: path.span(),
+                module: self.module_id,
+                kind: None,
+            };
             if let Some(name) = path.as_ident() {
                 let name_span = Span::new(path.span(), name.as_str());
-                if let Ok(resolution) = self.resolver.resolve_local(&context, &name_span) {
+                if let Ok(resolution) = self.resolver.resolve_local(&name_context, &name_span) {
                     match resolution {
                         SymbolResolution::Exact { gid, .. } => Some(gid),
-                        SymbolResolution::Local(item) => Some(resolution_module + item.into_inner()),
+                        SymbolResolution::Local(item) => Some(self.module_id + item.into_inner()),
                         _ => None,
                     }
                 } else {
