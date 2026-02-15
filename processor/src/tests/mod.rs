@@ -759,6 +759,67 @@ async fn test_diagnostic_no_mast_forest_with_procedure_call() {
 }
 
 #[tokio::test]
+async fn test_diagnostic_no_mast_forest_with_procedure_join() {
+    let source_manager = Arc::new(DefaultSourceManager::default());
+
+    let lib_module = {
+        let module_name = "foo::bar";
+        let src = "
+        pub proc dummy_proc
+            push.1
+        end
+    ";
+        let uri = Uri::from("src.masm");
+        let content = SourceContent::new(SourceLanguage::Masm, uri.clone(), src);
+        let source_file = source_manager.load_from_raw_parts(uri.clone(), content);
+        Module::parse(
+            PathBuf::new(module_name).unwrap(),
+            miden_assembly::ast::ModuleKind::Library,
+            source_file,
+            source_manager.clone(),
+        )
+        .unwrap()
+    };
+
+    let program_source = "
+        use foo::bar
+
+        begin
+            exec.bar::dummy_proc
+            call.bar::dummy_proc
+        end
+    ";
+
+    let library = Assembler::new(source_manager.clone()).assemble_library([lib_module]).unwrap();
+
+    let program = Assembler::new(source_manager.clone())
+        .with_dynamic_library(&library)
+        .unwrap()
+        .assemble_program(program_source)
+        .unwrap();
+
+    let mut host = DefaultHost::default().with_source_manager(source_manager);
+
+    let processor = FastProcessor::new(StackInputs::default())
+        .with_advice(AdviceInputs::default())
+        .with_debugging(true)
+        .with_tracing(true);
+    let err = processor.execute(&program, &mut host).await.unwrap_err();
+    assert_diagnostic_lines!(
+        err,
+        "no MAST forest contains the procedure with root digest 0x21458fd12b211505c36fe477314b3149bd4b2214f3304cbafa04ea80579d4328",
+        regex!(r#",-\[::\$exec:4:9\]"#),
+        " 3 |",
+        " 4 | ,->         begin",
+        " 5 | |               exec.bar::dummy_proc",
+        " 6 | |               call.bar::dummy_proc",
+        " 7 | `->         end",
+        " 8 |",
+        "   `----"
+    );
+}
+
+#[tokio::test]
 async fn test_diagnostic_no_mast_forest_with_procedure_loop() {
     let source_manager = Arc::new(DefaultSourceManager::default());
 

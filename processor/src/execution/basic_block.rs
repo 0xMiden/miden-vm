@@ -386,6 +386,7 @@ where
 ///
 /// That is, `op_idx_in_batch` is the index of the operation that was just executed within the batch
 /// `batch_index` of the basic block `basic_block_node`.
+#[inline(always)]
 fn get_continuation_after_executing_operation(
     basic_block_node: &BasicBlockNode,
     node_id: MastNodeId,
