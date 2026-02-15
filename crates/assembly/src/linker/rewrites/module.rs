@@ -248,9 +248,16 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             kind: None,
         };
         let resolution = self.resolver.resolve_local(&context, &name)?;
-        let gid = match resolution {
-            SymbolResolution::Exact { gid, .. } => gid,
-            SymbolResolution::Local(item) => resolution_module + item.into_inner(),
+        let (gid, constant_module) = match resolution {
+            SymbolResolution::Exact { gid, .. } => {
+                // If we got an Exact resolution, use the module where the constant is defined
+                // for resolving dependencies, not the module where it's used
+                (gid, gid.module)
+            },
+            SymbolResolution::Local(item) => {
+                let gid = resolution_module + item.into_inner();
+                (gid, resolution_module)
+            },
             SymbolResolution::External(path) => {
                 return self.get_by_path(path.as_deref());
             },
@@ -262,23 +269,28 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             },
         };
         
-        let constant_module = gid.module;
-        // If this constant is from a different module and we're not already evaluating
-        // a constant from that module, push it onto the stack so that dependencies are
-        // resolved in the correct context.
-        if constant_module != self.module_id {
-            let mut modules = self.evaluating_constant_modules.borrow_mut();
-            if modules.last() != Some(&constant_module) {
-                modules.push(constant_module);
-            }
-        }
+        // If the constant is from a different module and we're not already evaluating
+        // a constant from that module, we need to use that module's context for
+        // resolving dependencies. However, we can't modify the stack here (get takes &self),
+        // so we'll rely on on_eval_start to set it up. But we need to ensure that when
+        // dependencies are resolved, they use the correct module context.
+        // The stack will be set up by on_eval_start, which is called after get().
+        // For now, we'll return Miss and let the evaluation proceed.
         
         let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
                 Ok(Some(CachedConstantValue::Hit(&info.value)))
             },
-            SymbolItem::Constant(ast) => Ok(Some(CachedConstantValue::Miss(&ast.value))),
+            SymbolItem::Constant(ast) => {
+                // If this constant is from a different module, we need to ensure that
+                // when it's evaluated, dependencies are resolved in that module's context.
+                // The on_eval_start callback will set up the stack, but we need to make
+                // sure that get() uses the correct module when called recursively.
+                // Since we can't modify self here, we'll rely on the stack being set up
+                // by on_eval_start before dependencies are resolved.
+                Ok(Some(CachedConstantValue::Miss(&ast.value)))
+            },
             SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
                 Err(LinkerError::InvalidConstantRef {
                     span: name.span(),
@@ -327,17 +339,53 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
     fn on_eval_start(&mut self, path: Span<&ast::Path>) {
         // When we start evaluating a constant, resolve it to get its defining module
         // and push it onto the stack so that dependencies are resolved in the correct context.
+        // Use the top of the stack if we're already evaluating a constant from another module,
+        // otherwise use the current module.
+        let resolution_module = self
+            .evaluating_constant_modules
+            .borrow()
+            .last()
+            .copied()
+            .unwrap_or(self.module_id);
         let context = SymbolResolutionContext {
             span: path.span(),
-            module: self.module_id,
+            module: resolution_module,
             kind: None,
         };
-        if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
-            if let SymbolResolution::Exact { gid, .. } = resolution {
-                let constant_module = gid.module;
-                // Only push if the constant is defined in a different module
-                if constant_module != self.module_id {
-                    self.evaluating_constant_modules.borrow_mut().push(constant_module);
+        
+        // Try to resolve the path first
+        let gid = if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
+            match resolution {
+                SymbolResolution::Exact { gid, .. } => Some(gid),
+                SymbolResolution::Local(item) => Some(resolution_module + item.into_inner()),
+                _ => None,
+            }
+        } else {
+            // If path resolution fails, try resolving as a name (for imported constants)
+            if let Some(name) = path.as_ident() {
+                let name_span = Span::new(path.span(), name.as_str());
+                if let Ok(resolution) = self.resolver.resolve_local(&context, &name_span) {
+                    match resolution {
+                        SymbolResolution::Exact { gid, .. } => Some(gid),
+                        SymbolResolution::Local(item) => Some(resolution_module + item.into_inner()),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        };
+        
+        if let Some(gid) = gid {
+            let constant_module = gid.module;
+            // Only push if the constant is defined in a different module
+            if constant_module != self.module_id {
+                let mut modules = self.evaluating_constant_modules.borrow_mut();
+                // Only push if not already at the top of the stack
+                if modules.last() != Some(&constant_module) {
+                    modules.push(constant_module);
                 }
             }
         }
@@ -345,11 +393,17 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
 
     fn on_eval_completed(&mut self, path: Span<&ast::Path>, _value: &ast::ConstantExpr) {
         // Pop the evaluating constant module from the stack when we're done.
-        // We need to resolve the path to get the module, but if resolution fails,
-        // we still try to pop to maintain stack consistency.
+        // Use the top of the stack if we're already evaluating a constant from another module,
+        // otherwise use the current module.
+        let resolution_module = self
+            .evaluating_constant_modules
+            .borrow()
+            .last()
+            .copied()
+            .unwrap_or(self.module_id);
         let context = SymbolResolutionContext {
             span: path.span(),
-            module: self.module_id,
+            module: resolution_module,
             kind: None,
         };
         if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
@@ -366,7 +420,10 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
         } else {
             // If resolution fails, still try to pop to maintain stack consistency
             // (in case we pushed something earlier)
-            self.evaluating_constant_modules.borrow_mut().pop();
+            let mut modules = self.evaluating_constant_modules.borrow_mut();
+            if !modules.is_empty() {
+                modules.pop();
+            }
         }
     }
 }
