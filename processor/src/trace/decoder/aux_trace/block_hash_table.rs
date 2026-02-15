@@ -182,23 +182,17 @@ impl BlockHashTableRow {
         let is_first_child = false;
         let is_loop_body = false;
 
-        if stack_top == ONE {
-            let left_child_block_hash = main_trace.decoder_hasher_state_first_half(row);
-            Self {
-                parent_block_id,
-                child_block_hash: left_child_block_hash,
-                is_first_child,
-                is_loop_body,
-            }
+        let child_block_hash = if stack_top == ONE {
+            main_trace.decoder_hasher_state_first_half(row)
         } else {
-            let right_child_block_hash = main_trace.decoder_hasher_state_second_half(row);
+            main_trace.decoder_hasher_state_second_half(row)
+        };
 
-            Self {
-                parent_block_id,
-                child_block_hash: right_child_block_hash,
-                is_first_child,
-                is_loop_body,
-            }
+        Self {
+            parent_block_id,
+            child_block_hash,
+            is_first_child,
+            is_loop_body,
         }
     }
 
