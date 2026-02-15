@@ -1,5 +1,5 @@
 use alloc::{collections::BTreeSet, sync::Arc, vec::Vec};
-use core::ops::ControlFlow;
+use core::{cell::RefCell, ops::ControlFlow};
 
 use miden_assembly_syntax::{
     ast::constants::eval::CachedConstantValue, diagnostics::RelatedError, library::ItemInfo,
@@ -31,6 +31,9 @@ pub struct ModuleRewriter<'a, 'b: 'a> {
     resolver: &'a SymbolResolver<'b>,
     module_id: ModuleIndex,
     invoked: BTreeSet<Invoke>,
+    /// Stack of modules where constants currently being evaluated are defined.
+    /// This is used to ensure that dependencies are resolved in the correct context.
+    evaluating_constant_modules: RefCell<Vec<ModuleIndex>>,
 }
 
 macro_rules! wrap_const_control_flow {
@@ -54,6 +57,7 @@ impl<'a, 'b: 'a> ModuleRewriter<'a, 'b> {
             resolver,
             module_id: module,
             invoked: Default::default(),
+            evaluating_constant_modules: RefCell::new(Vec::new()),
         }
     }
 
@@ -229,16 +233,24 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
     }
 
     fn get(&self, name: &ast::Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
-        let module = &self.resolver.linker()[self.module_id];
         let name = Span::new(name.span(), name.as_str());
+        // Use the top of the evaluating constant modules stack if we're currently
+        // evaluating a constant from a different module, otherwise use the current module
+        let resolution_module = self
+            .evaluating_constant_modules
+            .borrow()
+            .last()
+            .copied()
+            .unwrap_or(self.module_id);
         let context = SymbolResolutionContext {
             span: name.span(),
-            module: self.module_id,
+            module: resolution_module,
             kind: None,
         };
-        let symbol = match self.resolver.resolve_local(&context, &name)? {
-            SymbolResolution::Exact { gid, .. } => &self.resolver.linker()[gid],
-            SymbolResolution::Local(item) => &module[*item.inner()],
+        let resolution = self.resolver.resolve_local(&context, &name)?;
+        let gid = match resolution {
+            SymbolResolution::Exact { gid, .. } => gid,
+            SymbolResolution::Local(item) => resolution_module + item.into_inner(),
             SymbolResolution::External(path) => {
                 return self.get_by_path(path.as_deref());
             },
@@ -249,6 +261,19 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 });
             },
         };
+        
+        let constant_module = gid.module;
+        // If this constant is from a different module and we're not already evaluating
+        // a constant from that module, push it onto the stack so that dependencies are
+        // resolved in the correct context.
+        if constant_module != self.module_id {
+            let mut modules = self.evaluating_constant_modules.borrow_mut();
+            if modules.last() != Some(&constant_module) {
+                modules.push(constant_module);
+            }
+        }
+        
+        let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
                 Ok(Some(CachedConstantValue::Hit(&info.value)))
@@ -296,6 +321,52 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 })
             },
             SymbolItem::Alias { .. } => unreachable!(),
+        }
+    }
+
+    fn on_eval_start(&mut self, path: Span<&ast::Path>) {
+        // When we start evaluating a constant, resolve it to get its defining module
+        // and push it onto the stack so that dependencies are resolved in the correct context.
+        let context = SymbolResolutionContext {
+            span: path.span(),
+            module: self.module_id,
+            kind: None,
+        };
+        if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
+            if let SymbolResolution::Exact { gid, .. } = resolution {
+                let constant_module = gid.module;
+                // Only push if the constant is defined in a different module
+                if constant_module != self.module_id {
+                    self.evaluating_constant_modules.borrow_mut().push(constant_module);
+                }
+            }
+        }
+    }
+
+    fn on_eval_completed(&mut self, path: Span<&ast::Path>, _value: &ast::ConstantExpr) {
+        // Pop the evaluating constant module from the stack when we're done.
+        // We need to resolve the path to get the module, but if resolution fails,
+        // we still try to pop to maintain stack consistency.
+        let context = SymbolResolutionContext {
+            span: path.span(),
+            module: self.module_id,
+            kind: None,
+        };
+        if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
+            if let SymbolResolution::Exact { gid, .. } = resolution {
+                let constant_module = gid.module;
+                // Only pop if the constant is from a different module
+                if constant_module != self.module_id {
+                    let mut modules = self.evaluating_constant_modules.borrow_mut();
+                    if modules.last() == Some(&constant_module) {
+                        modules.pop();
+                    }
+                }
+            }
+        } else {
+            // If resolution fails, still try to pop to maintain stack consistency
+            // (in case we pushed something earlier)
+            self.evaluating_constant_modules.borrow_mut().pop();
         }
     }
 }
