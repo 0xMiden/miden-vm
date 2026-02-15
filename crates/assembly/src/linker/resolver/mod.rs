@@ -45,12 +45,14 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
     }
 
     fn get(&self, name: &Ident) -> Result<Option<CachedConstantValue<'_>>, Self::Error> {
+        // First, try to resolve in the current module context
         let context = SymbolResolutionContext {
             span: name.span(),
             module: self.current_module,
             kind: None,
         };
-        let gid = match self.resolver.resolve_local(&context, name)? {
+        let resolution = self.resolver.resolve_local(&context, name)?;
+        let gid = match resolution {
             SymbolResolution::Exact { gid, .. } => gid,
             SymbolResolution::Local(index) => self.current_module + index.into_inner(),
             SymbolResolution::MastRoot(_) | SymbolResolution::Module { .. } => {
@@ -70,15 +72,23 @@ impl<'a, 'b: 'a> ConstEnvironment for Resolver<'a, 'b> {
 
         match self.cache.constants.get(&gid).map(CachedConstantValue::Hit) {
             some @ Some(_) => Ok(some),
-            None => match self.resolver.linker()[gid].item() {
-                SymbolItem::Compiled(ItemInfo::Constant(info)) => {
-                    Ok(Some(CachedConstantValue::Hit(&info.value)))
-                },
-                SymbolItem::Constant(item) => Ok(Some(CachedConstantValue::Miss(&item.value))),
-                _ => Err(LinkerError::InvalidConstantRef {
-                    span: name.span(),
-                    source_file: self.get_source_file_for(name.span()),
-                }),
+            None => {
+                match self.resolver.linker()[gid].item() {
+                    SymbolItem::Compiled(ItemInfo::Constant(info)) => {
+                        Ok(Some(CachedConstantValue::Hit(&info.value)))
+                    },
+                    SymbolItem::Constant(item) => {
+                        // Return Miss to indicate the constant needs evaluation.
+                        // The evaluation will happen in rewrite_symbol with current_module
+                        // set to gid.module (the defining module), which ensures that
+                        // references within the expression are resolved in the correct context.
+                        Ok(Some(CachedConstantValue::Miss(&item.value)))
+                    },
+                    _ => Err(LinkerError::InvalidConstantRef {
+                        span: name.span(),
+                        source_file: self.get_source_file_for(name.span()),
+                    }),
+                }
             },
         }
     }
