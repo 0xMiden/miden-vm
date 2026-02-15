@@ -261,19 +261,28 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 });
             },
         };
-        
+
+        let constant_module = gid.module;
+        // If this constant is from a different module and we're not already evaluating
+        // a constant from that module, push it onto the stack so that dependencies are
+        // resolved in the correct context. This needs to happen before we return Miss,
+        // so that when the evaluation starts and get() is called recursively, the stack
+        // is already set up.
+        if constant_module != self.module_id {
+            let mut modules = self.evaluating_constant_modules.borrow_mut();
+            if modules.last() != Some(&constant_module) {
+                modules.push(constant_module);
+            }
+        }
+
         let symbol = &self.resolver.linker()[gid];
         match symbol.item() {
             SymbolItem::Compiled(ItemInfo::Constant(info)) => {
                 Ok(Some(CachedConstantValue::Hit(&info.value)))
             },
             SymbolItem::Constant(ast) => {
-                // If this constant is from a different module, we need to ensure that
-                // when it's evaluated, dependencies are resolved in that module's context.
-                // The on_eval_start callback will set up the stack, but we need to make
-                // sure that get() uses the correct module when called recursively.
-                // Since we can't modify self here, we'll rely on the stack being set up
-                // by on_eval_start before dependencies are resolved.
+                // The stack has been set up above if needed, so when dependencies are
+                // resolved recursively, they will use the correct module context.
                 Ok(Some(CachedConstantValue::Miss(&ast.value)))
             },
             SymbolItem::Compiled(_) | SymbolItem::Procedure(_) | SymbolItem::Type(_) => {
@@ -322,10 +331,10 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
     }
 
     fn on_eval_start(&mut self, path: Span<&ast::Path>) {
-        // When we start evaluating a constant, resolve it to get its defining module
-        // and push it onto the stack so that dependencies are resolved in the correct context.
-        // Use the top of the stack if we're already evaluating a constant from another module,
-        // otherwise use the current module.
+        // When we start evaluating a constant, the stack should already be set up by get()
+        // if the constant is from a different module. However, we still need to handle the
+        // case where on_eval_start is called for a constant that wasn't resolved through get()
+        // (e.g., when using get_by_path). In that case, we resolve the path and set up the stack.
         let resolution_module = self
             .evaluating_constant_modules
             .borrow()
@@ -337,7 +346,7 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
             module: resolution_module,
             kind: None,
         };
-        
+
         // Try to resolve the path first
         let gid = if let Ok(resolution) = self.resolver.resolve_path(&context, path.as_deref()) {
             match resolution {
@@ -369,13 +378,13 @@ impl<'a, 'b: 'a> ConstEnvironment for ModuleRewriter<'a, 'b> {
                 None
             }
         };
-        
+
+        // Only push if we found a constant from a different module and it's not already on the
+        // stack (get() may have already set it up)
         if let Some(gid) = gid {
             let constant_module = gid.module;
-            // Only push if the constant is defined in a different module
             if constant_module != self.module_id {
                 let mut modules = self.evaluating_constant_modules.borrow_mut();
-                // Only push if not already at the top of the stack
                 if modules.last() != Some(&constant_module) {
                     modules.push(constant_module);
                 }
