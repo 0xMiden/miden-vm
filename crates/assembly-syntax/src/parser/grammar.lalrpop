@@ -79,7 +79,6 @@ extern {
         "assert_eq" => Token::AssertEq,
         "assert_eqw" => Token::AssertEqw,
         "begin" => Token::Begin,
-        "breakpoint" => Token::Breakpoint,
         "byte" => Token::Byte,
         "caller" => Token::Caller,
         "call" => Token::Call,
@@ -1113,7 +1112,6 @@ Call: Instruction = {
 
 #[inline]
 Debug: Instruction = {
-    "breakpoint" => Instruction::Breakpoint,
     "debug" "." "stack" <n:MaybeImm<U8>> => {
         match n {
             Some(n) => Instruction::Debug(DebugOptions::StackTop(n.map(|spanned| spanned.into_inner()))),

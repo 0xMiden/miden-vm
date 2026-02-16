@@ -1,19 +1,31 @@
 //! Miden VM Constraints
 //!
 //! This module contains the constraint functions for the Miden VM processor.
-//! Constraints are organized by component:
-//! - System-level constraints (clock)
-//! - Range checker constraints
-//! - (Future: decoder, stack, chiplets)
+//!
+//! ## Organization
+//!
+//! Constraints are separated into two categories:
+//!
+//! ### Main Trace Constraints
+//! - system: clock, ctx, fn_hash transitions
+//! - decoder: op bits, batch flags, control flow
+//! - range: range checker V column transitions
+//! - chiplets: hasher, bitwise, memory, ACE, kernel ROM
+//! - stack: op flags, overflow, field ops, etc.
+//!
+//! ### Bus Constraints (Auxiliary Trace)
+//! - decoder::bus, stack::bus, range::bus, chiplets::bus
+//! - bus: shared auxiliary trace indices and utils
+//!
+//! Bus constraints access the auxiliary trace via `builder.permutation()` and use
+//! random challenges from `builder.permutation_randomness()` for multiset/LogUp verification.
+//!
+//! ## Kernel Verification
+//!
+//! The chiplets bus uses aux_finals for kernel verification:
+//! - First row: b_chiplets[0] = 1 (AIR boundary constraint)
+//! - Last row: b_chiplets[last] = reduced_kernel_digests (verified via aux_finals)
 
-// Allow some clippy warnings for semi-generated code
-#![allow(clippy::useless_conversion, clippy::clone_on_copy)]
-// Temporarily allow unused code until feature flags are stabilized
-#![allow(unused_imports, dead_code, unused_variables)]
-
-use core::borrow::Borrow;
-
-use miden_core::{field::PrimeCharacteristicRing, utils::Matrix};
 use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::{
@@ -25,109 +37,30 @@ use crate::{
 pub mod chiplets;
 pub mod decoder;
 pub mod range;
-pub mod stack;
 pub mod system;
 
-/// Enforces all MidenVM constraints on the main trace
-pub fn enforce_main_constraints<AB>(builder: &mut AB)
-where
+// ENTRY POINTS
+// ================================================================================================
+
+/// Enforces all main trace constraints.
+pub fn enforce_main<AB>(
+    builder: &mut AB,
+    local: &MainTraceRow<AB::Var>,
+    next: &MainTraceRow<AB::Var>,
+) where
     AB: MidenAirBuilder,
 {
-    let main = builder.main();
-
-    // Access the two rows: current (local) and next
-    let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-    let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
-
-    // Use structured column access via MainTraceCols
-    let local: &MainTraceRow<AB::Var> = (*local).borrow();
-    let next: &MainTraceRow<AB::Var> = (*next).borrow();
-
-    let periodic_values: [_; NUM_PERIODIC_VALUES] =
-        builder.periodic_evals().try_into().expect("Wrong number of periodic values");
-
-    // SYSTEM MAIN CONSTRAINTS
-    system::enforce_main_system_constraints(builder, local, next);
-
-    // STACK MAIN CONSTRAINTS
-    stack::enforce_main_stack_constraints(builder, local, next);
-
-    // DECODER MAIN CONSTRAINTS
-    decoder::enforce_main_decoder_constraints(builder, local, next);
-
-    // RANGE CHECKER MAIN CONSTRAINTS
-    range::enforce_main_range_constraints(builder, local, next);
-
-    // CHIPLETS MAIN CONSTRAINTS
-    chiplets::enforce_main_chiplets_constraints(builder, local, next, &periodic_values);
+    system::enforce_main(builder, local, next);
+    range::enforce_main(builder, local, next);
 }
 
-/// Enforces all bus MidenVM constraints
-pub fn enforce_bus_constraints<AB>(builder: &mut AB)
-where
+/// Enforces all auxiliary (bus) constraints.
+pub fn enforce_bus<AB>(
+    builder: &mut AB,
+    local: &MainTraceRow<AB::Var>,
+    _next: &MainTraceRow<AB::Var>,
+) where
     AB: MidenAirBuilder,
 {
-    let main = builder.main();
-
-    // Access the two rows: current (local) and next
-    let local = main.row_slice(0).expect("Matrix should have at least 1 row");
-    let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
-
-    // Use structured column access via MainTraceCols
-    let local: &MainTraceRow<AB::Var> = (*local).borrow();
-    let next: &MainTraceRow<AB::Var> = (*next).borrow();
-
-    let periodic_values: [_; NUM_PERIODIC_VALUES] =
-        builder.periodic_evals().try_into().expect("Wrong number of periodic values");
-
-    let (&alpha, beta_challenges) = builder
-        .permutation_randomness()
-        .split_first()
-        .expect("Wrong number of randomness");
-    let beta_challenges: [_; AUX_TRACE_RAND_ELEMENTS - 1] =
-        beta_challenges.try_into().expect("Wrong number of randomness");
-    let aux_bus_boundary_values: [_; AUX_TRACE_WIDTH] = builder
-        .aux_bus_boundary_values()
-        .try_into()
-        .expect("Wrong number of aux bus boundary values");
-    let aux = builder.permutation();
-    let (aux_current, aux_next) = (aux.row_slice(0).unwrap(), aux.row_slice(1).unwrap());
-
-    // STACK BUS CONSTRAINTS
-    stack::bus::enforce_stack_bus_constraints(
-        builder,
-        alpha,
-        &beta_challenges,
-        &aux_current,
-        &aux_next,
-        local,
-        next,
-        &periodic_values,
-    );
-
-    // DECODER BUS CONSTRAINTS
-    decoder::bus::enforce_decoder_bus_constraints(
-        builder,
-        alpha,
-        &beta_challenges,
-        &aux_current,
-        &aux_next,
-        local,
-        next,
-    );
-
-    // RANGE CHECKER BUS CONSTRAINTS
-    range::bus::enforce_range_bus_constraints(builder, local);
-
-    // CHIPLETS BUS CONSTRAINTS
-    chiplets::bus::enforce_chiplets_bus_constraints(
-        builder,
-        alpha,
-        &beta_challenges,
-        &aux_current,
-        &aux_next,
-        local,
-        next,
-        &periodic_values,
-    );
+    range::bus::enforce_bus(builder, local);
 }

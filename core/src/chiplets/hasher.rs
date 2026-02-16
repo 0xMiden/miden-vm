@@ -1,4 +1,14 @@
-//! TODO: add docs
+//! Low-level Poseidon2 hasher functions and constants.
+//!
+//! This module provides core hashing primitives for the Poseidon2 hash function, including:
+//! - Constants defining the hasher state layout (STATE_WIDTH, RATE_LEN, NUM_ROUNDS)
+//! - Pass-through functions for common hash operations (merge, hash_elements)
+//! - Step-by-step permutation functions for fine-grained control (apply_round, apply_permutation)
+//!
+//! This module serves as a thin wrapper around `miden_crypto::hash::Poseidon2`, providing
+//! a consistent interface for the Miden VM's hashing needs. For higher-level hasher chiplet
+//! functionality, see the trace and processor modules.
+
 use miden_crypto::{Word as Digest, field::PrimeCharacteristicRing};
 
 use super::Felt;

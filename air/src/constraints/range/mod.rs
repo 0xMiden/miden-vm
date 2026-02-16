@@ -1,22 +1,32 @@
-//! Range Checker Constraints
+//! Range Checker Main Trace Constraints
 //!
-//! This module contains constraints for the range checker component:
+//! This module contains main trace constraints for the range checker component:
 //! - Boundary constraints: V[0] = 0, V[last] = 65535
 //! - Transition constraint: V column changes by powers of 3 or stays constant (for padding)
-//! - Bus constraint: LogUp multiset check for range check requests
-
-pub mod bus;
+//!
+//! Bus constraints for the range checker are in `bus`.
 
 use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
-use crate::MainTraceRow;
+use crate::{
+    MainTraceRow,
+    trace::{RANGE_CHECK_TRACE_OFFSET, range},
+};
 
-/// Enforces boundary constraints for the range checker.
-///
-/// - First row: V[0] = 0 (range checker starts at 0)
-/// - Last row: V[last] = 65535 (range checker ends at 2^16 - 1)
-pub fn enforce_main_range_constraints<AB>(
+pub mod bus;
+
+// CONSTANTS
+// ================================================================================================
+
+// --- SLICE-RELATIVE INDICES ---------------------------------------------------------------------
+const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
+
+// ENTRY POINTS
+// ================================================================================================
+
+/// Enforces range checker main-trace constraints.
+pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
@@ -35,12 +45,14 @@ pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTrac
 where
     AB: MidenAirBuilder,
 {
+    let v = local.range[RANGE_V_COL_IDX].clone();
+
     // First row: V[0] = 0
-    builder.when_first_row().assert_zero(local.range[1].clone());
+    builder.when_first_row().assert_zero(v.clone());
 
     // Last row: V[last] = 65535 (2^16 - 1)
     let sixty_five_k = AB::Expr::from_u32(65535);
-    builder.when_last_row().assert_eq(local.range[1].clone(), sixty_five_k);
+    builder.when_last_row().assert_eq(v, sixty_five_k);
 }
 
 /// Enforces the transition constraint for the range checker V column.
@@ -57,7 +69,9 @@ pub fn enforce_range_transition_constraint<AB>(
 ) where
     AB: MidenAirBuilder,
 {
-    let change_v = next.range[1].clone() - local.range[1].clone();
+    let v = local.range[RANGE_V_COL_IDX].clone();
+    let v_next = next.range[RANGE_V_COL_IDX].clone();
+    let change_v = v_next - v;
 
     // Powers of 3: {1, 3, 9, 27, 81, 243, 729, 2187}
     let one_expr = AB::Expr::ONE;

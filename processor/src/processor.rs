@@ -7,10 +7,9 @@ use crate::{
     BreakReason, ContextId, ExecutionError, Felt, Host, MemoryError, Word,
     advice::AdviceError,
     crypto::merkle::MerklePath,
-    errors::{AceEvalError, OperationError},
+    errors::OperationError,
     mast::{BasicBlockNode, MastForest, MastNodeId},
     precompile::PrecompileTranscriptState,
-    tracer::Tracer,
 };
 
 // PROCESSOR
@@ -20,7 +19,7 @@ use crate::{
 /// and operation helper register computation.
 pub(crate) trait Processor: Sized {
     type System: SystemInterface;
-    type Stack: StackInterface<Processor = Self>;
+    type Stack: StackInterface;
     type AdviceProvider: AdviceProviderInterface;
     type Memory: MemoryInterface;
     type Hasher: HasherInterface;
@@ -51,13 +50,11 @@ pub(crate) trait Processor: Sized {
 
     /// Saves the current execution context and truncates the stack to 16 elements in preparation to
     /// start a new execution context.
-    fn save_context_and_truncate_stack(&mut self, tracer: &mut impl Tracer);
+    fn save_context_and_truncate_stack(&mut self);
 
     /// Restores the execution context to the state it was in before the last `call`, `syscall` or
-    /// `dyncall`.
-    ///
-    /// This includes restoring the overflow stack and the system parameters.
-    fn restore_context(&mut self, tracer: &mut impl Tracer) -> Result<(), OperationError>;
+    /// `dyncall. This includes restoring the overflow stack and the system parameters.
+    fn restore_context(&mut self) -> Result<(), OperationError>;
 
     /// Returns the current precompile transcript state (sponge capacity).
     ///
@@ -68,29 +65,6 @@ pub(crate) trait Processor: Sized {
     ///
     /// Called by `log_precompile` after recording a new commitment.
     fn set_precompile_transcript_state(&mut self, state: PrecompileTranscriptState);
-
-    /// Checks that the evaluation of an arithmetic circuit is equal to zero.
-    ///
-    /// The inputs are composed of:
-    ///
-    /// 1. a pointer to the memory region containing the arithmetic circuit description, which
-    ///    itself is arranged as:
-    ///
-    ///    a. `Read` section:
-    ///       1. Inputs to the circuit which are elements in the quadratic extension field,
-    ///       2. Constants of the circuit which are elements in the quadratic extension field,
-    ///
-    ///    b. `Eval` section, which contains the encodings of the evaluation gates of the circuit,
-    ///    where each gate is encoded as a single base field element.
-    /// 2. the number of quadratic extension field elements read in the `READ` section,
-    /// 3. the number of field elements, one base field element per gate, in the `EVAL` section,
-    ///
-    /// Stack transition:
-    /// [ptr, num_read, num_eval, ...] -> [ptr, num_read, num_eval, ...]
-    ///
-    /// # Note
-    /// All processors need to support this operation.
-    fn op_eval_circuit(&mut self, tracer: &mut impl Tracer) -> Result<(), AceEvalError>;
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
@@ -171,8 +145,6 @@ pub(crate) trait SystemInterface {
 /// the top element, `stack_get(1)` returns the second element from the top, and so on. The stack is
 /// always at least 16 elements deep.
 pub(crate) trait StackInterface {
-    type Processor;
-
     /// Returns the top 16 elements of the stack, such that the top of the stack is at the last
     /// index of the returned slice.
     fn top(&self) -> &[Felt];
@@ -267,18 +239,14 @@ pub(crate) trait StackInterface {
     /// It is guaranteed that any operation that calls `increment_size()` will subsequently
     /// call `write(0)` or `write_word(0)` to write an element to that position on the
     /// stack.
-    fn increment_size<T>(&mut self, tracer: &mut T) -> Result<(), ExecutionError>
-    where
-        T: Tracer<Processor = Self::Processor>;
+    fn increment_size(&mut self) -> Result<(), ExecutionError>;
 
     /// Decrements the stack size by one, removing the top element from the stack.
     ///
     /// Concretely, this decrements the stack top pointer by one (removing the top element), and
     /// pushes a `ZERO` at the bottom of the stack if the stack size is already at 16 elements
     /// (since the stack size can never be less than 16).
-    fn decrement_size<T>(&mut self, tracer: &mut T)
-    where
-        T: Tracer<Processor = Self::Processor>;
+    fn decrement_size(&mut self);
 }
 
 // ADVICE PROVIDER INTERFACE

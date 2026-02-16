@@ -600,6 +600,36 @@ impl<T> MapExecErr<T> for Result<T, SystemEventError> {
     }
 }
 
+impl<T> MapExecErrWithOpIdx<T> for Result<T, SystemEventError> {
+    #[inline(always)]
+    fn map_exec_err_with_op_idx(
+        self,
+        mast_forest: &MastForest,
+        node_id: MastNodeId,
+        host: &impl Host,
+        op_idx: usize,
+    ) -> Result<T, ExecutionError> {
+        match self {
+            Ok(v) => Ok(v),
+            Err(err) => {
+                let (label, source_file) =
+                    get_label_and_source_file(Some(op_idx), mast_forest, node_id, host);
+                Err(match err {
+                    SystemEventError::Advice(err) => {
+                        ExecutionError::AdviceError { label, source_file, err }
+                    },
+                    SystemEventError::Operation(err) => {
+                        ExecutionError::OperationError { label, source_file, err }
+                    },
+                    SystemEventError::Memory(err) => {
+                        ExecutionError::MemoryError { label, source_file, err }
+                    },
+                })
+            },
+        }
+    }
+}
+
 // IoError implementations
 impl<T> MapExecErrWithOpIdx<T> for Result<T, IoError> {
     #[inline(always)]

@@ -583,11 +583,6 @@ impl Assembler {
             Instruction::ProcRef(callee) => self.procref(callee, proc_ctx.id(), block_builder)?,
 
             // ----- debug decorators -------------------------------------------------------------
-            Instruction::Breakpoint => {
-                block_builder.push_op(Noop);
-                block_builder.track_instruction(instruction, proc_ctx)?;
-            },
-
             Instruction::Debug(options) => {
                 block_builder
                     .push_decorator(Decorator::Debug(debug::compile_options(options, proc_ctx)?))?;

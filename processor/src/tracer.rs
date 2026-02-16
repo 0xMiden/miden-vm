@@ -182,15 +182,20 @@ pub trait Tracer {
     // --------------------------------------------------------------------------------------------
 
     /// Records the evaluation of a circuit.
-    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation);
+    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation);
 
     // MISCELLANEOUS
     // --------------------------------------------------------------------------------------------
 
     /// Signals that the stack depth is incremented as a result of pushing a new element.
+    ///
+    /// This method is guaranteed to be called *after* the stack size is incremented, and a valid
+    /// value is written to the new top of the stack.
     fn increment_stack_size(&mut self, processor: &Self::Processor);
 
     /// Signals that the stack depth is decremented as a result of popping an element off the stack.
+    ///
+    /// This method is guaranteed to be called *after* the stack size is decremented.
     ///
     /// Note that if the stack depth is already [miden_core::program::MIN_STACK_DEPTH], then the
     /// stack depth is unchanged; the top element is popped off, and a ZERO is shifted in at the
@@ -199,10 +204,14 @@ pub trait Tracer {
 
     /// Signals the start of a new execution context, as a result of a CALL, SYSCALL or DYNCALL
     /// operation being executed.
+    ///
+    /// This method is guaranteed to be called *before* the context is actually started.
     fn start_context(&mut self);
 
     /// Signals the end of an execution context, as a result of an END operation associated with a
     /// CALL, SYSCALL or DYNCALL.
+    ///
+    /// This method is guaranteed to be called *after* the context is actually restored.
     fn restore_context(&mut self);
 }
 
@@ -257,7 +266,7 @@ pub enum OperationHelperRegisters {
     /// - `ev`: evaluation point `alpha / x`, where `alpha` is the verifier challenge and `x` is the
     ///   domain point.
     /// - `es`: `ev^2`, i.e. `(alpha / x)^2`.
-    /// - `x`: the domain point, computed as `poe * tau_factor * DOMAIN_OFFSET`.
+    /// - `x`: the domain point, computed as `poe * tau_factor`.
     /// - `x_inv`: the multiplicative inverse of `x`.
     FriExt2Fold4 {
         ev: QuadFelt,

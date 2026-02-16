@@ -20,10 +20,11 @@ mod split;
 
 // RE-EXPORTS
 // ================================================================================================
-
 pub(crate) use basic_block::finish_emit_op_execution;
 pub(crate) use r#dyn::finish_load_mast_forest_from_dyn_start;
 pub(crate) use external::finish_load_mast_forest_from_external;
+#[cfg(test)]
+pub(crate) use operations::eval_circuit_impl;
 use operations::execute_op;
 
 // MAIN EXECUTION FUNCTION
@@ -82,7 +83,7 @@ use operations::execute_op;
 ///         InternalBreakReason::User(reason) => {
 ///             // Handle user-initiated break (e.g., propagate break reason)
 ///         },
-///         InternalBreakReason::Emit { basic_block_node_id, continuation } => {
+///         InternalBreakReason::Emit { basic_block_node_id, op_idx, continuation } => {
 ///             // Handle Emit operation (e.g., call `Host::on_event`)
 ///             self.op_emit(...);
 ///    
@@ -388,6 +389,7 @@ pub enum InternalBreakReason {
     User(BreakReason),
     Emit {
         basic_block_node_id: MastNodeId,
+        op_idx: usize,
         continuation: Continuation,
     },
     LoadMastForestFromDyn {

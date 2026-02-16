@@ -312,8 +312,23 @@ where
 
     #[cfg(feature = "constraints")]
     fn eval<AB: MidenAirBuilder<F = Felt>>(&self, builder: &mut AB) {
-        enforce_main_constraints(builder);
+                use crate::constraints;
+
+        let main = builder.main();
+
+        // Access the two rows: current (local) and next
+        let local = main.row_slice(0).expect("Matrix should have at least 1 row");
+        let next = main.row_slice(1).expect("Matrix should have at least 2 rows");
+
+        // Use structured column access via MainTraceCols
+        let local: &MainTraceRow<AB::Var> = (*local).borrow();
+        let next: &MainTraceRow<AB::Var> = (*next).borrow();
+
+        // Main trace constraints.
+        constraints::enforce_main(builder, local, next);
+
+        // Auxiliary (bus) constraints.
         #[cfg(feature = "bus_active")]
-        enforce_bus_constraints(builder);
+        constraints::enforce_bus(builder, local, next);
     }
 }

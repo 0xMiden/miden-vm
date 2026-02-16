@@ -65,7 +65,7 @@ pub async fn prove(
         "Generated execution trace of {} columns and {} steps (padded from {})",
         miden_air::trace::TRACE_WIDTH,
         trace.trace_len_summary().padded_trace_len(),
-        trace.trace_len_summary().main_trace_len()
+        trace.trace_len_summary().trace_len()
     );
 
     let stack_outputs = *trace.stack_outputs();

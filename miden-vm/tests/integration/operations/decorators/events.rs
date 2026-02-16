@@ -57,8 +57,8 @@ fn test_trace_handling() {
         ExecutionOptions::default(),
     )
     .unwrap();
-    let expected = Vec::<u32>::new();
-    assert_eq!(host.trace_handler, expected);
+    // No trace events should be recorded when tracing is disabled
+    assert!(host.get_execution_order().is_empty());
 
     // execute program with enabled tracing
     miden_processor::execute_sync(
@@ -69,8 +69,9 @@ fn test_trace_handling() {
         ExecutionOptions::default().with_tracing(true),
     )
     .unwrap();
-    let expected = vec![1, 2];
-    assert_eq!(host.trace_handler, expected);
+    // Extract trace IDs from execution order (ignoring clock cycles)
+    let trace_ids: Vec<u32> = host.get_execution_order().iter().map(|(id, _)| *id).collect();
+    assert_eq!(trace_ids, vec![1, 2]);
 }
 
 #[test]
