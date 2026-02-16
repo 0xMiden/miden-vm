@@ -9,10 +9,10 @@ use super::ood_eval::EvalRecord;
 /// Seed used for OOD evaluation fixtures.
 pub const OOD_SEED: u64 = 0xc0ffee;
 
-/// Expected OOD evaluations for the System+Range group.
+/// Expected OOD evaluations for the current group.
 ///
 /// These values are captured from the Rust constraints with seed 0xC0FFEE.
-pub fn system_range_expected() -> Vec<EvalRecord> {
+pub fn current_group_expected() -> Vec<EvalRecord> {
     vec![
         EvalRecord {
             id: 0,
@@ -96,6 +96,86 @@ pub fn system_range_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 16,
+            namespace: "stack.general.transition.0",
+            value: QuadFelt::new([Felt::new(2617308096902219240), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 17,
+            namespace: "stack.general.transition.1",
+            value: QuadFelt::new([Felt::new(4439102810547612775), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 18,
+            namespace: "stack.general.transition.2",
+            value: QuadFelt::new([Felt::new(15221140463513662734), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 19,
+            namespace: "stack.general.transition.3",
+            value: QuadFelt::new([Felt::new(4910128267170087966), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 20,
+            namespace: "stack.general.transition.4",
+            value: QuadFelt::new([Felt::new(8221884229886405628), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 21,
+            namespace: "stack.general.transition.5",
+            value: QuadFelt::new([Felt::new(87491100192562680), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 22,
+            namespace: "stack.general.transition.6",
+            value: QuadFelt::new([Felt::new(11411892308848385202), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 23,
+            namespace: "stack.general.transition.7",
+            value: QuadFelt::new([Felt::new(2425094460891103256), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 24,
+            namespace: "stack.general.transition.8",
+            value: QuadFelt::new([Felt::new(2767534397043537043), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 25,
+            namespace: "stack.general.transition.9",
+            value: QuadFelt::new([Felt::new(11686523590994044007), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 26,
+            namespace: "stack.general.transition.10",
+            value: QuadFelt::new([Felt::new(15000969044032170777), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 27,
+            namespace: "stack.general.transition.11",
+            value: QuadFelt::new([Felt::new(17422355615541008592), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 28,
+            namespace: "stack.general.transition.12",
+            value: QuadFelt::new([Felt::new(2555448945580115158), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 29,
+            namespace: "stack.general.transition.13",
+            value: QuadFelt::new([Felt::new(8864896307613509), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 30,
+            namespace: "stack.general.transition.14",
+            value: QuadFelt::new([Felt::new(3997062422665481459), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 31,
+            namespace: "stack.general.transition.15",
+            value: QuadFelt::new([Felt::new(6149720027324442163), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 32,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
@@ -107,5 +187,5 @@ pub fn system_range_expected() -> Vec<EvalRecord> {
 
 /// Entry point for the active tagged group in parity tests.
 pub fn active_expected_ood_evals() -> Vec<EvalRecord> {
-    system_range_expected()
+    current_group_expected()
 }
