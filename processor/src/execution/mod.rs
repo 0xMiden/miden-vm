@@ -460,8 +460,8 @@ where
 /// This function marks the end of a clock cycle.
 ///
 /// Specifically, it
-/// 1. Calls `tracer.finish_clock_cycle()` to signal the end of the clock cycle to the tracer.
-/// 2. Increments the processor's clock by 1.
+/// 1. Increments the processor's clock by 1.
+/// 2. Calls `tracer.finalize_clock_cycle()` to signal the end of the clock cycle to the tracer.
 /// 3. Checks if execution should stop using the provided `stopper`, providing the computed
 ///    continuation (from `continuation_after_stop()`) to the `BreakReason::Stopped` variant.
 ///
@@ -490,11 +490,11 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    // Signal the end of clock cycle to tracer (before incrementing processor clock).
-    tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);
-
     // Increment the processor clock.
     processor.system_mut().increment_clock();
+
+    // Signal the end of clock cycle to tracer (after incrementing processor clock).
+    tracer.finalize_clock_cycle(processor, op_helper_registers, current_forest);
 
     stopper.should_stop(processor, continuation_after_stop)
 }
