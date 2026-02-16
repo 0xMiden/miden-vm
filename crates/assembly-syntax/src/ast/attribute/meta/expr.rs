@@ -168,9 +168,7 @@ impl Deserializable for MetaExpr {
                 let bytes = source.read_slice(len)?;
                 let id = core::str::from_utf8(bytes)
                     .map_err(|err| DeserializationError::InvalidValue(err.to_string()))?;
-                Ok(Self::String(Ident::from_raw_parts(Span::unknown(Arc::from(
-                    id.to_string().into_boxed_str(),
-                )))))
+                Ok(Self::String(Ident::from_raw_parts(Span::unknown(Arc::from(id)))))
             },
             n => Err(DeserializationError::InvalidValue(format!(
                 "unknown MetaExpr variant tag '{n}'"
