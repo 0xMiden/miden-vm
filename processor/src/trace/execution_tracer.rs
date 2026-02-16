@@ -472,7 +472,8 @@ impl Tracer for ExecutionTracer {
                 },
                 MastNode::Block(basic_block_node) => {
                     self.hasher_for_chiplet.record_hash_basic_block(
-                        basic_block_node.op_batches().to_vec(),
+                        current_forest.clone(),
+                        mast_node_id,
                         basic_block_node.digest(),
                     );
                     let block_addr =
@@ -624,8 +625,8 @@ impl Tracer for ExecutionTracer {
         self.kernel.record_kernel_proc_access(proc_hash);
     }
 
-    fn record_circuit_evaluation(&mut self, clk: RowIndex, circuit_eval: CircuitEvaluation) {
-        self.ace.record_circuit_evaluation(clk, circuit_eval);
+    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation) {
+        self.ace.record_circuit_evaluation(circuit_evaluation);
     }
 
     fn finalize_clock_cycle(
@@ -638,7 +639,7 @@ impl Tracer for ExecutionTracer {
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
-        let new_overflow_value = processor.stack_get(15);
+        let new_overflow_value = processor.stack_get(16);
         self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 

@@ -6,7 +6,7 @@ use miden_core::{
 use proptest::prelude::*;
 
 use super::{
-    super::stack_ops::op_push, DOMAIN_OFFSET, EIGHT, TAU_INV, TAU2_INV, TAU3_INV, TWO_INV,
+    super::stack_ops::op_push, EIGHT, TAU_INV, TAU2_INV, TAU3_INV, TWO_INV,
     compute_evaluation_points, fold4 as fri_fold4, get_domain_segment_flags, get_tau_factor,
     op_fri_ext2fold4,
 };
@@ -125,7 +125,7 @@ proptest! {
 
         // Compute expected values
         let f_tau = get_tau_factor(d_seg as usize);
-        let x = poe * f_tau * DOMAIN_OFFSET;
+        let x = poe * f_tau;
         let x_inv = x.inverse();
 
         let (ev, es) = compute_evaluation_points(alpha, x_inv);

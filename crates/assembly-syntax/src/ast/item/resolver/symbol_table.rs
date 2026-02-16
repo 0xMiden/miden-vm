@@ -258,10 +258,9 @@ impl LocalSymbolTable {
                 // may want to refine module.get_import to allow passing an exclusion list, so that
                 // we can avoid recursing on the same import in an infinite loop.
                 AliasTarget::Path(shadowed) if shadowed.as_deref() == path => {
-                    Ok(SymbolResolution::External(shadowed.clone()))
+                    Ok(SymbolResolution::External(shadowed))
                 },
                 AliasTarget::Path(path) => {
-                    let path = path.clone();
                     let resolved = Self::expand(get_import, path.as_deref(), source_manager)?;
                     match resolved {
                         SymbolResolution::Module { id, path } => {
