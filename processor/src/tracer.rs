@@ -58,7 +58,7 @@ pub trait Tracer {
         current_forest: &Arc<MastForest>,
     );
 
-    /// Signals the end of a clock cycle, guaranteed to be called before incrementing the system
+    /// Signals the end of a clock cycle, guaranteed to be called after incrementing the system
     /// clock, and after all mutations to the processor state have been applied.
     ///
     /// Implementations should use this method to finalize any tracing information related to the
