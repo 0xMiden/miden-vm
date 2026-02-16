@@ -508,7 +508,7 @@ impl<'a> CoreTraceGenerationTracer<'a> {
         // Now populate the buffer with current system state for the next row
         let mut new_system_rows = [ZERO; SYS_TRACE_WIDTH];
 
-        new_system_rows[CLK_COL_IDX] = (system.clk + 1).into();
+        new_system_rows[CLK_COL_IDX] = system.clk.into();
         new_system_rows[CTX_COL_IDX] = system.ctx.into();
         new_system_rows[FN_HASH_OFFSET] = system.fn_hash[0];
         new_system_rows[FN_HASH_OFFSET + 1] = system.fn_hash[1];
