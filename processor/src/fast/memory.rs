@@ -9,7 +9,7 @@ use crate::{ContextId, MemoryAddress, MemoryError, PrimeField64, processor::Memo
 ///
 /// Allows to read/write elements or words to memory. Internally, it is implemented as a map from
 ///(context_id, word_address) to the word stored starting at that memory location.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct Memory {
     memory: BTreeMap<(ContextId, u32), Word>,
 }

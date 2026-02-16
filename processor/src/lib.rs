@@ -44,7 +44,7 @@ mod tests;
 pub use continuation_stack::Continuation;
 pub use errors::{ExecutionError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
-pub use fast::{BreakReason, ExecutionOutput, FastProcessor, Memory, ResumeContext};
+pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
 pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
