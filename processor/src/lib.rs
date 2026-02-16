@@ -12,12 +12,12 @@ use core::{
     ops::ControlFlow,
 };
 
-pub mod continuation_stack;
+mod continuation_stack;
 mod debug;
 mod errors;
 mod execution;
 mod execution_options;
-pub mod fast;
+mod fast;
 mod host;
 mod processor;
 mod tracer;
@@ -41,9 +41,10 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use continuation_stack::Continuation;
 pub use errors::{ExecutionError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
-pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};
+pub use fast::{BreakReason, ExecutionOutput, FastProcessor, Memory, ResumeContext};
 pub use host::{
     FutureMaybeSend, Host, MastForestStore, MemMastForestStore,
     debug::DefaultDebugHandler,
