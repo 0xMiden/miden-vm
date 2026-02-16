@@ -45,17 +45,17 @@ use crate::handlers::{
 /// The core library provides several categories of functionality:
 ///
 /// - **Cryptographic primitives**: Hash functions (Keccak256, SHA-512), digital signature
-///   verification (ECDSA, EdDSA-Ed25519), and authenticated encryption (AEAD decryption).
-/// - **Mathematical operations**: Division operations for u64 and Falcon signatures.
-/// - **Data structures**: Sparse Merkle Tree operations and sorted array utilities with lower-bound
-///   search capabilities.
+///   verification (ECDSA, EdDSA-Ed25519, Falcon), and authenticated encryption (AEAD decryption).
+/// - **Mathematical operations**: Division operations for u64, u128, and u256.
+/// - **Data structures**: Sparse Merkle Tree operations, Merkle Mountain Range (MMR), and sorted
+///   array utilities with lower-bound search capabilities.
+/// - **Memory operations**: Efficient hashing and "un-hashing" of large amounts of data.
 ///
 /// Many of these operations are implemented as **precompiles** - special procedures that execute
 /// outside the Miden VM but are verified as part of the proof. Precompiles allow for efficient
 /// execution of complex operations that would be expensive to compute directly in the VM, while
 /// maintaining the security guarantees of the Miden proof system. The core library includes
-/// precompiles for cryptographic operations like hash functions and signature verification, as well
-/// as specialized operations like division and SMT lookups.
+/// precompiles for cryptographic operations like hash functions and signature verification.
 ///
 /// # Usage
 ///
