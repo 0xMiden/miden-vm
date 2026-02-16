@@ -6,18 +6,22 @@
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
+#[cfg(test)]
+mod fixtures;
+pub mod manifest;
 mod ood_eval;
 mod state;
 mod tagged_builder;
 
 // Re-exports for public API.
 #[allow(unused_imports)]
+pub use manifest::{
+    CURRENT_MAX_ID, TAG_RANGE_BASE, TAG_RANGE_COUNT, TAG_SYSTEM_BASE, TAG_SYSTEM_COUNT, TOTAL_TAGS,
+};
+#[allow(unused_imports)]
 pub use ood_eval::{EvalRecord, OodEvalAirBuilder};
 #[allow(unused_imports)]
 pub use tagged_builder::TaggedAirBuilder;
-
-/// The highest constraint ID (zero-based). Update when adding constraints.
-pub const CURRENT_MAX_ID: usize = 0;
 
 /// Recorded tag data for a single asserted constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

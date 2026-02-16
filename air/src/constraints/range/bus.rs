@@ -18,6 +18,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 
 use crate::{
     MainTraceRow,
+    constraints::tagging::{TaggingAirBuilderExt, manifest::TAG_RANGE_BASE},
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
@@ -39,6 +40,12 @@ const MEMORY_D0_IDX: usize = chiplets::MEMORY_D0_COL_IDX - CHIPLETS_OFFSET;
 const MEMORY_D1_IDX: usize = chiplets::MEMORY_D1_COL_IDX - CHIPLETS_OFFSET;
 const RANGE_M_COL_IDX: usize = range::M_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
 const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
+
+// TAGGING CONSTANTS
+// ================================================================================================
+
+const RANGE_BUS_BASE_ID: usize = TAG_RANGE_BASE + 3;
+const RANGE_BUS_NAMESPACE: &str = "range.bus.transition";
 
 // ENTRY POINTS
 // ================================================================================================
@@ -80,10 +87,6 @@ where
         let alpha = challenges[0];
         (b_local, b_next, alpha)
     };
-
-    // Boundary constraints: b_range must start and end at 0
-    builder.when_first_row().assert_zero_ext(b_local.into());
-    builder.when_last_row().assert_zero_ext(b_local.into());
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]
@@ -135,7 +138,20 @@ where
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
-    builder.when_transition().assert_zero_ext(
-        b_next_term - b_term - rc_term + s0_term + s1_term + s2_term + s3_term + m0_term + m1_term,
-    );
+    let (tag_id, namespace) = range_bus_tag();
+    builder.tagged(tag_id, namespace, |builder| {
+        builder.when_transition().assert_zero_ext(
+            b_next_term - b_term - rc_term
+                + s0_term
+                + s1_term
+                + s2_term
+                + s3_term
+                + m0_term
+                + m1_term,
+        );
+    });
+}
+
+fn range_bus_tag() -> (usize, &'static str) {
+    (RANGE_BUS_BASE_ID, RANGE_BUS_NAMESPACE)
 }

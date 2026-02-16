@@ -1,0 +1,1369 @@
+//! Operation flags for stack constraints.
+//!
+//! This module computes operation flags from decoder op bits. These flags are used
+//! throughout stack constraints to gate constraint enforcement based on which operation
+//! is currently being executed.
+//!
+//! ## Operation Degree Categories
+//!
+//! Operations are grouped by their flag computation degree:
+//! - **Degree 7**: 64 operations (opcodes 0-63) - use all 7 op bits
+//! - **Degree 6**: 8 operations (opcodes 64-79) - u32 operations
+//! - **Degree 5**: 16 operations (opcodes 80-95) - use op_bit_extra[0]
+//! - **Degree 4**: 8 operations (opcodes 96-127) - use op_bit_extra[1]
+//!
+//! ## Composite Flags
+//!
+//! The module also computes composite flags that combine multiple operations:
+//! - `no_shift_at(i)`: stack position i unchanged
+//! - `left_shift_at(i)`: stack shifts left at position i
+//! - `right_shift_at(i)`: stack shifts right at position i
+
+use miden_core::{field::PrimeCharacteristicRing, operations::Operation};
+
+#[cfg(test)]
+use crate::trace::decoder::NUM_OP_BITS;
+use crate::trace::{
+    decoder::{IS_LOOP_FLAG_COL_IDX, OP_BITS_EXTRA_COLS_RANGE, OP_BITS_RANGE},
+    stack::{B0_COL_IDX, H0_COL_IDX},
+};
+
+// CONSTANTS
+// ================================================================================================
+
+/// Total number of degree 7 operations in the VM.
+pub const NUM_DEGREE_7_OPS: usize = 64;
+
+/// Total number of degree 6 operations in the VM.
+pub const NUM_DEGREE_6_OPS: usize = 8;
+
+/// Total number of degree 5 operations in the VM.
+pub const NUM_DEGREE_5_OPS: usize = 16;
+
+/// Total number of degree 4 operations in the VM.
+pub const NUM_DEGREE_4_OPS: usize = 8;
+
+/// Total number of composite flags per stack impact type in the VM.
+pub const NUM_STACK_IMPACT_FLAGS: usize = 16;
+
+/// Opcode at which degree 7 operations start.
+const DEGREE_7_OPCODE_STARTS: usize = 0;
+
+/// Opcode at which degree 7 operations end.
+const DEGREE_7_OPCODE_ENDS: usize = DEGREE_7_OPCODE_STARTS + 63;
+
+/// Opcode at which degree 6 operations start.
+const DEGREE_6_OPCODE_STARTS: usize = DEGREE_7_OPCODE_ENDS + 1;
+
+/// Opcode at which degree 6 operations end.
+const DEGREE_6_OPCODE_ENDS: usize = DEGREE_6_OPCODE_STARTS + 15;
+
+/// Opcode at which degree 5 operations start.
+const DEGREE_5_OPCODE_STARTS: usize = DEGREE_6_OPCODE_ENDS + 1;
+
+/// Opcode at which degree 5 operations end.
+const DEGREE_5_OPCODE_ENDS: usize = DEGREE_5_OPCODE_STARTS + 15;
+
+/// Opcode at which degree 4 operations start.
+const DEGREE_4_OPCODE_STARTS: usize = DEGREE_5_OPCODE_ENDS + 1;
+
+/// Opcode at which degree 4 operations end.
+#[allow(dead_code)]
+const DEGREE_4_OPCODE_ENDS: usize = DEGREE_4_OPCODE_STARTS + 31;
+
+// INTERNAL HELPERS
+// ================================================================================================
+
+/// Operation flags for all stack operations.
+///
+/// Computes all operation flag expressions from decoder op bits. Only one flag will be
+/// non-zero for any given row. The flags are computed using intermediate values to
+/// minimize the number of multiplications.
+///
+/// This struct is parameterized by the expression type `E` which allows it to work
+/// with both concrete field elements (for testing) and symbolic expressions (for
+/// constraint generation).
+#[allow(dead_code)]
+pub struct OpFlags<E> {
+    degree7_op_flags: [E; NUM_DEGREE_7_OPS],
+    degree6_op_flags: [E; NUM_DEGREE_6_OPS],
+    degree5_op_flags: [E; NUM_DEGREE_5_OPS],
+    degree4_op_flags: [E; NUM_DEGREE_4_OPS],
+    no_shift_flags: [E; NUM_STACK_IMPACT_FLAGS],
+    left_shift_flags: [E; NUM_STACK_IMPACT_FLAGS],
+    right_shift_flags: [E; NUM_STACK_IMPACT_FLAGS],
+
+    left_shift: E,
+    right_shift: E,
+    control_flow: E,
+    overflow: E,
+    u32_rc_op: E,
+}
+
+/// Helper trait for accessing decoder columns from a trace row.
+pub trait DecoderAccess<E> {
+    /// Returns the value of op_bit[index] from the decoder.
+    fn op_bit(&self, index: usize) -> E;
+
+    /// Returns the value of op_bit_extra[index] from the decoder.
+    fn op_bit_extra(&self, index: usize) -> E;
+
+    /// Returns the h0 helper register (overflow indicator).
+    fn overflow_register(&self) -> E;
+
+    /// Returns the stack depth (b0 column).
+    fn stack_depth(&self) -> E;
+
+    /// Returns the is_loop flag from the decoder.
+    fn is_loop_end(&self) -> E;
+}
+
+/// Implement DecoderAccess for MainTraceRow references.
+impl<T> DecoderAccess<T> for &crate::MainTraceRow<T>
+where
+    T: Clone,
+{
+    #[inline]
+    fn op_bit(&self, index: usize) -> T {
+        self.decoder[OP_BITS_RANGE.start + index].clone()
+    }
+
+    #[inline]
+    fn op_bit_extra(&self, index: usize) -> T {
+        self.decoder[OP_BITS_EXTRA_COLS_RANGE.start + index].clone()
+    }
+
+    #[inline]
+    fn overflow_register(&self) -> T {
+        self.stack[H0_COL_IDX].clone()
+    }
+
+    #[inline]
+    fn stack_depth(&self) -> T {
+        self.stack[B0_COL_IDX].clone()
+    }
+
+    #[inline]
+    fn is_loop_end(&self) -> T {
+        self.decoder[IS_LOOP_FLAG_COL_IDX].clone()
+    }
+}
+
+/// Wrapper that converts trace row variables to expressions during decoder access.
+///
+/// This is used when building constraints to convert `AB::Var` to `AB::Expr` so that
+/// `OpFlags<AB::Expr>` can be created for use in constraint expressions.
+pub struct ExprDecoderAccess<'a, V, E> {
+    row: &'a crate::MainTraceRow<V>,
+    _phantom: core::marker::PhantomData<E>,
+}
+
+impl<'a, V, E> ExprDecoderAccess<'a, V, E> {
+    /// Creates a new expression decoder access wrapper.
+    pub fn new(row: &'a crate::MainTraceRow<V>) -> Self {
+        Self { row, _phantom: core::marker::PhantomData }
+    }
+}
+
+impl<'a, V, E> DecoderAccess<E> for ExprDecoderAccess<'a, V, E>
+where
+    V: Clone + Into<E>,
+{
+    #[inline]
+    fn op_bit(&self, index: usize) -> E {
+        self.row.decoder[OP_BITS_RANGE.start + index].clone().into()
+    }
+
+    #[inline]
+    fn op_bit_extra(&self, index: usize) -> E {
+        self.row.decoder[OP_BITS_EXTRA_COLS_RANGE.start + index].clone().into()
+    }
+
+    #[inline]
+    fn overflow_register(&self) -> E {
+        self.row.stack[H0_COL_IDX].clone().into()
+    }
+
+    #[inline]
+    fn stack_depth(&self) -> E {
+        self.row.stack[B0_COL_IDX].clone().into()
+    }
+
+    #[inline]
+    fn is_loop_end(&self) -> E {
+        self.row.decoder[IS_LOOP_FLAG_COL_IDX].clone().into()
+    }
+}
+
+/// Helper function to compute binary NOT: 1 - x
+#[inline]
+fn binary_not<E>(x: E) -> E
+where
+    E: Clone + core::ops::Sub<Output = E> + PrimeCharacteristicRing,
+{
+    E::ONE - x
+}
+
+#[allow(dead_code)]
+impl<E> OpFlags<E>
+where
+    E: Clone
+        + Default
+        + core::ops::Add<Output = E>
+        + core::ops::Sub<Output = E>
+        + core::ops::Mul<Output = E>
+        + PrimeCharacteristicRing,
+{
+    /// Creates a new OpFlags instance by computing all flags from the decoder columns.
+    ///
+    /// The computation uses intermediate values to minimize multiplications:
+    /// - Degree 7 flags: computed hierarchically from op bits
+    /// - Degree 6 flags: u32 operations, share common prefix `100`
+    /// - Degree 5 flags: use op_bit_extra[0] for degree reduction
+    /// - Degree 4 flags: use op_bit_extra[1] for degree reduction
+    pub fn new<D: DecoderAccess<E>>(frame: D) -> Self {
+        // Initialize arrays with default values
+        let mut degree7_op_flags: [E; NUM_DEGREE_7_OPS] = core::array::from_fn(|_| E::default());
+        let mut degree6_op_flags: [E; NUM_DEGREE_6_OPS] = core::array::from_fn(|_| E::default());
+        let mut degree5_op_flags: [E; NUM_DEGREE_5_OPS] = core::array::from_fn(|_| E::default());
+        let mut degree4_op_flags: [E; NUM_DEGREE_4_OPS] = core::array::from_fn(|_| E::default());
+        let mut no_shift_flags: [E; NUM_STACK_IMPACT_FLAGS] =
+            core::array::from_fn(|_| E::default());
+        let mut left_shift_flags: [E; NUM_STACK_IMPACT_FLAGS] =
+            core::array::from_fn(|_| E::default());
+        let mut right_shift_flags: [E; NUM_STACK_IMPACT_FLAGS] =
+            core::array::from_fn(|_| E::default());
+
+        // Get op bits
+        let bit_0 = frame.op_bit(0);
+        let bit_1 = frame.op_bit(1);
+        let bit_2 = frame.op_bit(2);
+        let bit_3 = frame.op_bit(3);
+        let bit_4 = frame.op_bit(4);
+        let bit_5 = frame.op_bit(5);
+        let bit_6 = frame.op_bit(6);
+
+        // Binary NOT of all operation bits
+        let not_0 = binary_not(bit_0.clone());
+        let not_1 = binary_not(bit_1.clone());
+        let not_2 = binary_not(bit_2.clone());
+        let not_3 = binary_not(bit_3.clone());
+        let not_4 = binary_not(bit_4.clone());
+        let not_5 = binary_not(bit_5.clone());
+        let not_6 = binary_not(bit_6.clone());
+
+        // --- Low-degree prefix selectors for composite flags ---
+        // These produce degree-5 left_shift and right_shift composite flags.
+        // per spec: https://0xmiden.github.io/miden-vm/design/stack/op_constraints.html#shift-left-flag
+
+        // Prefix `010` selector: (1-b6)*b5*(1-b4) - degree 3
+        // Covers all degree-7 operations with this prefix (left shift ops)
+        let prefix_010 = not_6.clone() * bit_5.clone() * not_4.clone();
+
+        // Prefix `011` selector: (1-b6)*b5*b4 - degree 3
+        // Covers all degree-7 operations with this prefix (right shift ops)
+        let prefix_011 = not_6.clone() * bit_5.clone() * bit_4.clone();
+
+        // Prefix `10011` selector: b6*(1-b5)*(1-b4)*b3*b2 - degree 5
+        // Covers U32ADD3 and U32MADD (both cause left shift by 2)
+        let add3_madd_prefix =
+            bit_6.clone() * not_5.clone() * not_4.clone() * bit_3.clone() * bit_2.clone();
+
+        // --- Computation of degree 7 operation flags ---
+
+        // Intermediate values computed from most significant bits
+        degree7_op_flags[0] = not_5.clone() * not_4.clone();
+        degree7_op_flags[16] = not_5.clone() * bit_4.clone();
+        degree7_op_flags[32] = bit_5.clone() * not_4.clone();
+        degree7_op_flags[48] = bit_5.clone() * bit_4.clone();
+
+        // Flag of prefix `100` - all degree 6 u32 operations
+        let f100 = degree7_op_flags[0].clone() * bit_6.clone();
+        // Flag of prefix `1000` - u32 arithmetic operations
+        let f1000 = f100.clone() * not_3.clone();
+
+        let not_6_not_3 = not_6.clone() * not_3.clone();
+        let not_6_yes_3 = not_6.clone() * bit_3.clone();
+
+        // Add fourth most significant bit along with most significant bit
+        for i in (0..64).step_by(16) {
+            let base = degree7_op_flags[i].clone();
+            degree7_op_flags[i + 8] = base.clone() * not_6_yes_3.clone();
+            degree7_op_flags[i] = base * not_6_not_3.clone();
+        }
+
+        // Flag of prefix `011` - degree 7 right shift operations
+        let f011 = degree7_op_flags[48].clone() + degree7_op_flags[56].clone();
+        // Flag of prefix `010` - degree 7 left shift operations (reserved for future use)
+        let _f010 = degree7_op_flags[32].clone() + degree7_op_flags[40].clone();
+        // Flag of prefix `0000` - no shift from position 1 onwards
+        let f0000 = degree7_op_flags[0].clone();
+        // Flag of prefix `0100` - left shift from position 2 onwards
+        let f0100 = degree7_op_flags[32].clone();
+
+        // Add fifth most significant bit
+        for i in (0..64).step_by(8) {
+            let base = degree7_op_flags[i].clone();
+            degree7_op_flags[i + 4] = base.clone() * bit_2.clone();
+            degree7_op_flags[i] = base * not_2.clone();
+        }
+
+        // Add sixth most significant bit
+        for i in (0..64).step_by(4) {
+            let base = degree7_op_flags[i].clone();
+            degree7_op_flags[i + 2] = base.clone() * bit_1.clone();
+            degree7_op_flags[i] = base * not_1.clone();
+        }
+
+        // Cache flags for mov{up/dn}{2-8}, swapw{2-3} operations
+        let mov2_flag = degree7_op_flags[10].clone();
+        let mov3_flag = degree7_op_flags[12].clone();
+        let mov4_flag = degree7_op_flags[16].clone();
+        let mov5_flag = degree7_op_flags[18].clone();
+        let mov6_flag = degree7_op_flags[20].clone();
+        let mov7_flag = degree7_op_flags[22].clone();
+        let mov8_flag = degree7_op_flags[26].clone();
+        let swapwx_flag = degree7_op_flags[28].clone();
+        let adv_popw_expacc = degree7_op_flags[14].clone();
+
+        // Add least significant bit
+        for i in (0..64).step_by(2) {
+            let base = degree7_op_flags[i].clone();
+            degree7_op_flags[i + 1] = base.clone() * bit_0.clone();
+            degree7_op_flags[i] = base * not_0.clone();
+        }
+
+        let ext2mul_flag = degree7_op_flags[25].clone();
+
+        // Flag when items from first position onwards are copied over (excludes NOOP)
+        let no_change_1_flag = f0000.clone() - degree7_op_flags[0].clone();
+        // Flag when items from second position onwards shift left (excludes ASSERT)
+        let left_change_1_flag = f0100 - degree7_op_flags[32].clone();
+
+        // --- Computation of degree 6 operation flags ---
+
+        // Degree 6 flag prefix is `100`
+        let degree_6_flag = bit_6.clone() * not_5.clone() * not_4.clone();
+
+        // Degree 6 flags do not use the first bit (op_bits[0])
+        let not_2_not_3 = not_2.clone() * not_3.clone();
+        let yes_2_not_3 = bit_2.clone() * not_3.clone();
+        let not_2_yes_3 = not_2.clone() * bit_3.clone();
+        let yes_2_yes_3 = bit_2.clone() * bit_3.clone();
+
+        degree6_op_flags[0] = not_1.clone() * not_2_not_3.clone(); // U32ADD
+        degree6_op_flags[1] = bit_1.clone() * not_2_not_3.clone(); // U32SUB
+        degree6_op_flags[2] = not_1.clone() * yes_2_not_3.clone(); // U32MUL
+        degree6_op_flags[3] = bit_1.clone() * yes_2_not_3.clone(); // U32DIV
+        degree6_op_flags[4] = not_1.clone() * not_2_yes_3.clone(); // U32SPLIT
+        degree6_op_flags[5] = bit_1.clone() * not_2_yes_3.clone(); // U32ASSERT2
+        degree6_op_flags[6] = not_1.clone() * yes_2_yes_3.clone(); // U32ADD3
+        degree6_op_flags[7] = bit_1.clone() * yes_2_yes_3.clone(); // U32MADD
+
+        // Multiply by degree 6 flag
+        for flag in degree6_op_flags.iter_mut() {
+            *flag = flag.clone() * degree_6_flag.clone();
+        }
+
+        // --- Computation of degree 5 operation flags ---
+
+        // Degree 5 flag uses the first degree reduction column
+        let degree_5_flag = frame.op_bit_extra(0);
+
+        let not_0_not_1 = not_0.clone() * not_1.clone();
+        let yes_0_not_1 = bit_0.clone() * not_1.clone();
+        let not_0_yes_1 = not_0.clone() * bit_1.clone();
+        let yes_0_yes_1 = bit_0.clone() * bit_1.clone();
+
+        degree5_op_flags[0] = not_0_not_1.clone() * not_2.clone(); // HPERM
+        degree5_op_flags[1] = yes_0_not_1.clone() * not_2.clone(); // MPVERIFY
+        degree5_op_flags[2] = not_0_yes_1.clone() * not_2.clone(); // PIPE
+        degree5_op_flags[3] = yes_0_yes_1.clone() * not_2.clone(); // MSTREAM
+        degree5_op_flags[4] = not_0_not_1.clone() * bit_2.clone(); // SPLIT
+        degree5_op_flags[5] = yes_0_not_1.clone() * bit_2.clone(); // LOOP
+        degree5_op_flags[6] = not_0_yes_1.clone() * bit_2.clone(); // SPAN
+        degree5_op_flags[7] = yes_0_yes_1.clone() * bit_2.clone(); // JOIN
+
+        // Second half shares same lower 3 bits
+        for i in 0..8 {
+            degree5_op_flags[i + 8] = degree5_op_flags[i].clone();
+        }
+
+        // Update with op_bit[3] and degree 5 flag
+        let deg_5_not_3 = not_3.clone() * degree_5_flag.clone();
+        for flag in degree5_op_flags.iter_mut().take(8) {
+            *flag = flag.clone() * deg_5_not_3.clone();
+        }
+        let deg_5_yes_3 = bit_3.clone() * degree_5_flag.clone();
+        for flag in degree5_op_flags.iter_mut().skip(8) {
+            *flag = flag.clone() * deg_5_yes_3.clone();
+        }
+
+        // --- Computation of degree 4 operation flags ---
+
+        // Degree 4 flag uses the second degree reduction column
+        let degree_4_flag = frame.op_bit_extra(1);
+
+        // Degree 4 flags do not use the first two bits
+        degree4_op_flags[0] = not_2_not_3.clone(); // MRUPDATE
+        degree4_op_flags[1] = yes_2_not_3; // (unused)
+        degree4_op_flags[2] = not_2_yes_3; // SYSCALL
+        degree4_op_flags[3] = yes_2_yes_3; // CALL
+
+        // Second half shares same lower 4 bits
+        for i in 0..4 {
+            degree4_op_flags[i + 4] = degree4_op_flags[i].clone();
+        }
+
+        // Update with op_bit[4] and degree 4 flag
+        let deg_4_not_4 = not_4.clone() * degree_4_flag.clone();
+        for flag in degree4_op_flags.iter_mut().take(4) {
+            *flag = flag.clone() * deg_4_not_4.clone();
+        }
+        let deg_4_yes_4 = bit_4.clone() * degree_4_flag.clone();
+        for flag in degree4_op_flags.iter_mut().skip(4) {
+            *flag = flag.clone() * deg_4_yes_4.clone();
+        }
+
+        // --- No shift composite flags computation ---
+
+        // Flag for END operation causing stack to shift left (depends on whether in loop)
+        let shift_left_on_end = degree4_op_flags[4].clone() * frame.is_loop_end();
+
+        no_shift_flags[0] = degree7_op_flags[0].clone() // NOOP
+            + degree6_op_flags[5].clone() // U32ASSERT2
+            + degree5_op_flags[1].clone() // MPVERIFY
+            + degree5_op_flags[6].clone() // SPAN
+            + degree5_op_flags[7].clone() // JOIN
+            + degree7_op_flags[31].clone() // EMIT
+            + degree4_op_flags[6].clone() // RESPAN
+            + degree4_op_flags[7].clone() // HALT
+            + degree4_op_flags[3].clone() // CALL
+            + degree4_op_flags[4].clone() * binary_not(frame.is_loop_end()); // END (non-loop)
+
+        no_shift_flags[1] = no_shift_flags[0].clone() + no_change_1_flag;
+        no_shift_flags[2] = no_shift_flags[1].clone()
+            + degree7_op_flags[8].clone() // SWAP
+            + f1000.clone(); // u32 arithmetic
+        no_shift_flags[3] = no_shift_flags[2].clone() + mov2_flag.clone();
+        no_shift_flags[4] = no_shift_flags[3].clone()
+            + mov3_flag.clone()
+            + adv_popw_expacc.clone()
+            + swapwx_flag.clone()
+            + ext2mul_flag.clone()
+            + degree4_op_flags[0].clone(); // MRUPDATE
+
+        no_shift_flags[5] = no_shift_flags[4].clone() + mov4_flag.clone();
+        no_shift_flags[6] = no_shift_flags[5].clone() + mov5_flag.clone();
+        no_shift_flags[7] = no_shift_flags[6].clone() + mov6_flag.clone();
+        no_shift_flags[8] =
+            no_shift_flags[7].clone() + mov7_flag.clone() + degree7_op_flags[24].clone()
+                - degree7_op_flags[28].clone();
+
+        no_shift_flags[9] = no_shift_flags[8].clone() + mov8_flag.clone();
+        no_shift_flags[10] = no_shift_flags[9].clone();
+        no_shift_flags[11] = no_shift_flags[9].clone();
+        // SWAPW3; SWAPW2; HPERM
+        no_shift_flags[12] = no_shift_flags[9].clone() - degree7_op_flags[29].clone()
+            + degree7_op_flags[28].clone()
+            + degree5_op_flags[0].clone();
+        no_shift_flags[13] = no_shift_flags[12].clone();
+        no_shift_flags[14] = no_shift_flags[12].clone();
+        no_shift_flags[15] = no_shift_flags[12].clone();
+
+        // --- Left shift composite flags computation ---
+
+        let movdnn_flag = degree7_op_flags[11].clone()
+            + degree7_op_flags[13].clone()
+            + degree7_op_flags[17].clone()
+            + degree7_op_flags[19].clone()
+            + degree7_op_flags[21].clone()
+            + degree7_op_flags[23].clone()
+            + degree7_op_flags[27].clone();
+
+        let split_loop_flag = degree5_op_flags[4].clone() + degree5_op_flags[5].clone();
+        let add3_madd_flag = degree6_op_flags[6].clone() + degree6_op_flags[7].clone();
+
+        left_shift_flags[1] = degree7_op_flags[32].clone()
+            + movdnn_flag.clone()
+            + degree7_op_flags[41].clone()
+            + degree7_op_flags[45].clone()
+            + degree7_op_flags[47].clone()
+            + degree7_op_flags[46].clone()
+            + split_loop_flag.clone()
+            + shift_left_on_end.clone()
+            + degree5_op_flags[8].clone() // DYN
+            + degree5_op_flags[12].clone(); // DYNCALL
+
+        left_shift_flags[2] = left_shift_flags[1].clone() + left_change_1_flag;
+        left_shift_flags[3] =
+            left_shift_flags[2].clone() + add3_madd_flag.clone() + degree7_op_flags[42].clone()
+                - degree7_op_flags[11].clone();
+        left_shift_flags[4] = left_shift_flags[3].clone() - degree7_op_flags[13].clone();
+        left_shift_flags[5] = left_shift_flags[4].clone() + degree7_op_flags[44].clone()
+            - degree7_op_flags[17].clone();
+        left_shift_flags[6] = left_shift_flags[5].clone() - degree7_op_flags[19].clone();
+        left_shift_flags[7] = left_shift_flags[6].clone() - degree7_op_flags[21].clone();
+        left_shift_flags[8] = left_shift_flags[7].clone() - degree7_op_flags[23].clone();
+        left_shift_flags[9] = left_shift_flags[8].clone() + degree7_op_flags[43].clone()
+            - degree7_op_flags[27].clone();
+        left_shift_flags[10] = left_shift_flags[9].clone();
+        left_shift_flags[11] = left_shift_flags[9].clone();
+        left_shift_flags[12] = left_shift_flags[9].clone();
+        left_shift_flags[13] = left_shift_flags[9].clone();
+        left_shift_flags[14] = left_shift_flags[9].clone();
+        left_shift_flags[15] = left_shift_flags[9].clone();
+
+        // --- Right shift composite flags computation ---
+
+        let movupn_flag = degree7_op_flags[10].clone()
+            + degree7_op_flags[12].clone()
+            + degree7_op_flags[16].clone()
+            + degree7_op_flags[18].clone()
+            + degree7_op_flags[20].clone()
+            + degree7_op_flags[22].clone()
+            + degree7_op_flags[26].clone();
+
+        right_shift_flags[0] = f011.clone()
+            + degree5_op_flags[11].clone() // PUSH
+            + movupn_flag.clone();
+
+        right_shift_flags[1] = right_shift_flags[0].clone() + degree6_op_flags[4].clone(); // U32SPLIT
+
+        right_shift_flags[2] = right_shift_flags[1].clone() - degree7_op_flags[10].clone();
+        right_shift_flags[3] = right_shift_flags[2].clone() - degree7_op_flags[12].clone();
+        right_shift_flags[4] = right_shift_flags[3].clone() - degree7_op_flags[16].clone();
+        right_shift_flags[5] = right_shift_flags[4].clone() - degree7_op_flags[18].clone();
+        right_shift_flags[6] = right_shift_flags[5].clone() - degree7_op_flags[20].clone();
+        right_shift_flags[7] = right_shift_flags[6].clone() - degree7_op_flags[22].clone();
+        right_shift_flags[8] = right_shift_flags[7].clone() - degree7_op_flags[26].clone();
+        right_shift_flags[9] = right_shift_flags[8].clone();
+        right_shift_flags[10] = right_shift_flags[8].clone();
+        right_shift_flags[11] = right_shift_flags[8].clone();
+        right_shift_flags[12] = right_shift_flags[8].clone();
+        right_shift_flags[13] = right_shift_flags[8].clone();
+        right_shift_flags[14] = right_shift_flags[8].clone();
+        right_shift_flags[15] = right_shift_flags[8].clone();
+
+        // --- Other composite flags ---
+
+        // Flag if stack shifted right (degree 6, dominated by U32SPLIT)
+        // Uses prefix_011 (degree 3) instead of f011 (degree 4) for lower base degree
+        let right_shift = prefix_011.clone()
+            + degree5_op_flags[11].clone() // PUSH
+            + degree6_op_flags[4].clone(); // U32SPLIT
+
+        // Flag if stack shifted left (degree 5)
+        // Uses prefix_010 (degree 3) and add3_madd_prefix (degree 5) for controlled degree
+        // Note: DYNCALL not included, see docs
+        let left_shift = prefix_010.clone()
+            + add3_madd_prefix.clone()
+            + split_loop_flag
+            + degree4_op_flags[5].clone() // REPEAT
+            + shift_left_on_end
+            + degree5_op_flags[8].clone(); // DYN
+
+        // Flag if current operation is a control flow operation.
+        //
+        // Control flow operations are the only operations that can execute when outside a basic
+        // block (i.e., when in_span = 0). This is enforced by the decoder constraint:
+        //   (1 - in_span) * (1 - control_flow) = 0
+        //
+        // Control flow operations (must include ALL of these):
+        // - Block starters: SPAN, JOIN, SPLIT, LOOP
+        // - Block transitions: END, REPEAT, RESPAN, HALT
+        // - Dynamic execution: DYN, DYNCALL
+        // - Procedure calls: CALL, SYSCALL
+        //
+        // IMPORTANT: If a new control flow operation is added, it MUST be included here,
+        // otherwise the decoder constraint will fail when executing that operation.
+        let control_flow = degree_5_flag * not_3.clone() * bit_2.clone() // SPAN, JOIN, SPLIT, LOOP
+            + degree_4_flag * bit_4.clone() // END, REPEAT, RESPAN, HALT
+            + degree5_op_flags[8].clone() // DYN
+            + degree5_op_flags[12].clone() // DYNCALL
+            + degree4_op_flags[2].clone() // SYSCALL
+            + degree4_op_flags[3].clone(); // CALL
+
+        // Flag if current operation is a degree 6 u32 operation
+        let u32_rc_op = f100;
+
+        // Flag if overflow table contains values
+        let overflow = (frame.stack_depth() - E::from_u64(16)) * frame.overflow_register();
+
+        Self {
+            degree7_op_flags,
+            degree6_op_flags,
+            degree5_op_flags,
+            degree4_op_flags,
+            no_shift_flags,
+            left_shift_flags,
+            right_shift_flags,
+            left_shift,
+            right_shift,
+            control_flow,
+            overflow,
+            u32_rc_op,
+        }
+    }
+
+    // STATE ACCESSORS
+    // ============================================================================================
+
+    // ------ Degree 7 operations with no shift ---------------------------------------------------
+
+    /// Operation Flag of NOOP operation.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn noop(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Noop.op_code())].clone()
+    }
+
+    /// Operation Flag of EQZ operation.
+    #[inline(always)]
+    pub fn eqz(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Eqz.op_code())].clone()
+    }
+
+    /// Operation Flag of NEG operation.
+    #[inline(always)]
+    pub fn neg(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Neg.op_code())].clone()
+    }
+
+    /// Operation Flag of INV operation.
+    #[inline(always)]
+    pub fn inv(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Inv.op_code())].clone()
+    }
+
+    /// Operation Flag of INCR operation.
+    #[inline(always)]
+    pub fn incr(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Incr.op_code())].clone()
+    }
+
+    /// Operation Flag of NOT operation.
+    #[inline(always)]
+    pub fn not(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Not.op_code())].clone()
+    }
+
+    /// Operation Flag of MLOAD operation.
+    #[inline(always)]
+    pub fn mload(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MLoad.op_code())].clone()
+    }
+
+    /// Operation Flag of SWAP operation.
+    #[inline(always)]
+    pub fn swap(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Swap.op_code())].clone()
+    }
+
+    /// Operation Flag of CALLER operation.
+    ///
+    /// CALLER overwrites the top 4 stack elements with the hash of the function
+    /// that initiated the current SYSCALL.
+    #[inline(always)]
+    pub fn caller(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Caller.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP2 operation.
+    #[inline(always)]
+    pub fn movup2(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp2.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN2 operation.
+    #[inline(always)]
+    pub fn movdn2(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn2.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP3 operation.
+    #[inline(always)]
+    pub fn movup3(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp3.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN3 operation.
+    #[inline(always)]
+    pub fn movdn3(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn3.op_code())].clone()
+    }
+
+    /// Operation Flag of ADVPOPW operation.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn advpopw(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::AdvPopW.op_code())].clone()
+    }
+
+    /// Operation Flag of EXPACC operation.
+    #[inline(always)]
+    pub fn expacc(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Expacc.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP4 operation.
+    #[inline(always)]
+    pub fn movup4(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp4.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN4 operation.
+    #[inline(always)]
+    pub fn movdn4(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn4.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP5 operation.
+    #[inline(always)]
+    pub fn movup5(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp5.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN5 operation.
+    #[inline(always)]
+    pub fn movdn5(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn5.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP6 operation.
+    #[inline(always)]
+    pub fn movup6(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp6.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN6 operation.
+    #[inline(always)]
+    pub fn movdn6(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn6.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP7 operation.
+    #[inline(always)]
+    pub fn movup7(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp7.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN7 operation.
+    #[inline(always)]
+    pub fn movdn7(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn7.op_code())].clone()
+    }
+
+    /// Operation Flag of SWAPW operation.
+    #[inline(always)]
+    pub fn swapw(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::SwapW.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVUP8 operation.
+    #[inline(always)]
+    pub fn movup8(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovUp8.op_code())].clone()
+    }
+
+    /// Operation Flag of MOVDN8 operation.
+    #[inline(always)]
+    pub fn movdn8(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MovDn8.op_code())].clone()
+    }
+
+    /// Operation Flag of SWAPW2 operation.
+    #[inline(always)]
+    pub fn swapw2(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::SwapW2.op_code())].clone()
+    }
+
+    /// Operation Flag of SWAPW3 operation.
+    #[inline(always)]
+    pub fn swapw3(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::SwapW3.op_code())].clone()
+    }
+
+    /// Operation Flag of SWAPDW operation.
+    #[inline(always)]
+    pub fn swapdw(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::SwapDW.op_code())].clone()
+    }
+
+    /// Operation Flag of EXT2MUL operation.
+    #[inline(always)]
+    pub fn ext2mul(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Ext2Mul.op_code())].clone()
+    }
+
+    // ------ Degree 7 operations with left shift -------------------------------------------------
+
+    /// Operation Flag of ASSERT operation.
+    #[inline(always)]
+    pub fn assert_op(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Assert(miden_core::ZERO).op_code())].clone()
+    }
+
+    /// Operation Flag of EQ operation.
+    #[inline(always)]
+    pub fn eq(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Eq.op_code())].clone()
+    }
+
+    /// Operation Flag of ADD operation.
+    #[inline(always)]
+    pub fn add(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Add.op_code())].clone()
+    }
+
+    /// Operation Flag of MUL operation.
+    #[inline(always)]
+    pub fn mul(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Mul.op_code())].clone()
+    }
+
+    /// Operation Flag of AND operation.
+    #[inline(always)]
+    pub fn and(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::And.op_code())].clone()
+    }
+
+    /// Operation Flag of OR operation.
+    #[inline(always)]
+    pub fn or(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Or.op_code())].clone()
+    }
+
+    /// Operation Flag of U32AND operation.
+    #[inline(always)]
+    pub fn u32and(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::U32and.op_code())].clone()
+    }
+
+    /// Operation Flag of U32XOR operation.
+    #[inline(always)]
+    pub fn u32xor(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::U32xor.op_code())].clone()
+    }
+
+    /// Operation Flag of DROP operation.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn drop(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Drop.op_code())].clone()
+    }
+
+    /// Operation Flag of CSWAP operation.
+    #[inline(always)]
+    pub fn cswap(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::CSwap.op_code())].clone()
+    }
+
+    /// Operation Flag of CSWAPW operation.
+    #[inline(always)]
+    pub fn cswapw(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::CSwapW.op_code())].clone()
+    }
+
+    /// Operation Flag of MLOADW operation.
+    #[inline(always)]
+    pub fn mloadw(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MLoadW.op_code())].clone()
+    }
+
+    /// Operation Flag of MSTORE operation.
+    #[inline(always)]
+    pub fn mstore(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MStore.op_code())].clone()
+    }
+
+    /// Operation Flag of MSTOREW operation.
+    #[inline(always)]
+    pub fn mstorew(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::MStoreW.op_code())].clone()
+    }
+
+    // ------ Degree 7 operations with right shift ------------------------------------------------
+
+    /// Operation Flag of PAD operation.
+    #[inline(always)]
+    pub fn pad(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Pad.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP operation.
+    #[inline(always)]
+    pub fn dup(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup0.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP1 operation.
+    #[inline(always)]
+    pub fn dup1(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup1.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP2 operation.
+    #[inline(always)]
+    pub fn dup2(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup2.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP3 operation.
+    #[inline(always)]
+    pub fn dup3(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup3.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP4 operation.
+    #[inline(always)]
+    pub fn dup4(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup4.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP5 operation.
+    #[inline(always)]
+    pub fn dup5(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup5.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP6 operation.
+    #[inline(always)]
+    pub fn dup6(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup6.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP7 operation.
+    #[inline(always)]
+    pub fn dup7(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup7.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP9 operation.
+    #[inline(always)]
+    pub fn dup9(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup9.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP11 operation.
+    #[inline(always)]
+    pub fn dup11(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup11.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP13 operation.
+    #[inline(always)]
+    pub fn dup13(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup13.op_code())].clone()
+    }
+
+    /// Operation Flag of DUP15 operation.
+    #[inline(always)]
+    pub fn dup15(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Dup15.op_code())].clone()
+    }
+
+    /// Operation Flag of ADVPOP operation.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn advpop(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::AdvPop.op_code())].clone()
+    }
+
+    /// Operation Flag of SDEPTH operation.
+    #[inline(always)]
+    pub fn sdepth(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::SDepth.op_code())].clone()
+    }
+
+    /// Operation Flag of CLK operation.
+    #[inline(always)]
+    pub fn clk(&self) -> E {
+        self.degree7_op_flags[get_op_index(Operation::Clk.op_code())].clone()
+    }
+
+    // ------ Degree 6 u32 operations  ------------------------------------------------------------
+
+    /// Operation Flag of U32ADD operation.
+    #[inline(always)]
+    pub fn u32add(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32add.op_code())].clone()
+    }
+
+    /// Operation Flag of U32SUB operation.
+    #[inline(always)]
+    pub fn u32sub(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32sub.op_code())].clone()
+    }
+
+    /// Operation Flag of U32MUL operation.
+    #[inline(always)]
+    pub fn u32mul(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32mul.op_code())].clone()
+    }
+
+    /// Operation Flag of U32DIV operation.
+    #[inline(always)]
+    pub fn u32div(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32div.op_code())].clone()
+    }
+
+    /// Operation Flag of U32SPLIT operation.
+    #[inline(always)]
+    pub fn u32split(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32split.op_code())].clone()
+    }
+
+    /// Operation Flag of U32ASSERT2 operation.
+    #[inline(always)]
+    pub fn u32assert2(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32assert2(miden_core::ZERO).op_code())]
+            .clone()
+    }
+
+    /// Operation Flag of U32ADD3 operation.
+    #[inline(always)]
+    pub fn u32add3(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32add3.op_code())].clone()
+    }
+
+    /// Operation Flag of U32MADD operation.
+    #[inline(always)]
+    pub fn u32madd(&self) -> E {
+        self.degree6_op_flags[get_op_index(Operation::U32madd.op_code())].clone()
+    }
+
+    // ------ Degree 5 operations  ----------------------------------------------------------------
+
+    /// Operation Flag of HPERM operation.
+    #[inline(always)]
+    pub fn hperm(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::HPerm.op_code())].clone()
+    }
+
+    /// Operation Flag of MPVERIFY operation.
+    #[inline(always)]
+    pub fn mpverify(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::MpVerify(miden_core::ZERO).op_code())].clone()
+    }
+
+    /// Operation Flag of SPLIT operation.
+    #[inline(always)]
+    pub fn split(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Split.op_code())].clone()
+    }
+
+    /// Operation Flag of LOOP operation.
+    #[inline(always)]
+    pub fn loop_op(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Loop.op_code())].clone()
+    }
+
+    /// Operation Flag of SPAN operation.
+    #[inline(always)]
+    pub fn span(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Span.op_code())].clone()
+    }
+
+    /// Operation Flag of JOIN operation.
+    #[inline(always)]
+    pub fn join(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Join.op_code())].clone()
+    }
+
+    // ------ Degree 4 operations  ----------------------------------------------------------------
+
+    /// Operation Flag of MRUPDATE operation.
+    #[inline(always)]
+    pub fn mrupdate(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::MrUpdate.op_code())].clone()
+    }
+
+    /// Operation Flag of PUSH operation.
+    #[inline(always)]
+    pub fn push(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Push(miden_core::ONE).op_code())].clone()
+    }
+
+    /// Operation Flag of CALL operation.
+    #[inline(always)]
+    pub fn call(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::Call.op_code())].clone()
+    }
+
+    /// Operation Flag of SYSCALL operation.
+    #[inline(always)]
+    pub fn syscall(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::SysCall.op_code())].clone()
+    }
+
+    /// Operation Flag of DYN operation.
+    #[inline(always)]
+    pub fn dyn_op(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Dyn.op_code())].clone()
+    }
+
+    /// Operation Flag of DYNCALL operation.
+    #[inline(always)]
+    pub fn dyncall(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Dyncall.op_code())].clone()
+    }
+
+    /// Operation Flag of END operation.
+    #[inline(always)]
+    pub fn end(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::End.op_code())].clone()
+    }
+
+    /// Operation Flag of REPEAT operation.
+    #[inline(always)]
+    pub fn repeat(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::Repeat.op_code())].clone()
+    }
+
+    /// Operation Flag of RESPAN operation.
+    #[inline(always)]
+    pub fn respan(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::Respan.op_code())].clone()
+    }
+
+    /// Operation Flag of HALT operation.
+    #[inline(always)]
+    pub fn halt(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::Halt.op_code())].clone()
+    }
+
+    /// Operation Flag of CRYPTOSTREAM operation.
+    #[inline(always)]
+    pub fn cryptostream(&self) -> E {
+        self.degree4_op_flags[get_op_index(Operation::CryptoStream.op_code())].clone()
+    }
+
+    /// Operation Flag of EVALCIRCUIT operation.
+    #[inline(always)]
+    pub fn evalcircuit(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::EvalCircuit.op_code())].clone()
+    }
+
+    /// Operation Flag of LOG_PRECOMPILE operation.
+    #[inline(always)]
+    pub fn log_precompile(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::LogPrecompile.op_code())].clone()
+    }
+
+    /// Operation Flag of HORNERBASE operation.
+    #[inline(always)]
+    pub fn hornerbase(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::HornerBase.op_code())].clone()
+    }
+
+    /// Operation Flag of HORNEREXT operation.
+    #[inline(always)]
+    pub fn hornerext(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::HornerExt.op_code())].clone()
+    }
+
+    /// Operation Flag of MSTREAM operation.
+    #[inline(always)]
+    pub fn mstream(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::MStream.op_code())].clone()
+    }
+
+    /// Operation Flag of PIPE operation.
+    #[inline(always)]
+    pub fn pipe(&self) -> E {
+        self.degree5_op_flags[get_op_index(Operation::Pipe.op_code())].clone()
+    }
+
+    // ------ Composite Flags ---------------------------------------------------------------------
+
+    /// Returns the flag for when the stack item at the specified depth remains unchanged.
+    #[inline(always)]
+    pub fn no_shift_at(&self, index: usize) -> E {
+        self.no_shift_flags[index].clone()
+    }
+
+    /// Returns the flag for when the stack item at the specified depth shifts left.
+    /// Left shift is not defined on position 0, so returns default for index 0.
+    #[inline(always)]
+    pub fn left_shift_at(&self, index: usize) -> E {
+        self.left_shift_flags[index].clone()
+    }
+
+    /// Returns the flag for when the stack item at the specified depth shifts right.
+    #[inline(always)]
+    pub fn right_shift_at(&self, index: usize) -> E {
+        self.right_shift_flags[index].clone()
+    }
+
+    /// Returns the flag when the stack operation shifts the stack to the right.
+    /// Degree: 6
+    #[inline(always)]
+    pub fn right_shift(&self) -> E {
+        self.right_shift.clone()
+    }
+
+    /// Returns the flag when the stack operation shifts the stack to the left.
+    ///
+    /// Note: `DYNCALL` still shifts the stack, but it is handled via the per-position
+    /// `left_shift_at` flags. The aggregate `left_shift` flag only gates the generic
+    /// helper/overflow constraints, which do not apply to `DYNCALL` because those
+    /// helper columns are reused for the context switch and the overflow pointer is
+    /// stored in decoder hasher state (h5), not in the usual helper/stack columns.
+    /// Degree: 5
+    #[inline(always)]
+    pub fn left_shift(&self) -> E {
+        self.left_shift.clone()
+    }
+
+    /// Returns the flag when the current operation is a control flow operation.
+    ///
+    /// Control flow operations are the only operations allowed to execute when outside a basic
+    /// block (i.e., when in_span = 0). This includes:
+    /// - Block starters: SPAN, JOIN, SPLIT, LOOP
+    /// - Block transitions: END, REPEAT, RESPAN, HALT
+    /// - Dynamic execution: DYN, DYNCALL
+    /// - Procedure calls: CALL, SYSCALL
+    ///
+    /// Used by the decoder constraint: `(1 - in_span) * (1 - control_flow) = 0`
+    ///
+    /// Degree: 3
+    #[inline(always)]
+    pub fn control_flow(&self) -> E {
+        self.control_flow.clone()
+    }
+
+    /// Returns the flag when the current operation is a u32 operation requiring range checks.
+    #[inline(always)]
+    #[allow(dead_code)]
+    pub fn u32_rc_op(&self) -> E {
+        self.u32_rc_op.clone()
+    }
+
+    /// Returns the flag indicating whether the overflow stack contains values.
+    /// Degree: 2
+    #[inline(always)]
+    pub fn overflow(&self) -> E {
+        self.overflow.clone()
+    }
+
+    // TEST ACCESSORS
+    // ============================================================================================
+
+    /// Returns reference to degree 7 operation flags array (for testing).
+    #[cfg(test)]
+    pub fn degree7_op_flags(&self) -> &[E; NUM_DEGREE_7_OPS] {
+        &self.degree7_op_flags
+    }
+
+    /// Returns reference to degree 6 operation flags array (for testing).
+    #[cfg(test)]
+    pub fn degree6_op_flags(&self) -> &[E; NUM_DEGREE_6_OPS] {
+        &self.degree6_op_flags
+    }
+
+    /// Returns reference to degree 5 operation flags array (for testing).
+    #[cfg(test)]
+    pub fn degree5_op_flags(&self) -> &[E; NUM_DEGREE_5_OPS] {
+        &self.degree5_op_flags
+    }
+
+    /// Returns reference to degree 4 operation flags array (for testing).
+    #[cfg(test)]
+    pub fn degree4_op_flags(&self) -> &[E; NUM_DEGREE_4_OPS] {
+        &self.degree4_op_flags
+    }
+}
+
+// INTERNAL HELPERS
+// ================================================================================================
+
+/// Maps opcode of an operation to the index in its respective degree flag array.
+pub const fn get_op_index(opcode: u8) -> usize {
+    let opcode = opcode as usize;
+
+    if opcode <= DEGREE_7_OPCODE_ENDS {
+        // Index of a degree 7 operation (0-63)
+        opcode
+    } else if opcode <= DEGREE_6_OPCODE_ENDS {
+        // Index of a degree 6 operation (64-79, even opcodes only)
+        (opcode - DEGREE_6_OPCODE_STARTS) / 2
+    } else if opcode <= DEGREE_5_OPCODE_ENDS {
+        // Index of a degree 5 operation (80-95)
+        opcode - DEGREE_5_OPCODE_STARTS
+    } else {
+        // Index of a degree 4 operation (96-127, every 4th opcode)
+        (opcode - DEGREE_4_OPCODE_STARTS) / 4
+    }
+}
+
+// TEST HELPERS
+// ================================================================================================
+
+/// Generates a test trace row with the op bits set for a given opcode.
+///
+/// This creates a minimal trace row where:
+/// - Op bits are set according to the opcode's binary representation
+/// - Op bits extra columns are computed for degree reduction
+/// - All other columns are zero
+#[cfg(test)]
+pub fn generate_test_row(opcode: usize) -> crate::MainTraceRow<miden_core::Felt> {
+    use miden_core::{ONE, ZERO};
+
+    use crate::trace::{
+        CHIPLETS_WIDTH, DECODER_TRACE_WIDTH, RANGE_CHECK_TRACE_WIDTH, STACK_TRACE_WIDTH,
+        decoder::OP_BITS_EXTRA_COLS_RANGE,
+    };
+
+    // Get op bits for this opcode
+    let op_bits = get_op_bits(opcode);
+
+    // Initialize decoder array with zeros
+    let mut decoder = [ZERO; DECODER_TRACE_WIDTH];
+
+    // Set op bits (indices 1-7 in decoder, after addr column at index 0)
+    for (i, &bit) in op_bits.iter().enumerate() {
+        decoder[OP_BITS_RANGE.start + i] = bit;
+    }
+
+    // Compute and set op bits extra columns for degree reduction
+    let bit_6 = op_bits[6];
+    let bit_5 = op_bits[5];
+    let bit_4 = op_bits[4];
+
+    // op_bit_extra[0] = bit_6 * (1 - bit_5) * bit_4 (degree 5 flag)
+    decoder[OP_BITS_EXTRA_COLS_RANGE.start] = bit_6 * (ONE - bit_5) * bit_4;
+
+    // op_bit_extra[1] = bit_6 * bit_5 (degree 4 flag)
+    decoder[OP_BITS_EXTRA_COLS_RANGE.start + 1] = bit_6 * bit_5;
+
+    crate::MainTraceRow {
+        clk: ZERO,
+        ctx: ZERO,
+        fn_hash: [ZERO; 4],
+        decoder,
+        stack: [ZERO; STACK_TRACE_WIDTH],
+        range: [ZERO; RANGE_CHECK_TRACE_WIDTH],
+        chiplets: [ZERO; CHIPLETS_WIDTH],
+    }
+}
+
+/// Returns a 7-bit array representation of an opcode.
+#[cfg(test)]
+pub fn get_op_bits(opcode: usize) -> [miden_core::Felt; NUM_OP_BITS] {
+    use miden_core::{Felt, ZERO};
+
+    let mut opcode_copy = opcode;
+    let mut bit_array = [ZERO; NUM_OP_BITS];
+
+    for bit in bit_array.iter_mut() {
+        *bit = Felt::new((opcode_copy & 1) as u64);
+        opcode_copy >>= 1;
+    }
+
+    assert_eq!(opcode_copy, 0, "Opcode must be 7 bits");
+    bit_array
+}
+
+#[cfg(test)]
+mod tests;

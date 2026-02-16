@@ -241,3 +241,37 @@ impl SeededRng {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use alloc::vec::Vec;
+
+    use miden_core::{Felt, field::QuadFelt};
+    use miden_crypto::stark::air::MidenAir;
+
+    use super::{
+        super::fixtures::{OOD_SEED, active_expected_ood_evals},
+        OodEvalAirBuilder,
+    };
+    use crate::ProcessorAir;
+
+    fn run_group_parity_test(expected: Vec<super::super::EvalRecord>) {
+        let mut builder = OodEvalAirBuilder::new(OOD_SEED);
+        let air = ProcessorAir::new();
+        MidenAir::<Felt, QuadFelt>::eval(&air, &mut builder);
+        builder.assert_complete();
+
+        let actual = builder.records();
+        assert_eq!(actual.len(), expected.len());
+        for (actual, expected) in actual.iter().zip(expected.iter()) {
+            assert_eq!(actual.id, expected.id);
+            assert_eq!(actual.namespace, expected.namespace);
+            assert_eq!(actual.value, expected.value);
+        }
+    }
+
+    #[test]
+    fn ood_system_range_matches_expected() {
+        run_group_parity_test(active_expected_ood_evals());
+    }
+}
