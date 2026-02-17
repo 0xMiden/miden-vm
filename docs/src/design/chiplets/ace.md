@@ -360,7 +360,7 @@ Otherwise, $n_{eval}$ remains the same.
 
 ### Section constraints
 
-These constraints apply to all rows within the same section/
+These constraints apply to all rows within the same section:
 
 - Across the section, $ctx$ and $clk$ are constant.
 - A READ/EVAL block requests a word/element from memory, so the $ptr$ increases by 4/1, respectively in the next row.

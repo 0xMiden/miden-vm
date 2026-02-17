@@ -35,7 +35,7 @@ Managing control flow in the VM is accomplished by executing control flow operat
 | `DYN`     | Initiates processing of a new [Dyn block](../programs.md#dyn-block).         |
 | `DYNCALL` | Initiates processing of a new [Dyncall block](../programs.md#dyncall-block). |
 | `CALL`    | Initiates processing of a new [Call block](../programs.md#call-block).       |
-| `SYSCALL` | Initiates processing ofa new  [Syscall block](../programs.md#syscall-block). |
+| `SYSCALL` | Initiates processing of a new [Syscall block](../programs.md#syscall-block). |
 | `END`     | Marks the end of a program block.                                            |
 | `HALT`    | Marks the end of the entire program.                                         |
 
