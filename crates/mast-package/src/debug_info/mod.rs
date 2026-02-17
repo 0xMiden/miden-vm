@@ -9,6 +9,3 @@ mod serialization;
 mod types;
 
 pub use types::*;
-
-// Re-export serialization traits for use by consumers
-// (the impl blocks are in serialization.rs)

@@ -55,14 +55,14 @@ struct PendingAsmOp {
 pub struct BasicBlockBuilder<'a> {
     ops: Vec<Operation>,
     decorators: DecoratorList,
-    /// Debug variables attached to operations in this block.
-    /// Each entry is (op_index, debug_var_id) similar to decorators.
-    debug_vars: Vec<(usize, DebugVarId)>,
     epilogue: Vec<Operation>,
     /// Pending assembly operation info, waiting for cycle count to be computed.
     pending_asm_op: Option<PendingAsmOp>,
     /// Finalized AssemblyOps with their operation indices (op_idx, AssemblyOp).
     asm_ops: Vec<(usize, AssemblyOp)>,
+    /// Debug variables attached to operations in this block.
+    /// Each entry is (op_index, debug_var_id) similar to decorators.
+    debug_vars: Vec<(usize, DebugVarId)>,
     mast_forest_builder: &'a mut MastForestBuilder,
 }
 
@@ -81,19 +81,19 @@ impl<'a> BasicBlockBuilder<'a> {
             Some(wrapper) => Self {
                 ops: wrapper.prologue,
                 decorators: Vec::new(),
-                debug_vars: Vec::new(),
                 epilogue: wrapper.epilogue,
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
+                debug_vars: Vec::new(),
                 mast_forest_builder,
             },
             None => Self {
                 ops: Default::default(),
                 decorators: Default::default(),
-                debug_vars: Default::default(),
                 epilogue: Default::default(),
                 pending_asm_op: None,
                 asm_ops: Vec::new(),
+                debug_vars: Default::default(),
                 mast_forest_builder,
             },
         }

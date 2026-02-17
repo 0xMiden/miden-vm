@@ -200,8 +200,7 @@ impl Serializable for DebugVarLocation {
             },
             Self::Expression(bytes) => {
                 target.write_u8(4);
-                target.write_u16(bytes.len() as u16);
-                target.write_bytes(bytes);
+                bytes.write_into(target);
             },
         }
     }
@@ -222,11 +221,7 @@ impl Deserializable for DebugVarLocation {
                 Ok(Self::Local(i16::from_le_bytes(bytes)))
             },
             4 => {
-                let len = source.read_u16()? as usize;
-                let mut bytes = Vec::with_capacity(len);
-                for _ in 0..len {
-                    bytes.push(source.read_u8()?);
-                }
+                let bytes = Vec::<u8>::read_from(source)?;
                 Ok(Self::Expression(bytes))
             },
             _ => Err(DeserializationError::InvalidValue(format!(

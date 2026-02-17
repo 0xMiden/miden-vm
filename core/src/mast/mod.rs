@@ -57,7 +57,7 @@ use crate::{
     Felt, LexicographicWord, Word,
     advice::AdviceMap,
     field::PrimeField64,
-    operations::{AssemblyOp, Decorator},
+    operations::{AssemblyOp, DebugVarInfo, Decorator},
     serde::{
         BudgetedReader, ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
         SliceReader,
@@ -580,7 +580,7 @@ impl MastForest {
     /// Adds a debug variable to the forest, and returns the associated [`DebugVarId`].
     pub fn add_debug_var(
         &mut self,
-        debug_var: crate::operations::DebugVarInfo,
+        debug_var: DebugVarInfo,
     ) -> Result<DebugVarId, MastForestError> {
         self.debug_info.add_debug_var(debug_var)
     }
@@ -595,7 +595,7 @@ impl MastForest {
     }
 
     /// Returns the debug variable with the given ID, if it exists.
-    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&crate::operations::DebugVarInfo> {
+    pub fn debug_var(&self, debug_var_id: DebugVarId) -> Option<&DebugVarInfo> {
         self.debug_info.debug_var(debug_var_id)
     }
 

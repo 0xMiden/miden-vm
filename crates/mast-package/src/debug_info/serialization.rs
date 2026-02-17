@@ -52,10 +52,7 @@ impl Deserializable for DebugTypesSection {
         }
 
         let types_len = source.read_usize()?;
-        let mut types = alloc::vec::Vec::with_capacity(types_len);
-        for _ in 0..types_len {
-            types.push(DebugTypeInfo::read_from(source)?);
-        }
+        let types = source.read_many_iter(types_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, types })
     }
@@ -98,10 +95,7 @@ impl Deserializable for DebugSourcesSection {
         }
 
         let files_len = source.read_usize()?;
-        let mut files = alloc::vec::Vec::with_capacity(files_len);
-        for _ in 0..files_len {
-            files.push(DebugFileInfo::read_from(source)?);
-        }
+        let files = source.read_many_iter(files_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, files })
     }
@@ -144,10 +138,7 @@ impl Deserializable for DebugFunctionsSection {
         }
 
         let functions_len = source.read_usize()?;
-        let mut functions = alloc::vec::Vec::with_capacity(functions_len);
-        for _ in 0..functions_len {
-            functions.push(DebugFunctionInfo::read_from(source)?);
-        }
+        let functions = source.read_many_iter(functions_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self { version, strings, functions })
     }
@@ -237,10 +228,7 @@ impl Deserializable for DebugTypeInfo {
                 let name_idx = source.read_u32()?;
                 let size = source.read_u32()?;
                 let fields_len = source.read_usize()?;
-                let mut fields = alloc::vec::Vec::with_capacity(fields_len);
-                for _ in 0..fields_len {
-                    fields.push(DebugFieldInfo::read_from(source)?);
-                }
+                let fields = source.read_many_iter(fields_len)?.collect::<Result<_, _>>()?;
                 Ok(Self::Struct { name_idx, size, fields })
             },
             TYPE_TAG_FUNCTION => {
@@ -388,17 +376,11 @@ impl Deserializable for DebugFunctionInfo {
 
         // Read variables
         let vars_len = source.read_usize()?;
-        let mut variables = alloc::vec::Vec::with_capacity(vars_len);
-        for _ in 0..vars_len {
-            variables.push(DebugVariableInfo::read_from(source)?);
-        }
+        let variables = source.read_many_iter(vars_len)?.collect::<Result<_, _>>()?;
 
         // Read inlined calls
         let calls_len = source.read_usize()?;
-        let mut inlined_calls = alloc::vec::Vec::with_capacity(calls_len);
-        for _ in 0..calls_len {
-            inlined_calls.push(DebugInlinedCallInfo::read_from(source)?);
-        }
+        let inlined_calls = source.read_many_iter(calls_len)?.collect::<Result<_, _>>()?;
 
         Ok(Self {
             name_idx,
