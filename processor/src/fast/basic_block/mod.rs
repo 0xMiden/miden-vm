@@ -7,7 +7,7 @@ use miden_core::{
 };
 
 use crate::{
-    ExecutionError, Host,
+    Host,
     errors::{MapExecErrWithOpIdx, advice_error_with_context, event_error_with_context},
     fast::{BreakReason, FastProcessor},
 };
@@ -27,7 +27,7 @@ impl FastProcessor {
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
         host: &mut impl Host,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         if self.should_execute_decorators() {
             #[cfg(test)]
             self.record_decorator_retrieval();
@@ -38,7 +38,7 @@ impl FastProcessor {
             }
         }
 
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     #[inline(always)]

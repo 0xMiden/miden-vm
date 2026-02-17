@@ -4,10 +4,7 @@ use core::ops::ControlFlow;
 use crate::{
     BreakReason, Host, ONE, Stopper, ZERO,
     continuation_stack::Continuation,
-    execution::{
-        ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
-        result_to_control_flow,
-    },
+    execution::{ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation},
     mast::{MastForest, MastNodeId, SplitNode},
     operation::OperationError,
     processor::{Processor, StackInterface},
@@ -39,11 +36,9 @@ where
     );
 
     // Execute decorators that should be executed before entering the node
-    result_to_control_flow(state.processor.execute_before_enter_decorators(
-        node_id,
-        current_forest,
-        state.host,
-    ))?;
+    state
+        .processor
+        .execute_before_enter_decorators(node_id, current_forest, state.host)?;
 
     let condition = state.processor.stack().get(0);
 
@@ -99,9 +94,7 @@ where
         current_forest,
     )?;
 
-    result_to_control_flow(state.processor.execute_after_exit_decorators(
-        node_id,
-        current_forest,
-        state.host,
-    ))
+    state
+        .processor
+        .execute_after_exit_decorators(node_id, current_forest, state.host)
 }

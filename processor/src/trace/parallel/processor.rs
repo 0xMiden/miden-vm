@@ -432,9 +432,9 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     fn execute_after_exit_decorators(
@@ -442,9 +442,9 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _current_forest: &MastForest,
         _host: &mut impl Host,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     fn execute_decorators_for_op(
@@ -453,9 +453,9 @@ impl Processor for ReplayProcessor {
         _op_idx_in_block: usize,
         _current_forest: &MastForest,
         _host: &mut impl Host,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
-        Ok(())
+        ControlFlow::Continue(())
     }
 
     fn execute_end_of_block_decorators(
@@ -464,9 +464,9 @@ impl Processor for ReplayProcessor {
         _node_id: MastNodeId,
         _current_forest: &Arc<MastForest>,
         _host: &mut impl Host,
-    ) -> Result<(), ExecutionError> {
+    ) -> ControlFlow<BreakReason> {
         // do nothing - we don't execute decorators in this processor
-        Ok(())
+        ControlFlow::Continue(())
     }
 }
 

@@ -8,7 +8,7 @@ use crate::{
     continuation_stack::Continuation,
     execution::{
         ExecutionState, finalize_clock_cycle, finalize_clock_cycle_with_continuation,
-        get_next_ctx_id, result_to_control_flow,
+        get_next_ctx_id,
     },
     mast::{CallNode, MastForest, MastNodeExt, MastNodeId},
     operation::OperationError,
@@ -41,11 +41,9 @@ where
     );
 
     // Execute decorators that should be executed before entering the node
-    result_to_control_flow(state.processor.execute_before_enter_decorators(
-        current_node_id,
-        current_forest,
-        state.host,
-    ))?;
+    state
+        .processor
+        .execute_before_enter_decorators(current_node_id, current_forest, state.host)?;
 
     state.tracer.start_context();
     state.processor.save_context_and_truncate_stack();
@@ -138,9 +136,7 @@ where
         current_forest,
     )?;
 
-    result_to_control_flow(state.processor.execute_after_exit_decorators(
-        node_id,
-        current_forest,
-        state.host,
-    ))
+    state
+        .processor
+        .execute_after_exit_decorators(node_id, current_forest, state.host)
 }

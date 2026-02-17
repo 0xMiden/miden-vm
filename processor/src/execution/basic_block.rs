@@ -6,7 +6,7 @@ use crate::{
     continuation_stack::{Continuation, ContinuationStack},
     execution::{
         ExecutionState, InternalBreakReason, execute_op, finalize_clock_cycle_with_continuation,
-        finalize_clock_cycle_with_continuation_and_op_helpers, result_to_control_flow,
+        finalize_clock_cycle_with_continuation_and_op_helpers,
     },
     mast::{BasicBlockNode, MastForest, MastNodeId},
     operation::Operation,
@@ -39,12 +39,10 @@ where
     );
 
     // Execute decorators that should be executed before entering the node
-    result_to_control_flow(state.processor.execute_before_enter_decorators(
-        node_id,
-        current_forest,
-        state.host,
-    ))
-    .map_break(InternalBreakReason::from)?;
+    state
+        .processor
+        .execute_before_enter_decorators(node_id, current_forest, state.host)
+        .map_break(InternalBreakReason::from)?;
 
     // Finalize the clock cycle corresponding to the SPAN operation.
     finalize_clock_cycle_with_continuation(
@@ -220,17 +218,15 @@ where
         current_forest,
     )?;
 
-    result_to_control_flow(state.processor.execute_end_of_block_decorators(
+    state.processor.execute_end_of_block_decorators(
         basic_block_node,
         node_id,
         current_forest,
         state.host,
-    ))?;
-    result_to_control_flow(state.processor.execute_after_exit_decorators(
-        node_id,
-        current_forest,
-        state.host,
-    ))
+    )?;
+    state
+        .processor
+        .execute_after_exit_decorators(node_id, current_forest, state.host)
 }
 
 // HELPERS
@@ -271,13 +267,10 @@ where
             current_forest,
         );
 
-        result_to_control_flow(state.processor.execute_decorators_for_op(
-            node_id,
-            op_idx_in_block,
-            current_forest,
-            state.host,
-        ))
-        .map_break(InternalBreakReason::from)?;
+        state
+            .processor
+            .execute_decorators_for_op(node_id, op_idx_in_block, current_forest, state.host)
+            .map_break(InternalBreakReason::from)?;
 
         // Execute the operation.
         let operation_helpers = match op {
