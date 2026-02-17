@@ -41,6 +41,7 @@ mod tests;
 // RE-EXPORTS
 // ================================================================================================
 
+pub use continuation_stack::Continuation;
 pub use errors::{ExecutionError, MemoryError};
 pub use execution_options::{ExecutionOptions, ExecutionOptionsError};
 pub use fast::{BreakReason, ExecutionOutput, FastProcessor, ResumeContext};

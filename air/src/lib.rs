@@ -198,12 +198,10 @@ where
         let local: &MainTraceRow<AB::Var> = (*local).borrow();
         let next: &MainTraceRow<AB::Var> = (*next).borrow();
 
-        // SYSTEM CONSTRAINTS
-        constraints::enforce_clock_constraint(builder, local, next);
+        // Main trace constraints.
+        constraints::enforce_main(builder, local, next);
 
-        // RANGE CHECKER CONSTRAINTS
-        constraints::range::enforce_range_boundary_constraints(builder, local);
-        constraints::range::enforce_range_transition_constraint(builder, local, next);
-        constraints::range::enforce_range_bus_constraint(builder, local);
+        // Auxiliary (bus) constraints.
+        constraints::enforce_bus(builder, local, next);
     }
 }
