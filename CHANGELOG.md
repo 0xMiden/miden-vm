@@ -50,6 +50,10 @@
 
 #### Changes
 
+- Enforce expected final bus values via aux_finals ([#2684](https://github.com/0xMiden/miden-vm/pull/2684)).
+- [BREAKING] Removed `breakpoint` instruction from assembly ([#2655](https://github.com/0xMiden/miden-vm/pull/2655)).
+- [BREAKING] Added builder methods (`with_advice()`, `with_debugging()`, `with_tracing()`, `with_options()`) directly on `FastProcessor` for fluent configuration. Removed deprecated `new_with_advice_inputs()` and `new_debug()` constructors ([#2602](https://github.com/0xMiden/miden-vm/issues/2602), [#2625](https://github.com/0xMiden/miden-vm/pull/2625)).
+- Changed `assert_u32` helper function to return `u32` instead of `Felt` ([#2575](https://github.com/0xMiden/miden-vm/issues/2575)).
 - Added `--kernel` flag to CLI commands (`run`, `prove`, `verify`, `debug`) to allow loading custom kernels from `.masm` or `.masp` files ([#2363](https://github.com/0xMiden/miden-vm/pull/2363)).
 - Implemented running batch inversion concurrently per fragment in parallel trace generation ([#2405](https://github.com/0xMiden/miden-vm/issues/2405)).
 - Added MastForest validation ([#2412](https://github.com/0xMiden/miden-vm/pull/2412)).

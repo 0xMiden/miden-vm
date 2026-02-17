@@ -435,7 +435,8 @@ fn decoder_p2_join() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[8]);
 
-    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived
+    // from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 9..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -494,7 +495,8 @@ fn decoder_p2_split_true() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived
+    // from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 6..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -554,7 +556,8 @@ fn decoder_p2_split_false() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[5]);
 
-    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived
+    // from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 6..(p2.len()) {
         assert_eq!(expected_value, p2[i]);
@@ -674,7 +677,8 @@ fn decoder_p2_loop_with_repeat() {
     expected_value *= row_values[0].inverse();
     assert_eq!(expected_value, p2[19]);
 
-    // at this point the table should be empty; program hash is enforced via aux_finals (derived from public inputs).
+    // at this point the table should be empty; program hash is enforced via aux_finals (derived
+    // from public inputs).
     assert_eq!(expected_value, row_values[0].inverse());
     for i in 20..(p2.len()) {
         assert_eq!(expected_value, p2[i]);

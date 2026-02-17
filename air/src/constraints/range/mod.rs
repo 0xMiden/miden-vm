@@ -6,18 +6,17 @@
 //!
 //! Bus constraints for the range checker are in `bus`.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
+use p3_miden_air::PrimeCharacteristicRing;
 
 use crate::{
     MainTraceRow,
     trace::{RANGE_CHECK_TRACE_OFFSET, range},
 };
 
-pub mod bus;
-
 // CONSTANTS
 // ================================================================================================
+pub mod bus;
 
 // --- SLICE-RELATIVE INDICES ---------------------------------------------------------------------
 const RANGE_V_COL_IDX: usize = range::V_COL_IDX - RANGE_CHECK_TRACE_OFFSET;
@@ -40,7 +39,7 @@ pub fn enforce_main<AB>(
 /// Enforces boundary constraints for the range checker.
 ///
 /// - First row: V[0] = 0 (range checker starts at 0)
-/// - Last row: V[last] = 65535 (range checker ends at 2^16 - 1)
+/// - Last row: V[last] = 65535 (2^16 - 1)
 pub fn enforce_range_boundary_constraints<AB>(builder: &mut AB, local: &MainTraceRow<AB::Var>)
 where
     AB: MidenAirBuilder,

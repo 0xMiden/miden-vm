@@ -16,6 +16,7 @@ use miden_core::{
     program::{ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
+use p3_miden_air::{AuxFinalsError, VarLenPublicInputs};
 
 pub mod config;
 mod constraints;
@@ -238,25 +239,29 @@ where
         randomness: &[EF],
         aux_finals: &[EF],
         _public_values: &[Felt],
-        var_len_public_inputs: &[&[&[Felt]]],
-    ) -> bool {
-        use crate::constraints::bus::indices;
-
-        if aux_finals.len() < AUX_TRACE_WIDTH || randomness.len() < trace::AUX_TRACE_RAND_ELEMENTS {
-            return false;
+        var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
+    ) -> Result<(), AuxFinalsError> {
+        if aux_finals.len() < AUX_TRACE_WIDTH {
+            return Err(AuxFinalsError::InvalidAuxFinalsLength {
+                expected: AUX_TRACE_WIDTH,
+                got: aux_finals.len(),
+            });
+        }
+        if randomness.len() < trace::AUX_TRACE_RAND_ELEMENTS {
+            return Err(AuxFinalsError::Custom("randomness too short"));
         }
 
         let alphas = randomness;
 
         let aux = AuxFinals {
-            p1: aux_finals[indices::P1_BLOCK_STACK],
-            p2: aux_finals[indices::P2_BLOCK_HASH],
-            p3: aux_finals[indices::P3_OP_GROUP],
-            s_aux: aux_finals[indices::S_AUX_STACK],
-            b_range: aux_finals[indices::B_RANGE],
-            b_hash_kernel: aux_finals[indices::B_HASH_KERNEL],
-            b_chiplets: aux_finals[indices::B_CHIPLETS],
-            v_wiring: aux_finals[indices::V_WIRING],
+            p1: aux_finals[trace::DECODER_AUX_TRACE_OFFSET],
+            p2: aux_finals[trace::DECODER_AUX_TRACE_OFFSET + 1],
+            p3: aux_finals[trace::DECODER_AUX_TRACE_OFFSET + 2],
+            s_aux: aux_finals[trace::STACK_AUX_TRACE_OFFSET],
+            b_range: aux_finals[trace::RANGE_CHECK_AUX_TRACE_OFFSET],
+            b_hash_kernel: aux_finals[trace::HASH_KERNEL_VTABLE_AUX_TRACE_OFFSET],
+            b_chiplets: aux_finals[trace::CHIPLETS_BUS_AUX_TRACE_OFFSET],
+            v_wiring: aux_finals[trace::ACE_CHIPLET_WIRING_BUS_OFFSET],
         };
 
         // Program-specific bindings.
@@ -266,10 +271,7 @@ where
         // Kernel ROM digests are reduced via multiset product (var-len public inputs required).
         let kernel_procs = program_info.kernel_procedures();
         let kernel_reduced =
-            match kernel_reduced_from_var_len(alphas, var_len_public_inputs, kernel_procs.len()) {
-                Some(value) => value,
-                None => return false,
-            };
+            kernel_reduced_from_var_len(alphas, var_len_public_inputs, kernel_procs.len())?;
 
         // Transcript initial/final states for log_precompile.
         let default_state_msg =
@@ -281,24 +283,39 @@ where
 
         // Expected final identities for simple buses. First-row initialization constraints live
         // in the wrapper AIR (AirWithBoundaryConstraints) on the p3-miden side.
-        let identity_finals_ok = aux.p1 == EF::ONE
-            && aux.p3 == EF::ONE
-            && aux.s_aux == EF::ONE
-            && aux.b_range == EF::ZERO
-            && aux.v_wiring == EF::ZERO;
+        if aux.p1 != EF::ONE {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 0 });
+        }
+        if aux.p3 != EF::ONE {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 2 });
+        }
+        if aux.s_aux != EF::ONE {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 3 });
+        }
+        if aux.b_range != EF::ZERO {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 4 });
+        }
+        if aux.v_wiring != EF::ZERO {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 7 });
+        }
 
         // Bind the program hash to the last-row value of the block-hash table (p2).
-        let program_hash_ok = aux.p2 * program_hash_msg == EF::ONE;
+        if aux.p2 * program_hash_msg != EF::ONE {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 1 });
+        }
 
         // Balance hash-kernel and chiplets buses. This cancels ACE memory read requests against
         // memory chiplet responses, then links the transcript (init -> final) and kernel digests.
         // Soundness relies on the randomized message encoding: each message type has a unique
         // label in its first tuple element (domain separation), so distinct messages collide only
         // with negligible probability over random alphas.
-        let bus_balance_ok = aux.b_hash_kernel * aux.b_chiplets * default_state_msg
-            == kernel_reduced * final_state_msg;
+        if aux.b_hash_kernel * aux.b_chiplets * default_state_msg
+            != kernel_reduced * final_state_msg
+        {
+            return Err(AuxFinalsError::InvalidBoundary { bus_index: 5 });
+        }
 
-        identity_finals_ok && program_hash_ok && bus_balance_ok
+        Ok(())
     }
 }
 
@@ -331,34 +348,37 @@ fn program_hash_message<EF: ExtensionField<Felt>>(alphas: &[EF], program_hash: &
 
 fn kernel_reduced_from_var_len<EF: ExtensionField<Felt>>(
     alphas: &[EF],
-    var_len_public_inputs: &[&[&[Felt]]],
+    var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
     expected_len: usize,
-) -> Option<EF> {
-    // Expect exactly one var-len group containing kernel procedure digests, each as 4 felts.
-    // Return None if the group is missing, has the wrong length, or contains malformed digests.
-    // On success, return the multiset product of the kernel-proc messages for those digests.
-    if var_len_public_inputs.len() != 1 {
-        return None;
-    }
+) -> Result<EF, AuxFinalsError> {
+    // Expect kernel procedure digests under the kernel bus index. For compatibility, allow
+    // a single-group input and treat it as the kernel digests.
+    const KERNEL_BUS_INDEX: usize = 5;
 
-    let kernel_digests = var_len_public_inputs[0];
+    let kernel_digests = if var_len_public_inputs.len() == 1 {
+        var_len_public_inputs[0]
+    } else {
+        var_len_public_inputs
+            .get(KERNEL_BUS_INDEX)
+            .ok_or(AuxFinalsError::MissingBusPublicInputs { bus_index: KERNEL_BUS_INDEX })?
+    };
 
     if kernel_digests.len() != expected_len {
-        return None;
+        return Err(AuxFinalsError::Custom("invalid kernel digest count"));
     }
 
     let mut acc = EF::ONE;
     for digest in kernel_digests.iter() {
         let digest = *digest;
         if digest.len() != WORD_SIZE {
-            return None;
+            return Err(AuxFinalsError::Custom("invalid kernel digest length"));
         }
 
         let word: Word = [digest[0], digest[1], digest[2], digest[3]].into();
         acc *= kernel_proc_message(alphas, &word);
     }
 
-    Some(acc)
+    Ok(acc)
 }
 
 fn kernel_proc_message<EF: ExtensionField<Felt>>(alphas: &[EF], digest: &Word) -> EF {

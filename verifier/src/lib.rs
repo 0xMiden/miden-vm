@@ -8,7 +8,7 @@ extern crate std;
 use alloc::vec::Vec;
 
 use miden_air::{ProcessorAir, PublicInputs, config};
-use miden_crypto::{stark, Felt};
+use miden_crypto::{Felt, stark};
 
 // RE-EXPORTS
 // ================================================================================================

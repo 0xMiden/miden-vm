@@ -8,41 +8,18 @@
 //! - `ctx`: Execution context ID (determines memory context isolation)
 //! - `fn_hash[0..4]`: Current function digest (identifies executing procedure)
 //!
-//! ## Context Transitions
-//!
-//! | Operation    | ctx'                    | Description               |
-//! |--------------|-------------------------|---------------------------|
-//! | CALL/DYNCALL | clk + 1                 | Create new context        |
-//! | SYSCALL      | 0                       | Return to kernel context  |
-//! | END          | (from block stack table)| Restore previous context  |
-//! | Others       | ctx                     | Unchanged                 |
-//!
-//! ## Function Hash Transitions
-//!
-//! | Operation    | fn_hash'                | Description                         |
-//! |--------------|-------------------------|-------------------------------------|
-//! | CALL/DYNCALL | decoder_h[0..4]         | Load new procedure hash             |
-//! | END          | (from block stack table)| Restore previous hash               |
-//! | Others       | fn_hash                 | Unchanged (including DYN, SYSCALL)  |
-//!
-//! Note: END operation's restoration is handled by the block stack table (bus-based),
-//! not by these constraints. These constraints only handle the non-END cases.
-//!
-//! ## Implementation status
-//!
-//! - Clock constraints are enforced in this module.
-//! - Context and function-hash transitions are documented here for auditability; enforcement is
-//!   integrated alongside decoder/stack gating as those constraints are wired in.
+//! Note: Only the clock constraint is enforced here. Context and function-hash transitions
+//! are handled alongside decoder/stack gating constraints.
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
+use p3_miden_air::PrimeCharacteristicRing;
 
 use crate::MainTraceRow;
 
 // ENTRY POINTS
 // ================================================================================================
 
-/// Enforces system constraints
+/// Enforces system constraints.
 pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,

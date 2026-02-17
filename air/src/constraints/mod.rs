@@ -1,35 +1,48 @@
 //! Miden VM Constraints
 //!
 //! This module contains the constraint functions for the Miden VM processor.
-//! Constraints are organized by component:
-//! - System-level constraints (clock)
-//! - Range checker constraints
-//! - (Future: decoder, stack, chiplets)
+//!
+//! ## Organization
+//!
+//! Constraints are separated into two categories:
+//!
+//! ### Main Trace Constraints
+//! - system: clock, ctx, fn_hash transitions
+//! - range: range checker V column transitions
+//! - chiplets, stack, decoder (future)
+//!
+//! ### Bus Constraints (Auxiliary Trace)
+//! - range::bus (LogUp multiset checks)
 
-use miden_core::field::PrimeCharacteristicRing;
 use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
-pub mod bus;
 pub mod range;
+pub mod system;
 
-/// Enforces the clock constraint: clk' = clk + 1
-///
-/// The clock must increment by 1 at each step, ensuring proper sequencing of operations.
-pub fn enforce_clock_constraint<AB>(
+// ENTRY POINTS
+// ================================================================================================
+
+/// Enforces all main trace constraints.
+pub fn enforce_main<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {
-    let clk = local.clk.clone();
-    let clk_next = next.clk.clone();
+    system::enforce_main(builder, local, next);
+    range::enforce_main(builder, local, next);
+}
 
-    // Clock boundary constraint: clk[0] = 0
-    builder.when_first_row().assert_zero(clk.clone());
-
-    // Clock transition constraint: clk' = clk + 1
-    builder.when_transition().assert_eq(clk_next, clk + AB::Expr::ONE);
+/// Enforces all auxiliary (bus) constraints.
+pub fn enforce_bus<AB>(
+    builder: &mut AB,
+    local: &MainTraceRow<AB::Var>,
+    _next: &MainTraceRow<AB::Var>,
+) where
+    AB: MidenAirBuilder,
+{
+    range::bus::enforce_bus(builder, local);
 }
