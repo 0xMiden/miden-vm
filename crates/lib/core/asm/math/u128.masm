@@ -878,6 +878,9 @@ end
 #! Stack transition looks as follows:
 #! [n, a0, a1, a2, a3, ...] -> [c0, c1, c2, c3, ...], where c = (a << n) mod 2^128.
 pub proc shl(n: u32, a: u128) -> u128
+    # Validate shift amount is in [0, 128)
+    dup u32lt.128 assert.err="shift amount must be in the range [0, 128)"
+
     # Strategy: compute 2^n as u128, then use wrapping_mul
     # For n < 64: 2^n fits in lower 64 bits
     # For n >= 64: 2^n is in upper 64 bits
@@ -925,6 +928,9 @@ pub proc shr(n: u32, a: u128) -> u128
     # Algorithm: k = n / 32 (limb shift), m = n % 32 (bit shift)
     # For each c_i = (a_{i+k} >> m) | (a_{i+k+1} << (32-m))
 
+    # Validate shift amount is in [0, 128)
+    dup u32lt.128 assert.err="shift amount must be in the range [0, 128)"
+
     # Handle n == 0: no shift needed
     dup eq.0
     if.true
@@ -964,10 +970,8 @@ pub proc shr(n: u32, a: u128) -> u128
                 end
             end
         else
-            # k >= 4: result is all zeros (n >= 128)
-            drop drop       # [a0, a1, a2, a3, ...]
-            drop drop drop drop
-            push.0 push.0 push.0 push.0
+            # k >= 4: n >= 128, unreachable due to assertion above
+            push.0 assert.err="shift amount must be in the range [0, 128)"
         end
     end
 end

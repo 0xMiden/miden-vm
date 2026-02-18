@@ -641,3 +641,115 @@ proptest! {
             .expect_stack(&[c0, c1, c2, c3]);
     }
 }
+
+// =================================================================================================
+// MIN/MAX TESTS
+// =================================================================================================
+
+proptest! {
+    #[test]
+    fn test_min(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let c = a.min(b);
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::min
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+
+    #[test]
+    fn test_max(a in any::<u128>(), b in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let (b3, b2, b1, b0) = split_u128(b);
+        let c = a.max(b);
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::max
+            end
+        ";
+
+        build_test!(source, &[b0, b1, b2, b3, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+}
+
+// =================================================================================================
+// BIT-COUNTING TESTS
+// =================================================================================================
+
+proptest! {
+    #[test]
+    fn test_clz(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let expected = a.leading_zeros() as u64;
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::clz
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_ctz(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let expected = a.trailing_zeros() as u64;
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::ctz
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_clo(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let expected = a.leading_ones() as u64;
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::clo
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+
+    #[test]
+    fn test_cto(a in any::<u128>()) {
+        let (a3, a2, a1, a0) = split_u128(a);
+        let expected = a.trailing_ones() as u64;
+
+        let source = "
+            use miden::core::math::u128
+            begin
+                exec.u128::cto
+            end
+        ";
+
+        build_test!(source, &[a0, a1, a2, a3])
+            .expect_stack(&[expected]);
+    }
+}
