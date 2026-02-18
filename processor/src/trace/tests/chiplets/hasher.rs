@@ -913,10 +913,10 @@ fn build_expected(
     } else if label == LINEAR_HASH_LABEL {
         // Include the next absorbed rate portion of the state (RATE0 || RATE1).
         // With LE sponge layout [RATE0, RATE1, CAP], rate is at indices 0..8.
-        value += build_value(&alphas[8..16], &next_state[0..RATE_LEN]);
+        value += build_value(&alphas[4..12], &next_state[0..RATE_LEN]);
     } else if label == RETURN_HASH_LABEL {
         // include the digest (word b)
-        value += build_value(&alphas[8..12], &state[DIGEST_RANGE]);
+        value += build_value(&alphas[4..8], &state[DIGEST_RANGE]);
     } else {
         assert!(
             label == MP_VERIFY_LABEL
@@ -926,8 +926,8 @@ fn build_expected(
         let bit = index.as_canonical_u64() & 1;
         // For Merkle operations, RATE0 and RATE1 hold the two child digests.
         // With LE sponge layout [RATE0, RATE1, CAP], they are at indices 0..4 and 4..8.
-        let left_word = build_value(&alphas[8..12], &state[0..4]);
-        let right_word = build_value(&alphas[8..12], &state[4..8]);
+        let left_word = build_value(&alphas[4..8], &state[0..4]);
+        let right_word = build_value(&alphas[4..8], &state[4..8]);
 
         value += Felt::new(1 - bit) * left_word + Felt::new(bit) * right_word;
     }
