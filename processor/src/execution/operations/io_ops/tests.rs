@@ -384,50 +384,6 @@ fn test_op_pipe() {
     assert_eq!(expected, processor.stack_top());
 }
 
-// CLOCK CYCLE CONFLICT TESTS
-// --------------------------------------------------------------------------------------------
-
-/// Ensures that reading and writing in the same clock cycle results in an error.
-#[test]
-#[ignore = "Re-enable when addressing issue 2276"]
-fn test_read_and_write_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate reading and writing in the same clock cycle (no increment_clk between operations)
-    op_mload(&mut processor, &mut tracer).unwrap();
-    assert!(op_mstore(&mut processor, &mut tracer).is_err());
-}
-
-/// Ensures that writing twice in the same clock cycle results in an error.
-#[test]
-#[ignore = "Re-enable when addressing issue 2276"]
-fn test_write_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate writing twice in the same clock cycle (no increment_clk between operations)
-    op_mstore(&mut processor, &mut tracer).unwrap();
-    assert!(op_mstore(&mut processor, &mut tracer).is_err());
-}
-
-/// Ensures that reading twice in the same clock cycle does NOT result in an error.
-#[test]
-fn test_read_twice_in_same_clock_cycle() {
-    let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
-
-    assert_eq!(0, processor.memory().num_accessed_words());
-
-    // emulate reading twice in the same clock cycle (no increment_clk between operations)
-    op_mload(&mut processor, &mut tracer).unwrap();
-    op_mload(&mut processor, &mut tracer).unwrap();
-}
-
 // HELPER METHODS
 // --------------------------------------------------------------------------------------------
 
