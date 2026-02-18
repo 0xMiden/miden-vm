@@ -90,7 +90,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -100,7 +100,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -110,7 +110,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
@@ -130,7 +130,7 @@ impl Processor for FastProcessor {
 
     #[inline(always)]
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,
