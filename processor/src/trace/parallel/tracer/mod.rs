@@ -555,14 +555,6 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
     fn decrement_stack_size(&mut self) {
         // do nothing
     }
-
-    fn start_context(&mut self) {
-        // do nothing
-    }
-
-    fn restore_context(&mut self) {
-        // do nothing
-    }
 }
 
 // HELPER FUNCTIONS

@@ -1169,14 +1169,4 @@ impl Tracer for NoopTracer {
     fn decrement_stack_size(&mut self) {
         // do nothing
     }
-
-    #[inline(always)]
-    fn start_context(&mut self) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn restore_context(&mut self) {
-        // do nothing
-    }
 }

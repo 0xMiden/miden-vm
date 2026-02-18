@@ -112,6 +112,18 @@ pub struct ExecutionTracer {
 
     /// The number of rows per core trace fragment.
     fragment_size: usize,
+
+    /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall node starts, consumed in
+    /// `finalize_clock_cycle` to call `overflow_table.start_context()`. This is deferred to
+    /// `finalize_clock_cycle` because for Dyncall, `decrement_size` (which interacts with the
+    /// overflow table) is called between `start_clock_cycle` and the actual context start.
+    pending_start_context: bool,
+
+    /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
+    /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
+    /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
+    /// succeeds (i.e., the stack depth check passes).
+    pending_restore_context: bool,
 }
 
 impl ExecutionTracer {
@@ -136,6 +148,8 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
+            pending_start_context: false,
+            pending_restore_context: false,
         }
     }
 
@@ -458,16 +472,33 @@ impl Tracer for ExecutionTracer {
                 // do nothing, since operations in a basic block don't update the block stack
             },
             Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
-                MastNode::Join(_)
-                | MastNode::Split(_)
-                | MastNode::Loop(_)
-                | MastNode::Dyn(_)
-                | MastNode::Call(_) => {
+                MastNode::Join(_) | MastNode::Split(_) | MastNode::Loop(_) => {
                     self.record_control_node_start(
                         &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
+                },
+                MastNode::Call(_) => {
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+                    self.overflow_table.start_context();
+                },
+                MastNode::Dyn(dyn_node) => {
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+                    if dyn_node.is_dyncall() {
+                        // Deferred to `decrement_stack_size` because DYNCALL performs a DROP
+                        // before starting the new context, and the overflow pop must happen in
+                        // the old context's overflow table.
+                        self.pending_start_context = true;
+                    }
                 },
                 MastNode::Block(basic_block_node) => {
                     self.hasher_for_chiplet.record_hash_basic_block(
@@ -508,6 +539,8 @@ impl Tracer for ExecutionTracer {
                         parent_ctx: ctx_info.parent_ctx,
                         parent_fn_hash: ctx_info.parent_fn_hash,
                     });
+
+                    self.pending_restore_context = true;
                 }
             },
             Continuation::FinishExternal(_)
@@ -634,7 +667,31 @@ impl Tracer for ExecutionTracer {
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
     ) {
-        // do nothing
+        // Start a new overflow table context for Call/Syscall/Dyncall. This is deferred from
+        // start_clock_cycle because for Dyncall, decrement_size (which pops from the overflow table
+        // in the current context) happens before start_context. 
+        //
+        // TODO(plafer): this can be done in `start_clock_cycle()` if we remove `decrement_size()`
+        // and do it all in start_clock_cycle() on dyncall
+        if self.pending_start_context {
+            self.overflow_table.start_context();
+            self.pending_start_context = false;
+        }
+
+        // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
+        // from start_clock_cycle because finalize_clock_cycle is only called when the operation
+        // succeeds (i.e., the stack depth check in processor.restore_context() passes).
+        if self.pending_restore_context {
+            // Restore context for call/syscall/dyncall: pop the current context's
+            // (empty) overflow stack and restore the previous context's overflow state.
+            self.overflow_table.restore_context();
+            self.overflow_replay.record_restore_context_overflow_addr(
+                MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
+                self.overflow_table.last_update_clk_in_current_ctx(),
+            );
+
+            self.pending_restore_context = false;
+        }
     }
 
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
@@ -648,18 +705,6 @@ impl Tracer for ExecutionTracer {
             let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
             self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
         }
-    }
-
-    fn start_context(&mut self) {
-        self.overflow_table.start_context();
-    }
-
-    fn restore_context(&mut self) {
-        self.overflow_table.restore_context();
-        self.overflow_replay.record_restore_context_overflow_addr(
-            MIN_STACK_DEPTH + self.overflow_table.num_elements_in_current_ctx(),
-            self.overflow_table.last_update_clk_in_current_ctx(),
-        );
     }
 }
 

@@ -83,7 +83,6 @@ where
         let new_ctx: ContextId = get_next_ctx_id(state.processor);
 
         // Save the current state, and update the system registers.
-        state.tracer.start_context();
         state.processor.save_context_and_truncate_stack();
 
         state.processor.system_mut().set_ctx(new_ctx);
@@ -193,15 +192,14 @@ where
 
     let dyn_node = current_forest[node_id].unwrap_dyn();
     // For dyncall, restore the context.
-    if dyn_node.is_dyncall() {
-        if let Err(e) = state.processor.restore_context() {
-            return ControlFlow::Break(BreakReason::Err(e.with_context(
-                current_forest,
-                node_id,
-                state.host,
-            )));
-        }
-        state.tracer.restore_context();
+    if dyn_node.is_dyncall()
+        && let Err(e) = state.processor.restore_context()
+    {
+        return ControlFlow::Break(BreakReason::Err(e.with_context(
+            current_forest,
+            node_id,
+            state.host,
+        )));
     }
 
     // Finalize the clock cycle corresponding to the END operation.
