@@ -17,11 +17,9 @@ pub use sys_event_handlers::SystemEventError;
 use sys_event_handlers::handle_system_event;
 
 impl FastProcessor {
-    // Executes any decorators which have not been executed during span ops execution; this can
-    // happen for decorators appearing after all operations in a block. these decorators are
-    // executed after BASIC BLOCK is closed to make sure the VM clock cycle advances beyond the last
-    // clock cycle of the BASIC BLOCK ops. For the linked case, check for decorators at an operation
-    // index beyond the last operation
+    /// Executes any decorator in a basic block that is to be executed after all operations in the
+    /// block. This only differs from [`Self::execute_after_exit_decorators`] in that these
+    /// decorators are stored in the basic block node itself.
     #[inline(always)]
     pub(super) fn execute_end_of_block_decorators(
         &mut self,

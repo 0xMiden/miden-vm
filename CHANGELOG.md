@@ -2,6 +2,12 @@
 
 ## 0.22.0 (TBD)
 
+## 0.21.1 (2026-02-17)
+
+#### Changes
+
+- Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
+
 ## 0.21.0 (2026-02-14)
 
 #### Major breaking changes

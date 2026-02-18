@@ -4,7 +4,7 @@ sidebar_position: 2
 ---
 
 # Programs in Miden VM
-Miden VM consumes programs in a form of a Merkelized Abstract Syntax Tree (MAST). This tree is a binary tree where each node is a *code block*. The VM starts execution at the root of the tree, and attempts to recursively execute each required block according to its semantics. If the execution of a code block fails, the VM halts at that point and no further blocks are executed. A set of currently available blocks and their execution semantics are described below.
+Miden VM consumes programs in a form of a Merkleized Abstract Syntax Tree (MAST). This tree is a binary tree where each node is a *code block*. The VM starts execution at the root of the tree, and attempts to recursively execute each required block according to its semantics. If the execution of a code block fails, the VM halts at that point and no further blocks are executed. A set of currently available blocks and their execution semantics are described below.
 
 ## Code blocks
 
@@ -115,7 +115,7 @@ Execution of this program would proceed as follows:
 4. Block $B_3$ is a *split block*, and thus, the VM will pop the value off the top of the stack. If the popped value is $1$, operations from block $b$ will be executed in sequence. If the popped value is $0$, then the VM will attempt to execute block $B_2$.
 5. $B_2$ is a *join block*, thus, the VM will try to execute block $B_1$ first, and then execute operations from block $e$.
 6. Block $B_1$ is also a *join_block*, and thus, the VM will first execute all operations in block $c$, and then will attempt to execute block $B_0$.
-7. Block $B_0$ is a loop block, thus, the VM will pop the value off the top of the stack. If the pooped value is $1$, the VM will execute the body of the loop defined by block $d$. If the popped value is $0$, the VM will not execute block $d$ and instead will move up the tree executing first block $e$, then $f$.
+7. Block $B_0$ is a loop block, thus, the VM will pop the value off the top of the stack. If the popped value is $1$, the VM will execute the body of the loop defined by block $d$. If the popped value is $0$, the VM will not execute block $d$ and instead will move up the tree executing first block $e$, then $f$.
 8. If the VM does enter the loop, then after operation $d_n$ is executed, the VM will pop the value off the top of the stack again. If the popped value is $1$, the VM will execute block $d$ again, and again until the top of the stack becomes $0$. Once the top of the stack becomes $0$, the VM will exit the loop and will move up the tree executing first block $e$, then $f$.
 
 ## Program hash computation

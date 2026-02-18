@@ -33,8 +33,9 @@ Managing control flow in the VM is accomplished by executing control flow operat
 | `SPAN`    | Initiates processing of a new [Basic block](../programs.md#basic-block). (historically called "span block") |
 | `RESPAN`  | Initiates processing of a new operation batch within a basic block. (historically called "span block") |
 | `DYN`     | Initiates processing of a new [Dyn block](../programs.md#dyn-block).         |
+| `DYNCALL` | Initiates processing of a new [Dyncall block](../programs.md#dyncall-block). |
 | `CALL`    | Initiates processing of a new [Call block](../programs.md#call-block).       |
-| `SYSCALL` | Initiates processing ofa new  [Syscall block](../programs.md#syscall-block). |
+| `SYSCALL` | Initiates processing of a new [Syscall block](../programs.md#syscall-block). |
 | `END`     | Marks the end of a program block.                                            |
 | `HALT`    | Marks the end of the entire program.                                         |
 
@@ -142,18 +143,18 @@ To make hashing requests to the hash chiplet and to read the results from it, we
 To initiate a 2-to-1 hash of $8$ elements ($v_0, ..., v_7$) we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+8} \cdot v_i)
+\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
 $$
 
 where:
 * $m_{bp}$ is a label indicating beginning of a new permutation. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
 * $r$ is the address of the row at which the hashing begins.
-* Some $\alpha$ values are skipped in the above (e.g., $\alpha_3$) because of the specifics of how auxiliary hasher table rows are reduced to field elements (described [here](../chiplets/hasher.md#multiset-check-constraints)). For example, $\alpha_3$ is used as a coefficient for node index values during Merkle path computations in the hasher, and thus, is not relevant in this case.  The $\alpha_4$ term is omitted when the number of items being hashed is a multiple of the rate width ($8$) because it is multiplied by 0 - the value of the first capacity register as determined by the [hasher chiplet logic](../chiplets/hasher.md#simple-2-to-1-hash).
+* Some $\alpha$ values are skipped in the above (e.g., $\alpha_3$) because of the specifics of how auxiliary hasher table rows are reduced to field elements (described [here](../chiplets/hasher.md#multiset-check-constraints)). For example, $\alpha_3$ is used as a coefficient for node index values during Merkle path computations in the hasher, and thus, is not relevant in this case. The capacity lanes (state indices $8..11$, coefficients $\alpha_{12..15}$) are zero for these messages, so those terms drop out.
 
 To read the $4$-element result ($u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
 $$
 
 where:
@@ -165,13 +166,13 @@ where:
 To initiate a sequential hash of $n$ elements ($v_0, ..., v_{n-1}$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \alpha_4 \cdot n + \sum_{i=0}^7 (\alpha_{i+8} \cdot v_i)
+\alpha_0 + \alpha_1 \cdot m_{bp} + \alpha_2 \cdot r + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_i)
 $$
 
 This also absorbs the first $8$ elements of the sequence into the hasher state. Then, to absorb the next sequence of $8$ elements (e.g., $v_8, ..., v_{15}$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^7 (\alpha_{i+8} \cdot v_{i + 8})
+\alpha_0 + \alpha_1 \cdot m_{abp} + \alpha_2 \cdot (r + 31) + \sum_{i=0}^7 (\alpha_{i+4} \cdot v_{i + 8})
 $$
 
 Where $m_{abp}$ is a label indicating absorption of more elements into the hasher state. Value of this label is computed based on hash chiplet selector flags according to the methodology described [here](../chiplets/hasher.md#multiset-check-constraints).
@@ -179,7 +180,7 @@ Where $m_{abp}$ is a label indicating absorption of more elements into the hashe
 We can keep absorbing elements into the hasher in the similar manner until all elements have been absorbed. Then, to read the result (e.g., $u_0, ..., u_3$), we need to divide $b_{chip}$ by the following value:
 
 $$
-\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + \lceil n / 8 \rceil \cdot 32  - 1) + \sum_{i=0}^3 (\alpha_{i+8} \cdot u_i)
+\alpha_0 + \alpha_1 \cdot m_{hout} + \alpha_2 \cdot (r + \lceil n / 8 \rceil \cdot 32  - 1) + \sum_{i=0}^3 (\alpha_{i+4} \cdot u_i)
 $$
 
 Thus, for example, if $n = 14$, the result of the hash will be available at hasher row $r + 63$.
@@ -307,7 +308,7 @@ When the VM executes a `SPLIT` operation, it does the following:
 
 #### LOOP operation
 
-Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below.
+Before a `LOOP` operation is executed by the VM, the prover populates $h_0, ..., h_3$ registers with hash of the loop's body as shown in the diagram below. The remaining registers $h_4, ..., h_7$ are set to $0$ so the hash input is padded to a full 8-element rate.
 
 ![decoder_loop_operation](../../img/design/decoder/decoder_loop_operation.png)
 
@@ -319,7 +320,7 @@ When the VM executes a `LOOP` operation, it does the following:
    a. If the popped value is $1$ adds a tuple `(blk, prnt, 1, 0...)` to the block stack table (the `1` indicates that the loop's body is expected to be executed). Then, adds a tuple `(blk, loop_body_hash, 0, 1)` to the block hash table.\
    b. If the popped value is $0$, adds `(blk, prnt, 0, 0...)` to the block stack table. In this case, nothing is added to the block hash table.\
    c. If the popped value is neither $1$ nor $0$, the execution fails.
-2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and $h_0, ..., h_3$ as input values.
+2. Initiates a 2-to-1 hash computation in the hash chiplet (as described [here](#simple-2-to-1-hash)) using `blk` as row address in the auxiliary hashing table and the padded input $[h_0, ..., h_3, 0, 0, 0, 0]$.
 
 #### SPAN operation
 
