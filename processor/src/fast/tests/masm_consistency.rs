@@ -6,6 +6,7 @@ use rstest::fixture;
 use super::*;
 
 #[rstest]
+#[tokio::test]
 // ---- syscalls --------------------------------
 
 // check stack is preserved after syscall
@@ -227,7 +228,7 @@ use super::*;
     end",
     vec![Felt::from_u32(u32::MAX), ONE]
 )]
-fn test_masm_consistency(
+async fn test_masm_consistency(
     testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
@@ -261,12 +262,12 @@ fn test_masm_consistency(
 
     // fast processor
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_stack_outputs = processor.execute_sync(&program, &mut host).unwrap().stack;
+    let fast_stack_outputs = processor.execute(&program, &mut host).await.unwrap().stack;
 
     // fast processor by step
     let stepped_stack_outputs = {
         let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap()
+        processor.execute_by_step(&program, &mut host).await.unwrap()
     };
 
     assert_eq!(fast_stack_outputs, stepped_stack_outputs);
@@ -275,6 +276,7 @@ fn test_masm_consistency(
 
 /// Tests that emitted errors are consistent between the fast and slow processors.
 #[rstest]
+#[tokio::test]
 // check that error is returned if condition is not a boolean
 #[case(None, "begin while.true swap end end", vec![Felt::from_u32(2); 16])]
 #[case(None, "begin while.true push.100 end end", vec![ONE; 16])]
@@ -306,7 +308,7 @@ fn test_masm_consistency(
     end",
     vec![Felt::from_u32(u32::MAX) + ONE, ZERO]
 )]
-fn test_masm_errors_consistency(
+async fn test_masm_errors_consistency(
     testname: String,
     #[case] kernel_source: Option<&'static str>,
     #[case] program_source: &'static str,
@@ -340,12 +342,12 @@ fn test_masm_errors_consistency(
 
     // fast processor
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let fast_err = processor.execute_sync(&program, &mut host).unwrap_err();
+    let fast_err = processor.execute(&program, &mut host).await.unwrap_err();
 
     // fast processor by step
     let fast_stepped_err = {
         let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-        processor.execute_by_step_sync(&program, &mut host).unwrap_err()
+        processor.execute_by_step(&program, &mut host).await.unwrap_err()
     };
 
     assert_eq!(fast_err.to_string(), fast_stepped_err.to_string());
@@ -358,8 +360,8 @@ fn test_masm_errors_consistency(
 /// 1. The Poseidon2 permutation is applied correctly with LE sponge layout [RATE0, RATE1, CAP]
 /// 2. The stack is updated with [R0, R1, CAP_NEXT] as expected
 /// 3. The capacity is properly initialized to [0,0,0,0] for the first call
-#[test]
-fn test_log_precompile_correctness() {
+#[tokio::test]
+async fn test_log_precompile_correctness() {
     use miden_core::crypto::hash::Poseidon2;
 
     // Stack inputs: [1,2,3,4,5,6,7,8] with 1 at top
@@ -395,7 +397,7 @@ fn test_log_precompile_correctness() {
 
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
-    let execution_output = processor.execute_sync(&program, &mut host).unwrap();
+    let execution_output = processor.execute(&program, &mut host).await.unwrap();
 
     let actual_r0 = execution_output.stack.get_word(0).unwrap();
     let actual_r1 = execution_output.stack.get_word(4).unwrap();

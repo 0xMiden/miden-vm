@@ -94,6 +94,7 @@
 
 - Fixed issue with deserialization of Paths due to lifetime restrictions [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
 - Implemented path canonicalization and modified Path/PathBuf APIs to canonicalize paths during construction. This also addressed some issues uncovered during testing where some APIs were not canonicalizing paths, or path-related functions were inconsistent in their behavior due to special-casing that was previously needed [#2627](https://github.com/0xMiden/miden-vm/pull/2627)
+- [BREAKING] Removed all `_sync` methods (`execute_sync`, `prove_sync`, `execute_for_trace_sync`, etc.) making the processor strictly async. Users should manage their own async runtime with `tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(...)` for synchronous contexts ([#2552](https://github.com/0xMiden/miden-vm/issues/2552)).
 
 ## 0.20.4 (2026-01-30)
 

@@ -40,8 +40,8 @@ fn create_test_program(
 }
 
 // Test tracking decorator execution counts for fast processor
-#[test]
-fn test_before_enter_decorator_executed_once_fast() {
+#[tokio::test]
+async fn test_before_enter_decorator_executed_once_fast() {
     let before_enter_decorator = Decorator::Trace(1);
     let after_exit_decorator = Decorator::Trace(2);
     let operations = [Operation::Noop];
@@ -56,7 +56,7 @@ fn test_before_enter_decorator_executed_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -70,8 +70,8 @@ fn test_before_enter_decorator_executed_once_fast() {
     assert_eq!(order[1].0, 2, "Second trace should be after_exit");
 }
 
-#[test]
-fn test_multiple_before_enter_decorators_each_once_fast() {
+#[tokio::test]
+async fn test_multiple_before_enter_decorators_each_once_fast() {
     let before_enter_decorators = [Decorator::Trace(1), Decorator::Trace(2), Decorator::Trace(3)];
     let after_exit_decorator = Decorator::Trace(4);
     let operations = [Operation::Noop];
@@ -86,7 +86,7 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -116,8 +116,8 @@ fn test_multiple_before_enter_decorators_each_once_fast() {
     assert_eq!(order[3].0, 4, "Fourth trace should be after_exit");
 }
 
-#[test]
-fn test_multiple_after_exit_decorators_each_once_fast() {
+#[tokio::test]
+async fn test_multiple_after_exit_decorators_each_once_fast() {
     let before_enter_decorator = Decorator::Trace(1);
     let after_exit_decorators = [Decorator::Trace(2), Decorator::Trace(3), Decorator::Trace(4)];
     let operations = [Operation::Noop];
@@ -132,7 +132,7 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -162,8 +162,8 @@ fn test_multiple_after_exit_decorators_each_once_fast() {
     assert_eq!(order[3].0, 4, "Fourth trace should be third after_exit");
 }
 
-#[test]
-fn test_decorator_execution_order_fast() {
+#[tokio::test]
+async fn test_decorator_execution_order_fast() {
     let before_enter_decorators = [
         Decorator::Trace(1), // Executed first
         Decorator::Trace(2), // Executed second
@@ -184,7 +184,7 @@ fn test_decorator_execution_order_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify decorator execution counts
@@ -218,8 +218,8 @@ fn test_decorator_execution_order_fast() {
     assert_eq!(order[3].0, 4, "Fourth trace should be second after_exit");
 }
 
-#[test]
-fn test_processor_decorator_execution() {
+#[tokio::test]
+async fn test_processor_decorator_execution() {
     let before_enter_decorator = Decorator::Trace(1);
     let after_exit_decorator = Decorator::Trace(2);
     let operations = [Operation::Noop];
@@ -233,7 +233,7 @@ fn test_processor_decorator_execution() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let execution_result = processor.execute_sync(&program, &mut host);
+    let execution_result = processor.execute(&program, &mut host).await;
     assert!(execution_result.is_ok(), "Execution failed: {:?}", execution_result);
 
     // Check decorator execution
@@ -246,8 +246,8 @@ fn test_processor_decorator_execution() {
     insta::assert_debug_snapshot!("execution_order", host.get_execution_order());
 }
 
-#[test]
-fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
+#[tokio::test]
+async fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
     // This test ensures that inner decorators (especially those attached to operation zero)
     // and before_enter/after_exit decorators are not duplicated in the fast processor
 
@@ -277,7 +277,7 @@ fn test_no_duplication_between_inner_and_before_exit_decorators_fast() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify each decorator executes exactly once (no duplication)
@@ -335,20 +335,20 @@ fn create_test_program_with_inner_decorators(
 // DECORATOR BYPASS SPY TESTS
 // ================================================================================================
 
-#[test]
-fn test_decorator_bypass_in_release_mode() {
+#[tokio::test]
+async fn test_decorator_bypass_in_release_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
     let processor = FastProcessor::new(StackInputs::default());
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
-    processor.execute_sync(&program, &mut host).unwrap();
+    processor.execute(&program, &mut host).await.unwrap();
     assert_eq!(counter.get(), 0, "decorators should not be retrieved in release mode");
 }
 
-#[test]
-fn test_decorator_bypass_in_debug_mode() {
+#[tokio::test]
+async fn test_decorator_bypass_in_debug_mode() {
     let program =
         create_test_program(&[Decorator::Trace(1)], &[Decorator::Trace(2)], &[Operation::Noop]);
     let processor = FastProcessor::new(StackInputs::default())
@@ -358,6 +358,6 @@ fn test_decorator_bypass_in_debug_mode() {
     let counter = processor.decorator_retrieval_count.clone();
     let mut host = TestHost::new();
 
-    processor.execute_sync(&program, &mut host).unwrap();
+    processor.execute(&program, &mut host).await.unwrap();
     assert!(counter.get() > 0, "decorators should be retrieved in debug mode");
 }

@@ -27,8 +27,8 @@ fn create_debug_test_program() -> Program {
 }
 
 /// Test that verifies decorators only execute in debug mode
-#[test]
-fn test_decorators_only_execute_in_debug_mode() {
+#[tokio::test]
+async fn test_decorators_only_execute_in_debug_mode() {
     // Create program with Trace decorator
     let mut forest = MastForest::new();
     let decorator = Decorator::Trace(999);
@@ -48,7 +48,7 @@ fn test_decorators_only_execute_in_debug_mode() {
     let mut host_debug_off = TestHost::new();
     let process_debug_off = FastProcessor::new(StackInputs::default());
 
-    let result = process_debug_off.execute_sync(&program, &mut host_debug_off);
+    let result = process_debug_off.execute(&program, &mut host_debug_off).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
     assert!(
         host_debug_off.get_trace_count(999) == 0,
@@ -62,7 +62,7 @@ fn test_decorators_only_execute_in_debug_mode() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let result = process_debug_on.execute_sync(&program, &mut host_debug_on);
+    let result = process_debug_on.execute(&program, &mut host_debug_on).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
     assert!(
         host_debug_on.get_trace_count(999) == 1,
@@ -71,8 +71,8 @@ fn test_decorators_only_execute_in_debug_mode() {
 }
 
 /// Test that verifies decorators do NOT execute when debug mode is OFF
-#[test]
-fn test_decorators_only_execute_in_debug_mode_off() {
+#[tokio::test]
+async fn test_decorators_only_execute_in_debug_mode_off() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
 
@@ -83,7 +83,7 @@ fn test_decorators_only_execute_in_debug_mode_off() {
     let processor = FastProcessor::new(StackInputs::default());
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify that the decorator was NOT executed (trace count should be 0)
@@ -99,8 +99,8 @@ fn test_decorators_only_execute_in_debug_mode_off() {
 }
 
 /// Test that verifies decorators DO execute when debug mode is ON
-#[test]
-fn test_decorators_only_execute_in_debug_mode_on() {
+#[tokio::test]
+async fn test_decorators_only_execute_in_debug_mode_on() {
     // Create a test program with a Trace decorator
     let program = create_debug_test_program();
 
@@ -114,7 +114,7 @@ fn test_decorators_only_execute_in_debug_mode_on() {
         .with_tracing(true);
 
     // Execute the program
-    let result = processor.execute_sync(&program, &mut host);
+    let result = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Execution failed: {:?}", result);
 
     // Verify that the decorator WAS executed (trace count should be 1)
@@ -132,8 +132,8 @@ fn test_decorators_only_execute_in_debug_mode_on() {
 
 /// Test that demonstrates the zero overhead principle by comparing execution
 /// with debug mode on vs off for a more complex program
-#[test]
-fn test_zero_overhead_when_debug_off() {
+#[tokio::test]
+async fn test_zero_overhead_when_debug_off() {
     // Create a more complex program with multiple decorators
     let mut mast_forest = MastForest::new();
 
@@ -162,7 +162,7 @@ fn test_zero_overhead_when_debug_off() {
     let mut host_off = TestHost::new();
     let processor_off = FastProcessor::new(StackInputs::default());
 
-    let result_off = processor_off.execute_sync(&program, &mut host_off);
+    let result_off = processor_off.execute(&program, &mut host_off).await;
     assert!(result_off.is_ok());
 
     // Verify no decorators executed
@@ -177,7 +177,7 @@ fn test_zero_overhead_when_debug_off() {
         .with_debugging(true)
         .with_tracing(true);
 
-    let result_on = processor_on.execute_sync(&program, &mut host_on);
+    let result_on = processor_on.execute(&program, &mut host_on).await;
     assert!(result_on.is_ok());
 
     // Verify all decorators executed

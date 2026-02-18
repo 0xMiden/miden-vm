@@ -21,7 +21,8 @@ use crate::{AdviceInputs, PrimeField64, StackInputs};
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
-fn hasher_p1_mp_verify(#[case] index: u64) {
+#[tokio::test]
+async fn hasher_p1_mp_verify(#[case] index: u64) {
     let (tree, _) = build_merkle_tree();
     let store = MerkleStore::from(&tree);
     let depth = 3;
@@ -37,7 +38,7 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
 
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MpVerify(ZERO)];
-    let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
+    let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);
@@ -52,7 +53,8 @@ fn hasher_p1_mp_verify(#[case] index: u64) {
 #[rstest]
 #[case(5_u64)]
 #[case(4_u64)]
-fn hasher_p1_mr_update(#[case] index: u64) {
+#[tokio::test]
+async fn hasher_p1_mr_update(#[case] index: u64) {
     let (tree, _) = build_merkle_tree();
     let old_node = tree.get_node(NodeIndex::new(3, index).unwrap()).unwrap();
     let new_node = init_leaf(11);
@@ -70,7 +72,7 @@ fn hasher_p1_mr_update(#[case] index: u64) {
 
     // build execution trace and extract the sibling table column from it
     let ops = vec![Operation::MrUpdate];
-    let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs);
+    let trace = build_trace_from_ops_with_inputs(ops, stack_inputs, advice_inputs).await;
     let alphas = rand_array::<Felt, AUX_TRACE_RAND_ELEMENTS>();
     let aux_columns = trace.build_aux_trace(&alphas).unwrap();
     let p1 = aux_columns.get_column(P1_COL_IDX);

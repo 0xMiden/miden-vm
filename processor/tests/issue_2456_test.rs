@@ -7,8 +7,8 @@
 use miden_assembly::Assembler;
 use miden_processor::{DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs};
 
-#[test]
-fn test_issue_2456_statically_linked_library_call() {
+#[tokio::test]
+async fn test_issue_2456_statically_linked_library_call() {
     use std::sync::Arc;
 
     use miden_assembly::{DefaultSourceManager, diagnostics::NamedSource};
@@ -49,6 +49,6 @@ fn test_issue_2456_statically_linked_library_call() {
     let options = ExecutionOptions::default();
 
     let result =
-        miden_processor::execute_sync(&program, stack_inputs, advice_inputs, &mut host, options);
+        miden_processor::execute(&program, stack_inputs, advice_inputs, &mut host, options).await;
     assert!(result.is_ok(), "Execution should succeed but got error: {:?}", result.err());
 }

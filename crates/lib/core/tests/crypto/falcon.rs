@@ -26,7 +26,6 @@ use miden_utils_testing::{
     },
     expect_exec_error_matches,
     proptest::proptest,
-    prove_sync,
     rand::random_word,
 };
 use rand::{Rng, SeedableRng, rng};
@@ -344,8 +343,8 @@ fn test_mod_12289_larger_value() {
     test.expect_stack(&[expected]);
 }
 
-#[test]
-fn falcon_prove_verify() {
+#[tokio::test]
+async fn falcon_prove_verify() {
     let sk = SecretKey::new();
     let message = random_word();
     let (source, op_stack, _, _, advice_map) = generate_test(sk, message);
@@ -365,7 +364,8 @@ fn falcon_prove_verify() {
 
     let options = ProvingOptions::with_96_bit_security(HashFunction::Blake3_256);
     let (stack_outputs, proof) =
-        prove_sync(&program, stack_inputs, advice_inputs, &mut host, options)
+        miden_prover::prove(&program, stack_inputs, advice_inputs, &mut host, options)
+            .await
             .expect("failed to generate proof");
 
     let program_info = ProgramInfo::from(program);

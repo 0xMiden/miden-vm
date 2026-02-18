@@ -51,7 +51,7 @@ path = "tests/integration/main.rs"
 [features]
 concurrent = ["miden-prover/concurrent", "std"]
 default = ["std"]
-executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "internal", "serde", "std"]
+executable = ["dep:hex", "dep:clap", "dep:tracing-subscriber", "dep:tokio", "internal", "serde", "std"]
 serde = ["dep:serde", "dep:serde_json"]
 std = [
     "hex?/std",
@@ -86,6 +86,10 @@ serde_json = { workspace = true, optional = true }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", optional = true, features = ["std", "env-filter"] }
 tracing-forest = { version = "0.2", optional = true, features = ["ansi", "smallvec"] }
+
+# Tokio for CLI async runtime (non-wasm only)
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { workspace = true, features = ["rt"], optional = true }
 
 [dev-dependencies]
 assert_cmd = { version = "2.1" }

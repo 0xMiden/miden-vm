@@ -28,7 +28,7 @@ const TEST_TRACE_FRAGMENT_SIZE: usize = 1 << 10;
 // ================================================================================================
 
 /// Builds a sample trace by executing the provided code block against the provided stack inputs.
-pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
+pub async fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> ExecutionTrace {
     let stack_inputs = stack_inputs.iter().map(|&v| Felt::new(v)).collect::<Vec<Felt>>();
     let mut host = DefaultHost::default();
     let processor = FastProcessor::new_with_options(
@@ -39,14 +39,14 @@ pub fn build_trace_from_program(program: &Program, stack_inputs: &[u64]) -> Exec
             .unwrap(),
     );
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(program, &mut host).unwrap();
+        processor.execute_for_trace(program, &mut host).await.unwrap();
 
     build_trace(execution_output, trace_generation_context, program.to_info())
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
 /// results in 1 additional hash cycle (8 rows) at the beginning of the hash chiplet.
-pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
+pub async fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> ExecutionTrace {
     let mut mast_forest = MastForest::new();
 
     let basic_block_id = BasicBlockNodeBuilder::new(operations, Vec::new())
@@ -56,13 +56,13 @@ pub fn build_trace_from_ops(operations: Vec<Operation>, stack: &[u64]) -> Execut
 
     let program = Program::new(mast_forest.into(), basic_block_id);
 
-    build_trace_from_program(&program, stack)
+    build_trace_from_program(&program, stack).await
 }
 
 /// Builds a sample trace by executing a span block containing the specified operations. Unlike the
 /// function above, this function accepts the full [AdviceInputs] object, which means it can run
 /// the programs with initialized advice provider.
-pub fn build_trace_from_ops_with_inputs(
+pub async fn build_trace_from_ops_with_inputs(
     operations: Vec<Operation>,
     stack_inputs: StackInputs,
     advice_inputs: AdviceInputs,
@@ -83,7 +83,7 @@ pub fn build_trace_from_ops_with_inputs(
             .unwrap(),
     );
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+        processor.execute_for_trace(&program, &mut host).await.unwrap();
 
     build_trace(execution_output, trace_generation_context, program.to_info())
 }

@@ -6,8 +6,8 @@ use miden_utils_testing::{
     AdviceStackBuilder, build_expected_hash, build_expected_perm, felt_slice_to_ints,
 };
 
-#[test]
-fn test_memcopy_words() {
+#[tokio::test]
+async fn test_memcopy_words() {
     use miden_core_lib::CoreLibrary;
 
     let source = "
@@ -35,7 +35,7 @@ fn test_memcopy_words() {
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default());
-    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+    let exec_output = processor.execute(&program, &mut host).await.unwrap();
 
     let dummy_clk = RowIndex::from(0_usize);
 
@@ -122,8 +122,8 @@ fn test_memcopy_words() {
     );
 }
 
-#[test]
-fn test_memcopy_elements() {
+#[tokio::test]
+async fn test_memcopy_elements() {
     use miden_core_lib::CoreLibrary;
 
     let source = "
@@ -151,7 +151,7 @@ fn test_memcopy_elements() {
     let mut host = DefaultHost::default().with_library(&core_lib).unwrap();
 
     let processor = FastProcessor::new(StackInputs::default());
-    let exec_output = processor.execute_sync(&program, &mut host).unwrap();
+    let exec_output = processor.execute(&program, &mut host).await.unwrap();
 
     for addr in 2002_u32..2020_u32 {
         assert_eq!(

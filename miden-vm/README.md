@@ -52,7 +52,7 @@ use std::sync::Arc;
 use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
-    Assembler, execute_sync, ExecutionOptions, DefaultHost, Program, StackInputs
+    Assembler, execute, ExecutionOptions, DefaultHost, Program, StackInputs
 };
 
 // instantiate the assembler
@@ -73,8 +73,9 @@ let mut host = DefaultHost::default();
 // instantiate default execution options
 let exec_options = ExecutionOptions::default();
 
-// execute the program with no inputs
-let trace = execute_sync(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options).unwrap();
+// execute the program with no inputs (using tokio runtime for async execution)
+let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+let trace = rt.block_on(execute(&program, stack_inputs, advice_inputs.clone(), &mut host, exec_options)).unwrap();
 ```
 
 ### Proving program execution
@@ -101,7 +102,7 @@ use miden_vm::{
     advice::AdviceInputs,
     assembly::DefaultSourceManager,
     field::PrimeField64,
-    Assembler, DefaultHost, ProvingOptions, Program, prove_sync, StackInputs
+    Assembler, DefaultHost, ProvingOptions, Program, prove, StackInputs
 };
 
 // instantiate the assembler
@@ -110,14 +111,15 @@ let mut assembler = Assembler::default();
 // this is our program, we compile it from assembly code
 let program = assembler.assemble_program("begin push.3 push.5 add swap drop end").unwrap();
 
-// let's execute it and generate a STARK proof
-let (outputs, proof) = prove_sync(
+// let's execute it and generate a STARK proof (using tokio runtime for async execution)
+let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+let (outputs, proof) = rt.block_on(prove(
     &program,
     StackInputs::default(),       // we won't provide any inputs
     AdviceInputs::default(),      // we don't need any initial advice inputs
     &mut DefaultHost::default(),  // we'll be using a default host
     ProvingOptions::default(),    // we'll be using default options
-)
+))
 .unwrap();
 
 // the output should be 8
@@ -211,14 +213,15 @@ let mut host = DefaultHost::default();
 // initialize the stack with values 0 and 1
 let stack_inputs = StackInputs::try_from_ints([1, 0]).unwrap();
 
-// execute the program
-let (outputs, proof) = miden_vm::prove_sync(
+// execute the program (using tokio runtime for async execution)
+let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+let (outputs, proof) = rt.block_on(miden_vm::prove(
     &program,
     stack_inputs,
     AdviceInputs::default(), // without initial advice inputs
     &mut host,
     ProvingOptions::default(), // use default proving options
-)
+))
 .unwrap();
 
 // fetch the stack outputs, truncating to the first element

@@ -3,8 +3,8 @@ use miden_processor::{ExecutionOptions, Program, StackInputs, advice::AdviceInpu
 
 use super::TestHost;
 
-#[test]
-fn test_event_handling() {
+#[tokio::test]
+async fn test_event_handling() {
     let source = "\
     begin
         push.1000
@@ -19,13 +19,14 @@ fn test_event_handling() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
     )
+    .await
     .unwrap();
 
     // make sure events were handled correctly
@@ -33,8 +34,8 @@ fn test_event_handling() {
     assert_eq!(host.event_handler, expected);
 }
 
-#[test]
-fn test_trace_handling() {
+#[tokio::test]
+async fn test_trace_handling() {
     let source = "\
     begin
         push.1
@@ -49,33 +50,35 @@ fn test_trace_handling() {
     let mut host = TestHost::default();
 
     // execute program with disabled tracing
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
     )
+    .await
     .unwrap();
     // No trace events should be recorded when tracing is disabled
     assert!(host.get_execution_order().is_empty());
 
     // execute program with enabled tracing
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_tracing(true),
     )
+    .await
     .unwrap();
     // Extract trace IDs from execution order (ignoring clock cycles)
     let trace_ids: Vec<u32> = host.get_execution_order().iter().map(|(id, _)| *id).collect();
     assert_eq!(trace_ids, vec![1, 2]);
 }
 
-#[test]
-fn test_debug_with_debugging() {
+#[tokio::test]
+async fn test_debug_with_debugging() {
     let source: &str = "\
     begin
         push.1
@@ -87,13 +90,14 @@ fn test_debug_with_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_debugging(true),
     )
+    .await
     .unwrap();
 
     // Expect to see the debug.stack and debug.mem commands
@@ -101,8 +105,8 @@ fn test_debug_with_debugging() {
     assert_eq!(host.debug_handler, expected);
 }
 
-#[test]
-fn test_debug_without_debugging() {
+#[tokio::test]
+async fn test_debug_without_debugging() {
     let source: &str = "\
     begin
         push.1
@@ -114,13 +118,14 @@ fn test_debug_without_debugging() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default(),
     )
+    .await
     .unwrap();
 
     // Expect to see no debug commands
@@ -130,8 +135,8 @@ fn test_debug_without_debugging() {
 
 // Test that debug.adv_stack is parsable. For a functional test see
 // `miden-vm/tests/integration/cli/cli_test.rs::test_debug_adv_stack`
-#[test]
-fn test_parsing_debug_advice_stack() {
+#[tokio::test]
+async fn test_parsing_debug_advice_stack() {
     let source: &str = "\
     begin
         push.1
@@ -142,12 +147,13 @@ fn test_parsing_debug_advice_stack() {
     // compile and execute program
     let program: Program = Assembler::default().assemble_program(source).unwrap();
     let mut host = TestHost::default();
-    miden_processor::execute_sync(
+    miden_processor::execute(
         &program,
         StackInputs::default(),
         AdviceInputs::default(),
         &mut host,
         ExecutionOptions::default().with_debugging(true),
     )
+    .await
     .unwrap();
 }

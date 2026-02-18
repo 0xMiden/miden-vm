@@ -2,8 +2,8 @@ use miden_core::field::PrimeCharacteristicRing;
 
 use super::*;
 
-#[test]
-fn test_memory_word_access_alignment() {
+#[tokio::test]
+async fn test_memory_word_access_alignment() {
     let mut host = DefaultHost::default();
 
     // mloadw
@@ -12,12 +12,14 @@ fn test_memory_word_access_alignment() {
 
         // loadw at address 40 is allowed
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
-            .execute_sync(&program, &mut host)
+            .execute(&program, &mut host)
+            .await
             .unwrap();
 
         // but loadw at address 43 is not allowed
         let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
-            .execute_sync(&program, &mut host)
+            .execute(&program, &mut host)
+            .await
             .unwrap_err();
         assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
     }
@@ -28,19 +30,21 @@ fn test_memory_word_access_alignment() {
 
         // storew at address 40 is allowed
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(40)]).unwrap())
-            .execute_sync(&program, &mut host)
+            .execute(&program, &mut host)
+            .await
             .unwrap();
 
         // but storew at address 43 is not allowed
         let err = FastProcessor::new(StackInputs::new(&[Felt::from_u32(43)]).unwrap())
-            .execute_sync(&program, &mut host)
+            .execute(&program, &mut host)
+            .await
             .unwrap_err();
         assert_eq!(err.to_string(), "word access at memory address 43 in context 0 is unaligned");
     }
 }
 
-#[test]
-fn test_mloadw_success() {
+#[tokio::test]
+async fn test_mloadw_success() {
     let mut host = DefaultHost::default();
     let addr = Felt::from_u32(40);
     let word_at_addr = [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
@@ -53,7 +57,7 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_mut(&program, &mut host).await.unwrap();
 
         // Memory word[i] maps to stack position i (word[0] at top)
         assert_eq!(
@@ -68,14 +72,14 @@ fn test_mloadw_success() {
         processor.memory.write_word(ctx, addr, dummy_clk, word_at_addr.into()).unwrap();
 
         let program = simple_program_with_ops(vec![Operation::MLoadW]);
-        let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+        let stack_outputs = processor.execute_mut(&program, &mut host).await.unwrap();
 
         assert_eq!(stack_outputs.get_num_elements(16), &vec![ZERO; 16]);
     }
 }
 
-#[test]
-fn test_mstorew_success() {
+#[tokio::test]
+async fn test_mstorew_success() {
     let mut host = DefaultHost::default();
     let addr = Felt::from_u32(40);
     let word_to_store =
@@ -96,7 +100,7 @@ fn test_mstorew_success() {
         .unwrap(),
     );
     let program = simple_program_with_ops(vec![Operation::MStoreW]);
-    processor.execute_sync_mut(&program, &mut host).unwrap();
+    processor.execute_mut(&program, &mut host).await.unwrap();
 
     // Ensure that the memory was correctly modified
     assert_eq!(processor.memory.read_word(ctx, addr, clk).unwrap(), word_to_store);
@@ -107,7 +111,8 @@ fn test_mstorew_success() {
 #[case(41_u32, 42_u32)]
 #[case(42_u32, 42_u32)]
 #[case(43_u32, 42_u32)]
-fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
+#[tokio::test]
+async fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let mut host = DefaultHost::default();
     let ctx = 0_u32.into();
     let clk = 1_u32.into();
@@ -117,7 +122,7 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
     let mut processor =
         FastProcessor::new(StackInputs::new(&[Felt::from_u32(addr), value_to_store]).unwrap());
     let program = simple_program_with_ops(vec![Operation::MStore]);
-    processor.execute_sync_mut(&program, &mut host).unwrap();
+    processor.execute_mut(&program, &mut host).await.unwrap();
 
     // Ensure that the memory was correctly modified
     let word_addr = addr - (addr % WORD_SIZE as u32);
@@ -130,7 +135,8 @@ fn test_mstore_success(#[case] addr: u32, #[case] value_to_store: u32) {
 #[case(41_u32)]
 #[case(42_u32)]
 #[case(43_u32)]
-fn test_mload_success(#[case] addr_to_access: u32) {
+#[tokio::test]
+async fn test_mload_success(#[case] addr_to_access: u32) {
     let mut host = DefaultHost::default();
     let addr_with_word = 40_u32;
     let word_at_addr = [Felt::from_u32(1), Felt::from_u32(2), Felt::from_u32(3), Felt::from_u32(4)];
@@ -146,7 +152,7 @@ fn test_mload_success(#[case] addr_to_access: u32) {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MLoad]);
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_mut(&program, &mut host).await.unwrap();
 
     // Ensure that Operation::MLoad correctly reads the value on the stack
     assert_eq!(
@@ -155,8 +161,8 @@ fn test_mload_success(#[case] addr_to_access: u32) {
     );
 }
 
-#[test]
-fn test_mstream() {
+#[tokio::test]
+async fn test_mstream() {
     let mut host = DefaultHost::default();
     let addr = 40_u32;
     let word_at_addr_40 =
@@ -182,7 +188,7 @@ fn test_mstream() {
         .unwrap();
 
     let program = simple_program_with_ops(vec![Operation::MStream]);
-    let stack_outputs = processor.execute_sync_mut(&program, &mut host).unwrap();
+    let stack_outputs = processor.execute_mut(&program, &mut host).await.unwrap();
 
     // Word at addr 40 goes to positions 0-3, word at addr 44 goes to positions 4-7
     // word[0] at lowest position (top of stack)

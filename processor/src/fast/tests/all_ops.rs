@@ -11,7 +11,8 @@ use super::*;
 /// This creates a test for each element of the cross product of the given stack inputs and
 /// operations.
 #[rstest]
-fn test_basic_block(
+#[tokio::test]
+async fn test_basic_block(
     testname: String,
     // Stack inputs start from 1 so that moved elements are distinguishable from padding zeros
     #[values(
@@ -121,7 +122,7 @@ fn test_basic_block(
     let mut host = DefaultHost::default();
     let fast_processor = FastProcessor::new(StackInputs::new(&stack_inputs).unwrap());
     let fast_stack_outputs =
-        fast_processor.execute_sync(&program, &mut host).map(|output| output.stack);
+        fast_processor.execute(&program, &mut host).await.map(|output| output.stack);
 
     // Make sure that we're not getting an output stack overflow error, as it indicates that
     // the sequence of operations makes the stack end with a non-16 depth, and doesn't tell

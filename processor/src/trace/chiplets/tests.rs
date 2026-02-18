@@ -23,12 +23,12 @@ use crate::{
 
 type ChipletsTrace = [Vec<Felt>; CHIPLETS_WIDTH];
 
-#[test]
-fn hasher_chiplet_trace() {
+#[tokio::test]
+async fn hasher_chiplet_trace() {
     // --- single hasher permutation with no stack manipulation -----------------------------------
     let stack = [2, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0];
     let operations = vec![Operation::HPerm];
-    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default()).await;
 
     // Skip the hash of the span block generated while building the trace to check only the HPerm.
     let hasher_start = HASH_CYCLE_LEN;
@@ -39,12 +39,12 @@ fn hasher_chiplet_trace() {
     validate_padding(&chiplets_trace, hasher_end, trace_len);
 }
 
-#[test]
-fn bitwise_chiplet_trace() {
+#[tokio::test]
+async fn bitwise_chiplet_trace() {
     // --- single bitwise operation with no stack manipulation ------------------------------------
     let stack = [4, 8];
     let operations = vec![Operation::U32xor];
-    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default()).await;
 
     let bitwise_end = HASH_CYCLE_LEN + OP_CYCLE_LEN;
     validate_bitwise_trace(&chiplets_trace, HASH_CYCLE_LEN, bitwise_end);
@@ -53,13 +53,13 @@ fn bitwise_chiplet_trace() {
     validate_padding(&chiplets_trace, bitwise_end, trace_len - 1);
 }
 
-#[test]
-fn memory_chiplet_trace() {
+#[tokio::test]
+async fn memory_chiplet_trace() {
     // --- single memory operation with no stack manipulation -------------------------------------
     let addr = Felt::from_u32(4);
     let stack = [1, 2, 3, 4];
     let operations = vec![Operation::Push(addr), Operation::MStoreW];
-    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default());
+    let (chiplets_trace, trace_len) = build_trace(&stack, operations, Kernel::default()).await;
     let memory_trace_len = 1;
 
     // Skip the hash cycle created by the span block when building the trace.
@@ -71,13 +71,13 @@ fn memory_chiplet_trace() {
     validate_padding(&chiplets_trace, memory_end, trace_len);
 }
 
-#[test]
-fn stacked_chiplet_trace() {
+#[tokio::test]
+async fn stacked_chiplet_trace() {
     // --- operations in hasher, bitwise, and memory processors without stack manipulation --------
     let stack = [8, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 1];
     let ops = vec![Operation::U32xor, Operation::Push(ZERO), Operation::MStoreW, Operation::HPerm];
     let kernel = build_kernel();
-    let (chiplets_trace, trace_len) = build_trace(&stack, ops, kernel);
+    let (chiplets_trace, trace_len) = build_trace(&stack, ops, kernel).await;
     let memory_len = 1;
     let ace_len = 0;
     let kernel_rom_len = 2;
@@ -115,7 +115,7 @@ fn build_kernel() -> Kernel {
 
 /// Builds a sample trace by executing a span block containing the specified operations. This
 /// results in 1 additional hash cycle (8 rows) at the beginning of the hash chiplet.
-fn build_trace(
+async fn build_trace(
     stack_inputs: &[u64],
     operations: Vec<Operation>,
     kernel: Kernel,
@@ -140,7 +140,7 @@ fn build_trace(
     };
 
     let (execution_output, trace_generation_context) =
-        processor.execute_for_trace_sync(&program, &mut host).unwrap();
+        processor.execute_for_trace(&program, &mut host).await.unwrap();
     let trace =
         crate::trace::build_trace(execution_output, trace_generation_context, program.to_info());
 

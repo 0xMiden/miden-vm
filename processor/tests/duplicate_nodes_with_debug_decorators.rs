@@ -1,14 +1,15 @@
 use miden_assembly::testing::TestContext;
 use miden_processor::{
-    DefaultHost, ExecutionOptions, StackInputs, advice::AdviceInputs, operation::Operation,
+    DefaultHost, ExecutionOutput, FastProcessor, StackInputs, advice::AdviceInputs,
+    operation::Operation,
 };
 
 /// Ensures that equal MAST nodes don't get added twice to a MAST forest
 ///
 /// This test is disabled because with debug mode always enabled (issue #1821),
 /// nodes get unique debug decorators and are no longer de-duplicated.
-#[test]
-fn duplicate_nodes_with_debug_decorators() {
+#[tokio::test]
+async fn duplicate_nodes_with_debug_decorators() {
     let context = TestContext::new();
 
     let program_source = r#"
@@ -39,13 +40,8 @@ fn duplicate_nodes_with_debug_decorators() {
 
     // Verify the program can be executed (functional test)
     let mut host = DefaultHost::default();
-    let result = miden_processor::execute_sync(
-        &program,
-        StackInputs::default(),
-        AdviceInputs::default(),
-        &mut host,
-        ExecutionOptions::default(),
-    );
+    let processor = FastProcessor::new(StackInputs::default()).with_advice(AdviceInputs::default());
+    let result: Result<ExecutionOutput, _> = processor.execute(&program, &mut host).await;
     assert!(result.is_ok(), "Program should execute successfully");
 
     // Check that we have the expected control flow structure
