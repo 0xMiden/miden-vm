@@ -2,6 +2,10 @@
 
 ## 0.22.0 (TBD)
 
+- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
+- [BREAKING] Remove `Tracer` arguments from `Processor` methods ([#2676](https://github.com/0xMiden/miden-vm/pull/2676)).
+- Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
+
 ## 0.21.1 (2026-02-17)
 
 #### Changes
@@ -84,9 +88,6 @@
 - [BREAKING] Updated processor module structure ([#2651](https://github.com/0xMiden/miden-vm/pull/2651)).
 - [BREAKING] Removed `breakpoint` instruction from assembly ([#2655](https://github.com/0xMiden/miden-vm/pull/2655)).
 - Removed FRI domain offset from `fri_ext2fold4` operation for Plonky3 compatibility ([#2670](https://github.com/0xMiden/miden-vm/pull/2670)).
-- Consolidated testing hosts by merging `TestConsistencyHost` into `TestHost` and reusing the unified host in tests ([#2603](https://github.com/0xMiden/miden-vm/pull/2603)).
-- [BREAKING] Remove `Tracer` arguments from `Processor` methods ([#2676](https://github.com/0xMiden/miden-vm/pull/2676)).
-- Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
 - [BREAKING] Removed `Tracer` arguments from `Processor` methods ([#2676](https://github.com/0xMiden/miden-vm/pull/2676)).
 
 ## 0.20.6 (2026-02-04)
