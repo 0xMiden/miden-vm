@@ -1159,14 +1159,4 @@ impl Tracer for NoopTracer {
     ) {
         // do nothing
     }
-
-    #[inline(always)]
-    fn increment_stack_size(&mut self, _processor: &FastProcessor) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn decrement_stack_size(&mut self) {
-        // do nothing
-    }
 }

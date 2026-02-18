@@ -7,7 +7,7 @@ use miden_core::{
 
 use super::{dup_nth, op_cswap, op_cswapw, op_pad, op_push, op_swap, op_swap_double_word};
 use crate::{
-    fast::{FastProcessor, NoopTracer},
+    fast::FastProcessor,
     processor::{Processor, StackInterface},
 };
 
@@ -17,21 +17,20 @@ use crate::{
 #[test]
 fn test_op_push() {
     let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
 
     assert_eq!(MIN_STACK_DEPTH as u32, processor.stack_depth());
     let expected = build_expected(&[]);
     assert_eq!(expected, processor.stack_top());
 
     // push one item onto the stack
-    op_push(&mut processor, ONE, &mut tracer).unwrap();
+    op_push(&mut processor, ONE).unwrap();
     let expected = build_expected(&[1]);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 1, processor.stack_depth());
     assert_eq!(expected, processor.stack_top());
 
     // push another item onto the stack
-    op_push(&mut processor, Felt::new(3), &mut tracer).unwrap();
+    op_push(&mut processor, Felt::new(3)).unwrap();
     let expected = build_expected(&[3, 1]);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 2, processor.stack_depth());
@@ -41,22 +40,21 @@ fn test_op_push() {
 #[test]
 fn test_op_pad() {
     let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
 
     // push one item onto the stack
-    op_push(&mut processor, ONE, &mut tracer).unwrap();
+    op_push(&mut processor, ONE).unwrap();
     let expected = build_expected(&[1]);
     assert_eq!(expected, processor.stack_top());
 
     // pad the stack
-    op_pad(&mut processor, &mut tracer).unwrap();
+    op_pad(&mut processor).unwrap();
     let expected = build_expected(&[0, 1]);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 2, processor.stack_depth());
     assert_eq!(expected, processor.stack_top());
 
     // pad the stack again
-    op_pad(&mut processor, &mut tracer).unwrap();
+    op_pad(&mut processor).unwrap();
     let expected = build_expected(&[0, 0, 1]);
 
     assert_eq!(MIN_STACK_DEPTH as u32 + 3, processor.stack_depth());
@@ -66,11 +64,10 @@ fn test_op_pad() {
 #[test]
 fn test_op_drop() {
     let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
 
     // push a few items onto the stack
-    op_push(&mut processor, ONE, &mut tracer).unwrap();
-    op_push(&mut processor, Felt::new(2), &mut tracer).unwrap();
+    op_push(&mut processor, ONE).unwrap();
+    op_push(&mut processor, Felt::new(2)).unwrap();
 
     // drop the first value
     Processor::stack_mut(&mut processor).decrement_size();
@@ -91,27 +88,26 @@ fn test_op_drop() {
 #[test]
 fn test_op_dup() {
     let mut processor = FastProcessor::new(StackInputs::default());
-    let mut tracer = NoopTracer;
 
     // push one item onto the stack
-    op_push(&mut processor, ONE, &mut tracer).unwrap();
+    op_push(&mut processor, ONE).unwrap();
     let expected = build_expected(&[1]);
     assert_eq!(expected, processor.stack_top());
 
     // duplicate it (dup0)
-    dup_nth(&mut processor, 0, &mut tracer).unwrap();
+    dup_nth(&mut processor, 0).unwrap();
     let expected = build_expected(&[1, 1]);
     assert_eq!(expected, processor.stack_top());
 
     // duplicating non-existent item from the min stack range should be ok (dup2)
-    dup_nth(&mut processor, 2, &mut tracer).unwrap();
+    dup_nth(&mut processor, 2).unwrap();
     // drop it again before continuing the tests and stack comparison
     Processor::stack_mut(&mut processor).decrement_size();
 
     // put 15 more items onto the stack
     let mut expected_arr = [ONE; 16];
     for i in 2..17u64 {
-        op_push(&mut processor, Felt::new(i), &mut tracer).unwrap();
+        op_push(&mut processor, Felt::new(i)).unwrap();
         expected_arr[16 - i as usize] = Felt::new(i);
     }
     // expected_arr now is [16, 15, 14, ..., 2, 1, 1] in "old test order" (top at index 0)
@@ -120,7 +116,7 @@ fn test_op_dup() {
     assert_eq!(&expected[..], processor.stack_top());
 
     // duplicate last stack item (dup15)
-    dup_nth(&mut processor, 15, &mut tracer).unwrap();
+    dup_nth(&mut processor, 15).unwrap();
     assert_eq!(ONE, processor.stack_get(0));
     // Check that elements shifted correctly
     for (i, element) in expected_arr.iter().enumerate().take(15) {
@@ -128,7 +124,7 @@ fn test_op_dup() {
     }
 
     // duplicate 8th stack item (dup7 on the new stack state)
-    dup_nth(&mut processor, 7, &mut tracer).unwrap();
+    dup_nth(&mut processor, 7).unwrap();
     assert_eq!(Felt::new(10), processor.stack_get(0));
     assert_eq!(ONE, processor.stack_get(1));
 
@@ -401,24 +397,22 @@ fn test_op_cswap() {
         StackInputs::new(&[Felt::new(0), Felt::new(1), Felt::new(2), Felt::new(3), Felt::new(4)])
             .unwrap(),
     );
-    let mut tracer = NoopTracer;
-
     // no swap (top of the stack is 0)
-    op_cswap(&mut processor, &mut tracer).unwrap();
+    op_cswap(&mut processor).unwrap();
     let expected = build_expected(&[1, 2, 3, 4]);
     assert_eq!(expected, processor.stack_top());
 
     // swap (top of the stack is 1)
-    op_cswap(&mut processor, &mut tracer).unwrap();
+    op_cswap(&mut processor).unwrap();
     let expected = build_expected(&[3, 2, 4]);
     assert_eq!(expected, processor.stack_top());
 
     // error: top of the stack is not binary
-    assert!(op_cswap(&mut processor, &mut tracer).is_err());
+    assert!(op_cswap(&mut processor).is_err());
 
     // executing conditional swap with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    assert!(op_cswap(&mut processor, &mut tracer).is_ok());
+    assert!(op_cswap(&mut processor).is_ok());
 }
 
 #[test]
@@ -441,24 +435,22 @@ fn test_op_cswapw() {
         ])
         .unwrap(),
     );
-    let mut tracer = NoopTracer;
-
     // no swap (top of the stack is 0)
-    op_cswapw(&mut processor, &mut tracer).unwrap();
+    op_cswapw(&mut processor).unwrap();
     let expected = build_expected(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     assert_eq!(expected, processor.stack_top());
 
     // swap (top of the stack is 1)
-    op_cswapw(&mut processor, &mut tracer).unwrap();
+    op_cswapw(&mut processor).unwrap();
     let expected = build_expected(&[6, 7, 8, 9, 2, 3, 4, 5, 10, 11]);
     assert_eq!(expected, processor.stack_top());
 
     // error: top of the stack is not binary
-    assert!(op_cswapw(&mut processor, &mut tracer).is_err());
+    assert!(op_cswapw(&mut processor).is_err());
 
     // executing conditional swap with a minimum stack depth should be ok
     let mut processor = FastProcessor::new(StackInputs::default());
-    assert!(op_cswapw(&mut processor, &mut tracer).is_ok());
+    assert!(op_cswapw(&mut processor).is_ok());
 }
 
 // HELPER FUNCTIONS

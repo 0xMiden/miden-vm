@@ -183,24 +183,6 @@ pub trait Tracer {
 
     /// Records the evaluation of a circuit.
     fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation);
-
-    // MISCELLANEOUS
-    // --------------------------------------------------------------------------------------------
-
-    /// Signals that the stack depth is incremented as a result of pushing a new element.
-    ///
-    /// This method is guaranteed to be called *after* the stack size is incremented, and a valid
-    /// value is written to the new top of the stack.
-    fn increment_stack_size(&mut self, processor: &Self::Processor);
-
-    /// Signals that the stack depth is decremented as a result of popping an element off the stack.
-    ///
-    /// This method is guaranteed to be called *after* the stack size is decremented.
-    ///
-    /// Note that if the stack depth is already [miden_core::program::MIN_STACK_DEPTH], then the
-    /// stack depth is unchanged; the top element is popped off, and a ZERO is shifted in at the
-    /// bottom.
-    fn decrement_stack_size(&mut self);
 }
 
 // OPERATION HELPER REGISTERS

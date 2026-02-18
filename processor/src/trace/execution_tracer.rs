@@ -113,12 +113,6 @@ pub struct ExecutionTracer {
     /// The number of rows per core trace fragment.
     fragment_size: usize,
 
-    /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall node starts, consumed in
-    /// `finalize_clock_cycle` to call `overflow_table.start_context()`. This is deferred to
-    /// `finalize_clock_cycle` because for Dyncall, `decrement_size` (which interacts with the
-    /// overflow table) is called between `start_clock_cycle` and the actual context start.
-    pending_start_context: bool,
-
     /// Flag set in `start_clock_cycle` when a Call/Syscall/Dyncall END is encountered, consumed
     /// in `finalize_clock_cycle` to call `overflow_table.restore_context()`. This is deferred to
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
@@ -148,7 +142,6 @@ impl ExecutionTracer {
             external: MastForestResolutionReplay::default(),
             fragment_contexts: Vec::new(),
             fragment_size,
-            pending_start_context: false,
             pending_restore_context: false,
         }
     }
@@ -438,6 +431,22 @@ impl ExecutionTracer {
             self.fragment_contexts.push(trace_state);
         }
     }
+
+    /// Pushes the value at stack position 15 onto the overflow table. This must be called in
+    /// `Tracer::start_clock_cycle()` *before* the processor increments the stack size, where stack
+    /// position 15 at the start of the clock cycle corresponds to the element that overflows.
+    fn increment_stack_size(&mut self, processor: &FastProcessor) {
+        let new_overflow_value = processor.stack_get(15);
+        self.overflow_table.push(new_overflow_value, processor.system().clock());
+    }
+
+    /// Pops a value from the overflow table and records it for replay.
+    fn decrement_stack_size(&mut self) {
+        if let Some(popped_value) = self.overflow_table.pop() {
+            let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
+            self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
+        }
+    }
 }
 
 impl Tracer for ExecutionTracer {
@@ -466,18 +475,34 @@ impl Tracer for ExecutionTracer {
             );
         }
 
-        // Update block stack
         match continuation {
-            Continuation::ResumeBasicBlock { .. } => {
-                // do nothing, since operations in a basic block don't update the block stack
+            Continuation::ResumeBasicBlock { node_id, batch_index, op_idx_in_batch } => {
+                // Update overflow table based on whether the operation increments or decrements
+                // the stack size.
+                let basic_block = current_forest[node_id].unwrap_basic_block();
+                let op = &basic_block.op_batches()[batch_index].ops()[op_idx_in_batch];
+
+                if op.increments_stack_size() {
+                    self.increment_stack_size(processor);
+                } else if op.decrements_stack_size() {
+                    self.decrement_stack_size();
+                }
             },
             Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
-                MastNode::Join(_) | MastNode::Split(_) | MastNode::Loop(_) => {
+                MastNode::Join(_) => {
                     self.record_control_node_start(
                         &current_forest[mast_node_id],
                         processor,
                         current_forest,
                     );
+                },
+                MastNode::Split(_) | MastNode::Loop(_) => {
+                    self.record_control_node_start(
+                        &current_forest[mast_node_id],
+                        processor,
+                        current_forest,
+                    );
+                    self.decrement_stack_size();
                 },
                 MastNode::Call(_) => {
                     self.record_control_node_start(
@@ -493,11 +518,14 @@ impl Tracer for ExecutionTracer {
                         processor,
                         current_forest,
                     );
+                    // DYN and DYNCALL both drop the memory address from the stack.
+                    self.decrement_stack_size();
+
                     if dyn_node.is_dyncall() {
-                        // Deferred to `decrement_stack_size` because DYNCALL performs a DROP
-                        // before starting the new context, and the overflow pop must happen in
-                        // the old context's overflow table.
-                        self.pending_start_context = true;
+                        // Note: the overflow pop (stack size decrement above) must happen before
+                        // starting the new context so that it operates on the old context's
+                        // overflow table, per the semantics of dyncall.
+                        self.overflow_table.start_context();
                     }
                 },
                 MastNode::Block(basic_block_node) => {
@@ -522,7 +550,8 @@ impl Tracer for ExecutionTracer {
             Continuation::FinishLoop { node_id: _, was_entered }
                 if was_entered && processor.stack_get(0) == ONE =>
             {
-                // This is a REPEAT operation; do nothing, since REPEAT doesn't affect the block stack
+                // This is a REPEAT operation, which drops the condition (top element) off the stack
+                self.decrement_stack_size();
             },
             Continuation::FinishJoin(_)
             | Continuation::FinishSplit(_)
@@ -530,6 +559,14 @@ impl Tracer for ExecutionTracer {
             | Continuation::FinishDyn(_)
             | Continuation::FinishLoop { .. } // not a REPEAT, which is handled separately above
             | Continuation::FinishBasicBlock(_) => {
+                // The END of a loop that was entered drops the condition from the stack.
+                if matches!(
+                    &continuation,
+                    Continuation::FinishLoop { was_entered, .. } if *was_entered
+                ) {
+                    self.decrement_stack_size();
+                }
+
                 // This is an END operation; pop the block stack and record the node end
                 let block_info = self.block_stack.pop();
                 self.record_node_end(&block_info);
@@ -667,17 +704,6 @@ impl Tracer for ExecutionTracer {
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
     ) {
-        // Start a new overflow table context for Call/Syscall/Dyncall. This is deferred from
-        // start_clock_cycle because for Dyncall, decrement_size (which pops from the overflow table
-        // in the current context) happens before start_context. 
-        //
-        // TODO(plafer): this can be done in `start_clock_cycle()` if we remove `decrement_size()`
-        // and do it all in start_clock_cycle() on dyncall
-        if self.pending_start_context {
-            self.overflow_table.start_context();
-            self.pending_start_context = false;
-        }
-
         // Restore the overflow table context for Call/Syscall/Dyncall END. This is deferred
         // from start_clock_cycle because finalize_clock_cycle is only called when the operation
         // succeeds (i.e., the stack depth check in processor.restore_context() passes).
@@ -691,19 +717,6 @@ impl Tracer for ExecutionTracer {
             );
 
             self.pending_restore_context = false;
-        }
-    }
-
-    fn increment_stack_size(&mut self, processor: &FastProcessor) {
-        let new_overflow_value = processor.stack_get(16);
-        self.overflow_table.push(new_overflow_value, processor.system().clock());
-    }
-
-    fn decrement_stack_size(&mut self) {
-        // Record the popped value for replay, if present
-        if let Some(popped_value) = self.overflow_table.pop() {
-            let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
-            self.overflow_replay.record_pop_overflow(popped_value, new_overflow_addr);
         }
     }
 }

@@ -547,14 +547,6 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
     fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
         // do nothing
     }
-
-    fn increment_stack_size(&mut self, _processor: &ReplayProcessor) {
-        // do nothing
-    }
-
-    fn decrement_stack_size(&mut self) {
-        // do nothing
-    }
 }
 
 // HELPER FUNCTIONS

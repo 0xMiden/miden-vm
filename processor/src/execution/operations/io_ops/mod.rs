@@ -33,8 +33,6 @@ where
     processor.stack_mut().increment_size()?;
     processor.stack_mut().set(0, value);
 
-    tracer.increment_stack_size(processor);
-
     Ok(OperationHelperRegisters::Empty)
 }
 
@@ -88,7 +86,6 @@ where
     let clk = processor.system().clock();
 
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     let word = processor.memory_mut().read_word(ctx, addr, clk)?;
     tracer.record_memory_read_word(
@@ -137,7 +134,6 @@ where
     let clk = processor.system().clock();
 
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     processor.memory_mut().write_word(ctx, addr, clk, word)?;
     tracer.record_memory_write_word(
@@ -201,7 +197,6 @@ where
     let ctx = processor.system().ctx();
 
     processor.stack_mut().decrement_size();
-    tracer.decrement_stack_size();
 
     processor.memory_mut().write_element(ctx, addr, value)?;
     tracer.record_memory_write_element(

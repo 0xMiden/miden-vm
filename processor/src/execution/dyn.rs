@@ -74,7 +74,6 @@ where
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
     state.processor.stack_mut().decrement_size();
-    state.tracer.decrement_stack_size();
 
     // For dyncall,
     // - save the context and reset it,
