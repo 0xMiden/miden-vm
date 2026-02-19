@@ -176,11 +176,56 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 32,
+            namespace: "stack.overflow.depth.first_row",
+            value: QuadFelt::new([Felt::new(1820735510664294085), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 33,
+            namespace: "stack.overflow.depth.last_row",
+            value: QuadFelt::new([Felt::new(12520055704510454391), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 34,
+            namespace: "stack.overflow.addr.first_row",
+            value: QuadFelt::new([Felt::new(9235172344178625178), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 35,
+            namespace: "stack.overflow.addr.last_row",
+            value: QuadFelt::new([Felt::new(6001883085148683205), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 36,
+            namespace: "stack.overflow.depth.transition",
+            value: QuadFelt::new([Felt::new(6706883717633639596), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 37,
+            namespace: "stack.overflow.flag.transition",
+            value: QuadFelt::new([Felt::new(957822818659219409), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 38,
+            namespace: "stack.overflow.addr.transition",
+            value: QuadFelt::new([Felt::new(13739720401332236216), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 39,
+            namespace: "stack.overflow.zero_insert.transition",
+            value: QuadFelt::new([Felt::new(15830245309845547857), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 40,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
                 Felt::new(16469718665506609592),
             ]),
+        },
+        EvalRecord {
+            id: 41,
+            namespace: "stack.overflow.bus.transition",
+            value: QuadFelt::new([Felt::new(7384164985445418427), Felt::new(3858806565449404456)]),
         },
     ]
 }
