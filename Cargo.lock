@@ -1985,7 +1985,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-air"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#f65532ef525ff9bb5d06061fb2b43fbc71db14c2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#45ddca6b5366fa35be7a8f2146f1e4c21340b602"
 dependencies = [
  "p3-air",
  "p3-field",
@@ -2015,7 +2015,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-prover"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#f65532ef525ff9bb5d06061fb2b43fbc71db14c2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#45ddca6b5366fa35be7a8f2146f1e4c21340b602"
 dependencies = [
  "itertools 0.14.0",
  "p3-challenger",
@@ -2035,7 +2035,7 @@ dependencies = [
 [[package]]
 name = "p3-miden-uni-stark"
 version = "0.4.2"
-source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#f65532ef525ff9bb5d06061fb2b43fbc71db14c2"
+source = "git+https://github.com/0xMiden/p3-miden.git?branch=al-aux-finals-simplifications#45ddca6b5366fa35be7a8f2146f1e4c21340b602"
 dependencies = [
  "itertools 0.14.0",
  "p3-air",

@@ -16,7 +16,10 @@ use miden_core::{
     program::{ProgramInfo, StackInputs, StackOutputs},
 };
 use miden_crypto::stark::matrix::{Matrix, RowMajorMatrix};
-use p3_miden_air::{AuxFinalsError, VarLenPublicInputs};
+use p3_miden_air::{
+    AuxFinalsContribution, AuxFinalsError, Field, VarLenPublicInputs, logup_contribution,
+    multiset_contribution,
+};
 
 pub mod config;
 mod constraints;
@@ -233,14 +236,14 @@ where
         constraints::enforce_bus(builder, local, next);
     }
 
-    /// Verifier hook: check aux_finals against public inputs and randomness-derived messages.
+    /// Verifier hook: compute this AIR's contribution to the global aux-final check.
     fn verify_aux_finals(
         &self,
         randomness: &[EF],
         aux_finals: &[EF],
         _public_values: &[Felt],
         var_len_public_inputs: VarLenPublicInputs<'_, Felt>,
-    ) -> Result<(), AuxFinalsError> {
+    ) -> Result<AuxFinalsContribution<EF>, AuxFinalsError> {
         if aux_finals.len() < AUX_TRACE_WIDTH {
             return Err(AuxFinalsError::InvalidAuxFinalsLength {
                 expected: AUX_TRACE_WIDTH,
@@ -281,41 +284,30 @@ where
             self.public_inputs.pc_transcript_state(),
         );
 
-        // Expected final identities for simple buses. First-row initialization constraints live
-        // in the wrapper AIR (AirWithBoundaryConstraints) on the p3-miden side.
-        if aux.p1 != EF::ONE {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 0 });
-        }
-        if aux.p3 != EF::ONE {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 2 });
-        }
-        if aux.s_aux != EF::ONE {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 3 });
-        }
-        if aux.b_range != EF::ZERO {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 4 });
-        }
-        if aux.v_wiring != EF::ZERO {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 7 });
-        }
+        let mut eqs = AuxFinalsEquations::new();
+
+        // Multiset equations for p1, p3, and s_aux columns.
+        eqs.multiset_eq(aux.p1, EF::ONE)?;
+        eqs.multiset_eq(aux.p3, EF::ONE)?;
+        eqs.multiset_eq(aux.s_aux, EF::ONE)?;
 
         // Bind the program hash to the last-row value of the block-hash table (p2).
-        if aux.p2 * program_hash_msg != EF::ONE {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 1 });
-        }
+        eqs.multiset_eq(aux.p2 * program_hash_msg, EF::ONE)?;
 
         // Balance hash-kernel and chiplets buses. This cancels ACE memory read requests against
         // memory chiplet responses, then links the transcript (init -> final) and kernel digests.
         // Soundness relies on the randomized message encoding: each message type has a unique
         // label in its first tuple element (domain separation), so distinct messages collide only
         // with negligible probability over random alphas.
-        if aux.b_hash_kernel * aux.b_chiplets * default_state_msg
-            != kernel_reduced * final_state_msg
-        {
-            return Err(AuxFinalsError::InvalidBoundary { bus_index: 5 });
-        }
+        let lhs = aux.b_hash_kernel * aux.b_chiplets * default_state_msg;
+        let rhs = kernel_reduced * final_state_msg;
+        eqs.multiset_eq(lhs, rhs)?;
 
-        Ok(())
+        // LogUp equations: expected zero.
+        eqs.logup_eq(aux.b_range, EF::ZERO);
+        eqs.logup_eq(aux.v_wiring, EF::ZERO);
+
+        Ok(eqs.finish())
     }
 }
 
@@ -333,6 +325,29 @@ struct AuxFinals<EF> {
     b_hash_kernel: EF,
     b_chiplets: EF,
     v_wiring: EF,
+}
+
+struct AuxFinalsEquations<EF: Field> {
+    acc: AuxFinalsContribution<EF>,
+}
+
+impl<EF: Field> AuxFinalsEquations<EF> {
+    fn new() -> Self {
+        Self { acc: AuxFinalsContribution::identity() }
+    }
+
+    fn multiset_eq(&mut self, actual: EF, expected: EF) -> Result<(), AuxFinalsError> {
+        self.acc.multiset *= multiset_contribution(actual, expected)?;
+        Ok(())
+    }
+
+    fn logup_eq(&mut self, actual: EF, expected: EF) {
+        self.acc.logup += logup_contribution(actual, expected);
+    }
+
+    fn finish(self) -> AuxFinalsContribution<EF> {
+        self.acc
+    }
 }
 
 fn program_hash_message<EF: ExtensionField<Felt>>(alphas: &[EF], program_hash: &Word) -> EF {
