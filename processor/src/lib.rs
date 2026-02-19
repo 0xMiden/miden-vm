@@ -158,7 +158,7 @@ pub fn execute_sync(
 /// advice provider, and execution context information.
 #[derive(Debug)]
 pub struct ProcessorState<'a> {
-    processor: &'a mut FastProcessor,
+    processor: &'a FastProcessor,
 }
 
 impl<'a> ProcessorState<'a> {
@@ -166,12 +166,6 @@ impl<'a> ProcessorState<'a> {
     #[inline(always)]
     pub fn advice_provider(&self) -> &AdviceProvider {
         self.processor.advice_provider()
-    }
-
-    /// Returns a mutable reference to the advice provider.
-    #[inline(always)]
-    pub fn advice_provider_mut(&mut self) -> &mut AdviceProvider {
-        self.processor.advice_provider_mut()
     }
 
     /// Returns the current clock cycle of a process.

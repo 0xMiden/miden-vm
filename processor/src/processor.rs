@@ -68,7 +68,7 @@ pub(crate) trait Processor: Sized {
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -76,7 +76,7 @@ pub(crate) trait Processor: Sized {
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -85,7 +85,7 @@ pub(crate) trait Processor: Sized {
     /// Executes any decorator in a basic block that is to be executed before the operation at the
     /// given index in the block.
     fn execute_decorators_for_op(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         op_idx_in_block: usize,
         current_forest: &MastForest,
@@ -96,7 +96,7 @@ pub(crate) trait Processor: Sized {
     /// block. This only differs from `execute_after_exit_decorators` in that these decorators are
     /// stored in the basic block node itself.
     fn execute_end_of_block_decorators(
-        &mut self,
+        &self,
         basic_block_node: &BasicBlockNode,
         node_id: MastNodeId,
         current_forest: &Arc<MastForest>,

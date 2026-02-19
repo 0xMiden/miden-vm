@@ -359,7 +359,7 @@ impl FastProcessor {
 
     /// Returns a narrowed interface for reading and updating the processor state.
     #[inline(always)]
-    pub fn state(&mut self) -> ProcessorState<'_> {
+    pub fn state(&self) -> ProcessorState<'_> {
         ProcessorState { processor: self }
     }
 
@@ -627,7 +627,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -652,7 +652,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -677,15 +677,15 @@ impl FastProcessor {
 
     /// Executes the specified decorator
     fn execute_decorator(
-        &mut self,
+        &self,
         decorator: &Decorator,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_debug(process, options) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_debug(&processor_state, options) {
                         return ControlFlow::Break(BreakReason::Err(
                             crate::errors::HostError::DebugHandlerError { err }.into(),
                         ));
@@ -694,8 +694,8 @@ impl FastProcessor {
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_trace(process, *id) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_trace(&processor_state, *id) {
                         return ControlFlow::Break(BreakReason::Err(
                             crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
                                 .into(),
