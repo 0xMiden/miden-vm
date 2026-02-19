@@ -23,52 +23,12 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::MainTraceRow;
 
+pub mod bus;
+mod op_flags;
 pub mod range;
 pub mod stack;
 pub mod system;
-#[cfg(all(any(test, feature = "testing"), feature = "std"))]
-#[allow(dead_code)]
 pub mod tagging;
-
-/// When tagging is not compiled in, expose a no-op extension trait so call sites stay clean.
-///
-/// This keeps the production/no-std build free of std-only machinery while letting test builds
-/// enable full tagging via the real module above.
-#[cfg(not(all(any(test, feature = "testing"), feature = "std")))]
-pub mod tagging {
-    use miden_crypto::stark::air::MidenAirBuilder;
-
-    /// The highest constraint ID (zero-based). Update when adding constraints.
-    #[allow(dead_code)]
-    pub const CURRENT_MAX_ID: usize = 0;
-
-    /// No-op tagging extension for non-testing builds.
-    ///
-    /// The methods call the provided closure directly so they have no runtime overhead beyond
-    /// the call itself (which the optimizer should inline away).
-    #[allow(dead_code)]
-    pub trait TaggingAirBuilderExt: MidenAirBuilder {
-        fn tagged<R>(
-            &mut self,
-            _id: usize,
-            _namespace: &'static str,
-            f: impl FnOnce(&mut Self) -> R,
-        ) -> R {
-            f(self)
-        }
-
-        fn tagged_list<R, const N: usize>(
-            &mut self,
-            _ids: [usize; N],
-            _namespace: &'static str,
-            f: impl FnOnce(&mut Self) -> R,
-        ) -> R {
-            f(self)
-        }
-    }
-
-    impl<T: MidenAirBuilder> TaggingAirBuilderExt for T {}
-}
 
 // ENTRY POINTS
 // ================================================================================================
@@ -92,9 +52,11 @@ pub fn enforce_main<AB>(
 pub fn enforce_bus<AB>(
     builder: &mut AB,
     local: &MainTraceRow<AB::Var>,
-    _next: &MainTraceRow<AB::Var>,
+    next: &MainTraceRow<AB::Var>,
 ) where
     AB: MidenAirBuilder,
 {
     range::bus::enforce_bus(builder, local);
+    let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
+    stack::bus::enforce_bus(builder, local, next, &op_flags);
 }
