@@ -1,9 +1,10 @@
-//! Stack constraints module (partial).
+//! Stack constraints module.
 //!
-//! This module currently exposes the general stack transition constraints. Additional stack
-//! constraint groups (u32, field, crypto, overflow, etc.) will be added in later chunks.
+//! This module currently exposes the general stack transition and stack overflow constraints.
 
+pub mod bus;
 pub mod general;
+pub mod overflow;
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
@@ -22,4 +23,5 @@ pub fn enforce_main<AB>(
     AB: MidenAirBuilder,
 {
     general::enforce_main(builder, local, next, op_flags);
+    overflow::enforce_main(builder, local, next, op_flags);
 }
