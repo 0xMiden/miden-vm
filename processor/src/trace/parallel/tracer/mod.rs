@@ -516,15 +516,60 @@ impl Tracer for CoreTraceGenerationTracer<'_> {
         // do nothing
     }
 
+    fn record_memory_read_element_pair(
+        &mut self,
+        _element_0: Felt,
+        _addr_0: Felt,
+        _element_1: Felt,
+        _addr_1: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    fn record_memory_read_dword(
+        &mut self,
+        _words: [Word; 2],
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    fn record_dyncall_memory(
+        &mut self,
+        _callee_hash: Word,
+        _read_addr: Felt,
+        _read_ctx: ContextId,
+        _fmp_ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    fn record_crypto_stream(
+        &mut self,
+        _plaintext: [Word; 2],
+        _src_addr: Felt,
+        _ciphertext: [Word; 2],
+        _dst_addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+        // do nothing
+    }
+
+    fn record_pipe(&mut self, _words: [Word; 2], _addr: Felt, _ctx: ContextId, _clk: RowIndex) {
+        // do nothing
+    }
+
     fn record_advice_pop_stack(&mut self, _value: Felt) {
         // do nothing
     }
 
     fn record_advice_pop_stack_word(&mut self, _word: Word) {
-        // do nothing
-    }
-
-    fn record_advice_pop_stack_dword(&mut self, _words: [Word; 2]) {
         // do nothing
     }
 

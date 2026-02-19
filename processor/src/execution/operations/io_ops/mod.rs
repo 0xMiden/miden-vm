@@ -239,20 +239,9 @@ pub(super) fn op_mstream<P: Processor, T: Tracer>(
         let addr_second_word = addr_first_word + WORD_SIZE_FELT;
 
         let first_word = processor.memory_mut().read_word(ctx, addr_first_word, clk)?;
-        tracer.record_memory_read_word(
-            first_word,
-            addr_first_word,
-            processor.system().ctx(),
-            processor.system().clock(),
-        );
-
         let second_word = processor.memory_mut().read_word(ctx, addr_second_word, clk)?;
-        tracer.record_memory_read_word(
-            second_word,
-            addr_second_word,
-            processor.system().ctx(),
-            processor.system().clock(),
-        );
+
+        tracer.record_memory_read_dword([first_word, second_word], addr_first_word, ctx, clk);
 
         [first_word, second_word]
     };
@@ -303,24 +292,12 @@ pub(super) fn op_pipe<P: Processor, T: Tracer>(
 
     // pop two words from the advice stack
     let words = processor.advice_provider_mut().pop_stack_dword()?;
-    tracer.record_advice_pop_stack_dword(words);
 
     // write the words to memory
     processor.memory_mut().write_word(ctx, addr_first_word, clk, words[0])?;
-    tracer.record_memory_write_word(
-        words[0],
-        addr_first_word,
-        processor.system().ctx(),
-        processor.system().clock(),
-    );
-
     processor.memory_mut().write_word(ctx, addr_second_word, clk, words[1])?;
-    tracer.record_memory_write_word(
-        words[1],
-        addr_second_word,
-        processor.system().ctx(),
-        processor.system().clock(),
-    );
+
+    tracer.record_pipe(words, addr_first_word, ctx, clk);
 
     // Replace the elements on the stack with the word elements (in stack order).
     // words[0] goes to top positions (0-3), words[1] goes to positions (4-7).

@@ -47,29 +47,20 @@ where
     let dyn_node = current_forest[current_node_id].unwrap_dyn();
 
     // Retrieve callee hash from memory, using stack top as the memory address.
-    let callee_hash = {
-        let ctx = state.processor.system().ctx();
-        let clk = state.processor.system().clock();
-        let mem_addr = state.processor.stack().get(0);
+    let read_ctx = state.processor.system().ctx();
+    let clk = state.processor.system().clock();
+    let mem_addr = state.processor.stack().get(0);
 
-        let word = match state.processor.memory_mut().read_word(ctx, mem_addr, clk).map_exec_err(
-            current_forest,
-            current_node_id,
-            state.host,
-        ) {
-            Ok(w) => w,
-            Err(err) => {
-                return ControlFlow::Break(BreakReason::Err(err).into());
-            },
-        };
-        state.tracer.record_memory_read_word(
-            word,
-            mem_addr,
-            state.processor.system().ctx(),
-            state.processor.system().clock(),
-        );
-
-        word
+    let callee_hash = match state
+        .processor
+        .memory_mut()
+        .read_word(read_ctx, mem_addr, clk)
+        .map_exec_err(current_forest, current_node_id, state.host)
+    {
+        Ok(w) => w,
+        Err(err) => {
+            return ControlFlow::Break(BreakReason::Err(err).into());
+        },
     };
 
     // Drop the memory address from the stack. This needs to be done before saving the context.
@@ -96,12 +87,11 @@ where
         {
             return ControlFlow::Break(BreakReason::Err(err).into());
         }
-        state.tracer.record_memory_write_element(
-            FMP_INIT_VALUE,
-            FMP_ADDR,
-            new_ctx,
-            state.processor.system().clock(),
-        );
+        state
+            .tracer
+            .record_dyncall_memory(callee_hash, mem_addr, read_ctx, new_ctx, clk);
+    } else {
+        state.tracer.record_memory_read_word(callee_hash, mem_addr, read_ctx, clk);
     };
 
     // Update continuation stack
@@ -149,8 +139,6 @@ where
     S: Stopper<Processor = P>,
     T: Tracer<Processor = P>,
 {
-    tracer.record_mast_forest_resolution(root_id, &new_forest);
-
     // Save the old forest: the continuation from start_clock_cycle references nodes in it.
     let old_forest = Arc::clone(current_forest);
 
@@ -166,7 +154,11 @@ where
     // Finalize the clock cycle corresponding to the DYN or DYNCALL operation. We pass the old
     // forest because the continuation was set during start_clock_cycle, which referenced the old
     // forest.
-    finalize_clock_cycle(processor, tracer, stopper, &old_forest)
+    finalize_clock_cycle(processor, tracer, stopper, &old_forest)?;
+
+    tracer.record_mast_forest_resolution(root_id, current_forest);
+
+    ControlFlow::Continue(())
 }
 
 /// Executes the finish phase of a Dyn node.

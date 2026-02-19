@@ -1,6 +1,7 @@
 use alloc::{sync::Arc, vec::Vec};
 
 use miden_air::trace::chiplets::hasher::{HASH_CYCLE_LEN, HASH_CYCLE_LEN_FELT, STATE_WIDTH};
+use miden_core::{FMP_ADDR, FMP_INIT_VALUE, operations::Operation};
 
 use super::{
     decoder::block_stack::{BlockInfo, BlockStack, BlockType, ExecutionContextInfo},
@@ -24,7 +25,7 @@ use crate::{
     },
     precompile::PrecompileTranscript,
     processor::{Processor, StackInterface, SystemInterface},
-    trace::chiplets::CircuitEvaluation,
+    trace::chiplets::{CircuitEvaluation, PTR_OFFSET_ELEM, PTR_OFFSET_WORD},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -118,10 +119,15 @@ pub struct ExecutionTracer {
     /// `finalize_clock_cycle` because `finalize_clock_cycle` is only called when the operation
     /// succeeds (i.e., the stack depth check passes).
     pending_restore_context: bool,
+
+    /// Flag set in `start_clock_cycle` when an `EvalCircuit` operation is encountered, consumed
+    /// in `finalize_clock_cycle` to record the memory reads performed by the operation.
+    is_eval_circuit_op: bool,
 }
 
 impl ExecutionTracer {
     /// Creates a new `ExecutionTracer` with the given fragment size.
+    #[inline(always)]
     pub fn new(fragment_size: usize) -> Self {
         Self {
             state_snapshot: None,
@@ -143,6 +149,7 @@ impl ExecutionTracer {
             fragment_contexts: Vec::new(),
             fragment_size,
             pending_restore_context: false,
+            is_eval_circuit_op: false,
         }
     }
 
@@ -151,6 +158,7 @@ impl ExecutionTracer {
     ///
     /// The `final_pc_transcript` parameter represents the final precompile transcript at
     /// the end of execution, which is needed for the auxiliary trace column builder.
+    #[inline(always)]
     pub fn into_trace_generation_context(
         mut self,
         final_pc_transcript: PrecompileTranscript,
@@ -181,6 +189,7 @@ impl ExecutionTracer {
     /// This must be called at the beginning of a new trace fragment, before executing the first
     /// operation. Internal replay fields are expected to be accessed during execution of this new
     /// fragment to record data to be replayed by the trace fragment generators.
+    #[inline(always)]
     fn start_new_fragment_context(
         &mut self,
         system_state: SystemState,
@@ -228,6 +237,7 @@ impl ExecutionTracer {
         };
     }
 
+    #[inline(always)]
     fn record_control_node_start<P: Processor>(
         &mut self,
         node: &MastNode,
@@ -367,6 +377,7 @@ impl ExecutionTracer {
     }
 
     /// Records the block address and flags for an END operation based on the block being popped.
+    #[inline(always)]
     fn record_node_end(&mut self, block_info: &BlockInfo) {
         let flags = NodeFlags::new(
             block_info.is_loop_body() == ONE,
@@ -389,6 +400,7 @@ impl ExecutionTracer {
     }
 
     /// Records the execution context system info for CALL/SYSCALL/DYNCALL operations.
+    #[inline(always)]
     fn record_execution_context(&mut self, ctx_info: ExecutionContextSystemInfo) {
         self.execution_context_replay.record_execution_context(ctx_info);
     }
@@ -401,6 +413,7 @@ impl ExecutionTracer {
     ///
     /// Note that the very first time that this is called (at clock cycle 0), the snapshot will not
     /// contain any replay data, and so no core trace state will be recorded.
+    #[inline(always)]
     fn finish_current_fragment_context(&mut self) {
         if let Some(snapshot) = self.state_snapshot.take() {
             // Extract the replays
@@ -435,12 +448,14 @@ impl ExecutionTracer {
     /// Pushes the value at stack position 15 onto the overflow table. This must be called in
     /// `Tracer::start_clock_cycle()` *before* the processor increments the stack size, where stack
     /// position 15 at the start of the clock cycle corresponds to the element that overflows.
+    #[inline(always)]
     fn increment_stack_size(&mut self, processor: &FastProcessor) {
         let new_overflow_value = processor.stack_get(15);
         self.overflow_table.push(new_overflow_value, processor.system().clock());
     }
 
     /// Pops a value from the overflow table and records it for replay.
+    #[inline(always)]
     fn decrement_stack_size(&mut self) {
         if let Some(popped_value) = self.overflow_table.pop() {
             let new_overflow_addr = self.overflow_table.last_update_clk_in_current_ctx();
@@ -454,6 +469,7 @@ impl Tracer for ExecutionTracer {
 
     /// When sufficiently many clock cycles have elapsed, starts a new trace state. Also updates the
     /// internal block stack.
+    #[inline(always)]
     fn start_clock_cycle(
         &mut self,
         processor: &FastProcessor,
@@ -486,6 +502,10 @@ impl Tracer for ExecutionTracer {
                     self.increment_stack_size(processor);
                 } else if op.decrements_stack_size() {
                     self.decrement_stack_size();
+                }
+
+                if matches!(op, Operation::EvalCircuit) {
+                    self.is_eval_circuit_op = true;
                 }
             },
             Continuation::StartNode(mast_node_id) => match &current_forest[mast_node_id] {
@@ -591,10 +611,12 @@ impl Tracer for ExecutionTracer {
         }
     }
 
+    #[inline(always)]
     fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>) {
         self.external.record_resolution(node_id, forest.clone());
     }
 
+    #[inline(always)]
     fn record_hasher_permute(
         &mut self,
         input_state: [Felt; STATE_WIDTH],
@@ -604,6 +626,7 @@ impl Tracer for ExecutionTracer {
         self.hasher_chiplet_shim.record_permute_output(output_state);
     }
 
+    #[inline(always)]
     fn record_hasher_build_merkle_root(
         &mut self,
         node: Word,
@@ -616,6 +639,7 @@ impl Tracer for ExecutionTracer {
         self.hasher_for_chiplet.record_build_merkle_root(node, path.clone(), index);
     }
 
+    #[inline(always)]
     fn record_hasher_update_merkle_root(
         &mut self,
         old_value: Word,
@@ -635,6 +659,7 @@ impl Tracer for ExecutionTracer {
         );
     }
 
+    #[inline(always)]
     fn record_memory_read_element(
         &mut self,
         element: Felt,
@@ -645,10 +670,12 @@ impl Tracer for ExecutionTracer {
         self.memory_reads.record_read_element(element, addr, ctx, clk);
     }
 
+    #[inline(always)]
     fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.memory_reads.record_read_word(word, addr, ctx, clk);
     }
 
+    #[inline(always)]
     fn record_memory_write_element(
         &mut self,
         element: Felt,
@@ -659,30 +686,96 @@ impl Tracer for ExecutionTracer {
         self.memory_writes.record_write_element(element, addr, ctx, clk);
     }
 
+    #[inline(always)]
     fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex) {
         self.memory_writes.record_write_word(word, addr, ctx, clk);
     }
 
+    #[inline(always)]
+    fn record_memory_read_element_pair(
+        &mut self,
+        element_0: Felt,
+        addr_0: Felt,
+        element_1: Felt,
+        addr_1: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_reads.record_read_element(element_0, addr_0, ctx, clk);
+        self.memory_reads.record_read_element(element_1, addr_1, ctx, clk);
+    }
+
+    #[inline(always)]
+    fn record_memory_read_dword(
+        &mut self,
+        words: [Word; 2],
+        addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_reads.record_read_word(words[0], addr, ctx, clk);
+        self.memory_reads.record_read_word(words[1], addr + Felt::new(4), ctx, clk);
+    }
+
+    #[inline(always)]
+    fn record_dyncall_memory(
+        &mut self,
+        callee_hash: Word,
+        read_addr: Felt,
+        read_ctx: ContextId,
+        fmp_ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_reads.record_read_word(callee_hash, read_addr, read_ctx, clk);
+        self.memory_writes.record_write_element(FMP_INIT_VALUE, FMP_ADDR, fmp_ctx, clk);
+    }
+
+    #[inline(always)]
+    fn record_crypto_stream(
+        &mut self,
+        plaintext: [Word; 2],
+        src_addr: Felt,
+        ciphertext: [Word; 2],
+        dst_addr: Felt,
+        ctx: ContextId,
+        clk: RowIndex,
+    ) {
+        self.memory_reads.record_read_word(plaintext[0], src_addr, ctx, clk);
+        self.memory_reads
+            .record_read_word(plaintext[1], src_addr + Felt::new(4), ctx, clk);
+        self.memory_writes.record_write_word(ciphertext[0], dst_addr, ctx, clk);
+        self.memory_writes
+            .record_write_word(ciphertext[1], dst_addr + Felt::new(4), ctx, clk);
+    }
+
+    #[inline(always)]
+    fn record_pipe(&mut self, words: [Word; 2], addr: Felt, ctx: ContextId, clk: RowIndex) {
+        self.advice.record_pop_stack_dword(words);
+        self.memory_writes.record_write_word(words[0], addr, ctx, clk);
+        self.memory_writes.record_write_word(words[1], addr + Felt::new(4), ctx, clk);
+    }
+
+    #[inline(always)]
     fn record_advice_pop_stack(&mut self, value: Felt) {
         self.advice.record_pop_stack(value);
     }
 
+    #[inline(always)]
     fn record_advice_pop_stack_word(&mut self, word: Word) {
         self.advice.record_pop_stack_word(word);
     }
 
-    fn record_advice_pop_stack_dword(&mut self, words: [Word; 2]) {
-        self.advice.record_pop_stack_dword(words);
-    }
-
+    #[inline(always)]
     fn record_u32and(&mut self, a: Felt, b: Felt) {
         self.bitwise.record_u32and(a, b);
     }
 
+    #[inline(always)]
     fn record_u32xor(&mut self, a: Felt, b: Felt) {
         self.bitwise.record_u32xor(a, b);
     }
 
+    #[inline(always)]
     fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt) {
         let (t1, t0) = split_u32_into_u16(u32_lo.as_canonical_u64());
         let (t3, t2) = split_u32_into_u16(u32_hi.as_canonical_u64());
@@ -690,17 +783,20 @@ impl Tracer for ExecutionTracer {
         self.range_checker.record_range_check_u32(clk, [t0, t1, t2, t3]);
     }
 
+    #[inline(always)]
     fn record_kernel_proc_access(&mut self, proc_hash: Word) {
         self.kernel.record_kernel_proc_access(proc_hash);
     }
 
+    #[inline(always)]
     fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation) {
         self.ace.record_circuit_evaluation(circuit_evaluation);
     }
 
+    #[inline(always)]
     fn finalize_clock_cycle(
         &mut self,
-        _processor: &FastProcessor,
+        processor: &FastProcessor,
         _op_helper_registers: OperationHelperRegisters,
         _current_forest: &Arc<MastForest>,
     ) {
@@ -717,6 +813,39 @@ impl Tracer for ExecutionTracer {
             );
 
             self.pending_restore_context = false;
+        }
+
+        // Record all memory reads performed during EvalCircuit operations. We run this in
+        // `finalize_clock_cycle` to ensure that the memory reads are only recorded if the operation
+        // succeeds (and hence the values read from the stack can be assumed to be valid).
+        if self.is_eval_circuit_op {
+            let ptr = processor.stack_get(0);
+            let num_read = processor.stack_get(1).as_canonical_u64();
+            let num_eval = processor.stack_get(2).as_canonical_u64();
+            let ctx = processor.ctx();
+            let clk = processor.clock();
+
+            let num_read_rows = num_read / 2;
+
+            let mut addr = ptr;
+            for _ in 0..num_read_rows {
+                let word = processor
+                    .memory()
+                    .read_word(ctx, addr, clk)
+                    .expect("EvalCircuit memory read should not fail after successful execution");
+                self.memory_reads.record_read_word(word, addr, ctx, clk);
+                addr += PTR_OFFSET_WORD;
+            }
+            for _ in 0..num_eval {
+                let element = processor
+                    .memory()
+                    .read_element(ctx, addr)
+                    .expect("EvalCircuit memory read should not fail after successful execution");
+                self.memory_reads.record_read_element(element, addr, ctx, clk);
+                addr += PTR_OFFSET_ELEM;
+            }
+
+            self.is_eval_circuit_op = false;
         }
     }
 }
