@@ -4,6 +4,7 @@
 //! constraints.
 
 pub mod bus;
+pub mod crypto;
 pub mod general;
 pub mod ops;
 pub mod overflow;
@@ -27,4 +28,5 @@ pub fn enforce_main<AB>(
     general::enforce_main(builder, local, next, op_flags);
     overflow::enforce_main(builder, local, next, op_flags);
     ops::enforce_main(builder, local, next, op_flags);
+    crypto::enforce_main(builder, local, next, op_flags);
 }
