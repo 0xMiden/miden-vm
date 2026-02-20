@@ -626,6 +626,36 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 122,
+            namespace: "stack.system.assert",
+            value: QuadFelt::new([Felt::new(13682615670963393420), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 123,
+            namespace: "stack.system.caller",
+            value: QuadFelt::new([Felt::new(16674981897661760210), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 124,
+            namespace: "stack.system.caller",
+            value: QuadFelt::new([Felt::new(14361028107722480662), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 125,
+            namespace: "stack.system.caller",
+            value: QuadFelt::new([Felt::new(9738252875195915138), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 126,
+            namespace: "stack.system.caller",
+            value: QuadFelt::new([Felt::new(15161342143096572193), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 127,
+            namespace: "stack.io.sdepth",
+            value: QuadFelt::new([Felt::new(9690568048381717864), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 128,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
@@ -633,7 +663,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 123,
+            id: 129,
             namespace: "stack.overflow.bus.transition",
             value: QuadFelt::new([Felt::new(7384164985445418427), Felt::new(3858806565449404456)]),
         },
