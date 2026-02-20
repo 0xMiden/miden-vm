@@ -249,21 +249,27 @@ After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, \mathsf{tmp1}_0, \mathsf{tmp1}_1, \mathsf{tmp0}_0, \mathsf{tmp0}_1]$.
 - Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
 
-More specifically, the stack transition for this operation must satisfy the following constraints. Let $\alpha = (\alpha_0, \alpha_1) \in \mathbb{F}_p[x]/(x^2 - 7)$ and define
-
-$$
-\alpha^2 = (\alpha_0^2 + 7 \cdot \alpha_1^2,\; 2 \cdot \alpha_0 \cdot \alpha_1), \qquad
-\alpha^3 = (\alpha_0^3 + 21 \cdot \alpha_0 \cdot \alpha_1^2,\; 3 \cdot \alpha_0^2 \cdot \alpha_1 + 7 \cdot \alpha_1^3).
-$$
+More specifically, the stack transition for this operation must satisfy the following constraints.
+Here $\alpha = (\alpha_0, \alpha_1)$ is an element of $\mathbb{F}_{p^2}$ with $u^2 = 7$.
+We write $c_0 = (c_{0,0}, c_{0,1})$, $c_1 = (c_{1,0}, c_{1,1})$, $c_2 = (c_{2,0}, c_{2,1})$, and $c_3 = (c_{3,0}, c_{3,1})$ for the extension-field coefficients.
 
 $$
 \begin{align*}
-\mathsf{tmp0}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot 7 \cdot \alpha^2_1 + c_0 \cdot \alpha_0 + c_1 \text{ | degree} = 3 \\
-\mathsf{tmp0}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0 + c_0 \cdot \alpha_1 \text{ | degree} = 3 \\
-\mathsf{tmp1}_0 &= \mathsf{tmp0}_0 \cdot \alpha^3_0 + \mathsf{tmp0}_1 \cdot 7 \cdot \alpha^3_1 + c_2 \cdot \alpha^2_0 + c_3 \cdot \alpha_0 + c_4 \text{ | degree} = 4 \\
-\mathsf{tmp1}_1 &= \mathsf{tmp0}_0 \cdot \alpha^3_1 + \mathsf{tmp0}_1 \cdot \alpha^3_0 + c_2 \cdot \alpha^2_1 + c_3 \cdot \alpha_1 \text{ | degree} = 4 \\
-\mathsf{acc}_0^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_0 + \mathsf{tmp1}_1 \cdot 7 \cdot \alpha^3_1 + c_5 \cdot \alpha^2_0 + c_6 \cdot \alpha_0 + c_7 \text{ | degree} = 4 \\
-\mathsf{acc}_1^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_1 + \mathsf{tmp1}_1 \cdot \alpha^3_0 + c_5 \cdot \alpha^2_1 + c_6 \cdot \alpha_1 \text{ | degree} = 4
+    \alpha^2 &= (\alpha^2_0, \alpha^2_1) = (\alpha_0^2 + 7 \alpha_1^2, 2 \alpha_0 \alpha_1) \\
+    \alpha^3 &= (\alpha^3_0, \alpha^3_1) = (\alpha_0^3 + 21 \alpha_0 \alpha_1^2, 3 \alpha_0^2 \alpha_1 + 7 \alpha_1^3) \\
+    \\
+    \mathsf{tmp0}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot (7 \alpha^2_1) + c_0 \alpha_0 + c_1 \\
+    \mathsf{tmp0}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0 + c_0 \alpha_1 \\
+    \\
+    \mathsf{tmp1}_0 &= \mathsf{tmp0}_0 \cdot \alpha^3_0 + \mathsf{tmp0}_1 \cdot (7 \alpha^3_1)
+        + c_2 \alpha^2_0 + c_3 \alpha_0 + c_4 \\
+    \mathsf{tmp1}_1 &= \mathsf{tmp0}_0 \cdot \alpha^3_1 + \mathsf{tmp0}_1 \cdot \alpha^3_0
+        + c_2 \alpha^2_1 + c_3 \alpha_1 \\
+    \\
+    \mathsf{acc}_0^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_0 + \mathsf{tmp1}_1 \cdot (7 \alpha^3_1)
+        + c_5 \alpha^2_0 + c_6 \alpha_0 + c_7 \\
+    \mathsf{acc}_1^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_1 + \mathsf{tmp1}_1 \cdot \alpha^3_0
+        + c_5 \alpha^2_1 + c_6 \alpha_1
 \end{align*}
 $$
 
@@ -313,19 +319,23 @@ After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, k_0, k_1, \mathsf{tmp}_0, \mathsf{tmp}_1]$.
 - Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
 
-More specifically, the stack transition for this operation must satisfy the following constraints. Let
-$$
-\alpha^2 = (\alpha_0^2 + 7 \cdot \alpha_1^2,\; 2 \cdot \alpha_0 \cdot \alpha_1).
-$$
+More specifically, the stack transition for this operation must satisfy the following constraints.
+Here $\alpha = (\alpha_0, \alpha_1)$ is an element of $\mathbb{F}_{p^2}$ with $u^2 = 7$.
 
-Then
 $$
-\begin{aligned}
-\mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot 7 \cdot \alpha^2_1 + c_{0,0} \cdot \alpha_0 + 7 \cdot c_{0,1} \cdot \alpha_1 + c_{1,0} \text{ | degree} = 3 \\
-\mathsf{tmp}_1 &= \mathsf{acc}_1 \cdot \alpha^2_0 + \mathsf{acc}_0 \cdot \alpha^2_1 + c_{0,1} \cdot \alpha_0 + c_{0,0} \cdot \alpha_1 + c_{1,1} \text{ | degree} = 3 \\
-\mathsf{acc}_0^{'} &= \mathsf{tmp}_0 \cdot \alpha^2_0 + \mathsf{tmp}_1 \cdot 7 \cdot \alpha^2_1 + c_{2,0} \cdot \alpha_0 + 7 \cdot c_{2,1} \cdot \alpha_1 + c_{3,0} \text{ | degree} = 3 \\
-\mathsf{acc}_1^{'} &= \mathsf{tmp}_1 \cdot \alpha^2_0 + \mathsf{tmp}_0 \cdot \alpha^2_1 + c_{2,1} \cdot \alpha_0 + c_{2,0} \cdot \alpha_1 + c_{3,1} \text{ | degree} = 3
-\end{aligned}
+\begin{align*}
+\alpha^2 &= (\alpha^2_0, \alpha^2_1) = (\alpha_0^2 + 7 \alpha_1^2, 2 \alpha_0 \alpha_1) \\
+\\
+\mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot (7 \alpha^2_1)
+    + c_{0,0} \alpha_0 + 7 c_{0,1} \alpha_1 + c_{1,0} \\
+\mathsf{tmp}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0
+    + c_{0,0} \alpha_1 + c_{0,1} \alpha_0 + c_{1,1} \\
+\\
+\mathsf{acc}_0^{'} &= \mathsf{tmp}_0 \cdot \alpha^2_0 + \mathsf{tmp}_1 \cdot (7 \alpha^2_1)
+    + c_{2,0} \alpha_0 + 7 c_{2,1} \alpha_1 + c_{3,0} \\
+\mathsf{acc}_1^{'} &= \mathsf{tmp}_0 \cdot \alpha^2_1 + \mathsf{tmp}_1 \cdot \alpha^2_0
+    + c_{2,0} \alpha_1 + c_{2,1} \alpha_0 + c_{3,1}
+\end{align*}
 $$
 
 The effect on the rest of the stack is:
