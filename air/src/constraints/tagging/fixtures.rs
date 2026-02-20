@@ -886,6 +886,291 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 174,
+            namespace: "decoder.in_span.first_row",
+            value: QuadFelt::new([Felt::new(14927496178105230921), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 175,
+            namespace: "decoder.in_span.binary",
+            value: QuadFelt::new([Felt::new(14486244054610710736), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 176,
+            namespace: "decoder.in_span.span",
+            value: QuadFelt::new([Felt::new(466300909996410452), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 177,
+            namespace: "decoder.in_span.respan",
+            value: QuadFelt::new([Felt::new(3338971954421326066), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 178,
+            namespace: "decoder.op_bits.b0.binary",
+            value: QuadFelt::new([Felt::new(13628791071868321124), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 179,
+            namespace: "decoder.op_bits.b1.binary",
+            value: QuadFelt::new([Felt::new(2117480814916000258), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 180,
+            namespace: "decoder.op_bits.b2.binary",
+            value: QuadFelt::new([Felt::new(16926933246570374887), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 181,
+            namespace: "decoder.op_bits.b3.binary",
+            value: QuadFelt::new([Felt::new(9176310969543325496), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 182,
+            namespace: "decoder.op_bits.b4.binary",
+            value: QuadFelt::new([Felt::new(7537316481676351991), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 183,
+            namespace: "decoder.op_bits.b5.binary",
+            value: QuadFelt::new([Felt::new(2144456409708417452), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 184,
+            namespace: "decoder.op_bits.b6.binary",
+            value: QuadFelt::new([Felt::new(4533994350960751386), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 185,
+            namespace: "decoder.extra.e0",
+            value: QuadFelt::new([Felt::new(8133745730975361882), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 186,
+            namespace: "decoder.extra.e1",
+            value: QuadFelt::new([Felt::new(1382945310839592478), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 187,
+            namespace: "decoder.op_bits.u32_prefix.b0",
+            value: QuadFelt::new([Felt::new(3295186688501169293), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 188,
+            namespace: "decoder.op_bits.very_high.b0",
+            value: QuadFelt::new([Felt::new(1492924210658182178), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 189,
+            namespace: "decoder.op_bits.very_high.b1",
+            value: QuadFelt::new([Felt::new(11514104647859742926), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 190,
+            namespace: "decoder.batch_flags.c0.binary",
+            value: QuadFelt::new([Felt::new(5362129305222679805), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 191,
+            namespace: "decoder.batch_flags.c1.binary",
+            value: QuadFelt::new([Felt::new(7857195453682114326), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 192,
+            namespace: "decoder.batch_flags.c2.binary",
+            value: QuadFelt::new([Felt::new(7691051559149421836), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 193,
+            namespace: "decoder.general.split_loop.s0.binary",
+            value: QuadFelt::new([Felt::new(14496120396244092127), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 194,
+            namespace: "decoder.general.dyn.h4.zero",
+            value: QuadFelt::new([Felt::new(1277805081675897337), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 195,
+            namespace: "decoder.general.dyn.h5.zero",
+            value: QuadFelt::new([Felt::new(4194588350245381799), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 196,
+            namespace: "decoder.general.dyn.h6.zero",
+            value: QuadFelt::new([Felt::new(16022182314963541978), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 197,
+            namespace: "decoder.general.dyn.h7.zero",
+            value: QuadFelt::new([Felt::new(8836314757936512908), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 198,
+            namespace: "decoder.general.repeat.s0.one",
+            value: QuadFelt::new([Felt::new(12665553195229242113), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 199,
+            namespace: "decoder.general.repeat.h4.one",
+            value: QuadFelt::new([Felt::new(7110671376227656729), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 200,
+            namespace: "decoder.general.end.loop.s0.zero",
+            value: QuadFelt::new([Felt::new(17349561739015487668), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 201,
+            namespace: "decoder.general.end_repeat.h0.carry",
+            value: QuadFelt::new([Felt::new(14675084366068366020), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 202,
+            namespace: "decoder.general.end_repeat.h1.carry",
+            value: QuadFelt::new([Felt::new(7206936627190077403), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 203,
+            namespace: "decoder.general.end_repeat.h2.carry",
+            value: QuadFelt::new([Felt::new(6718740807857903289), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 204,
+            namespace: "decoder.general.end_repeat.h3.carry",
+            value: QuadFelt::new([Felt::new(17516850364483319430), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 205,
+            namespace: "decoder.general.end_repeat.h4.carry",
+            value: QuadFelt::new([Felt::new(6539200550348860466), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 206,
+            namespace: "decoder.general.halt.next",
+            value: QuadFelt::new([Felt::new(46417891308149319), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 207,
+            namespace: "decoder.group_count.delta.binary",
+            value: QuadFelt::new([Felt::new(14515312709656548917), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 208,
+            namespace: "decoder.group_count.decrement.h0_or_imm",
+            value: QuadFelt::new([Felt::new(13182337539042779943), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 209,
+            namespace: "decoder.group_count.span_decrement",
+            value: QuadFelt::new([Felt::new(6058211846758132294), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 210,
+            namespace: "decoder.group_count.end_or_respan.hold",
+            value: QuadFelt::new([Felt::new(11052268645110095431), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 211,
+            namespace: "decoder.group_count.end.zero",
+            value: QuadFelt::new([Felt::new(8085923270334721350), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 212,
+            namespace: "decoder.op_group.shift",
+            value: QuadFelt::new([Felt::new(1312737539633457020), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 213,
+            namespace: "decoder.op_group.end_or_respan.h0.zero",
+            value: QuadFelt::new([Felt::new(12951763225475877068), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 214,
+            namespace: "decoder.op_index.span_respan.reset",
+            value: QuadFelt::new([Felt::new(10573491584444022281), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 215,
+            namespace: "decoder.op_index.new_group.reset",
+            value: QuadFelt::new([Felt::new(6175768744156945971), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 216,
+            namespace: "decoder.op_index.increment",
+            value: QuadFelt::new([Felt::new(11099022161747498050), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 217,
+            namespace: "decoder.op_index.range",
+            value: QuadFelt::new([Felt::new(10884671635123915786), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 218,
+            namespace: "decoder.batch_flags.span_sum",
+            value: QuadFelt::new([Felt::new(3694838697400308733), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 219,
+            namespace: "decoder.batch_flags.zero_when_not_span",
+            value: QuadFelt::new([Felt::new(3630764990867231714), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 220,
+            namespace: "decoder.batch_flags.h4.zero",
+            value: QuadFelt::new([Felt::new(2244382601531916648), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 221,
+            namespace: "decoder.batch_flags.h5.zero",
+            value: QuadFelt::new([Felt::new(15434877991581266285), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 222,
+            namespace: "decoder.batch_flags.h6.zero",
+            value: QuadFelt::new([Felt::new(7419023179375721027), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 223,
+            namespace: "decoder.batch_flags.h7.zero",
+            value: QuadFelt::new([Felt::new(7459745966287177285), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 224,
+            namespace: "decoder.batch_flags.h2.zero",
+            value: QuadFelt::new([Felt::new(11698744832781440772), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 225,
+            namespace: "decoder.batch_flags.h3.zero",
+            value: QuadFelt::new([Felt::new(8586259512688079232), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 226,
+            namespace: "decoder.batch_flags.h1.zero",
+            value: QuadFelt::new([Felt::new(7969602088154595265), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 227,
+            namespace: "decoder.addr.hold_in_span",
+            value: QuadFelt::new([Felt::new(5569758276797826136), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 228,
+            namespace: "decoder.addr.respan.increment",
+            value: QuadFelt::new([Felt::new(7010123233147094271), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 229,
+            namespace: "decoder.addr.halt.zero",
+            value: QuadFelt::new([Felt::new(571992094937652912), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 230,
+            namespace: "decoder.control_flow.sp_complement",
+            value: QuadFelt::new([Felt::new(2368373158779190039), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 231,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
@@ -893,14 +1178,35 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 175,
+            id: 232,
             namespace: "stack.overflow.bus.transition",
             value: QuadFelt::new([Felt::new(7384164985445418427), Felt::new(3858806565449404456)]),
+        },
+        EvalRecord {
+            id: 233,
+            namespace: "decoder.bus.p1.transition",
+            value: QuadFelt::new([
+                Felt::new(11611432650982424455),
+                Felt::new(10377793451000863001),
+            ]),
+        },
+        EvalRecord {
+            id: 234,
+            namespace: "decoder.bus.p2.transition",
+            value: QuadFelt::new([
+                Felt::new(15040597896341508305),
+                Felt::new(11465419388996005277),
+            ]),
+        },
+        EvalRecord {
+            id: 235,
+            namespace: "decoder.bus.p3.transition",
+            value: QuadFelt::new([Felt::new(9395869302542898577), Felt::new(6472917827183803848)]),
         },
     ]
 }
 
-/// Entry point for the active tagged group in parity tests.
+/// Returns the active expected OOD evaluations for the current tagged group.
 pub fn active_expected_ood_evals() -> Vec<EvalRecord> {
     current_group_expected()
 }
