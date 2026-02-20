@@ -32,7 +32,7 @@ The meaning of the above columns is as follows:
 
 ### Overflow table
 
-To keep track of the data which doesn't fit into the top $16$ stack slots, we'll use an overflow table. This will be a [virtual table](../lookups/multiset.md#virtual-tables). To represent this table, we'll use a single auxiliary column $p_1$.
+To keep track of the data which doesn't fit into the top $16$ stack slots, we'll use an overflow table. This will be a [virtual table](../lookups/multiset.md#virtual-tables). To represent this table, we'll use a single auxiliary column $p_1$ (named `p1` in the codebase).
 
 The table itself can be thought of as having 3 columns as illustrated below.
 
@@ -139,6 +139,10 @@ To simplify constraint descriptions, we'll assume that the VM exposes two binary
 
 These flags are mutually exclusive. That is, if $f_{shl}=1$, then $f_{shr}=0$ and vice versa. However, both flags can be set to $0$ simultaneously. This happens when the executed instruction does not shift the stack. How these flags are computed is described [here](./op_constraints.md).
 
+We also use a combined call-entry flag $f_{enter}$ to denote entry into a new execution context.
+Here, $f_{enter} = f_{call} + f_{dyncall} + f_{syscall}$. The END-of-call transition is
+validated by the block stack table constraints and is not handled by the stack depth rule below.
+
 ### Stack overflow flag
 
 Additionally, we'll define a flag to indicate whether the overflow table contains values. This flag will be set to $0$ when the overflow table is empty, and to $1$ otherwise (i.e., when stack depth $>16$). This flag can be computed as follows:
@@ -165,16 +169,18 @@ To make sure stack depth column $b_0$ is updated correctly, we need to impose th
 | --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
 | $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
 | $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
-| $f_{call} + f_{syscall} + f_{dyncall} = 1$ | $b'_0 = 16$ | When entering a new execution context, the stack is truncated to depth 16.                                         |
+| $f_{enter}=1$               | $b'_0 = 16$      | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the visible window.                                        |
 | otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
 
-We can combine the first three cases above (excluding context changes) into a single expression as follows:
+For non-call rows (no CALL/SYSCALL/DYNCALL entry and no END-of-call), we can combine the shift
+constraints into a single expression as follows:
 
 $$
 b'_0 - b_0 + f_{shl} \cdot f_{ov} - f_{shr} = 0 \text{ | degree} = 7
 $$
 
-The context-change case ($f_{call} + f_{syscall} + f_{dyncall} = 1$) is enforced separately.
+On CALL/SYSCALL/DYNCALL entry, we instead enforce $b'_0 = 16$ via a dedicated term. END-of-call
+depth updates are handled by the block stack table constraints.
 
 ### Overflow table constraints
 
@@ -190,11 +196,17 @@ $$
 u = \alpha_0 + \alpha_1 \cdot b_1 + \alpha_2 \cdot s'_{15} + \alpha_3 \cdot b'_1
 $$
 
+When the operation is DYNCALL and the overflow table is non-empty, we also remove one row, but
+the "prev" value comes from decoder hasher state/helper element 5 instead of $b'_1$.
+
 Using the above variables, we can ensure that right and left shifts update the overflow table correctly by enforcing the following constraint:
 
 $$
 p_1' \cdot (u \cdot f_{shl} \cdot f_{ov} + 1 - f_{shl} \cdot f_{ov}) = p_1 \cdot (v \cdot f_{shr} + 1 - f_{shr}) \text{ | degree} = 9
 $$
+
+For DYNCALL, the same structure applies with $f_{dyncall}$ in place of $f_{shl}$ and with $u$
+defined using the hasher-state "prev" value described above.
 
 The above constraint reduces to the following under various flag conditions:
 
