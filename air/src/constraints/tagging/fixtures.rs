@@ -216,6 +216,416 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 40,
+            namespace: "stack.ops.pad",
+            value: QuadFelt::new([Felt::new(13331629930659656176), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 41,
+            namespace: "stack.ops.dup",
+            value: QuadFelt::new([Felt::new(756650319667756050), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 42,
+            namespace: "stack.ops.dup1",
+            value: QuadFelt::new([Felt::new(8866275161884692697), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 43,
+            namespace: "stack.ops.dup2",
+            value: QuadFelt::new([Felt::new(3836534398031583164), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 44,
+            namespace: "stack.ops.dup3",
+            value: QuadFelt::new([Felt::new(14027345575708861734), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 45,
+            namespace: "stack.ops.dup4",
+            value: QuadFelt::new([Felt::new(6758311777121484896), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 46,
+            namespace: "stack.ops.dup5",
+            value: QuadFelt::new([Felt::new(3070735592903657788), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 47,
+            namespace: "stack.ops.dup6",
+            value: QuadFelt::new([Felt::new(7754656097784875208), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 48,
+            namespace: "stack.ops.dup7",
+            value: QuadFelt::new([Felt::new(6720121361576140513), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 49,
+            namespace: "stack.ops.dup9",
+            value: QuadFelt::new([Felt::new(17539764796672551158), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 50,
+            namespace: "stack.ops.dup11",
+            value: QuadFelt::new([Felt::new(10804911883091000860), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 51,
+            namespace: "stack.ops.dup13",
+            value: QuadFelt::new([Felt::new(9611708950007293491), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 52,
+            namespace: "stack.ops.dup15",
+            value: QuadFelt::new([Felt::new(8853070398648442411), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 53,
+            namespace: "stack.ops.clk",
+            value: QuadFelt::new([Felt::new(9109734313690111543), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 54,
+            namespace: "stack.ops.swap",
+            value: QuadFelt::new([Felt::new(3018402783504114630), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 55,
+            namespace: "stack.ops.swap",
+            value: QuadFelt::new([Felt::new(17272825861332302734), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 56,
+            namespace: "stack.ops.movup2",
+            value: QuadFelt::new([Felt::new(6365383181668196029), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 57,
+            namespace: "stack.ops.movup3",
+            value: QuadFelt::new([Felt::new(11479712264864576587), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 58,
+            namespace: "stack.ops.movup4",
+            value: QuadFelt::new([Felt::new(12050324136647260589), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 59,
+            namespace: "stack.ops.movup5",
+            value: QuadFelt::new([Felt::new(4842889514271599822), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 60,
+            namespace: "stack.ops.movup6",
+            value: QuadFelt::new([Felt::new(7388624400246275858), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 61,
+            namespace: "stack.ops.movup7",
+            value: QuadFelt::new([Felt::new(10382124953564405655), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 62,
+            namespace: "stack.ops.movup8",
+            value: QuadFelt::new([Felt::new(14668661130070444298), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 63,
+            namespace: "stack.ops.movdn2",
+            value: QuadFelt::new([Felt::new(7617911967740804399), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 64,
+            namespace: "stack.ops.movdn3",
+            value: QuadFelt::new([Felt::new(10587498815844952065), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 65,
+            namespace: "stack.ops.movdn4",
+            value: QuadFelt::new([Felt::new(6234074065813353677), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 66,
+            namespace: "stack.ops.movdn5",
+            value: QuadFelt::new([Felt::new(8228745571736556881), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 67,
+            namespace: "stack.ops.movdn6",
+            value: QuadFelt::new([Felt::new(1255130201489737978), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 68,
+            namespace: "stack.ops.movdn7",
+            value: QuadFelt::new([Felt::new(4861541115171604729), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 69,
+            namespace: "stack.ops.movdn8",
+            value: QuadFelt::new([Felt::new(7218300239612772413), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 70,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(1397391365707566947), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 71,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(15192275354424729852), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 72,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(8991791753517007572), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 73,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(6845904526592099338), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 74,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(14405008868848810993), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 75,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(14818059880037013402), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 76,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(12858781526955010288), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 77,
+            namespace: "stack.ops.swapw",
+            value: QuadFelt::new([Felt::new(4346525868099676574), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 78,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(12020803221700843056), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 79,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(5905514554571101818), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 80,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(13967530246007855218), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 81,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(1745280905200466463), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 82,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(8273384627661819419), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 83,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(17907212562142949954), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 84,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(10641837676859047674), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 85,
+            namespace: "stack.ops.swapw2",
+            value: QuadFelt::new([Felt::new(5696399439164028901), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 86,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(261758456050090541), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 87,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(13783565204182644984), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 88,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(8373199292442046895), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 89,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(17987956356814792948), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 90,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(15863165148623313437), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 91,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(15873554387396407564), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 92,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(13572800254923888612), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 93,
+            namespace: "stack.ops.swapw3",
+            value: QuadFelt::new([Felt::new(37494485778659889), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 94,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(5468305410596890575), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 95,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(8148573700621797018), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 96,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(174223531403505930), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 97,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(7472429897136677074), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 98,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(9085995615849733227), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 99,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(17751305329307070351), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 100,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(12464875440922891257), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 101,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(7381981033510767101), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 102,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(14206386269299463916), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 103,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(5165712881513112310), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 104,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(9505024677507267655), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 105,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(7199235098885318815), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 106,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(14863071265127885763), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 107,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(7964997496183729586), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 108,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(17447611484236572336), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 109,
+            namespace: "stack.ops.swapdw",
+            value: QuadFelt::new([Felt::new(7663698430658282360), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 110,
+            namespace: "stack.ops.cswap",
+            value: QuadFelt::new([Felt::new(4142872517165003079), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 111,
+            namespace: "stack.ops.cswap",
+            value: QuadFelt::new([Felt::new(18107469477286194402), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 112,
+            namespace: "stack.ops.cswap",
+            value: QuadFelt::new([Felt::new(8228755909294702214), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 113,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(7382517392819628451), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 114,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(4827417633003237585), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 115,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(17779390882653606052), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 116,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(16587491652407655425), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 117,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(6936098212561125534), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 118,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(5094958697700743127), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 119,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(189412762651021203), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 120,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(8308993958309806023), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 121,
+            namespace: "stack.ops.cswapw",
+            value: QuadFelt::new([Felt::new(16580384734945713908), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 122,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
@@ -223,7 +633,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 41,
+            id: 123,
             namespace: "stack.overflow.bus.transition",
             value: QuadFelt::new([Felt::new(7384164985445418427), Felt::new(3858806565449404456)]),
         },
