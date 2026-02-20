@@ -6,6 +6,7 @@
 
 - Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
 - [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
+- [BREAKING] `Tracer` API significantly refactored ([#2720](https://github.com/0xMiden/miden-vm/pull/2720)).
 
 #### Fixes
 
