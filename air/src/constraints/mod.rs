@@ -24,6 +24,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 use crate::MainTraceRow;
 
 pub mod bus;
+pub mod decoder;
 mod op_flags;
 pub mod range;
 pub mod stack;
@@ -46,6 +47,7 @@ pub fn enforce_main<AB>(
 
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     stack::enforce_main(builder, local, next, &op_flags);
+    decoder::enforce_main(builder, local, next, &op_flags);
 }
 
 /// Enforces all auxiliary (bus) constraints.
@@ -59,4 +61,5 @@ pub fn enforce_bus<AB>(
     range::bus::enforce_bus(builder, local);
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     stack::bus::enforce_bus(builder, local, next, &op_flags);
+    decoder::bus::enforce_bus(builder, local, next, &op_flags);
 }
