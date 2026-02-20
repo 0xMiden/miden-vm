@@ -1,7 +1,8 @@
 //! Stack operation constraints.
 //!
 //! This module enforces ops that directly rewrite visible stack items:
-//! PAD, DUP*, CLK, SWAP, MOVUP/MOVDN, SWAPW/SWAPDW, and conditional swaps.
+//! PAD, DUP*, CLK, SWAP, MOVUP/MOVDN, SWAPW/SWAPDW, conditional swaps, and small
+//! system/io stack ops (ASSERT, CALLER, SDEPTH).
 //!
 //! Stack shifting is enforced in the general stack constraints; here we only cover explicit
 //! rewrites of stack positions for these op groups.
@@ -22,7 +23,7 @@ use crate::{
 
 /// Number of stack ops constraints.
 #[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 82;
+pub const NUM_CONSTRAINTS: usize = 88;
 
 /// Base tag ID for stack ops constraints.
 const STACK_OPS_BASE_ID: usize = TAG_STACK_OPS_BASE;
@@ -123,6 +124,15 @@ const STACK_OPS_NAMES: [&str; NUM_CONSTRAINTS] = [
     "stack.ops.cswapw",
     "stack.ops.cswapw",
     "stack.ops.cswapw",
+    // ASSERT
+    "stack.system.assert",
+    // CALLER
+    "stack.system.caller",
+    "stack.system.caller",
+    "stack.system.caller",
+    "stack.system.caller",
+    // SDEPTH
+    "stack.io.sdepth",
 ];
 
 // ENTRY POINT
@@ -153,6 +163,12 @@ pub fn enforce_main<AB>(
     let s13: AB::Expr = local.stack[13].clone().into();
     let s14: AB::Expr = local.stack[14].clone().into();
     let s15: AB::Expr = local.stack[15].clone().into();
+    let stack_depth: AB::Expr = local.stack[16].clone().into();
+
+    let fn_hash_0: AB::Expr = local.fn_hash[0].clone().into();
+    let fn_hash_1: AB::Expr = local.fn_hash[1].clone().into();
+    let fn_hash_2: AB::Expr = local.fn_hash[2].clone().into();
+    let fn_hash_3: AB::Expr = local.fn_hash[3].clone().into();
 
     let s0_next: AB::Expr = next.stack[0].clone().into();
     let s1_next: AB::Expr = next.stack[1].clone().into();
@@ -211,6 +227,9 @@ pub fn enforce_main<AB>(
 
     let is_cswap = op_flags.cswap();
     let is_cswapw = op_flags.cswapw();
+    let is_assert = op_flags.assert_op();
+    let is_caller = op_flags.caller();
+    let is_sdepth = op_flags.sdepth();
 
     let mut idx = 0usize;
 
@@ -341,7 +360,7 @@ pub fn enforce_main<AB>(
     );
 
     // CSWAP / CSWAPW: conditional swaps using s0 as the selector.
-    let cswap_c = s0;
+    let cswap_c = s0.clone();
     let cswap_c_inv = AB::Expr::ONE - cswap_c.clone();
 
     // Binary constraint for the cswap selector (must be 0 or 1).
@@ -367,24 +386,51 @@ pub fn enforce_main<AB>(
         "stack.ops.cswapw",
         [
             is_cswapw.clone()
-                * (s0_next - (cswap_c.clone() * s5.clone() + cswap_c_inv.clone() * s1.clone())),
+                * (s0_next.clone()
+                    - (cswap_c.clone() * s5.clone() + cswap_c_inv.clone() * s1.clone())),
             is_cswapw.clone()
-                * (s1_next - (cswap_c.clone() * s6.clone() + cswap_c_inv.clone() * s2.clone())),
+                * (s1_next.clone()
+                    - (cswap_c.clone() * s6.clone() + cswap_c_inv.clone() * s2.clone())),
             is_cswapw.clone()
-                * (s2_next - (cswap_c.clone() * s7.clone() + cswap_c_inv.clone() * s3.clone())),
+                * (s2_next.clone()
+                    - (cswap_c.clone() * s7.clone() + cswap_c_inv.clone() * s3.clone())),
             is_cswapw.clone()
-                * (s3_next - (cswap_c.clone() * s8.clone() + cswap_c_inv.clone() * s4.clone())),
+                * (s3_next.clone()
+                    - (cswap_c.clone() * s8.clone() + cswap_c_inv.clone() * s4.clone())),
             is_cswapw.clone()
-                * (s4_next - (cswap_c.clone() * s1.clone() + cswap_c_inv.clone() * s5.clone())),
+                * (s4_next.clone()
+                    - (cswap_c.clone() * s1.clone() + cswap_c_inv.clone() * s5.clone())),
             is_cswapw.clone()
-                * (s5_next - (cswap_c.clone() * s2.clone() + cswap_c_inv.clone() * s6.clone())),
+                * (s5_next.clone()
+                    - (cswap_c.clone() * s2.clone() + cswap_c_inv.clone() * s6.clone())),
             is_cswapw.clone()
-                * (s6_next - (cswap_c.clone() * s3.clone() + cswap_c_inv.clone() * s7.clone())),
+                * (s6_next.clone()
+                    - (cswap_c.clone() * s3.clone() + cswap_c_inv.clone() * s7.clone())),
             is_cswapw.clone()
-                * (s7_next - (cswap_c.clone() * s4.clone() + cswap_c_inv.clone() * s8.clone())),
+                * (s7_next.clone()
+                    - (cswap_c.clone() * s4.clone() + cswap_c_inv.clone() * s8.clone())),
             is_cswapw * (cswap_c.clone() * (cswap_c - AB::Expr::ONE)),
         ],
     );
+
+    // ASSERT: top element must be 1 (shift handled by stack general).
+    emit(builder, &mut idx, is_assert * (s0 - AB::Expr::ONE));
+
+    // CALLER: load fn_hash into the top 4 stack elements.
+    emit_list(
+        builder,
+        &mut idx,
+        "stack.system.caller",
+        [
+            is_caller.clone() * (s0_next.clone() - fn_hash_0),
+            is_caller.clone() * (s1_next.clone() - fn_hash_1),
+            is_caller.clone() * (s2_next.clone() - fn_hash_2),
+            is_caller * (s3_next.clone() - fn_hash_3),
+        ],
+    );
+
+    // SDEPTH: push current stack depth to the top.
+    emit(builder, &mut idx, is_sdepth * (s0_next - stack_depth));
 }
 
 // CONSTRAINT HELPERS
