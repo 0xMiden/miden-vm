@@ -175,3 +175,12 @@ pub fn enforce_chiplet_selectors<AB>(
             .assert_zero(s4_next - s4);
     });
 }
+
+// INTERNAL HELPERS
+// ================================================================================================
+
+/// Bitwise chiplet active flag: `s0 * !s1`.
+#[inline]
+pub fn bitwise_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E) -> E {
+    s0 * (E::ONE - s1)
+}
