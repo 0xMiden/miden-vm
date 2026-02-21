@@ -21,9 +21,10 @@
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
-use crate::MainTraceRow;
+use crate::{Felt, MainTraceRow};
 
 pub mod bus;
+pub mod chiplets;
 pub mod decoder;
 pub mod ext_field;
 mod op_flags;
@@ -41,7 +42,7 @@ pub fn enforce_main<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: MidenAirBuilder<F = Felt>,
 {
     system::enforce_main(builder, local, next);
     range::enforce_main(builder, local, next);
@@ -49,6 +50,7 @@ pub fn enforce_main<AB>(
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     stack::enforce_main(builder, local, next, &op_flags);
     decoder::enforce_main(builder, local, next, &op_flags);
+    chiplets::enforce_main(builder, local, next);
 }
 
 /// Enforces all auxiliary (bus) constraints.
@@ -57,7 +59,7 @@ pub fn enforce_bus<AB>(
     local: &MainTraceRow<AB::Var>,
     next: &MainTraceRow<AB::Var>,
 ) where
-    AB: MidenAirBuilder,
+    AB: MidenAirBuilder<F = Felt>,
 {
     range::bus::enforce_bus(builder, local);
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));

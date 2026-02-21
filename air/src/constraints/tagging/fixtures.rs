@@ -1171,6 +1171,366 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
         },
         EvalRecord {
             id: 231,
+            namespace: "chiplets.selectors.s0.binary",
+            value: QuadFelt::new([Felt::new(13339369523717109295), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 232,
+            namespace: "chiplets.selectors.s1.binary",
+            value: QuadFelt::new([Felt::new(5399081030326323264), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 233,
+            namespace: "chiplets.selectors.s2.binary",
+            value: QuadFelt::new([Felt::new(12423271937388024622), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 234,
+            namespace: "chiplets.selectors.s3.binary",
+            value: QuadFelt::new([Felt::new(6104289749728022881), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 235,
+            namespace: "chiplets.selectors.s4.binary",
+            value: QuadFelt::new([Felt::new(1241452016395320053), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 236,
+            namespace: "chiplets.selectors.s0.stability",
+            value: QuadFelt::new([Felt::new(14729701512419667041), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 237,
+            namespace: "chiplets.selectors.s1.stability",
+            value: QuadFelt::new([Felt::new(8909164618174988456), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 238,
+            namespace: "chiplets.selectors.s2.stability",
+            value: QuadFelt::new([Felt::new(17247285692427399965), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 239,
+            namespace: "chiplets.selectors.s3.stability",
+            value: QuadFelt::new([Felt::new(18202363660063267394), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 240,
+            namespace: "chiplets.selectors.s4.stability",
+            value: QuadFelt::new([Felt::new(6610185862666795331), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 241,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(4099164774137728313), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 242,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(14454658395404025559), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 243,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(14045750606291612344), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 244,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(4962577616206122596), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 245,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(17693281290536116739), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 246,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(2566307954601069485), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 247,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(7014825251917345868), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 248,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(12643485402937350728), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 249,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(13773518984372045426), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 250,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(12725128195760136818), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 251,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(12789485480014529422), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 252,
+            namespace: "chiplets.hasher.permutation.init",
+            value: QuadFelt::new([Felt::new(2064555680622899263), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 253,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(14965667877036435255), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 254,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(8649163745447702544), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 255,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(1871614405591673138), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 256,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(3904379054162154278), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 257,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(14269032524621289009), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 258,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(819271014970897034), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 259,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(7445347300254257143), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 260,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(18264241495848405505), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 261,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(4022419953426403986), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 262,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(16556927457681327599), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 263,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(7630095839895141032), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 264,
+            namespace: "chiplets.hasher.permutation.external",
+            value: QuadFelt::new([Felt::new(17073915086247210099), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 265,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(12354414453280530108), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 266,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(15162996181146864722), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 267,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(3799802584325483032), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 268,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(7503666179952416559), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 269,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(5195105242383400264), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 270,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(2672184473444251603), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 271,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(1545887997090789749), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 272,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(212978569305465235), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 273,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(7828622218965306157), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 274,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(15313472288808367905), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 275,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(1544567903496578828), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 276,
+            namespace: "chiplets.hasher.permutation.internal",
+            value: QuadFelt::new([Felt::new(6950222684787745222), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 277,
+            namespace: "chiplets.hasher.selectors.binary",
+            value: QuadFelt::new([Felt::new(14125970682131069043), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 278,
+            namespace: "chiplets.hasher.selectors.binary",
+            value: QuadFelt::new([Felt::new(15397757255883077151), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 279,
+            namespace: "chiplets.hasher.selectors.binary",
+            value: QuadFelt::new([Felt::new(8206822507230624215), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 280,
+            namespace: "chiplets.hasher.selectors.stability",
+            value: QuadFelt::new([Felt::new(6479352521221779748), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 281,
+            namespace: "chiplets.hasher.selectors.stability",
+            value: QuadFelt::new([Felt::new(210512107158412246), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 282,
+            namespace: "chiplets.hasher.selectors.continuation",
+            value: QuadFelt::new([Felt::new(15715623607701353500), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 283,
+            namespace: "chiplets.hasher.selectors.invalid",
+            value: QuadFelt::new([Felt::new(13405975868755856198), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 284,
+            namespace: "chiplets.hasher.abp.capacity",
+            value: QuadFelt::new([Felt::new(1899048554833837921), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 285,
+            namespace: "chiplets.hasher.abp.capacity",
+            value: QuadFelt::new([Felt::new(12437244811220538952), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 286,
+            namespace: "chiplets.hasher.abp.capacity",
+            value: QuadFelt::new([Felt::new(10139411892992277524), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 287,
+            namespace: "chiplets.hasher.abp.capacity",
+            value: QuadFelt::new([Felt::new(15737189571305100043), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 288,
+            namespace: "chiplets.hasher.output.index",
+            value: QuadFelt::new([Felt::new(16881983815653283540), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 289,
+            namespace: "chiplets.hasher.merkle.index.binary",
+            value: QuadFelt::new([Felt::new(13143318647927561805), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 290,
+            namespace: "chiplets.hasher.merkle.index.stability",
+            value: QuadFelt::new([Felt::new(13941205471766075471), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 291,
+            namespace: "chiplets.hasher.merkle.capacity",
+            value: QuadFelt::new([Felt::new(5486621160745001548), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 292,
+            namespace: "chiplets.hasher.merkle.capacity",
+            value: QuadFelt::new([Felt::new(15134096900702524735), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 293,
+            namespace: "chiplets.hasher.merkle.capacity",
+            value: QuadFelt::new([Felt::new(17576701782509621064), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 294,
+            namespace: "chiplets.hasher.merkle.capacity",
+            value: QuadFelt::new([Felt::new(14561117990313963177), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 295,
+            namespace: "chiplets.hasher.merkle.digest.rate0",
+            value: QuadFelt::new([Felt::new(8725087617587926550), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 296,
+            namespace: "chiplets.hasher.merkle.digest.rate0",
+            value: QuadFelt::new([Felt::new(12515088494833138961), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 297,
+            namespace: "chiplets.hasher.merkle.digest.rate0",
+            value: QuadFelt::new([Felt::new(6965398204541535664), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 298,
+            namespace: "chiplets.hasher.merkle.digest.rate0",
+            value: QuadFelt::new([Felt::new(11433229023120737569), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 299,
+            namespace: "chiplets.hasher.merkle.digest.rate1",
+            value: QuadFelt::new([Felt::new(4884394573065500633), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 300,
+            namespace: "chiplets.hasher.merkle.digest.rate1",
+            value: QuadFelt::new([Felt::new(16805257998005939804), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 301,
+            namespace: "chiplets.hasher.merkle.digest.rate1",
+            value: QuadFelt::new([Felt::new(55029178798193706), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 302,
+            namespace: "chiplets.hasher.merkle.digest.rate1",
+            value: QuadFelt::new([Felt::new(17219870521967201546), Felt::new(0)]),
+        },
+        EvalRecord {
+            id: 303,
             namespace: "range.bus.transition",
             value: QuadFelt::new([
                 Felt::new(10365289165200035540),
@@ -1178,12 +1538,12 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 232,
+            id: 304,
             namespace: "stack.overflow.bus.transition",
             value: QuadFelt::new([Felt::new(7384164985445418427), Felt::new(3858806565449404456)]),
         },
         EvalRecord {
-            id: 233,
+            id: 305,
             namespace: "decoder.bus.p1.transition",
             value: QuadFelt::new([
                 Felt::new(11611432650982424455),
@@ -1191,7 +1551,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 234,
+            id: 306,
             namespace: "decoder.bus.p2.transition",
             value: QuadFelt::new([
                 Felt::new(15040597896341508305),
@@ -1199,7 +1559,7 @@ pub fn current_group_expected() -> Vec<EvalRecord> {
             ]),
         },
         EvalRecord {
-            id: 235,
+            id: 307,
             namespace: "decoder.bus.p3.transition",
             value: QuadFelt::new([Felt::new(9395869302542898577), Felt::new(6472917827183803848)]),
         },
