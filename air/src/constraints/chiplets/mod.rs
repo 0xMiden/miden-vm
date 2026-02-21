@@ -4,11 +4,13 @@
 //! - chiplet selector constraints
 //! - hasher chiplet main-trace constraints
 //! - bitwise chiplet main-trace constraints
+//! - memory chiplet main-trace constraints
 //!
 //! Other chiplets (memory/ACE/kernel ROM) and chiplet buses are added later.
 
 pub mod bitwise;
 pub mod hasher;
+pub mod memory;
 pub mod selectors;
 
 use miden_crypto::stark::air::MidenAirBuilder;
@@ -29,4 +31,5 @@ pub fn enforce_main<AB>(
     selectors::enforce_chiplet_selectors(builder, local, next);
     hasher::enforce_hasher_constraints(builder, local, next);
     bitwise::enforce_bitwise_constraints(builder, local, next);
+    memory::enforce_memory_constraints(builder, local, next);
 }
