@@ -164,3 +164,12 @@ pub fn enforce_chiplet_selectors<AB>(
         builder.assert_zero(is_transition * s0 * s1 * s2 * s3 * s4.clone() * (s4_next - s4));
     });
 }
+
+// INTERNAL HELPERS
+// ================================================================================================
+
+/// Bitwise chiplet active flag: `s0 * !s1`.
+#[inline]
+pub fn bitwise_chiplet_flag<E: PrimeCharacteristicRing>(s0: E, s1: E) -> E {
+    s0 * (E::ONE - s1)
+}
