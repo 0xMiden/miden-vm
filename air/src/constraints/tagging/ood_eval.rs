@@ -6,9 +6,11 @@ use miden_core::{
     Felt,
     field::{PrimeCharacteristicRing, QuadFelt},
 };
+use crate::constraints::chiplets::hasher::periodic;
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
 use super::{ids::TAG_TOTAL_COUNT, state};
+use crate::constraints::chiplets::hasher::periodic;
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,9 +84,8 @@ impl OodEvalAirBuilder {
         let first_row = rng.next_felt();
         let last_row = rng.next_felt();
         let transition = rng.next_felt();
-        // Minimal constraints in this branch do not use periodic values.
-        // When chiplet constraints are added, update this to seed the full periodic set.
-        let periodic_values = Vec::new();
+        let periodic_values =
+            (0..periodic::NUM_PERIODIC_COLUMNS).map(|_| rng.next_felt()).collect();
 
         Self {
             main,
@@ -259,8 +260,9 @@ mod tests {
 
     use super::{
         super::fixtures::{OOD_SEED, active_expected_ood_evals},
-        EvalRecord, OodEvalAirBuilder, TAG_TOTAL_COUNT,
+        EvalRecord, OodEvalAirBuilder,
     };
+    use super::ids::TAG_TOTAL_COUNT;
     use crate::ProcessorAir;
 
     fn run_group_parity_test(expected: Vec<EvalRecord>) {
