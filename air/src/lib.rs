@@ -174,7 +174,12 @@ where
     }
 
     fn periodic_table(&self) -> Vec<Vec<Felt>> {
-        constraints::chiplets::hasher::periodic_columns()
+        let mut cols = constraints::chiplets::hasher::periodic_columns();
+        let [k_first, k_transition] = constraints::chiplets::bitwise::periodic_columns();
+
+        cols.push(k_first);
+        cols.push(k_transition);
+        cols
     }
 
     fn build_aux_trace(

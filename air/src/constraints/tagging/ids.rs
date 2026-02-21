@@ -53,7 +53,7 @@ pub const TAG_DECODER_COUNT: usize = 57;
 /// Base ID for the chiplets constraint group.
 pub const TAG_CHIPLETS_BASE: usize = TAG_DECODER_BASE + TAG_DECODER_COUNT;
 /// Number of chiplets constraints in this group.
-pub const TAG_CHIPLETS_COUNT: usize = 72;
+pub const TAG_CHIPLETS_COUNT: usize = 89;
 
 /// Base ID for the range bus constraint.
 ///
