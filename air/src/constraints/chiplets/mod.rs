@@ -3,9 +3,11 @@
 //! Currently we implement:
 //! - chiplet selector constraints
 //! - hasher chiplet main-trace constraints
+//! - bitwise chiplet main-trace constraints
 //!
-//! Other chiplets (bitwise/memory/ACE/kernel ROM) and chiplet buses are added later.
+//! Other chiplets (memory/ACE/kernel ROM) and chiplet buses are added later.
 
+pub mod bitwise;
 pub mod hasher;
 pub mod selectors;
 
@@ -26,4 +28,5 @@ pub fn enforce_main<AB>(
 {
     selectors::enforce_chiplet_selectors(builder, local, next);
     hasher::enforce_hasher_constraints(builder, local, next);
+    bitwise::enforce_bitwise_constraints(builder, local, next);
 }
