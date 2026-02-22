@@ -1,13 +1,14 @@
 //! Stack constraints module.
 //!
-//! This module currently exposes the general stack transition, stack ops, and stack overflow
-//! constraints.
+//! This module exposes the general stack transition, stack ops, stack arith/u32, stack crypto,
+//! and stack overflow constraints.
 
 pub mod bus;
 pub mod crypto;
 pub mod general;
 pub mod ops;
 pub mod overflow;
+pub mod stack_arith;
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
@@ -29,4 +30,5 @@ pub fn enforce_main<AB>(
     overflow::enforce_main(builder, local, next, op_flags);
     ops::enforce_main(builder, local, next, op_flags);
     crypto::enforce_main(builder, local, next, op_flags);
+    stack_arith::enforce_main(builder, local, next, op_flags);
 }
