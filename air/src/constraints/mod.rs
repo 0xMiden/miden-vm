@@ -64,5 +64,5 @@ pub fn enforce_bus<AB>(
     let op_flags = op_flags::OpFlags::new(op_flags::ExprDecoderAccess::<_, AB::Expr>::new(local));
     stack::bus::enforce_bus(builder, local, next, &op_flags);
     decoder::bus::enforce_bus(builder, local, next, &op_flags);
-    chiplets::bus::enforce_bus(builder, local, next);
+    chiplets::bus::enforce_bus(builder, local, next, &op_flags);
 }
