@@ -50,6 +50,7 @@ const ACE_OFFSET: usize = 4;
 // ================================================================================================
 
 const ACE_BASE_ID: usize = super::memory::MEMORY_BASE_ID + super::memory::MEMORY_COUNT;
+pub(super) const ACE_COUNT: usize = 20;
 
 const ACE_BINARY_BASE_ID: usize = ACE_BASE_ID;
 const ACE_SECTION_BASE_ID: usize = ACE_BASE_ID + 2;
