@@ -59,8 +59,8 @@ pub enum Continuation {
     /// Process the `after_exit` decorators of the basic block node.
     ///
     /// Similar to `AfterExitDecorators`, but also executes all operation-level decorators that
-    /// refer to after the last operation in the basic block. See [`BasicBlockNode`] for more
-    /// details.
+    /// refer to after the last operation in the basic block. See
+    /// [`miden_core::mast::BasicBlockNode`] for more details.
     AfterExitDecoratorsBasicBlock(MastNodeId),
 }
 

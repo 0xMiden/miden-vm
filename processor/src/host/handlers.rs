@@ -142,14 +142,16 @@ impl EventHandlerRegistry {
     ) -> Result<(), ExecutionError> {
         // Check if the event is a reserved system event
         if SystemEvent::from_name(event.as_str()).is_some() {
-            return Err(ExecutionError::ReservedEventNamespace { event });
+            return Err(crate::errors::HostError::ReservedEventNamespace { event }.into());
         }
 
         // Compute EventId from the event name
         let id = event.to_event_id();
         match self.handlers.entry(id) {
             Entry::Vacant(e) => e.insert((event, handler)),
-            Entry::Occupied(_) => return Err(ExecutionError::DuplicateEventHandler { event }),
+            Entry::Occupied(_) => {
+                return Err(crate::errors::HostError::DuplicateEventHandler { event }.into());
+            },
         };
         Ok(())
     }

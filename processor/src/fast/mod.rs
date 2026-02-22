@@ -359,7 +359,7 @@ impl FastProcessor {
 
     /// Returns a narrowed interface for reading and updating the processor state.
     #[inline(always)]
-    pub fn state(&mut self) -> ProcessorState<'_> {
+    pub fn state(&self) -> ProcessorState<'_> {
         ProcessorState { processor: self }
     }
 
@@ -552,13 +552,7 @@ impl FastProcessor {
                 InternalBreakReason::LoadMastForestFromDyn { dyn_node_id, callee_hash } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            callee_hash,
-                            host,
-                            |digest| OperationError::DynamicNodeNotFound { digest },
-                            current_forest,
-                            dyn_node_id,
-                        )
+                        .load_mast_forest(callee_hash, host, current_forest, dyn_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -583,13 +577,7 @@ impl FastProcessor {
                 } => {
                     // load mast forest asynchronously
                     let (root_id, new_forest) = match self
-                        .load_mast_forest(
-                            procedure_hash,
-                            host,
-                            |root_digest| OperationError::NoMastForestWithProcedure { root_digest },
-                            current_forest,
-                            external_node_id,
-                        )
+                        .load_mast_forest(procedure_hash, host, current_forest, external_node_id)
                         .await
                     {
                         Ok(result) => result,
@@ -639,7 +627,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed before entering a node.
     fn execute_before_enter_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -664,7 +652,7 @@ impl FastProcessor {
 
     /// Executes the decorators that should be executed after exiting a node.
     fn execute_after_exit_decorators(
-        &mut self,
+        &self,
         node_id: MastNodeId,
         current_forest: &MastForest,
         host: &mut impl Host,
@@ -689,27 +677,28 @@ impl FastProcessor {
 
     /// Executes the specified decorator
     fn execute_decorator(
-        &mut self,
+        &self,
         decorator: &Decorator,
         host: &mut impl Host,
     ) -> ControlFlow<BreakReason> {
         match decorator {
             Decorator::Debug(options) => {
                 if self.in_debug_mode() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_debug(process, options) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_debug(&processor_state, options) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::DebugHandlerError { err },
+                            crate::errors::HostError::DebugHandlerError { err }.into(),
                         ));
                     }
                 }
             },
             Decorator::Trace(id) => {
                 if self.options.enable_tracing() {
-                    let process = &mut self.state();
-                    if let Err(err) = host.on_trace(process, *id) {
+                    let processor_state = self.state();
+                    if let Err(err) = host.on_trace(&processor_state, *id) {
                         return ControlFlow::Break(BreakReason::Err(
-                            ExecutionError::TraceHandlerError { trace_id: *id, err },
+                            crate::errors::HostError::TraceHandlerError { trace_id: *id, err }
+                                .into(),
                         ));
                     }
                 }
@@ -725,15 +714,17 @@ impl FastProcessor {
         &mut self,
         node_digest: Word,
         host: &mut impl Host,
-        get_mast_forest_failed: impl Fn(Word) -> OperationError,
         current_forest: &MastForest,
         node_id: MastNodeId,
     ) -> Result<(MastNodeId, Arc<MastForest>), ExecutionError> {
-        let mast_forest = host
-            .get_mast_forest(&node_digest)
-            .await
-            .ok_or_else(|| get_mast_forest_failed(node_digest))
-            .map_exec_err(current_forest, node_id, host)?;
+        let mast_forest = host.get_mast_forest(&node_digest).await.ok_or_else(|| {
+            crate::errors::procedure_not_found_with_context(
+                node_digest,
+                current_forest,
+                node_id,
+                host,
+            )
+        })?;
 
         // We limit the parts of the program that can be called externally to procedure
         // roots, even though MAST doesn't have that restriction.

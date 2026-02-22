@@ -11,7 +11,7 @@ Cryptographic operations in Miden VM are performed by the [Hash chiplet](../chip
 Thus, to describe AIR constraints for the cryptographic operations, we need to define how to compute these input and output values within the stack. We do this in the following sections.
 
 ## HPERM
-The `HPERM` operation applies Poseidon2 permutation to the top $12$ elements of the stack. The stack is assumed to be arranged so that the $8$ elements of the rate are at the top of the stack. The capacity word follows, with the number of elements to be hashed at the deepest position in stack. The diagram below illustrates this graphically.
+The `HPERM` operation applies a Poseidon2 permutation to the top $12$ elements of the stack. The stack is arranged in LE state order `[RATE0, RATE1, CAPACITY]`, with $s_0$ at the top and mapping to the first rate lane. The diagram below illustrates this graphically.
 
 ![hperm](../../img/design/stack/crypto_ops/HPERM.png)
 
@@ -58,11 +58,11 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `MPVERIFY` operation, we define input and output values as follows:
 
 $$
-v_{input} = \alpha_0 + \alpha_1 \cdot op_{mpver} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3 \alpha_{j+8} \cdot s_{3 - j}
+v_{input} = \alpha_0 + \alpha_1 \cdot op_{mpver} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3 \alpha_{j + 4} \cdot s_{j}
 $$
 
 $$
-v_{output} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 8 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{9 - j}
+v_{output} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 32 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
 $$
 
 In the above, $op_{mpver}$ and $op_{rethash}$ are the unique [operation labels](../chiplets/index.md#operation-labels) for initiating a Merkle path verification computation and reading the hash result respectively. The sum expression for inputs computes the value of the leaf node, while the sum expression for the output computes the value of the tree root.
@@ -97,19 +97,19 @@ In the above, $r$ (located in the helper register $h_0$) is the row address from
 For the `MRUPDATE` operation, we define input and output values as follows:
 
 $$
-v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{3 - j}
+v_{inputold} = \alpha_0 + \alpha_1 \cdot op_{mruold} + \alpha_2 \cdot h_0 + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}
 $$
 
 $$
-v_{outputold} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 8 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{9 - j}
+v_{outputold} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 32 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{6 + j}
 $$
 
 $$
-v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 8 \cdot s_4) + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{13 - j}
+v_{inputnew} = \alpha_0 + \alpha_1 \cdot op_{mrunew} + \alpha_2 \cdot (h_0 + 32 \cdot s_4) + \alpha_3 \cdot s_5 + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{10 + j}
 $$
 
 $$
-v_{outputnew} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot 8 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 8} \cdot s_{3 - j}'
+v_{outputnew} = \alpha_0 + \alpha_1 \cdot op_{rethash} + \alpha_2 \cdot (h_0 + 2 \cdot 32 \cdot s_4 - 1) + \sum_{j=0}^3\alpha_{j + 4} \cdot s_{j}'
 $$
 
 In the above, the first two expressions correspond to inputs and outputs for verifying the Merkle path between the old node value and the old tree root, while the last two expressions correspond to inputs and outputs for verifying the Merkle path between the new node value and the new tree root. The hash chiplet ensures the same set of sibling nodes are used in both of these computations.
@@ -124,6 +124,72 @@ The above constraint enforces that the specified input and output rows for both,
 
 The effect of this operation on the rest of the stack is:
 * **No change** for positions starting from $4$.
+
+## CRYPTOSTREAM
+The `CRYPTOSTREAM` operation reads two words from memory, combines them with the
+top 8 stack elements (the rate), writes the resulting ciphertext back to memory,
+and replaces the top 8 stack elements with the ciphertext. The source and
+destination pointers are stored in stack positions $12$ and $13$, respectively.
+
+Let $r_i = s_i$ be the rate values and $c_i = s_i'$ be the ciphertext values on
+the stack after the operation. We define plaintext values as $p_i = c_i - r_i$.
+
+The source and destination pointers advance by two words:
+
+$$
+s_{12}' = s_{12} + 8
+$$
+
+$$
+s_{13}' = s_{13} + 8
+$$
+
+The capacity and tail elements are unchanged:
+
+$$
+s_i' - s_i = 0 \text{ for } i \in \{8,9,10,11,14,15\}
+$$
+
+We define the two read requests and two write requests as follows:
+
+$$
+u_{read,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
+\alpha_3 \cdot s_{12} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot p_j
+$$
+
+$$
+u_{read,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx +
+\alpha_3 \cdot (s_{12} + 4) + \alpha_4 \cdot clk +
+\sum_{j=0}^3 \alpha_{j+5} \cdot p_{j+4}
+$$
+
+$$
+u_{write,1} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
+\alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \sum_{j=0}^3 \alpha_{j+5} \cdot c_j
+$$
+
+$$
+u_{write,2} = \alpha_0 + \alpha_1 \cdot op_{mem\_writeword} + \alpha_2 \cdot ctx +
+\alpha_3 \cdot (s_{13} + 4) + \alpha_4 \cdot clk +
+\sum_{j=0}^3 \alpha_{j+5} \cdot c_{j+4}
+$$
+
+$$
+u_{mem} = u_{read,1} \cdot u_{read,2} \cdot u_{write,1} \cdot u_{write,2}
+$$
+
+In the above, $op_{mem\_readword}$ and $op_{mem\_writeword}$ are the unique
+[operation labels](../chiplets/index.md#operation-labels) for the memory read
+and write word operations.
+
+Using the above value, the chiplet bus constraint is:
+
+$$
+b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 5
+$$
+
+The effect of this operation on the rest of the stack is:
+* **No change** starting from position $8$, except for the pointer updates above.
 
 ## FRIE2F4
 The `FRIE2F4` operation performs FRI layer folding by a factor of 4 for FRI protocol executed in a degree 2 extension of the base field. It also performs several computations needed for checking correctness of the folding from the previous layer as well as simplifying folding of the next FRI layer.
@@ -183,31 +249,21 @@ After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, \mathsf{tmp1}_0, \mathsf{tmp1}_1, \mathsf{tmp0}_0, \mathsf{tmp0}_1]$.
 - Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
 
-More specifically, the stack transition for this operation must satisfy the following constraints:
+More specifically, the stack transition for this operation must satisfy the following constraints. Let $\alpha = (\alpha_0, \alpha_1) \in \mathbb{F}_p[x]/(x^2 - 7)$ and define
+
+$$
+\alpha^2 = (\alpha_0^2 + 7 \cdot \alpha_1^2,\; 2 \cdot \alpha_0 \cdot \alpha_1), \qquad
+\alpha^3 = (\alpha_0^3 + 21 \cdot \alpha_0 \cdot \alpha_1^2,\; 3 \cdot \alpha_0^2 \cdot \alpha_1 + 7 \cdot \alpha_1^3).
+$$
 
 $$
 \begin{align*}
-    \mathsf{tmp0}_0 &= s_6 + s_7 \cdot \alpha_0 + s_{15} \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
-    &\quad - 2 \cdot s_{14} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2)  \; \text{ | degree} = 3 \\
-    \\
-    \mathsf{tmp0}_1 &= s_7 \cdot \alpha_1 + s_{14} \cdot (\alpha_0^2 + 2 \cdot \alpha_0 \cdot \alpha_1 - \alpha_1^2) \\
-    &\quad + s_{15} \cdot (2 \cdot \alpha_0 \cdot \alpha_1 + \alpha_1^2) \; \text{ | degree} = 3 \\
-    \\
-\mathsf{tmp1}_0 &= s_3 + s_4 \cdot \alpha_0 + s_5 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
-    &\quad + \mathsf{tmp0}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
-    &\quad + \mathsf{tmp0}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
-    \\
-\mathsf{tmp1}_1 &= \alpha_1 \cdot s_4 + s_5 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
-    &\quad + \mathsf{tmp0}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
-    &\quad + \mathsf{tmp0}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
-    \\
-\mathsf{acc}_0^{'} &= s_0 + s_1 \cdot \alpha_0 + s_2 \cdot (\alpha_0^2 - 2 \cdot \alpha_1^2)  \\
-    &\quad + \mathsf{tmp1}_0 \cdot (\alpha_0^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 2 \cdot \alpha_1^3)  \\
-    &\quad + \mathsf{tmp1}_1 \cdot (2 \cdot \alpha_1^3 - 6 \cdot \alpha_0 \cdot \alpha_1^2 - 6 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4 \\
-    \\
-\mathsf{acc}_1^{'} &= \alpha_1 \cdot s_1 + s_2 \cdot (\alpha_1^2 + 2 \cdot \alpha_0 \cdot \alpha_1)  \\
-    &\quad + \mathsf{tmp1}_1 \cdot (-3 \cdot \alpha_1^3 - 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1 + \alpha_0^3)  \\
-    &\quad + \mathsf{tmp1}_0 \cdot (-\alpha_1^3 + 3 \cdot \alpha_0 \cdot \alpha_1^2 + 3 \cdot \alpha_0^2 \cdot \alpha_1)  \; \text{ | degree} = 4
+\mathsf{tmp0}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot 7 \cdot \alpha^2_1 + c_0 \cdot \alpha_0 + c_1 \text{ | degree} = 3 \\
+\mathsf{tmp0}_1 &= \mathsf{acc}_0 \cdot \alpha^2_1 + \mathsf{acc}_1 \cdot \alpha^2_0 + c_0 \cdot \alpha_1 \text{ | degree} = 3 \\
+\mathsf{tmp1}_0 &= \mathsf{tmp0}_0 \cdot \alpha^3_0 + \mathsf{tmp0}_1 \cdot 7 \cdot \alpha^3_1 + c_2 \cdot \alpha^2_0 + c_3 \cdot \alpha_0 + c_4 \text{ | degree} = 4 \\
+\mathsf{tmp1}_1 &= \mathsf{tmp0}_0 \cdot \alpha^3_1 + \mathsf{tmp0}_1 \cdot \alpha^3_0 + c_2 \cdot \alpha^2_1 + c_3 \cdot \alpha_1 \text{ | degree} = 4 \\
+\mathsf{acc}_0^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_0 + \mathsf{tmp1}_1 \cdot 7 \cdot \alpha^3_1 + c_5 \cdot \alpha^2_0 + c_6 \cdot \alpha_0 + c_7 \text{ | degree} = 4 \\
+\mathsf{acc}_1^{'} &= \mathsf{tmp1}_0 \cdot \alpha^3_1 + \mathsf{tmp1}_1 \cdot \alpha^3_0 + c_5 \cdot \alpha^2_1 + c_6 \cdot \alpha_1 \text{ | degree} = 4
 \end{align*}
 $$
 
@@ -227,10 +283,10 @@ $$
 \end{aligned}
 $$
 
-Using the above values, we can describe the constraint for the memory bus column as follows:
+Using the above values, we can describe the constraint for the chiplets bus column as follows:
 
 $$
-b_{mem}' = b_{mem} \cdot u_{mem,0} \cdot u_{mem,1} \text{ | degree} = 3
+b_{chip}' \cdot u_{mem,0} \cdot u_{mem,1} = b_{chip} \text{ | degree} = 3
 $$
 
 The effect on the rest of the stack is:
@@ -238,13 +294,13 @@ The effect on the rest of the stack is:
 
 ## HORNEREXT
 The `HORNEREXT` operation performs $4$ steps of the Horner method for evaluating a polynomial with coefficients over the quadratic extension field at a point in the quadratic extension field. More precisely, it performs the following update to the accumulator on the stack
-    $$\mathsf{tmp} = (\mathsf{acc} \cdot \alpha + a_3) \cdot \alpha + a_2$$
-$$\mathsf{acc}^{'} = (\mathsf{tmp} \cdot \alpha + a_1) \cdot \alpha + a_0$$
+    $$\mathsf{tmp} = (\mathsf{acc} \cdot \alpha + c_3) \cdot \alpha + c_2$$
+$$\mathsf{acc}^{'} = (\mathsf{tmp} \cdot \alpha + c_1) \cdot \alpha + c_0$$
 
-where $a_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, $\mathsf{acc}^{'}$ the updated accumulator value, and $\mathsf{tmp}$ is a helper variable used for constraint degree reduction.
+where $c_i$ are the coefficients of the polynomial, $\alpha$ the evaluation point, $\mathsf{acc}$ the current accumulator value, $\mathsf{acc}^{'}$ the updated accumulator value, and $\mathsf{tmp}$ is a helper variable used for constraint degree reduction.
 
 The stack for the operation is expected to be arranged as follows:
-- The first $8$ stack elements contain $8$ base field elements that make up the current 4-element batch of coefficients, in the quadratic extension field, for the polynomial being evaluated.
+- The first $8$ stack elements contain $8$ base field elements that make up the current 4-element batch of coefficients, in the quadratic extension field, for the polynomial being evaluated. We interpret these coefficients as $c_0 = (s_0, s_1)$, $c_1 = (s_2, s_3)$, $c_2 = (s_4, s_5)$, and $c_3 = (s_6, s_7)$.
 - The next $5$ stack elements are irrelevant for the operation and unaffected by it.
 - The next stack element contains the value of the memory pointer `alpha_ptr` to the evaluation point $\alpha$. The word address containing $\alpha = (\alpha_0, \alpha_1)$ is expected to have layout $[\alpha_0, \alpha_1, k_0, k_1]$ where $[k_0, k_1]$ is the second half of the memory word containing $\alpha$. Note that, in the context of the above expressions, we only care about the first half i.e., $[\alpha_0, \alpha_1]$, but providing the second half of the word in order to be able to do a one word memory read is more optimal than doing two element memory reads.
 - The next $2$ stack elements contain the value of the current accumulator $\textsf{acc} = (\textsf{acc}_0, \textsf{acc}_1)$.
@@ -257,30 +313,19 @@ After calling the operation:
 - Helper registers $h_i$ will contain the values $[\alpha_0, \alpha_1, k_0, k_1, \mathsf{tmp}_0, \mathsf{tmp}_1]$.
 - Stack elements $14$ and $15$ will contain the value of the updated accumulator i.e., $\mathsf{acc}^{'}$.
 
-More specifically, the stack transition for this operation must satisfy the following constraints:
-
+More specifically, the stack transition for this operation must satisfy the following constraints. Let
 $$
-\begin{align*}
-\mathsf{tmp}_0 &= \mathsf{acc}_0\cdot \alpha_0^2 - 4\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{acc}_0\cdot \alpha_1^2  &- 2\cdot \mathsf{acc}_1\cdot \alpha_1^2 + s_6\cdot \alpha_0 -2\cdot s_7\cdot \alpha_1 + s_4  \text{ | degree} = 3
-\end{align*}
+\alpha^2 = (\alpha_0^2 + 7 \cdot \alpha_1^2,\; 2 \cdot \alpha_0 \cdot \alpha_1).
 $$
 
+Then
 $$
-\begin{align*}
-\mathsf{tmp}_1 &= \mathsf{acc}_1\cdot \alpha_0^2 + 2\cdot \mathsf{acc}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{acc}_1\cdot \alpha_0\cdot \alpha_1  &+ \mathsf{acc}_0\cdot \alpha_1^2 - \mathsf{acc}_1\cdot \alpha_1^2 + s_7\cdot \alpha_0 + s_6\cdot \alpha_1 + s_7\cdot \alpha_1 + s_5  \text{ | degree} = 3
-\end{align*}
-$$
-
-$$
-\begin{align*}
-\mathsf{acc}_0^{'} &= \mathsf{tmp}_0\cdot \alpha_0^2 - 4\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 - 2\cdot \mathsf{tmp}_0\cdot \alpha_1^2 & - 2\cdot \mathsf{tmp}_1\cdot \alpha_1^2 + s_2\cdot \alpha_0 - 2\cdot s_3\cdot \alpha_1 + s_0  \text{ | degree} = 3
-\end{align*}
-$$
-
-$$
-\begin{align*}
-\mathsf{acc}_1^{'} &= \mathsf{tmp}_1\cdot \alpha_0^2 + 2\cdot \mathsf{tmp}_0\cdot \alpha_0\cdot \alpha_1 + 2\cdot \mathsf{tmp}_1\cdot \alpha_0\cdot \alpha_1 & + \mathsf{tmp}_0\cdot \alpha_1^2 - \mathsf{tmp}_1\cdot \alpha_1^2 + s_3\cdot \alpha_0 + s_2\cdot \alpha_1 + s_3\cdot \alpha_1 + s_1  \text{ | degree} = 3
-\end{align*}
+\begin{aligned}
+\mathsf{tmp}_0 &= \mathsf{acc}_0 \cdot \alpha^2_0 + \mathsf{acc}_1 \cdot 7 \cdot \alpha^2_1 + c_{0,0} \cdot \alpha_0 + 7 \cdot c_{0,1} \cdot \alpha_1 + c_{1,0} \text{ | degree} = 3 \\
+\mathsf{tmp}_1 &= \mathsf{acc}_1 \cdot \alpha^2_0 + \mathsf{acc}_0 \cdot \alpha^2_1 + c_{0,1} \cdot \alpha_0 + c_{0,0} \cdot \alpha_1 + c_{1,1} \text{ | degree} = 3 \\
+\mathsf{acc}_0^{'} &= \mathsf{tmp}_0 \cdot \alpha^2_0 + \mathsf{tmp}_1 \cdot 7 \cdot \alpha^2_1 + c_{2,0} \cdot \alpha_0 + 7 \cdot c_{2,1} \cdot \alpha_1 + c_{3,0} \text{ | degree} = 3 \\
+\mathsf{acc}_1^{'} &= \mathsf{tmp}_1 \cdot \alpha^2_0 + \mathsf{tmp}_0 \cdot \alpha^2_1 + c_{2,1} \cdot \alpha_0 + c_{2,0} \cdot \alpha_1 + c_{3,1} \text{ | degree} = 3
+\end{aligned}
 $$
 
 The effect on the rest of the stack is:
@@ -289,13 +334,13 @@ The effect on the rest of the stack is:
 The `HORNEREXT` makes one memory access request:
 
 $$
-u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{3} + \alpha_{8} \cdot h_{4}
+u_{mem} = \alpha_0 + \alpha_1 \cdot op_{mem\_readword} + \alpha_2 \cdot ctx + \alpha_3 \cdot s_{13} + \alpha_4 \cdot clk + \alpha_{5} \cdot h_{0} + \alpha_{6} \cdot h_{1} + \alpha_{7} \cdot h_{2} + \alpha_{8} \cdot h_{3}
 $$
 
-Using the above value, we can describe the constraint for the memory bus column as follows:
+Using the above value, we can describe the constraint for the chiplets bus column as follows:
 
 $$
-b_{mem}' = b_{mem} \cdot u_{mem} \text{ | degree} = 2
+b_{chip}' \cdot u_{mem} = b_{chip} \text{ | degree} = 2
 $$
 
 ## EVALCIRCUIT
@@ -342,11 +387,11 @@ The stack is expected to be arranged as `[COMM, TAG, PAD, ...]`. See [Precompile
 
 Additionally, the processor maintains a persistent precompile transcript state word `CAP` (the sponge capacity) that is updated with each `LOG_PRECOMPILE` invocation. This word is provided non-deterministically via helper registers and is denoted `CAP_PREV`. The virtual table bus links each removal to a matching insertion, ensuring a single, consistent state sequence.
 
-The operation evaluates `[CAP_NEXT, R0, R1] = Poseidon2([CAP_PREV, TAG, COMM])`, with the following stack transition
+The operation evaluates `[R0, R1, CAP_NEXT] = Poseidon2([COMM, TAG, CAP_PREV])`, with the following stack transition
 
 ```
 Before:  [COMM, TAG, PAD,      ...]
-After:   [R1,   R0,  CAP_NEXT, ...]
+After:   [R0,   R1,  CAP_NEXT, ...]
 ```
 
 The VM updates its internal precompile transcript state (`CAP_NEXT`) using a bus as we describe below. The rate outputs `R0` and `R1` are transient; together with `CAP_NEXT`, they are typically dropped by the caller immediately after logging.
@@ -367,16 +412,16 @@ The following two messages are sent to the hasher chiplet, ensuring the validity
 $$
 \begin{aligned}
 \mathsf{CAP}^{\text{prev}}_i &= h_{i+1} &&\text{(helper registers)}\\
-\mathsf{TAG}_i &= s_{7-i} &&\text{(stack slots 4..7)}\\
-\mathsf{COMM}_i &= s_{3-i} &&\text{(stack slots 0..3)}
+\mathsf{TAG}_i &= s_{4+i} &&\text{(stack slots 4..7)}\\
+\mathsf{COMM}_i &= s_{i} &&\text{(stack slots 0..3)}
 \end{aligned}
 \qquad i \in \{0,1,2,3\}.
 $$
 
-The input message therefore reduces the Poseidon2 state in the canonical order `[CAP_PREV, TAG, COMM]`:
+The input message therefore reduces the Poseidon2 state in the canonical order `[COMM, TAG, CAP_PREV]`:
 
 $$
-v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+3} \cdot \mathsf{CAP}_{\text{prev},i} + \sum_{i=0}^{3} \alpha_{i+7} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+11} \cdot \mathsf{COMM}_i.
+v_{\text{input}} = \alpha_0 + \alpha_1 \cdot op_{linhash} + \alpha_2 \cdot h_0 + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{COMM}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{TAG}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{CAP}_{\text{prev},i}.
 $$
 
 Thirty-one rows later, the `op_retstate` response provides the permuted state `[R0, R1, CAP_{next}]` (with R0 on top). Denote the stack after the instruction by $s'_i$; the top twelve elements are `[R0, R1, CAP_NEXT]`. Thus
@@ -393,7 +438,7 @@ $$
 and the response message is
 
 $$
-v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 31) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{CAP}^{\text{next}}_i+ \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{R}_1{}_i.
+v_{\text{output}} = \alpha_0 + \alpha_1 \cdot op_{retstate} + \alpha_2 \cdot (h_0 + 31) + \sum_{i=0}^{3} \alpha_{i+4} \cdot \mathsf{R}_0{}_i + \sum_{i=0}^{3} \alpha_{i+8} \cdot \mathsf{R}_1{}_i + \sum_{i=0}^{3} \alpha_{i+12} \cdot \mathsf{CAP}^{\text{next}}_i.
 $$
 
 Using the above values, we can describe the constraint for the chiplet bus column as follows:

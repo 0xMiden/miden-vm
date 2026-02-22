@@ -160,19 +160,19 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[12] * sibling[0]
-                + alphas[13] * sibling[1]
-                + alphas[14] * sibling[2]
-                + alphas[15] * sibling[3]
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
             let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+                + alphas[4] * sibling[0]
+                + alphas[5] * sibling[1]
+                + alphas[6] * sibling[2]
+                + alphas[7] * sibling[3]
         }
     } else if f_mua {
         let index = main_trace.chiplet_node_index(row);
@@ -182,19 +182,19 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[12] * sibling[0]
-                + alphas[13] * sibling[1]
-                + alphas[14] * sibling[2]
-                + alphas[15] * sibling[3]
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+                + alphas[4] * sibling[0]
+                + alphas[5] * sibling[1]
+                + alphas[6] * sibling[2]
+                + alphas[7] * sibling[3]
         }
     } else {
         E::ONE
@@ -221,19 +221,19 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[12] * sibling[0]
-                + alphas[13] * sibling[1]
-                + alphas[14] * sibling[2]
-                + alphas[15] * sibling[3]
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
             let sibling = &main_trace.chiplet_hasher_state(row)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+                + alphas[4] * sibling[0]
+                + alphas[5] * sibling[1]
+                + alphas[6] * sibling[2]
+                + alphas[7] * sibling[3]
         }
     } else if f_mva {
         let index = main_trace.chiplet_node_index(row);
@@ -243,19 +243,19 @@ where
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE1_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[12] * sibling[0]
-                + alphas[13] * sibling[1]
-                + alphas[14] * sibling[2]
-                + alphas[15] * sibling[3]
+                + alphas[8] * sibling[0]
+                + alphas[9] * sibling[1]
+                + alphas[10] * sibling[2]
+                + alphas[11] * sibling[3]
         } else {
             // Node is right child at RATE1, sibling is left child at RATE0
             let sibling = &main_trace.chiplet_hasher_state(row + 1)[RATE0_RANGE];
             alphas[0]
                 + alphas[3] * index
-                + alphas[8] * sibling[0]
-                + alphas[9] * sibling[1]
-                + alphas[10] * sibling[2]
-                + alphas[11] * sibling[3]
+                + alphas[4] * sibling[0]
+                + alphas[5] * sibling[1]
+                + alphas[6] * sibling[2]
+                + alphas[7] * sibling[3]
         }
     } else {
         E::ONE
