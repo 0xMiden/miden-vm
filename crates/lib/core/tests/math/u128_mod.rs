@@ -753,3 +753,244 @@ proptest! {
             .expect_stack(&[expected]);
     }
 }
+
+// =================================================================================================
+// SHIFT STACK PADDING TESTS
+// =================================================================================================
+
+/// Test that shr does not leak sentinel values from below the stack frame into results.
+/// This verifies that shr_k1/k2/k3 helpers explicitly push zeros instead of relying on
+/// implicit stack padding.
+#[test]
+fn shr_stack_padding_k1() {
+    let a: u128 = 0x00000000_00000000_00000000_FFFFFFFFu128;
+    let (a3, a2, a1, a0) = split_u128(a);
+    let sentinel1: u64 = 0xDEADBEEF;
+    let sentinel2: u64 = 0xCAFEBABE;
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    // Shift right by 32 (k=1, m=0): c0=a1, c1=a2, c2=a3, c3=0
+    let c = a >> 32;
+    let (c3, c2, c1, c0) = split_u128(c);
+
+    let test = build_test!(source, &[sentinel1, sentinel2, 32u64, a0, a1, a2, a3]);
+    let result = test.execute().unwrap();
+
+    // Verify the result is correct and sentinels do not appear in the output
+    let stack = result.stack_outputs();
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new(c2), "c2 mismatch");
+    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+}
+
+#[test]
+fn shr_stack_padding_k2() {
+    let a: u128 = 0x00000000_00000000_FFFFFFFF_FFFFFFFFu128;
+    let (a3, a2, a1, a0) = split_u128(a);
+    let sentinel1: u64 = 0xDEADBEEF;
+    let sentinel2: u64 = 0xCAFEBABE;
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    // Shift right by 64 (k=2, m=0): c0=a2, c1=a3, c2=0, c3=0
+    let c = a >> 64;
+    let (c3, c2, c1, c0) = split_u128(c);
+
+    let test = build_test!(source, &[sentinel1, sentinel2, 64u64, a0, a1, a2, a3]);
+    let result = test.execute().unwrap();
+
+    let stack = result.stack_outputs();
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new(0), "c2 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+}
+
+#[test]
+fn shr_stack_padding_k3() {
+    let a: u128 = 0xFFFFFFFF_00000000_00000000_00000000u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+    let sentinel1: u64 = 0xDEADBEEF;
+    let sentinel2: u64 = 0xCAFEBABE;
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    // Shift right by 96 (k=3, m=0): c0=a3, c1=0, c2=0, c3=0
+    let c = a >> 96;
+    let (c3, c2, c1, c0) = split_u128(c);
+
+    let test = build_test!(source, &[sentinel1, sentinel2, 96u64, a0, a1, a2, a3]);
+    let result = test.execute().unwrap();
+
+    let stack = result.stack_outputs();
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new(0), "c1 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new(0), "c2 should be 0, not a sentinel");
+    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+}
+
+/// Test shr with non-zero m values and sentinels to verify cross-limb bit transfer
+/// doesn't leak stack values.
+#[test]
+fn shr_stack_padding_nonzero_m() {
+    let a: u128 = 0x00000001_00000001u128; // bits at positions 0 and 32
+    let (a3, a2, a1, a0) = split_u128(a);
+    let sentinel: u64 = 0xDEADBEEF;
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    // shr by 33 (k=1, m=1): crosses limb boundary
+    let c = a >> 33;
+    let (c3, c2, c1, c0) = split_u128(c);
+
+    let test = build_test!(source, &[sentinel, 33u64, a0, a1, a2, a3]);
+    let result = test.execute().unwrap();
+
+    let stack = result.stack_outputs();
+    assert_eq!(stack.get_element(0).unwrap(), Felt::new(c0), "c0 mismatch");
+    assert_eq!(stack.get_element(1).unwrap(), Felt::new(c1), "c1 mismatch");
+    assert_eq!(stack.get_element(2).unwrap(), Felt::new(c2), "c2 mismatch");
+    assert_eq!(stack.get_element(3).unwrap(), Felt::new(0), "c3 should be 0, not a sentinel");
+}
+
+/// Test shr with boundary shift values.
+#[test]
+fn shr_boundary_values() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    let boundaries = [0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97, 127];
+    for n in boundaries {
+        let c = a >> n;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+}
+
+/// Test shl with boundary shift values.
+#[test]
+fn shl_boundary_values() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shl
+        end
+    ";
+
+    let boundaries = [0, 1, 31, 32, 33, 63, 64, 65, 95, 96, 97, 127];
+    for n in boundaries {
+        let c = a << n;
+        let (c3, c2, c1, c0) = split_u128(c);
+
+        build_test!(source, &[n as u64, a0, a1, a2, a3])
+            .expect_stack(&[c0, c1, c2, c3]);
+    }
+}
+
+/// Test rotl with n=0 is identity.
+#[test]
+fn rotl_n_zero_is_identity() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::rotl
+        end
+    ";
+
+    build_test!(source, &[0u64, a0, a1, a2, a3])
+        .expect_stack(&[a0, a1, a2, a3]);
+}
+
+/// Test rotr with n=0 is identity.
+#[test]
+fn rotr_n_zero_is_identity() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::rotr
+        end
+    ";
+
+    build_test!(source, &[0u64, a0, a1, a2, a3])
+        .expect_stack(&[a0, a1, a2, a3]);
+}
+
+/// Test that shr with n >= 128 produces an assertion error.
+#[test]
+fn shr_out_of_range_errors() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shr
+        end
+    ";
+
+    let test = build_test!(source, &[128u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+
+    let test = build_test!(source, &[200u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that shl with n >= 128 produces an assertion error.
+#[test]
+fn shl_out_of_range_errors() {
+    let a: u128 = 0x12345678_9ABCDEF0_12345678_9ABCDEF0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::shl
+        end
+    ";
+
+    let test = build_test!(source, &[128u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+
+    let test = build_test!(source, &[200u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+}

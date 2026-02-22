@@ -941,37 +941,31 @@ pub proc shr(n: u32, a: u128) -> u128
         dup push.31 u32and      # [m, n, a0, a1, a2, a3, ...]
         swap push.5 u32shr      # [k, m, a0, a1, a2, a3, ...]
 
-        # Branch based on k (0, 1, 2, 3, or >=4)
-        dup push.4 u32lt
+        # Branch based on k (0, 1, 2, or 3)
+        # k < 4 is guaranteed by the assertion above (n < 128 => k = n/32 <= 3)
+        dup eq.0
         if.true
-            # k < 4: compute shifted result
-            dup eq.0
+            # k=0: n in [1, 31], shift by m bits within limbs
+            drop        # [m, a0, a1, a2, a3, ...]
+            exec.shr_k0
+        else
+            dup eq.1
             if.true
-                # k=0: n in [1, 31], shift by m bits within limbs
-                drop        # [m, a0, a1, a2, a3, ...]
-                exec.shr_k0
+                # k=1: n in [32, 63]
+                drop    # [m, a0, a1, a2, a3, ...]
+                exec.shr_k1
             else
-                dup eq.1
+                dup eq.2
                 if.true
-                    # k=1: n in [32, 63]
+                    # k=2: n in [64, 95]
                     drop    # [m, a0, a1, a2, a3, ...]
-                    exec.shr_k1
+                    exec.shr_k2
                 else
-                    dup eq.2
-                    if.true
-                        # k=2: n in [64, 95]
-                        drop    # [m, a0, a1, a2, a3, ...]
-                        exec.shr_k2
-                    else
-                        # k=3: n in [96, 127]
-                        drop    # [m, a0, a1, a2, a3, ...]
-                        exec.shr_k3
-                    end
+                    # k=3: n in [96, 127]
+                    drop    # [m, a0, a1, a2, a3, ...]
+                    exec.shr_k3
                 end
             end
-        else
-            # k >= 4: n >= 128, unreachable due to assertion above
-            push.0 assert.err="shift amount must be in the range [0, 128)"
         end
     end
 end
@@ -1032,7 +1026,8 @@ proc shr_k1
     if.true
         drop                    # [a0, a1, a2, a3, ...]
         drop                    # [a1, a2, a3, ...]
-        # c0=a1, c1=a2, c2=a3, c3=0 (from padding)
+        # c0=a1, c1=a2, c2=a3, push c3=0 explicitly
+        push.0 movdn.3         # [a1, a2, a3, 0, ...]
     else
         # Compute 2^(32-m) for left shift operations
         push.32 dup.1 u32wrapping_sub pow2
@@ -1051,10 +1046,14 @@ proc shr_k1
         dup.7 dup.4 u32widening_mul swap drop
         u32or
 
-        # Clean up
+        # Stack: [c0, c1, c2, 2^(32-m), m, a0, a1, a2, a3, ...]
+        # Clean up: move results down past temporaries, drop old values
         movdn.8 movdn.8 movdn.8
+        # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, c2, ...]
         drop drop drop drop drop drop
-        # c0, c1, c2, c3=0 (from padding)
+        # Stack: [c0, c1, c2, ...]
+        # Push c3=0 explicitly
+        push.0 movdn.3         # [c0, c1, c2, 0, ...]
     end
 end
 
@@ -1070,7 +1069,8 @@ proc shr_k2
     if.true
         drop                    # [a0, a1, a2, a3, ...]
         drop drop               # [a2, a3, ...]
-        # c0=a2, c1=a3, c2=c3=0 (from padding)
+        # c0=a2, c1=a3, push c2=c3=0 explicitly
+        push.0 push.0 movdn.3 movdn.3  # [a2, a3, 0, 0, ...]
     else
         # Compute 2^(32-m) for left shift operations
         push.32 dup.1 u32wrapping_sub pow2
@@ -1083,10 +1083,14 @@ proc shr_k2
         dup.7 dup.3 u32widening_mul swap drop
         u32or
 
+        # Stack: [c0, c1, 2^(32-m), m, a0, a1, a2, a3, ...]
         # Clean up
         movdn.7 movdn.7
+        # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, ...]
         drop drop drop drop drop drop
-        # c0, c1, c2=c3=0 (from padding)
+        # Stack: [c0, c1, ...]
+        # Push c2=c3=0 explicitly
+        push.0 push.0 movdn.3 movdn.3  # [c0, c1, 0, 0, ...]
     end
 end
 
@@ -1100,7 +1104,9 @@ proc shr_k3
     movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
     # Clean up: drop a0, a1, a2
     swap drop swap drop swap drop
-    # c0, c1=c2=c3=0 (from padding)
+    # Stack: [c0, ...]
+    # Push c1=c2=c3=0 explicitly
+    push.0 push.0 push.0 movup.3  # [c0, 0, 0, 0, ...]
 end
 
 #! Performs left rotation of one unsigned 128-bit integer.
