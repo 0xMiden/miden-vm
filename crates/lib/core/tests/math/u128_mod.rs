@@ -759,7 +759,7 @@ proptest! {
 /// implicit stack padding.
 #[test]
 fn shr_stack_padding_k1() {
-    let a: u128 = 0x00000000_00000000_00000000_ffffffffu128;
+    let a: u128 = 0x12345678_aabbccdd_11223344_ffffffffu128;
     let (a3, a2, a1, a0) = split_u128(a);
     let sentinel1: u64 = 0xdeadbeef;
     let sentinel2: u64 = 0xcafebabe;
@@ -775,7 +775,9 @@ fn shr_stack_padding_k1() {
     let c = a >> 32;
     let (_c3, c2, c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[sentinel1, sentinel2, 32u64, a0, a1, a2, a3]);
+    // Sentinels placed below the arguments (positions 5-6) to verify they don't leak
+    // into the result through stack padding.
+    let test = build_test!(source, &[32u64, a0, a1, a2, a3, sentinel1, sentinel2]);
     let result = test.execute().unwrap();
 
     // Verify the result is correct and sentinels do not appear in the output
@@ -788,7 +790,7 @@ fn shr_stack_padding_k1() {
 
 #[test]
 fn shr_stack_padding_k2() {
-    let a: u128 = 0x00000000_00000000_ffffffff_ffffffffu128;
+    let a: u128 = 0x12345678_aabbccdd_ffffffff_ffffffffu128;
     let (a3, a2, a1, a0) = split_u128(a);
     let sentinel1: u64 = 0xdeadbeef;
     let sentinel2: u64 = 0xcafebabe;
@@ -804,7 +806,8 @@ fn shr_stack_padding_k2() {
     let c = a >> 64;
     let (_c3, _c2, c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[sentinel1, sentinel2, 64u64, a0, a1, a2, a3]);
+    // Sentinels placed below the arguments (positions 5-6)
+    let test = build_test!(source, &[64u64, a0, a1, a2, a3, sentinel1, sentinel2]);
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
@@ -816,7 +819,7 @@ fn shr_stack_padding_k2() {
 
 #[test]
 fn shr_stack_padding_k3() {
-    let a: u128 = 0xffffffff_00000000_00000000_00000000u128;
+    let a: u128 = 0xaabbccdd_00000000_00000000_00000000u128;
     let (a3, a2, a1, a0) = split_u128(a);
     let sentinel1: u64 = 0xdeadbeef;
     let sentinel2: u64 = 0xcafebabe;
@@ -832,7 +835,8 @@ fn shr_stack_padding_k3() {
     let c = a >> 96;
     let (_c3, _c2, _c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[sentinel1, sentinel2, 96u64, a0, a1, a2, a3]);
+    // Sentinels placed below the arguments (positions 5-6)
+    let test = build_test!(source, &[96u64, a0, a1, a2, a3, sentinel1, sentinel2]);
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
@@ -846,7 +850,7 @@ fn shr_stack_padding_k3() {
 /// doesn't leak stack values.
 #[test]
 fn shr_stack_padding_nonzero_m() {
-    let a: u128 = 0x00000001_00000001u128; // bits at positions 0 and 32
+    let a: u128 = 0x00000003_00000002_80000001_00000000u128;
     let (a3, a2, a1, a0) = split_u128(a);
     let sentinel: u64 = 0xdeadbeef;
 
@@ -861,7 +865,8 @@ fn shr_stack_padding_nonzero_m() {
     let c = a >> 33;
     let (_c3, c2, c1, c0) = split_u128(c);
 
-    let test = build_test!(source, &[sentinel, 33u64, a0, a1, a2, a3]);
+    // Sentinel placed below the arguments (position 5)
+    let test = build_test!(source, &[33u64, a0, a1, a2, a3, sentinel]);
     let result = test.execute().unwrap();
 
     let stack = result.stack_outputs();
@@ -977,6 +982,46 @@ fn shl_out_of_range_errors() {
         use miden::core::math::u128
         begin
             exec.u128::shl
+        end
+    ";
+
+    let test = build_test!(source, &[128u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+
+    let test = build_test!(source, &[200u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that rotl with n >= 128 produces an assertion error.
+#[test]
+fn rotl_out_of_range_errors() {
+    let a: u128 = 0x12345678_9abcdef0_12345678_9abcdef0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::rotl
+        end
+    ";
+
+    let test = build_test!(source, &[128u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+
+    let test = build_test!(source, &[200u64, a0, a1, a2, a3]);
+    expect_assert_error_message!(test);
+}
+
+/// Test that rotr with n >= 128 produces an assertion error.
+#[test]
+fn rotr_out_of_range_errors() {
+    let a: u128 = 0x12345678_9abcdef0_12345678_9abcdef0u128;
+    let (a3, a2, a1, a0) = split_u128(a);
+
+    let source = "
+        use miden::core::math::u128
+        begin
+            exec.u128::rotr
         end
     ";
 

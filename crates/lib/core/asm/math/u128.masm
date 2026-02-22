@@ -953,16 +953,22 @@ pub proc shr(n: u32, a: u128) -> u128
             if.true
                 # k=1: n in [32, 63]
                 drop    # [m, a0, a1, a2, a3, ...]
+                # Insert explicit zero for c3 (shr_k1 produces only 3 result limbs)
+                push.0 movdn.5
                 exec.shr_k1
             else
                 dup eq.2
                 if.true
                     # k=2: n in [64, 95]
                     drop    # [m, a0, a1, a2, a3, ...]
+                    # Insert explicit zeros for c2, c3 (shr_k2 produces only 2 result limbs)
+                    push.0 movdn.5 push.0 movdn.5
                     exec.shr_k2
                 else
                     # k=3: n in [96, 127]
                     drop    # [m, a0, a1, a2, a3, ...]
+                    # Insert explicit zeros for c1, c2, c3 (shr_k3 produces only 1 result limb)
+                    push.0 movdn.5 push.0 movdn.5 push.0 movdn.5
                     exec.shr_k3
                 end
             end
@@ -1024,10 +1030,9 @@ proc shr_k1
     # Handle m=0 case (shift by exactly 32)
     dup eq.0
     if.true
-        drop                    # [a0, a1, a2, a3, ...]
-        drop                    # [a1, a2, a3, X, ...] where X is from below
-        # c0=a1, c1=a2, c2=a3, replace X with 0 for c3
-        movup.3 drop push.0 movdn.3  # [a1, a2, a3, 0, ...]
+        drop                    # [a0, a1, a2, a3, 0, ...]
+        drop                    # [a1, a2, a3, 0, ...]
+        # c0=a1, c1=a2, c2=a3, c3=0 (explicit zero inserted by caller)
     else
         # Compute 2^(32-m) for left shift operations
         push.32 dup.1 u32wrapping_sub pow2
@@ -1046,14 +1051,10 @@ proc shr_k1
         dup.7 dup.4 u32widening_mul swap drop
         u32or
 
-        # Stack: [c0, c1, c2, 2^(32-m), m, a0, a1, a2, a3, ...]
-        # Clean up: move results down past temporaries, drop old values
+        # Clean up
         movdn.8 movdn.8 movdn.8
-        # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, c2, ...]
         drop drop drop drop drop drop
-        # Stack: [c0, c1, c2, X, ...] where X is from below
-        # Replace X with 0 for c3
-        movup.3 drop push.0 movdn.3  # [c0, c1, c2, 0, ...]
+        # c0, c1, c2, c3=0 (explicit zero inserted by caller)
     end
 end
 
@@ -1068,10 +1069,8 @@ proc shr_k2
     dup eq.0
     if.true
         drop                    # [a0, a1, a2, a3, ...]
-        drop drop               # [a2, a3, X, Y, ...] where X, Y are from below
-        # c0=a2, c1=a3, replace X and Y with 0 for c2 and c3
-        movup.2 drop push.0 movdn.2  # [a2, a3, 0, Y, ...]
-        movup.3 drop push.0 movdn.3  # [a2, a3, 0, 0, ...]
+        drop drop               # [a2, a3, ...]
+        # c0=a2, c1=a3, c2=c3=0 (explicit zeros inserted by caller)
     else
         # Compute 2^(32-m) for left shift operations
         push.32 dup.1 u32wrapping_sub pow2
@@ -1084,15 +1083,10 @@ proc shr_k2
         dup.7 dup.3 u32widening_mul swap drop
         u32or
 
-        # Stack: [c0, c1, 2^(32-m), m, a0, a1, a2, a3, ...]
         # Clean up
         movdn.7 movdn.7
-        # Stack: [2^(32-m), m, a0, a1, a2, a3, c0, c1, ...]
         drop drop drop drop drop drop
-        # Stack: [c0, c1, X, Y, ...] where X, Y are from below
-        # Replace X and Y with 0 for c2 and c3
-        movup.2 drop push.0 movdn.2  # [c0, c1, 0, Y, ...]
-        movup.3 drop push.0 movdn.3  # [c0, c1, 0, 0, ...]
+        # c0, c1, c2=c3=0 (explicit zeros inserted by caller)
     end
 end
 
@@ -1106,11 +1100,7 @@ proc shr_k3
     movup.4 swap u32shr         # [c0, a0, a1, a2, ...]
     # Clean up: drop a0, a1, a2
     swap drop swap drop swap drop
-    # Stack: [c0, X, Y, Z, ...] where X, Y, Z are from below
-    # Replace X, Y, Z with 0 for c1, c2, c3
-    swap drop push.0 swap               # [c0, 0, Y, Z, ...]
-    movup.2 drop push.0 movdn.2         # [c0, 0, 0, Z, ...]
-    movup.3 drop push.0 movdn.3         # [c0, 0, 0, 0, ...]
+    # c0, c1=c2=c3=0 (explicit zeros inserted by caller)
 end
 
 #! Performs left rotation of one unsigned 128-bit integer.
