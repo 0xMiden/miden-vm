@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.0 (TBD)
+
+#### Changes
+
+- Consolidated error variants: simplified `AceError` and FRI errors to string-based types, merged `DynamicNodeNotFound`/`NoMastForestWithProcedure` into `ProcedureNotFound`, introduced `HostError` for handler-related variants ([#2675](https://github.com/0xMiden/miden-vm/pull/2675)).
+- [BREAKING] `Processor` and `FastProcessor` decorator execution is now immutable ([#2718](https://github.com/0xMiden/miden-vm/pull/2718)).
+- Fix `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).
+
 ## 0.21.1 (2026-02-17)
 
 #### Changes
