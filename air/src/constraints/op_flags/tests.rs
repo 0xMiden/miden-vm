@@ -1,6 +1,6 @@
 //! Tests for operation flags.
 
-use std::vec::Vec;
+use alloc::vec::Vec;
 
 use miden_core::{Felt, ONE, ZERO, field::PrimeCharacteristicRing, operations::Operation};
 
