@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 
 use miden_crypto::stark::air::MidenAirBuilder;
 
-use super::{CURRENT_MAX_ID, TagRecord, state, validate_tag};
+use super::{CURRENT_MAX_ID, TagRecord, state};
 
 /// Wraps an AIR builder and records tag IDs in the order assertions are emitted.
 ///
@@ -42,7 +42,7 @@ impl<AB> TaggedAirBuilder<AB> {
     }
 
     fn record(&mut self, tag: TagRecord) {
-        validate_tag(&mut self.used, self.records.len(), tag);
+        tag.validate(&mut self.used, self.records.len());
         self.records.push(tag);
     }
 }

@@ -6,7 +6,7 @@ use miden_core::{
 };
 use miden_crypto::stark::{air::MidenAirBuilder, matrix::RowMajorMatrix};
 
-use super::{CURRENT_MAX_ID, TagRecord, state, validate_tag};
+use super::{CURRENT_MAX_ID, TagRecord, state};
 
 /// Captured evaluation for a single tagged constraint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,7 @@ impl OodEvalAirBuilder {
     }
 
     fn record(&mut self, tag: TagRecord, value: QuadFelt) {
-        validate_tag(&mut self.used, self.records.len(), tag);
+        tag.validate(&mut self.used, self.records.len());
         self.records.push(EvalRecord {
             id: tag.id,
             namespace: tag.namespace,

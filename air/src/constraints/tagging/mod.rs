@@ -28,18 +28,20 @@ pub struct TagRecord {
     pub namespace: &'static str,
 }
 
-/// Validate ordering, range, and uniqueness of a single tag.
-fn validate_tag(used: &mut [Option<&'static str>], expected: usize, tag: TagRecord) {
-    if tag.id != expected {
-        panic!("constraint id {} out of order (expected {})", tag.id, expected);
+impl TagRecord {
+    /// Validate ordering, range, and uniqueness of this tag.
+    fn validate(self, used: &mut [Option<&'static str>], expected: usize) {
+        if self.id != expected {
+            panic!("constraint id {} out of order (expected {})", self.id, expected);
+        }
+        if self.id > CURRENT_MAX_ID {
+            panic!("constraint id {} is out of range (CURRENT_MAX_ID={})", self.id, CURRENT_MAX_ID);
+        }
+        if let Some(prev) = used[self.id] {
+            panic!("constraint id {} already used (previous namespace: {})", self.id, prev);
+        }
+        used[self.id] = Some(self.namespace);
     }
-    if tag.id > CURRENT_MAX_ID {
-        panic!("constraint id {} is out of range (CURRENT_MAX_ID={})", tag.id, CURRENT_MAX_ID);
-    }
-    if let Some(prev) = used[tag.id] {
-        panic!("constraint id {} already used (previous namespace: {})", tag.id, prev);
-    }
-    used[tag.id] = Some(tag.namespace);
 }
 
 /// Extension methods for tagging constraints.
