@@ -253,7 +253,7 @@ Common cryptographic operations, including hashing and Merkle tree manipulations
 | `hmerge`       | `[A, B, ...]`        | `[C, ...]`       | 16     | `C ← hash(A,B)`. 2-to-1 Poseidon2 hash.                                                                                                                                                  |
 | `mtree_get`    | `[d, i, R, ...]`     | `[V, R, ...]`    | 10     | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider), returns `V`.                                                                                           |
 | `mtree_set`    | `[d, i, R, V', ...]` | `[V, R', ...]`   | 30     | Updates node in tree `R` at `d,i` to `V'`. Returns old value `V` and new root `R'`. Both trees in advice provider.                                                                                    |
-| `mtree_merge`  | `[R, L, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
+| `mtree_merge`  | `[L, R, ...]`        | `[M, ...]`       | 16     | Merges Merkle trees with roots `L` (left) and `R` (right) into new tree `M`. Input trees retained.                                                                                                    |
 | `mtree_verify` | `[V, d, i, R, ...]`  | `[V,d,i,R,...]`  | 1      | Verifies Merkle path for node `V` at depth `d`, index `i` for tree `R` (from advice provider). <br /> _Can be parameterized with `err` code (e.g., `mtree_verify.err=123`). Default error code is 0._ |
 
 ## Flow Control Operations
