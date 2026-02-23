@@ -8,7 +8,7 @@ use miden_crypto::stark::air::MidenAirBuilder;
 #[path = "tagging/manifest.rs"]
 mod manifest;
 
-#[allow(dead_code)]
+#[allow(dead_code, unused_imports)]
 pub use manifest::{
     CURRENT_MAX_ID, TAG_RANGE_BASE, TAG_RANGE_COUNT, TAG_SYSTEM_BASE, TAG_SYSTEM_COUNT, TOTAL_TAGS,
 };

@@ -18,7 +18,7 @@ use miden_crypto::stark::{air::MidenAirBuilder, matrix::Matrix};
 
 use crate::{
     MainTraceRow,
-    constraints::tagging::{TaggingAirBuilderExt, manifest::TAG_RANGE_BASE},
+    constraints::tagging::{TAG_RANGE_BASE, TaggingAirBuilderExt},
     trace::{
         CHIPLET_S0_COL_IDX, CHIPLET_S1_COL_IDX, CHIPLET_S2_COL_IDX, CHIPLETS_OFFSET,
         RANGE_CHECK_TRACE_OFFSET, chiplets, decoder, range,
