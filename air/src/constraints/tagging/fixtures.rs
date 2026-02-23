@@ -1,4 +1,5 @@
 //! Test fixtures for constraint tagging.
+#![allow(dead_code)]
 
 use alloc::vec::Vec;
 

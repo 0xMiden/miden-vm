@@ -135,8 +135,7 @@ where
 
     // Main constraint: b_next * lookups = b * lookups + rc_term - s0_term - s1_term - s2_term -
     // s3_term - m0_term - m1_term
-    let (tag_id, namespace) = range_bus_tag();
-    builder.tagged(tag_id, namespace, |builder| {
+    builder.tagged(RANGE_BUS_BASE_ID, RANGE_BUS_NAMESPACE, |builder| {
         builder.when_transition().assert_zero_ext(
             b_next_term - b_term - rc_term
                 + s0_term
@@ -147,8 +146,4 @@ where
                 + m1_term,
         );
     });
-}
-
-fn range_bus_tag() -> (usize, &'static str) {
-    (RANGE_BUS_BASE_ID, RANGE_BUS_NAMESPACE)
 }

@@ -10,7 +10,7 @@ mod enabled;
 #[cfg(not(all(any(test, feature = "testing"), feature = "std")))]
 mod fallback;
 
-#[cfg(test)]
+#[cfg(all(any(test, feature = "testing"), feature = "std"))]
 mod fixtures;
 #[cfg(all(any(test, feature = "testing"), feature = "std"))]
 mod ood_eval;
