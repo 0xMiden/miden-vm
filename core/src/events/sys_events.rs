@@ -238,21 +238,21 @@ pub enum SystemEvent {
     /// defined by the hash of these words.
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, ...]
+    ///   Operand stack: [A, B, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
     ///   Operand stack: [B, A, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed as hash(A || B, domain=0)
+    /// Where KEY is computed as hash(A || B, domain=0).
     HdwordToMap,
 
     /// Reads two words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words (using `d` as the domain).
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, d, ...]
+    ///   Operand stack: [A, B, d, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
@@ -266,7 +266,7 @@ pub enum SystemEvent {
     /// defined by the hash of these words.
     ///
     /// Inputs:
-    ///   Operand stack: [D, C, B, A, ...]
+    ///   Operand stack: [A, B, C, D, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
@@ -283,7 +283,7 @@ pub enum SystemEvent {
     /// under the key defined by applying a Poseidon2 permutation to all three words.
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, C, ...]
+    ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
