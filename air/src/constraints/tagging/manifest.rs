@@ -1,5 +1,7 @@
 //! Tag ID bases and counts for constraint groups.
 
+#![allow(dead_code)]
+
 /// Base ID for the system constraint group.
 pub const TAG_SYSTEM_BASE: usize = 0;
 /// Number of system constraints in this group.

@@ -1,5 +1,7 @@
 //! Thread-local tagging state for enforcing tag ordering and counts.
 
+#![allow(dead_code)]
+
 use alloc::vec::Vec;
 use std::{
     cell::{Cell, RefCell},

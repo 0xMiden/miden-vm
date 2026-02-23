@@ -86,11 +86,10 @@ pub(crate) fn enforce_clock_constraint<AB>(
         builder.when_first_row().assert_zero(local.clk.clone());
     });
 
-    let one_expr: AB::Expr = AB::F::ONE.into();
     builder.tagged(SYSTEM_CLK_BASE_ID + 1, SYSTEM_CLK_NAMES[1], |builder| {
         builder
             .when_transition()
-            .assert_eq(next.clk.clone(), local.clk.clone() + one_expr);
+            .assert_eq(next.clk.clone(), local.clk.clone() + AB::Expr::ONE);
     });
 }
 
@@ -144,24 +143,29 @@ pub(crate) fn enforce_fn_hash_constraints<AB>(
     let f_dyncall = op_flags.dyncall();
     let f_end = op_flags.end();
 
-    let load_flag = f_call.clone() + f_dyncall.clone();
-    let preserve_flag = AB::Expr::ONE - (f_call + f_dyncall + f_end);
+    let f_load = f_call.clone() + f_dyncall.clone();
+    let f_preserve = AB::Expr::ONE - (f_load.clone() + f_end);
 
     let load_ids: [usize; 4] = core::array::from_fn(|i| SYSTEM_FN_HASH_BASE_ID + i);
     builder.tagged_list(load_ids, SYSTEM_FN_HASH_LOAD_NAMESPACE, |builder| {
-        builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
-            let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].clone().into();
-            load_flag.clone() * (fn_hash_i_next - decoder_h_i)
-        }));
+        builder.when_transition().when(f_load.clone()).assert_zeros(
+            core::array::from_fn::<_, 4, _>(|i| {
+                let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
+                let decoder_h_i: AB::Expr = local.decoder[HASHER_STATE_OFFSET + i].clone().into();
+                fn_hash_i_next - decoder_h_i
+            }),
+        );
     });
 
     let preserve_ids: [usize; 4] = core::array::from_fn(|i| SYSTEM_FN_HASH_BASE_ID + 4 + i);
     builder.tagged_list(preserve_ids, SYSTEM_FN_HASH_PRESERVE_NAMESPACE, |builder| {
-        builder.when_transition().assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
-            let fn_hash_i: AB::Expr = local.fn_hash[i].clone().into();
-            let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
-            preserve_flag.clone() * (fn_hash_i_next - fn_hash_i)
-        }));
+        builder
+            .when_transition()
+            .when(f_preserve.clone())
+            .assert_zeros(core::array::from_fn::<_, 4, _>(|i| {
+                let fn_hash_i: AB::Expr = local.fn_hash[i].clone().into();
+                let fn_hash_i_next: AB::Expr = next.fn_hash[i].clone().into();
+                fn_hash_i_next - fn_hash_i
+            }));
     });
 }

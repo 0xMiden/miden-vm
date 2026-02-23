@@ -76,17 +76,14 @@ where
     );
 
     // Extract values needed for constraints
-    let (b_local, b_next, alpha) = {
-        let aux = builder.permutation();
-        let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
-        let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
-        let b_local = aux_local[range::B_RANGE_COL_IDX];
-        let b_next = aux_next[range::B_RANGE_COL_IDX];
+    let aux = builder.permutation();
+    let aux_local = aux.row_slice(0).expect("Matrix should have at least 1 row");
+    let aux_next = aux.row_slice(1).expect("Matrix should have at least 2 rows");
+    let b_local = aux_local[range::B_RANGE_COL_IDX];
+    let b_next = aux_next[range::B_RANGE_COL_IDX];
 
-        let challenges = builder.permutation_randomness();
-        let alpha = challenges[0];
-        (b_local, b_next, alpha)
-    };
+    let challenges = builder.permutation_randomness();
+    let alpha = challenges[0];
 
     // Denominators for LogUp
     // Memory lookups: mv0 = alpha + chiplets[MEMORY_D0], mv1 = alpha + chiplets[MEMORY_D1]

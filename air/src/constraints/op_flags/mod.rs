@@ -19,6 +19,8 @@
 //! - `left_shift_at(i)`: stack shifts left at position i
 //! - `right_shift_at(i)`: stack shifts right at position i
 
+use core::marker::PhantomData;
+
 use miden_core::{field::PrimeCharacteristicRing, operations::Operation};
 
 #[cfg(test)]
@@ -155,13 +157,13 @@ where
 /// `OpFlags<AB::Expr>` can be created for use in constraint expressions.
 pub struct ExprDecoderAccess<'a, V, E> {
     row: &'a crate::MainTraceRow<V>,
-    _phantom: core::marker::PhantomData<E>,
+    _phantom: PhantomData<E>,
 }
 
 impl<'a, V, E> ExprDecoderAccess<'a, V, E> {
     /// Creates a new expression decoder access wrapper.
     pub fn new(row: &'a crate::MainTraceRow<V>) -> Self {
-        Self { row, _phantom: core::marker::PhantomData }
+        Self { row, _phantom: PhantomData }
     }
 }
 
@@ -275,7 +277,8 @@ where
         degree7_op_flags[0] = not_5.clone() * not_4.clone();
         degree7_op_flags[16] = not_5.clone() * bit_4.clone();
         degree7_op_flags[32] = bit_5.clone() * not_4.clone();
-        degree7_op_flags[48] = bit_5.clone() * bit_4.clone();
+        // Prefix `11` in bits [5..4] (binary 110000 = 48).
+        degree7_op_flags[0b110000] = bit_5.clone() * bit_4.clone();
 
         // Flag of prefix `100` - all degree 6 u32 operations
         let f100 = degree7_op_flags[0].clone() * bit_6.clone();

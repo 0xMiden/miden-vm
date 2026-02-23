@@ -1,3 +1,7 @@
+//! Tagged builder wrapper for structural validation of constraint IDs.
+
+#![allow(dead_code)]
+
 use alloc::vec::Vec;
 
 use miden_crypto::stark::air::MidenAirBuilder;

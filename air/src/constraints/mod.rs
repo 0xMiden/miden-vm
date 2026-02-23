@@ -33,11 +33,6 @@ use crate::MainTraceRow;
 mod op_flags;
 pub mod range;
 pub mod system;
-#[cfg(all(any(test, feature = "testing"), feature = "std"))]
-#[allow(dead_code)]
-pub mod tagging;
-#[cfg(not(all(any(test, feature = "testing"), feature = "std")))]
-#[path = "tagging_fallback.rs"]
 pub mod tagging;
 
 // ENTRY POINTS

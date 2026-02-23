@@ -1,3 +1,7 @@
+//! OOD evaluation helper for tagged constraint parity tests.
+
+#![allow(dead_code)]
+
 use alloc::vec::Vec;
 
 use miden_core::{
