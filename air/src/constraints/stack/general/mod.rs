@@ -41,13 +41,6 @@ use crate::{
 #[allow(dead_code)]
 pub const NUM_CONSTRAINTS: usize = 16;
 
-/// The degrees of the general stack constraints.
-/// Each transition constraint is degree 8 (flag degree 7 * item degree 1).
-#[allow(dead_code)]
-pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
-    8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, // stack transitions
-];
-
 /// Tag base ID for stack general constraints.
 const STACK_GENERAL_BASE_ID: usize = TAG_STACK_GENERAL_BASE;
 
