@@ -16,6 +16,7 @@
 - [BREAKING] `Operation` enum now only encodes basic block operations ([#2771](https://github.com/0xMiden/miden-vm/pull/2771)).
 - Added `math::u128` division operations ([#2776](https://github.com/0xMiden/miden-vm/pull/2776)).
 - Added general stack transition constraints (shift/no‑shift) ([#2725](https://github.com/0xMiden/miden-vm/pull/2725)).
+- Added optional tagging instrumentation for AIR constraints (test-only; enables stable ID tracking and OOD parity checks) ([#2713](https://github.com/0xMiden/miden-vm/pull/2713)).
 
 #### Fixes
 
