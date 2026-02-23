@@ -206,6 +206,24 @@ where
     E::ONE - x
 }
 
+#[derive(Clone)]
+struct Op<E> {
+    bit: E,
+    not: E,
+}
+
+impl<E: Clone> Op<E> {
+    #[inline]
+    fn is(&self) -> E {
+        self.bit.clone()
+    }
+
+    #[inline]
+    fn not(&self) -> E {
+        self.not.clone()
+    }
+}
+
 #[allow(dead_code)]
 impl<E> OpFlags<E>
 where
@@ -236,23 +254,12 @@ where
         let mut right_shift_flags: [E; NUM_STACK_IMPACT_FLAGS] =
             core::array::from_fn(|_| E::default());
 
-        // Get op bits
-        let bit_0 = frame.op_bit(0);
-        let bit_1 = frame.op_bit(1);
-        let bit_2 = frame.op_bit(2);
-        let bit_3 = frame.op_bit(3);
-        let bit_4 = frame.op_bit(4);
-        let bit_5 = frame.op_bit(5);
-        let bit_6 = frame.op_bit(6);
-
-        // Binary NOT of all operation bits
-        let not_0 = binary_not(bit_0.clone());
-        let not_1 = binary_not(bit_1.clone());
-        let not_2 = binary_not(bit_2.clone());
-        let not_3 = binary_not(bit_3.clone());
-        let not_4 = binary_not(bit_4.clone());
-        let not_5 = binary_not(bit_5.clone());
-        let not_6 = binary_not(bit_6.clone());
+        // Get op bits and their binary negations.
+        let op: [Op<E>; 7] = core::array::from_fn(|i| {
+            let bit = frame.op_bit(i);
+            let not = binary_not(bit.clone());
+            Op { bit, not }
+        });
 
         // --- Low-degree prefix selectors for composite flags ---
         // These produce degree-5 left_shift and right_shift composite flags.
@@ -260,33 +267,32 @@ where
 
         // Prefix `010` selector: (1-b6)*b5*(1-b4) - degree 3
         // Covers all degree-7 operations with this prefix (left shift ops)
-        let prefix_010 = not_6.clone() * bit_5.clone() * not_4.clone();
+        let prefix_010 = op[6].not() * op[5].is() * op[4].not();
 
         // Prefix `011` selector: (1-b6)*b5*b4 - degree 3
         // Covers all degree-7 operations with this prefix (right shift ops)
-        let prefix_011 = not_6.clone() * bit_5.clone() * bit_4.clone();
+        let prefix_011 = op[6].not() * op[5].is() * op[4].is();
 
         // Prefix `10011` selector: b6*(1-b5)*(1-b4)*b3*b2 - degree 5
         // Covers U32ADD3 and U32MADD (both cause left shift by 2)
-        let add3_madd_prefix =
-            bit_6.clone() * not_5.clone() * not_4.clone() * bit_3.clone() * bit_2.clone();
+        let add3_madd_prefix = op[6].is() * op[5].not() * op[4].not() * op[3].is() * op[2].is();
 
         // --- Computation of degree 7 operation flags ---
 
         // Intermediate values computed from most significant bits
-        degree7_op_flags[0] = not_5.clone() * not_4.clone();
-        degree7_op_flags[16] = not_5.clone() * bit_4.clone();
-        degree7_op_flags[32] = bit_5.clone() * not_4.clone();
+        degree7_op_flags[0] = op[5].not() * op[4].not();
+        degree7_op_flags[16] = op[5].not() * op[4].is();
+        degree7_op_flags[32] = op[5].is() * op[4].not();
         // Prefix `11` in bits [5..4] (binary 110000 = 48).
-        degree7_op_flags[0b110000] = bit_5.clone() * bit_4.clone();
+        degree7_op_flags[0b110000] = op[5].is() * op[4].is();
 
         // Flag of prefix `100` - all degree 6 u32 operations
-        let f100 = degree7_op_flags[0].clone() * bit_6.clone();
+        let f100 = degree7_op_flags[0].clone() * op[6].is();
         // Flag of prefix `1000` - u32 arithmetic operations
-        let f1000 = f100.clone() * not_3.clone();
+        let f1000 = f100.clone() * op[3].not();
 
-        let not_6_not_3 = not_6.clone() * not_3.clone();
-        let not_6_yes_3 = not_6.clone() * bit_3.clone();
+        let not_6_not_3 = op[6].not() * op[3].not();
+        let not_6_yes_3 = op[6].not() * op[3].is();
 
         // Add fourth most significant bit along with most significant bit
         for i in (0..64).step_by(16) {
@@ -307,15 +313,15 @@ where
         // Add fifth most significant bit
         for i in (0..64).step_by(8) {
             let base = degree7_op_flags[i].clone();
-            degree7_op_flags[i + 4] = base.clone() * bit_2.clone();
-            degree7_op_flags[i] = base * not_2.clone();
+            degree7_op_flags[i + 4] = base.clone() * op[2].is();
+            degree7_op_flags[i] = base * op[2].not();
         }
 
         // Add sixth most significant bit
         for i in (0..64).step_by(4) {
             let base = degree7_op_flags[i].clone();
-            degree7_op_flags[i + 2] = base.clone() * bit_1.clone();
-            degree7_op_flags[i] = base * not_1.clone();
+            degree7_op_flags[i + 2] = base.clone() * op[1].is();
+            degree7_op_flags[i] = base * op[1].not();
         }
 
         // Cache flags for mov{up/dn}{2-8}, swapw{2-3} operations
@@ -332,8 +338,8 @@ where
         // Add least significant bit
         for i in (0..64).step_by(2) {
             let base = degree7_op_flags[i].clone();
-            degree7_op_flags[i + 1] = base.clone() * bit_0.clone();
-            degree7_op_flags[i] = base * not_0.clone();
+            degree7_op_flags[i + 1] = base.clone() * op[0].is();
+            degree7_op_flags[i] = base * op[0].not();
         }
 
         let ext2mul_flag = degree7_op_flags[25].clone();
@@ -346,22 +352,22 @@ where
         // --- Computation of degree 6 operation flags ---
 
         // Degree 6 flag prefix is `100`
-        let degree_6_flag = bit_6.clone() * not_5.clone() * not_4.clone();
+        let degree_6_flag = op[6].is() * op[5].not() * op[4].not();
 
         // Degree 6 flags do not use the first bit (op_bits[0])
-        let not_2_not_3 = not_2.clone() * not_3.clone();
-        let yes_2_not_3 = bit_2.clone() * not_3.clone();
-        let not_2_yes_3 = not_2.clone() * bit_3.clone();
-        let yes_2_yes_3 = bit_2.clone() * bit_3.clone();
+        let not_2_not_3 = op[2].not() * op[3].not();
+        let yes_2_not_3 = op[2].is() * op[3].not();
+        let not_2_yes_3 = op[2].not() * op[3].is();
+        let yes_2_yes_3 = op[2].is() * op[3].is();
 
-        degree6_op_flags[0] = not_1.clone() * not_2_not_3.clone(); // U32ADD
-        degree6_op_flags[1] = bit_1.clone() * not_2_not_3.clone(); // U32SUB
-        degree6_op_flags[2] = not_1.clone() * yes_2_not_3.clone(); // U32MUL
-        degree6_op_flags[3] = bit_1.clone() * yes_2_not_3.clone(); // U32DIV
-        degree6_op_flags[4] = not_1.clone() * not_2_yes_3.clone(); // U32SPLIT
-        degree6_op_flags[5] = bit_1.clone() * not_2_yes_3.clone(); // U32ASSERT2
-        degree6_op_flags[6] = not_1.clone() * yes_2_yes_3.clone(); // U32ADD3
-        degree6_op_flags[7] = bit_1.clone() * yes_2_yes_3.clone(); // U32MADD
+        degree6_op_flags[0] = op[1].not() * not_2_not_3.clone(); // U32ADD
+        degree6_op_flags[1] = op[1].is() * not_2_not_3.clone(); // U32SUB
+        degree6_op_flags[2] = op[1].not() * yes_2_not_3.clone(); // U32MUL
+        degree6_op_flags[3] = op[1].is() * yes_2_not_3.clone(); // U32DIV
+        degree6_op_flags[4] = op[1].not() * not_2_yes_3.clone(); // U32SPLIT
+        degree6_op_flags[5] = op[1].is() * not_2_yes_3.clone(); // U32ASSERT2
+        degree6_op_flags[6] = op[1].not() * yes_2_yes_3.clone(); // U32ADD3
+        degree6_op_flags[7] = op[1].is() * yes_2_yes_3.clone(); // U32MADD
 
         // Multiply by degree 6 flag
         for flag in degree6_op_flags.iter_mut() {
@@ -373,19 +379,19 @@ where
         // Degree 5 flag uses the first degree reduction column
         let degree_5_flag = frame.op_bit_extra(0);
 
-        let not_0_not_1 = not_0.clone() * not_1.clone();
-        let yes_0_not_1 = bit_0.clone() * not_1.clone();
-        let not_0_yes_1 = not_0.clone() * bit_1.clone();
-        let yes_0_yes_1 = bit_0.clone() * bit_1.clone();
+        let not_0_not_1 = op[0].not() * op[1].not();
+        let yes_0_not_1 = op[0].is() * op[1].not();
+        let not_0_yes_1 = op[0].not() * op[1].is();
+        let yes_0_yes_1 = op[0].is() * op[1].is();
 
-        degree5_op_flags[0] = not_0_not_1.clone() * not_2.clone(); // HPERM
-        degree5_op_flags[1] = yes_0_not_1.clone() * not_2.clone(); // MPVERIFY
-        degree5_op_flags[2] = not_0_yes_1.clone() * not_2.clone(); // PIPE
-        degree5_op_flags[3] = yes_0_yes_1.clone() * not_2.clone(); // MSTREAM
-        degree5_op_flags[4] = not_0_not_1.clone() * bit_2.clone(); // SPLIT
-        degree5_op_flags[5] = yes_0_not_1.clone() * bit_2.clone(); // LOOP
-        degree5_op_flags[6] = not_0_yes_1.clone() * bit_2.clone(); // SPAN
-        degree5_op_flags[7] = yes_0_yes_1.clone() * bit_2.clone(); // JOIN
+        degree5_op_flags[0] = not_0_not_1.clone() * op[2].not(); // HPERM
+        degree5_op_flags[1] = yes_0_not_1.clone() * op[2].not(); // MPVERIFY
+        degree5_op_flags[2] = not_0_yes_1.clone() * op[2].not(); // PIPE
+        degree5_op_flags[3] = yes_0_yes_1.clone() * op[2].not(); // MSTREAM
+        degree5_op_flags[4] = not_0_not_1.clone() * op[2].is(); // SPLIT
+        degree5_op_flags[5] = yes_0_not_1.clone() * op[2].is(); // LOOP
+        degree5_op_flags[6] = not_0_yes_1.clone() * op[2].is(); // SPAN
+        degree5_op_flags[7] = yes_0_yes_1.clone() * op[2].is(); // JOIN
 
         // Second half shares same lower 3 bits
         for i in 0..8 {
@@ -393,11 +399,11 @@ where
         }
 
         // Update with op_bit[3] and degree 5 flag
-        let deg_5_not_3 = not_3.clone() * degree_5_flag.clone();
+        let deg_5_not_3 = op[3].not() * degree_5_flag.clone();
         for flag in degree5_op_flags.iter_mut().take(8) {
             *flag = flag.clone() * deg_5_not_3.clone();
         }
-        let deg_5_yes_3 = bit_3.clone() * degree_5_flag.clone();
+        let deg_5_yes_3 = op[3].is() * degree_5_flag.clone();
         for flag in degree5_op_flags.iter_mut().skip(8) {
             *flag = flag.clone() * deg_5_yes_3.clone();
         }
@@ -419,11 +425,11 @@ where
         }
 
         // Update with op_bit[4] and degree 4 flag
-        let deg_4_not_4 = not_4.clone() * degree_4_flag.clone();
+        let deg_4_not_4 = op[4].not() * degree_4_flag.clone();
         for flag in degree4_op_flags.iter_mut().take(4) {
             *flag = flag.clone() * deg_4_not_4.clone();
         }
-        let deg_4_yes_4 = bit_4.clone() * degree_4_flag.clone();
+        let deg_4_yes_4 = op[4].is() * degree_4_flag.clone();
         for flag in degree4_op_flags.iter_mut().skip(4) {
             *flag = flag.clone() * deg_4_yes_4.clone();
         }
@@ -580,8 +586,8 @@ where
         //
         // IMPORTANT: If a new control flow operation is added, it MUST be included here,
         // otherwise the decoder constraint will fail when executing that operation.
-        let control_flow = degree_5_flag * not_3.clone() * bit_2.clone() // SPAN, JOIN, SPLIT, LOOP
-            + degree_4_flag * bit_4.clone() // END, REPEAT, RESPAN, HALT
+        let control_flow = degree_5_flag * op[3].not() * op[2].is() // SPAN, JOIN, SPLIT, LOOP
+            + degree_4_flag * op[4].is() // END, REPEAT, RESPAN, HALT
             + degree5_op_flags[8].clone() // DYN
             + degree5_op_flags[12].clone() // DYNCALL
             + degree4_op_flags[2].clone() // SYSCALL
