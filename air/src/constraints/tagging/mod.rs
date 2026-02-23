@@ -10,7 +10,6 @@ mod ood_eval;
 mod state;
 mod tagged_builder;
 
-
 // Re-exports for public API.
 #[allow(unused_imports)]
 pub use ood_eval::{EvalRecord, OodEvalAirBuilder};
