@@ -334,10 +334,10 @@ pub fn u32rotr(
             span_builder.push_op(Noop);
         },
         Some(imm) => {
-            if imm == 0 || imm > MAX_U32_ROTATE_VALUE {
+            if imm > MAX_U32_ROTATE_VALUE {
                 return Err(RelatedLabel::error("invalid argument")
                     .with_labeled_span(span, "this instruction argument is out of range")
-                    .with_help(format!("value must be in the range 0..={MAX_U32_ROTATE_VALUE}"))
+                    .with_help(format!("value must be in the range 1..={MAX_U32_ROTATE_VALUE}"))
                     .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
                     .into());
             }
@@ -517,10 +517,10 @@ fn prepare_bitwise<const MAX_VALUE: u8>(
             block_builder.push_op(Noop);
         },
         Some(imm) => {
-            if imm == 0 || imm > MAX_VALUE {
+            if imm > MAX_VALUE {
                 return Err(RelatedLabel::error("invalid argument")
                     .with_labeled_span(span, "this instruction argument is out of range")
-                    .with_help(format!("value must be in the range 0..={MAX_VALUE}"))
+                    .with_help(format!("value must be in the range 1..={MAX_VALUE}"))
                     .with_source_file(proc_ctx.source_manager().get(span.source_id()).ok())
                     .into());
             }
