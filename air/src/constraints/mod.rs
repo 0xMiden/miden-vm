@@ -45,12 +45,14 @@ pub mod tagging {
     use miden_crypto::stark::air::MidenAirBuilder;
 
     /// The highest constraint ID (zero-based). Update when adding constraints.
+    #[allow(dead_code)]
     pub const CURRENT_MAX_ID: usize = 0;
 
     /// No-op tagging extension for non-testing builds.
     ///
     /// The methods call the provided closure directly so they have no runtime overhead beyond
     /// the call itself (which the optimizer should inline away).
+    #[allow(dead_code)]
     pub trait TaggingAirBuilderExt: MidenAirBuilder {
         fn tagged<R>(
             &mut self,
