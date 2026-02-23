@@ -24,7 +24,7 @@ use crate::MainTraceRow;
 
 pub mod range;
 pub mod system;
-#[cfg(any(test, feature = "testing"))]
+#[cfg(all(any(test, feature = "testing"), feature = "std"))]
 #[allow(dead_code)]
 pub mod tagging;
 
@@ -32,7 +32,7 @@ pub mod tagging;
 ///
 /// This keeps the production/no-std build free of std-only machinery while letting test builds
 /// enable full tagging via the real module above.
-#[cfg(not(any(test, feature = "testing")))]
+#[cfg(not(all(any(test, feature = "testing"), feature = "std")))]
 pub mod tagging {
     use miden_crypto::stark::air::MidenAirBuilder;
 
