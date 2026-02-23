@@ -334,7 +334,7 @@ impl Linker {
     ///
     /// Note: it is assumed that kernel and kernel_module are consistent, but this is not checked.
     ///
-    /// TODO: consider passing `KerneLibrary` into this constructor as a parameter instead.
+    /// TODO: consider passing `KernelLibrary` into this constructor as a parameter instead.
     pub(super) fn with_kernel(
         source_manager: Arc<dyn SourceManager>,
         kernel: Kernel,
