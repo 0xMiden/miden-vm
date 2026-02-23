@@ -4,7 +4,7 @@ use miden_core::{
     Word,
     events::{EventId, EventName},
     mast::MastForest,
-    operations::{DebugOptions, DebugVarInfo},
+    operations::DebugOptions,
 };
 use miden_debug_types::{DefaultSourceManager, Location, SourceFile, SourceManager, SourceSpan};
 
@@ -177,10 +177,6 @@ where
 
     fn on_trace(&mut self, process: &ProcessorState, trace_id: u32) -> Result<(), TraceError> {
         self.debug_handler.on_trace(process, trace_id)
-    }
-
-    fn on_debug_var(&mut self, process: &ProcessorState, var_info: &DebugVarInfo) {
-        self.debug_handler.on_debug_var(process, var_info)
     }
 
     fn resolve_event(&self, event_id: EventId) -> Option<&EventName> {

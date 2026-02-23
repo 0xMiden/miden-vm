@@ -125,15 +125,6 @@ impl Processor for FastProcessor {
             }
         }
 
-        if self.in_debug_mode() {
-            for &debug_var_id in current_forest.debug_vars_for_operation(node_id, op_idx_in_block) {
-                if let Some(var_info) = current_forest.debug_var(debug_var_id) {
-                    let process = &mut self.state();
-                    host.on_debug_var(process, var_info);
-                }
-            }
-        }
-
         ControlFlow::Continue(())
     }
 
