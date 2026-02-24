@@ -176,7 +176,7 @@ end
 #! Half-key means that, out of the keys in the array, only half of the key - the most significant
 #! element (prefix) and the second most significant element (suffix) - need to match.
 #!
-#! Inputs: [key_prefix, key_suffix, start_ptr, end_ptr]
+#! Inputs: [key_suffix, key_prefix, start_ptr, end_ptr]
 #! Output: [is_key_found, key_ptr, start_ptr, end_ptr]
 #!
 #! # Panics
@@ -190,7 +190,7 @@ end
 pub proc find_half_key_value
     # Build KEY with key_prefix at word[3] (most significant in BE) and key_suffix at word[2]
     # word[0] and word[1] are 0 (will be zeroed in half-key comparison anyway)
-    swap push.0 push.0
+    push.0 push.0
     # => [0, 0, key_suffix, key_prefix, start_ptr, end_ptr]
     # KEY = [0, 0, key_suffix, key_prefix] with w0=0 on top, w3=key_prefix
 
