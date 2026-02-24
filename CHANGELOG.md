@@ -12,6 +12,10 @@
 
 - Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
 
+#### Enhancements
+
+- Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging (#[2471](https://github.com/0xMiden/miden-vm/pull/2471)).
+
 ## 0.21.0 (2026-02-14)
 
 #### Major breaking changes
