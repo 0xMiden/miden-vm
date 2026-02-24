@@ -93,7 +93,9 @@ impl Eq for Constant {}
 
 impl PartialEq for Constant {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.value == other.value
+        self.visibility == other.visibility
+            && self.name == other.name
+            && self.value == other.value
     }
 }
 
