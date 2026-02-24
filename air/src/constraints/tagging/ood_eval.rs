@@ -107,10 +107,15 @@ impl OodEvalAirBuilder {
 
     /// Panics if any ID in `0..=CURRENT_MAX_ID` was not recorded.
     pub fn assert_complete(&self) {
-        for (id, entry) in self.used.iter().enumerate() {
-            if entry.is_none() {
-                panic!("missing constraint id {id}");
-            }
+        let missing: Vec<usize> = self
+            .used
+            .iter()
+            .enumerate()
+            .filter_map(|(id, entry)| entry.is_none().then_some(id))
+            .collect();
+
+        if !missing.is_empty() {
+            panic!("missing constraint ids: {missing:?}");
         }
     }
 
