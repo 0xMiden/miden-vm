@@ -208,7 +208,7 @@ _Insert into Advice Map:_
 | `adv.insert_mem`      | `[K, a, b, ... ]`    | `[K, a, b, ... ]`    | `advice_map[K] ← mem[a..b]`.                                                           |
 | `adv.insert_hdword`   | `[A, B, ... ]`       | `[A, B, ... ]`       | `K ← hash(A \|\| B)` (top first). `advice_map[K] ← [A,B]`. MASM: `hmerge`.             |
 | `adv.insert_hdword_d` | `[A, B, d, ... ]`    | `[A, B, d, ... ]`    | `K ← hash(A \|\| B, domain=d)` (top first). `advice_map[K] ← [A,B]`.                   |
-| `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash(hash(hash(A \|\| B) \|\| C) \|\| D), domain=0`. `advice_map[K] ← [A,B,C,D]`. |
+| `adv.insert_hqword`   | `[A, B, C, D, ... ]` | `[A, B, C, D, ... ]` | `K ← hash_elements([A,B,C,D])`. `advice_map[K] ← [A,B,C,D]`. |
 | `adv.insert_hperm`    | `[R0, R1, C, ...]`   | `[R0, R1, C, ...]`   | `K ← permute(R0,R1,C).digest`. `advice_map[K] ← [R0,R1]`.                                  |
 
 ### Random Access Memory
