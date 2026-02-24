@@ -34,6 +34,9 @@ pub use self::{
     span::{SourceSpan, Span, Spanned},
 };
 
+// URI
+// ================================================================================================
+
 /// A [URI reference](https://datatracker.ietf.org/doc/html/rfc3986#section-4.1) that specifies
 /// the location of a source file, whether on disk, on the network, or elsewhere.
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -70,7 +73,7 @@ impl Uri {
         }
     }
 
-    /// Returns the scheme portion of this URI, if present.
+    /// Returns the authority portion of this URI, if present.
     pub fn authority(&self) -> Option<&str> {
         let uri = self.0.as_ref();
         let (_, rest) = uri.split_once("//")?;
@@ -183,6 +186,9 @@ impl core::str::FromStr for Uri {
         Ok(Self::from(s))
     }
 }
+
+// TESTS
+// ================================================================================================
 
 #[cfg(test)]
 mod tests {
