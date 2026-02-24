@@ -4,7 +4,7 @@
 //! The stack overflow table tracks values that overflow from the 16-element operand stack.
 //!
 //! The bus accumulator p1 uses a multiset check:
-//! - Boundary: p1[0] = 1 and p1[last] = 1
+//! - Boundary: p1[0] = 1 and p1[last] = 1 (enforced by the wrapper AIR)
 //! - Transition: p1' * requests = p1 * responses
 //!
 //! Where:
