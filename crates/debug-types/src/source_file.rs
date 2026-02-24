@@ -1194,6 +1194,42 @@ macro_rules! declare_dual_number_and_index_type {
 declare_dual_number_and_index_type!(Line, "line");
 declare_dual_number_and_index_type!(Column, "column");
 
+// SERIALIZATION FOR LINE/COLUMN NUMBERS
+// ================================================================================================
+
+use miden_crypto::utils::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
+};
+
+impl Serializable for LineNumber {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.to_u32());
+    }
+}
+
+impl Deserializable for LineNumber {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = source.read_u32()?;
+        Self::new(value)
+            .ok_or_else(|| DeserializationError::InvalidValue("line number cannot be zero".into()))
+    }
+}
+
+impl Serializable for ColumnNumber {
+    fn write_into<W: ByteWriter>(&self, target: &mut W) {
+        target.write_u32(self.to_u32());
+    }
+}
+
+impl Deserializable for ColumnNumber {
+    fn read_from<R: ByteReader>(source: &mut R) -> Result<Self, DeserializationError> {
+        let value = source.read_u32()?;
+        Self::new(value).ok_or_else(|| {
+            DeserializationError::InvalidValue("column number cannot be zero".into())
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
