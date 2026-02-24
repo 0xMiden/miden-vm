@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.2 (TBD)
+
+#### Changes
+
+- Update `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
+
 ## 0.21.1 (2026-02-17)
 
 #### Changes
