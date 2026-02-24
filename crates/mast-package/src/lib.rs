@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate std;
 
 mod artifact;
+pub mod debug_info;
 mod dependency;
 mod package;
 

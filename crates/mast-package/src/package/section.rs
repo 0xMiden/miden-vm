@@ -20,8 +20,13 @@ use serde::{Deserialize, Serialize};
 pub struct SectionId(Cow<'static, str>);
 
 impl SectionId {
-    /// The section containing debug information (source locations, spans)
-    pub const DEBUG_INFO: Self = Self(Cow::Borrowed("debug_info"));
+    /// The section containing debug type definitions (primitives, structs, arrays, pointers,
+    /// function types)
+    pub const DEBUG_TYPES: Self = Self(Cow::Borrowed("debug_types"));
+    /// The section containing debug source file paths and checksums
+    pub const DEBUG_SOURCES: Self = Self(Cow::Borrowed("debug_sources"));
+    /// The section containing debug function metadata, variables, and inlined calls
+    pub const DEBUG_FUNCTIONS: Self = Self(Cow::Borrowed("debug_functions"));
     /// This section provides the encoded metadata for a compiled account component
     ///
     /// Currently, this corresponds to the serialized representation of
@@ -68,7 +73,9 @@ impl FromStr for SectionId {
     type Err = InvalidSectionIdError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "debug_info" => Ok(Self::DEBUG_INFO),
+            "debug_types" => Ok(Self::DEBUG_TYPES),
+            "debug_sources" => Ok(Self::DEBUG_SOURCES),
+            "debug_functions" => Ok(Self::DEBUG_FUNCTIONS),
             "account_component_metadata" => Ok(Self::ACCOUNT_COMPONENT_METADATA),
             custom => Self::custom(custom),
         }

@@ -772,6 +772,8 @@ fn test_sparse_debuginfo_round_trip() {
         asm_op_storage: crate::mast::OpToAsmOpId::new(),
         error_codes,
         procedure_names: BTreeMap::new(),
+        debug_vars: IndexVec::new(),
+        op_debug_var_storage: crate::mast::debuginfo::debug_var_storage::OpToDebugVarIds::default(),
     };
 
     // Serialize and deserialize
@@ -780,4 +782,89 @@ fn test_sparse_debuginfo_round_trip() {
 
     // Verify
     assert_eq!(debug_info.num_decorators(), deserialized.num_decorators());
+}
+
+#[test]
+fn test_debuginfo_with_debug_vars_round_trip() {
+    use crate::{
+        mast::debuginfo::DebugInfo,
+        operations::{DebugVarInfo, DebugVarLocation, Decorator},
+        serde::{Deserializable, Serializable},
+    };
+
+    // Create DebugInfo with both decorators and debug vars
+    let mut debug_info = DebugInfo::new();
+
+    // Add some decorators
+    let dec_id0 = debug_info.add_decorator(Decorator::Trace(0)).unwrap();
+    let dec_id1 = debug_info.add_decorator(Decorator::Trace(1)).unwrap();
+
+    // Add debug variables
+    let var0 = DebugVarInfo::new("x", DebugVarLocation::Stack(0));
+    let mut var1 = DebugVarInfo::new("y", DebugVarLocation::Memory(100));
+    var1.set_type_id(42);
+    let mut var2 = DebugVarInfo::new("param", DebugVarLocation::Local(-3));
+    var2.set_arg_index(1);
+
+    let var_id0 = debug_info.add_debug_var(var0.clone()).unwrap();
+    let var_id1 = debug_info.add_debug_var(var1.clone()).unwrap();
+    let var_id2 = debug_info.add_debug_var(var2.clone()).unwrap();
+
+    assert_eq!(debug_info.num_debug_vars(), 3);
+
+    // Register decorators and debug vars for node 0
+    debug_info
+        .register_op_indexed_decorators(
+            MastNodeId::new_unchecked(0),
+            vec![(0, dec_id0), (1, dec_id1)],
+        )
+        .unwrap();
+
+    debug_info
+        .register_op_indexed_debug_vars(
+            MastNodeId::new_unchecked(0),
+            vec![(0, var_id0), (0, var_id1), (2, var_id2)],
+        )
+        .unwrap();
+
+    // Verify accessors before serialization
+    assert_eq!(debug_info.debug_var(var_id0).unwrap().name(), "x");
+    assert_eq!(debug_info.debug_var(var_id1).unwrap().name(), "y");
+    assert_eq!(debug_info.debug_var(var_id2).unwrap().name(), "param");
+
+    let op0_vars = debug_info.debug_vars_for_operation(MastNodeId::new_unchecked(0), 0);
+    assert_eq!(op0_vars.len(), 2);
+    assert_eq!(op0_vars[0], var_id0);
+    assert_eq!(op0_vars[1], var_id1);
+
+    let op2_vars = debug_info.debug_vars_for_operation(MastNodeId::new_unchecked(0), 2);
+    assert_eq!(op2_vars.len(), 1);
+    assert_eq!(op2_vars[0], var_id2);
+
+    // No vars at op 1
+    let op1_vars = debug_info.debug_vars_for_operation(MastNodeId::new_unchecked(0), 1);
+    assert_eq!(op1_vars.len(), 0);
+
+    // Serialize and deserialize
+    let bytes = debug_info.to_bytes();
+    let deserialized = DebugInfo::read_from_bytes(&bytes).expect("Should deserialize successfully");
+
+    // Verify decorators survived
+    assert_eq!(deserialized.num_decorators(), 2);
+
+    // Verify debug vars survived
+    assert_eq!(deserialized.num_debug_vars(), 3);
+    assert_eq!(deserialized.debug_var(var_id0).unwrap(), &var0);
+    assert_eq!(deserialized.debug_var(var_id1).unwrap(), &var1);
+    assert_eq!(deserialized.debug_var(var_id2).unwrap(), &var2);
+
+    // Verify debug var storage survived
+    let deser_op0 = deserialized.debug_vars_for_operation(MastNodeId::new_unchecked(0), 0);
+    assert_eq!(deser_op0, &[var_id0, var_id1]);
+
+    let deser_op1 = deserialized.debug_vars_for_operation(MastNodeId::new_unchecked(0), 1);
+    assert_eq!(deser_op1, &[]);
+
+    let deser_op2 = deserialized.debug_vars_for_operation(MastNodeId::new_unchecked(0), 2);
+    assert_eq!(deser_op2, &[var_id2]);
 }
