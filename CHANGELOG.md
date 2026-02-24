@@ -1,4 +1,9 @@
 # Changelog
+## 0.21.2 (2026-02-24)
+
+#### Changes
+
+- Updated `sorted_array::find_half_key_value` to use little-endian ordering ([#2734](https://github.com/0xMiden/miden-vm/pull/2734)).
 
 ## 0.21.1 (2026-02-17)
 
