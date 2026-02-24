@@ -18,7 +18,7 @@ use miden_core::{
     Word,
     chiplets::hasher::apply_permutation,
     crypto::merkle::{MerkleStore, MerkleTree, NodeIndex},
-    field::{Field, PrimeCharacteristicRing},
+    field::Field,
     mast::{BasicBlockNodeBuilder, MastForest, MastForestContributor, SplitNodeBuilder},
     program::Program,
     utils::range,
@@ -30,7 +30,7 @@ use super::{
     ONE, Operation, ZERO, build_span_with_respan_ops, build_trace_from_ops_with_inputs,
     build_trace_from_program, init_state_from_words, rand_array,
 };
-use crate::{PrimeField64, StackInputs};
+use crate::StackInputs;
 
 // CONSTANTS
 // ================================================================================================

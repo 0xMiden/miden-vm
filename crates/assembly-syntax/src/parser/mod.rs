@@ -185,6 +185,7 @@ pub fn read_modules_from_dir(
     dir: impl AsRef<std::path::Path>,
     namespace: impl AsRef<Path>,
     source_manager: Arc<dyn SourceManager>,
+    warnings_as_errors: bool,
 ) -> Result<impl Iterator<Item = Box<ast::Module>>, Report> {
     use std::collections::{BTreeMap, btree_map::Entry};
 
@@ -214,6 +215,7 @@ pub fn read_modules_from_dir(
 
         // Parse module at the given path
         let mut parser = ModuleParser::new(ast::ModuleKind::Library);
+        parser.set_warnings_as_errors(warnings_as_errors);
         let ast = parser.parse_file(&name, &source_path, source_manager.clone())?;
         match modules.entry(name) {
             Entry::Occupied(ref entry) => {

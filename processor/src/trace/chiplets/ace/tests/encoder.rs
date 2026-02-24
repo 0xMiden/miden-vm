@@ -4,7 +4,7 @@ use super::{
     super::instruction::{ID_BITS, MAX_ID},
     *,
 };
-use crate::{Felt, ZERO, crypto::hash::Poseidon2, field::PrimeCharacteristicRing};
+use crate::{Felt, ZERO, crypto::hash::Poseidon2};
 
 #[derive(Debug)]
 pub enum EncodingError {

@@ -9,7 +9,7 @@ use miden_core::{
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::{PrimeField64, debug::BusDebugger};
+use crate::debug::BusDebugger;
 
 // BLOCK HASH TABLE COLUMN BUILDER
 // ================================================================================================

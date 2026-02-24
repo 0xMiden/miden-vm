@@ -11,7 +11,7 @@ use tracing::instrument;
 
 use crate::{
     Felt,
-    field::{ExtensionField, PrimeCharacteristicRing},
+    field::ExtensionField,
     trace::AuxTraceBuilders,
     utils::{ColMatrix, Matrix, RowMajorMatrix},
 };

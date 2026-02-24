@@ -19,7 +19,6 @@ use miden_utils_testing::{
 use crate::{
     DefaultHost, FastProcessor, Kernel, ONE, Program, StackInputs, Word, ZERO,
     advice::{AdviceInputs, AdviceMap},
-    field::PrimeField64,
     operation::Operation,
 };
 

@@ -1,9 +1,8 @@
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::fmt;
 
-use miden_core::{
-    field::PrimeCharacteristicRing,
-    serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
+use miden_core::serde::{
+    ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable,
 };
 use miden_debug_types::{SourceSpan, Span, Spanned};
 #[cfg(feature = "serde")]

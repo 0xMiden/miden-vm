@@ -131,10 +131,10 @@ proptest! {
         let (ev, es) = compute_evaluation_points(alpha, x_inv);
         let (folded_value, tmp0, tmp1) = fri_fold4(query_values, ev, es);
 
-        let tmp0_base = tmp0.as_basis_coefficients_slice();
-        let tmp1_base = tmp1.as_basis_coefficients_slice();
+        let tmp0_base: &[Felt] = tmp0.as_basis_coefficients_slice();
+        let tmp1_base: &[Felt] = tmp1.as_basis_coefficients_slice();
         let ds = get_domain_segment_flags(d_seg as usize);
-        let folded_value_base = folded_value.as_basis_coefficients_slice();
+        let folded_value_base: &[Felt] = folded_value.as_basis_coefficients_slice();
         let poe2 = poe.square();
         let poe4 = poe2.square();
 

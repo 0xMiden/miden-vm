@@ -18,7 +18,6 @@ use crate::{
     ContextId, EMPTY_WORD, FastProcessor, Felt, MIN_STACK_DEPTH, ONE, RowIndex, Word, ZERO,
     continuation_stack::{Continuation, ContinuationStack},
     crypto::merkle::MerklePath,
-    field::{PrimeCharacteristicRing, PrimeField64},
     mast::{
         BasicBlockNode, JoinNode, LoopNode, MastForest, MastNode, MastNodeExt, MastNodeId,
         SplitNode,

@@ -9,7 +9,7 @@ use core::{marker::PhantomData, ops::Range};
 
 use miden_debug_types::{SourceId, SourceSpan, Span, Spanned};
 use smallvec::smallvec;
-use miden_core::{Felt, field::{PrimeCharacteristicRing, PrimeField64}};
+use miden_core::{Felt, field::PrimeField64};
 
 use crate::{ast::{*, types::{AddressSpace, Type}}, Word};
 use super::{

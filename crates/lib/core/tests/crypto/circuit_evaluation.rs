@@ -1,6 +1,6 @@
 use miden_core::{
     Felt, ONE, ZERO,
-    field::{BasedVectorSpace, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, PrimeCharacteristicRing, QuadFelt},
 };
 use miden_utils_testing::rand::rand_quad_felt;
 

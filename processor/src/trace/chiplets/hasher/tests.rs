@@ -20,7 +20,6 @@ use super::{
     MerklePath, RETURN_HASH, RETURN_STATE, Selectors, TRACE_WIDTH, TraceFragment,
     init_state_from_words,
 };
-use crate::PrimeField64;
 
 // LINEAR HASH TESTS
 // ================================================================================================

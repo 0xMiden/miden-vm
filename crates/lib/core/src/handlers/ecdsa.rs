@@ -35,7 +35,7 @@ use alloc::{vec, vec::Vec};
 use miden_core::{
     Felt,
     events::EventName,
-    field::{PrimeCharacteristicRing, PrimeField64},
+    field::PrimeCharacteristicRing,
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     serde::{ByteReader, ByteWriter, Deserializable, DeserializationError, Serializable},
     utils::bytes_to_packed_u32_elements,

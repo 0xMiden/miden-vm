@@ -1,6 +1,4 @@
-use miden_core::{
-    Felt, ZERO, events::SystemEvent, field::PrimeCharacteristicRing, operations::Operation::*,
-};
+use miden_core::{Felt, ZERO, events::SystemEvent, operations::Operation::*};
 
 use super::BasicBlockBuilder;
 use crate::Report;
@@ -142,8 +140,8 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Rep
 
 /// Creates a new Merkle tree in the advice provider by combining trees with the specified roots.
 /// The stack is expected to be arranged as follows (from the top):
-/// - root of the right tree, 4 elements
 /// - root of the left tree, 4 elements
+/// - root of the right tree, 4 elements
 ///
 /// The operation will merge the Merkle trees with the provided roots, producing a new merged root
 /// with incremented depth. After the operations are executed, the stack will be arranged as
@@ -154,7 +152,7 @@ pub(super) fn mtree_set(block_builder: &mut BasicBlockBuilder) -> Result<(), Rep
 ///
 /// This operation takes 16 VM cycles.
 pub(super) fn mtree_merge(block_builder: &mut BasicBlockBuilder) {
-    // stack input:  [R_rhs, R_lhs, ...]
+    // stack input:  [R_lhs, R_rhs, ...]
     // stack output: [R_merged, ...]
 
     // invoke the advice provider function to merge 2 Merkle trees defined by the roots on the top

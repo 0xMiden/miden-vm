@@ -17,7 +17,7 @@ use miden_air::{
 };
 use miden_core::{
     ONE, Word, ZERO,
-    field::{PrimeCharacteristicRing, batch_inversion_allow_zeros},
+    field::batch_inversion_allow_zeros,
     mast::MastForest,
     operations::Operation,
     program::{Kernel, MIN_STACK_DEPTH, ProgramInfo},

@@ -1,6 +1,5 @@
 use miden_core::{
     FMP_INIT_VALUE,
-    field::PrimeField64,
     mast::{
         BasicBlockNodeBuilder, CallNodeBuilder, MastForest, MastForestContributor, MastNode,
         MastNodeExt,

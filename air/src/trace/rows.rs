@@ -4,7 +4,7 @@ use core::{
     ops::{Add, AddAssign, Bound, Index, IndexMut, Mul, RangeBounds, Sub, SubAssign},
 };
 
-use miden_core::{Felt, field::PrimeCharacteristicRing};
+use miden_core::Felt;
 
 // ROW INDEX
 // ================================================================================================

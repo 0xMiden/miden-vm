@@ -4,9 +4,7 @@ use miden_assembly::{Assembler, PathBuf, Report, ast::ModuleKind};
 use miden_core_lib::CoreLibrary;
 use miden_debug_types::{SourceLanguage, SourceManager};
 use miden_processor::{ExecutionError, Word, operation::OperationError};
-use miden_utils_testing::{
-    PrimeField64, StackInputs, Test, build_test, expect_exec_error_matches, push_inputs,
-};
+use miden_utils_testing::{StackInputs, Test, build_test, expect_exec_error_matches, push_inputs};
 use miden_vm::Module;
 
 // SIMPLE FLOW CONTROL TESTS

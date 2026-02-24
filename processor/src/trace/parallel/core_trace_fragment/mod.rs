@@ -1,9 +1,5 @@
 use miden_air::{Felt, trace::decoder::NUM_OP_BITS};
-use miden_core::{
-    field::{PrimeCharacteristicRing, PrimeField64},
-    mast::BasicBlockNode,
-    operations::OPCODE_PUSH,
-};
+use miden_core::{mast::BasicBlockNode, operations::OPCODE_PUSH};
 
 use super::CORE_TRACE_WIDTH;
 

@@ -12,7 +12,6 @@ use miden_core::{
     Felt, Word, ZERO,
     crypto::hash::{Poseidon2, Sha512},
     events::EventName,
-    field::{PrimeCharacteristicRing, PrimeField64},
     precompile::{PrecompileCommitment, PrecompileError, PrecompileRequest, PrecompileVerifier},
     utils::bytes_to_packed_u32_elements,
 };
