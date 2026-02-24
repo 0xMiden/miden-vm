@@ -224,6 +224,18 @@ impl<E: Clone> Op<E> {
     }
 }
 
+macro_rules! op_flag_getters {
+    ($array:ident, $( $(#[$meta:meta])* $name:ident => $op:expr ),* $(,)?) => {
+        $(
+            $(#[$meta])*
+            #[inline(always)]
+            pub fn $name(&self) -> E {
+                self.$array[get_op_index($op.op_code())].clone()
+            }
+        )*
+    };
+}
+
 #[allow(dead_code)]
 impl<E> OpFlags<E>
 where
@@ -618,571 +630,214 @@ where
     // STATE ACCESSORS
     // ============================================================================================
 
-    // ------ Degree 7 operations with no shift ---------------------------------------------------
+    // ------ Operation flags ---------------------------------------------------------------------
 
-    /// Operation Flag of NOOP operation.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn noop(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Noop.op_code())].clone()
-    }
-
-    /// Operation Flag of EQZ operation.
-    #[inline(always)]
-    pub fn eqz(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Eqz.op_code())].clone()
-    }
-
-    /// Operation Flag of NEG operation.
-    #[inline(always)]
-    pub fn neg(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Neg.op_code())].clone()
-    }
-
-    /// Operation Flag of INV operation.
-    #[inline(always)]
-    pub fn inv(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Inv.op_code())].clone()
-    }
-
-    /// Operation Flag of INCR operation.
-    #[inline(always)]
-    pub fn incr(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Incr.op_code())].clone()
-    }
-
-    /// Operation Flag of NOT operation.
-    #[inline(always)]
-    pub fn not(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Not.op_code())].clone()
-    }
-
-    /// Operation Flag of MLOAD operation.
-    #[inline(always)]
-    pub fn mload(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MLoad.op_code())].clone()
-    }
-
-    /// Operation Flag of SWAP operation.
-    #[inline(always)]
-    pub fn swap(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Swap.op_code())].clone()
-    }
-
-    /// Operation Flag of CALLER operation.
-    ///
-    /// CALLER overwrites the top 4 stack elements with the hash of the function
-    /// that initiated the current SYSCALL.
-    #[inline(always)]
-    pub fn caller(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Caller.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP2 operation.
-    #[inline(always)]
-    pub fn movup2(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp2.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN2 operation.
-    #[inline(always)]
-    pub fn movdn2(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn2.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP3 operation.
-    #[inline(always)]
-    pub fn movup3(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp3.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN3 operation.
-    #[inline(always)]
-    pub fn movdn3(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn3.op_code())].clone()
-    }
-
-    /// Operation Flag of ADVPOPW operation.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn advpopw(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::AdvPopW.op_code())].clone()
-    }
-
-    /// Operation Flag of EXPACC operation.
-    #[inline(always)]
-    pub fn expacc(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Expacc.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP4 operation.
-    #[inline(always)]
-    pub fn movup4(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp4.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN4 operation.
-    #[inline(always)]
-    pub fn movdn4(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn4.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP5 operation.
-    #[inline(always)]
-    pub fn movup5(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp5.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN5 operation.
-    #[inline(always)]
-    pub fn movdn5(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn5.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP6 operation.
-    #[inline(always)]
-    pub fn movup6(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp6.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN6 operation.
-    #[inline(always)]
-    pub fn movdn6(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn6.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP7 operation.
-    #[inline(always)]
-    pub fn movup7(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp7.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN7 operation.
-    #[inline(always)]
-    pub fn movdn7(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn7.op_code())].clone()
-    }
-
-    /// Operation Flag of SWAPW operation.
-    #[inline(always)]
-    pub fn swapw(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::SwapW.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVUP8 operation.
-    #[inline(always)]
-    pub fn movup8(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovUp8.op_code())].clone()
-    }
-
-    /// Operation Flag of MOVDN8 operation.
-    #[inline(always)]
-    pub fn movdn8(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MovDn8.op_code())].clone()
-    }
-
-    /// Operation Flag of SWAPW2 operation.
-    #[inline(always)]
-    pub fn swapw2(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::SwapW2.op_code())].clone()
-    }
-
-    /// Operation Flag of SWAPW3 operation.
-    #[inline(always)]
-    pub fn swapw3(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::SwapW3.op_code())].clone()
-    }
-
-    /// Operation Flag of SWAPDW operation.
-    #[inline(always)]
-    pub fn swapdw(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::SwapDW.op_code())].clone()
-    }
-
-    /// Operation Flag of EXT2MUL operation.
-    #[inline(always)]
-    pub fn ext2mul(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Ext2Mul.op_code())].clone()
-    }
-
-    // ------ Degree 7 operations with left shift -------------------------------------------------
-
-    /// Operation Flag of ASSERT operation.
-    #[inline(always)]
-    pub fn assert_op(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Assert(miden_core::ZERO).op_code())].clone()
-    }
-
-    /// Operation Flag of EQ operation.
-    #[inline(always)]
-    pub fn eq(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Eq.op_code())].clone()
-    }
-
-    /// Operation Flag of ADD operation.
-    #[inline(always)]
-    pub fn add(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Add.op_code())].clone()
-    }
-
-    /// Operation Flag of MUL operation.
-    #[inline(always)]
-    pub fn mul(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Mul.op_code())].clone()
-    }
-
-    /// Operation Flag of AND operation.
-    #[inline(always)]
-    pub fn and(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::And.op_code())].clone()
-    }
-
-    /// Operation Flag of OR operation.
-    #[inline(always)]
-    pub fn or(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Or.op_code())].clone()
-    }
-
-    /// Operation Flag of U32AND operation.
-    #[inline(always)]
-    pub fn u32and(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::U32and.op_code())].clone()
-    }
-
-    /// Operation Flag of U32XOR operation.
-    #[inline(always)]
-    pub fn u32xor(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::U32xor.op_code())].clone()
-    }
-
-    /// Operation Flag of DROP operation.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn drop(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Drop.op_code())].clone()
-    }
-
-    /// Operation Flag of CSWAP operation.
-    #[inline(always)]
-    pub fn cswap(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::CSwap.op_code())].clone()
-    }
-
-    /// Operation Flag of CSWAPW operation.
-    #[inline(always)]
-    pub fn cswapw(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::CSwapW.op_code())].clone()
-    }
-
-    /// Operation Flag of MLOADW operation.
-    #[inline(always)]
-    pub fn mloadw(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MLoadW.op_code())].clone()
-    }
-
-    /// Operation Flag of MSTORE operation.
-    #[inline(always)]
-    pub fn mstore(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MStore.op_code())].clone()
-    }
-
-    /// Operation Flag of MSTOREW operation.
-    #[inline(always)]
-    pub fn mstorew(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::MStoreW.op_code())].clone()
-    }
-
-    // ------ Degree 7 operations with right shift ------------------------------------------------
-
-    /// Operation Flag of PAD operation.
-    #[inline(always)]
-    pub fn pad(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Pad.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP operation.
-    #[inline(always)]
-    pub fn dup(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup0.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP1 operation.
-    #[inline(always)]
-    pub fn dup1(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup1.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP2 operation.
-    #[inline(always)]
-    pub fn dup2(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup2.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP3 operation.
-    #[inline(always)]
-    pub fn dup3(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup3.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP4 operation.
-    #[inline(always)]
-    pub fn dup4(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup4.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP5 operation.
-    #[inline(always)]
-    pub fn dup5(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup5.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP6 operation.
-    #[inline(always)]
-    pub fn dup6(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup6.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP7 operation.
-    #[inline(always)]
-    pub fn dup7(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup7.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP9 operation.
-    #[inline(always)]
-    pub fn dup9(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup9.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP11 operation.
-    #[inline(always)]
-    pub fn dup11(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup11.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP13 operation.
-    #[inline(always)]
-    pub fn dup13(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup13.op_code())].clone()
-    }
-
-    /// Operation Flag of DUP15 operation.
-    #[inline(always)]
-    pub fn dup15(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Dup15.op_code())].clone()
-    }
-
-    /// Operation Flag of ADVPOP operation.
-    #[inline(always)]
-    #[allow(dead_code)]
-    pub fn advpop(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::AdvPop.op_code())].clone()
-    }
-
-    /// Operation Flag of SDEPTH operation.
-    #[inline(always)]
-    pub fn sdepth(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::SDepth.op_code())].clone()
-    }
-
-    /// Operation Flag of CLK operation.
-    #[inline(always)]
-    pub fn clk(&self) -> E {
-        self.degree7_op_flags[get_op_index(Operation::Clk.op_code())].clone()
-    }
+    op_flag_getters!(degree7_op_flags,
+        /// Operation Flag of NOOP operation.
+        #[allow(dead_code)]
+        noop => Operation::Noop,
+        /// Operation Flag of EQZ operation.
+        eqz => Operation::Eqz,
+        /// Operation Flag of NEG operation.
+        neg => Operation::Neg,
+        /// Operation Flag of INV operation.
+        inv => Operation::Inv,
+        /// Operation Flag of INCR operation.
+        incr => Operation::Incr,
+        /// Operation Flag of NOT operation.
+        not => Operation::Not,
+        /// Operation Flag of MLOAD operation.
+        mload => Operation::MLoad,
+        /// Operation Flag of SWAP operation.
+        swap => Operation::Swap,
+        /// Operation Flag of CALLER operation.
+        ///
+        /// CALLER overwrites the top 4 stack elements with the hash of the function
+        /// that initiated the current SYSCALL.
+        caller => Operation::Caller,
+        /// Operation Flag of MOVUP2 operation.
+        movup2 => Operation::MovUp2,
+        /// Operation Flag of MOVDN2 operation.
+        movdn2 => Operation::MovDn2,
+        /// Operation Flag of MOVUP3 operation.
+        movup3 => Operation::MovUp3,
+        /// Operation Flag of MOVDN3 operation.
+        movdn3 => Operation::MovDn3,
+        /// Operation Flag of ADVPOPW operation.
+        #[allow(dead_code)]
+        advpopw => Operation::AdvPopW,
+        /// Operation Flag of EXPACC operation.
+        expacc => Operation::Expacc,
+        /// Operation Flag of MOVUP4 operation.
+        movup4 => Operation::MovUp4,
+        /// Operation Flag of MOVDN4 operation.
+        movdn4 => Operation::MovDn4,
+        /// Operation Flag of MOVUP5 operation.
+        movup5 => Operation::MovUp5,
+        /// Operation Flag of MOVDN5 operation.
+        movdn5 => Operation::MovDn5,
+        /// Operation Flag of MOVUP6 operation.
+        movup6 => Operation::MovUp6,
+        /// Operation Flag of MOVDN6 operation.
+        movdn6 => Operation::MovDn6,
+        /// Operation Flag of MOVUP7 operation.
+        movup7 => Operation::MovUp7,
+        /// Operation Flag of MOVDN7 operation.
+        movdn7 => Operation::MovDn7,
+        /// Operation Flag of SWAPW operation.
+        swapw => Operation::SwapW,
+        /// Operation Flag of MOVUP8 operation.
+        movup8 => Operation::MovUp8,
+        /// Operation Flag of MOVDN8 operation.
+        movdn8 => Operation::MovDn8,
+        /// Operation Flag of SWAPW2 operation.
+        swapw2 => Operation::SwapW2,
+        /// Operation Flag of SWAPW3 operation.
+        swapw3 => Operation::SwapW3,
+        /// Operation Flag of SWAPDW operation.
+        swapdw => Operation::SwapDW,
+        /// Operation Flag of EXT2MUL operation.
+        ext2mul => Operation::Ext2Mul,
+        /// Operation Flag of ASSERT operation.
+        assert_op => Operation::Assert(miden_core::ZERO),
+        /// Operation Flag of EQ operation.
+        eq => Operation::Eq,
+        /// Operation Flag of ADD operation.
+        add => Operation::Add,
+        /// Operation Flag of MUL operation.
+        mul => Operation::Mul,
+        /// Operation Flag of AND operation.
+        and => Operation::And,
+        /// Operation Flag of OR operation.
+        or => Operation::Or,
+        /// Operation Flag of U32AND operation.
+        u32and => Operation::U32and,
+        /// Operation Flag of U32XOR operation.
+        u32xor => Operation::U32xor,
+        /// Operation Flag of DROP operation.
+        #[allow(dead_code)]
+        drop => Operation::Drop,
+        /// Operation Flag of CSWAP operation.
+        cswap => Operation::CSwap,
+        /// Operation Flag of CSWAPW operation.
+        cswapw => Operation::CSwapW,
+        /// Operation Flag of MLOADW operation.
+        mloadw => Operation::MLoadW,
+        /// Operation Flag of MSTORE operation.
+        mstore => Operation::MStore,
+        /// Operation Flag of MSTOREW operation.
+        mstorew => Operation::MStoreW,
+        /// Operation Flag of PAD operation.
+        pad => Operation::Pad,
+        /// Operation Flag of DUP operation.
+        dup => Operation::Dup0,
+        /// Operation Flag of DUP1 operation.
+        dup1 => Operation::Dup1,
+        /// Operation Flag of DUP2 operation.
+        dup2 => Operation::Dup2,
+        /// Operation Flag of DUP3 operation.
+        dup3 => Operation::Dup3,
+        /// Operation Flag of DUP4 operation.
+        dup4 => Operation::Dup4,
+        /// Operation Flag of DUP5 operation.
+        dup5 => Operation::Dup5,
+        /// Operation Flag of DUP6 operation.
+        dup6 => Operation::Dup6,
+        /// Operation Flag of DUP7 operation.
+        dup7 => Operation::Dup7,
+        /// Operation Flag of DUP9 operation.
+        dup9 => Operation::Dup9,
+        /// Operation Flag of DUP11 operation.
+        dup11 => Operation::Dup11,
+        /// Operation Flag of DUP13 operation.
+        dup13 => Operation::Dup13,
+        /// Operation Flag of DUP15 operation.
+        dup15 => Operation::Dup15,
+        /// Operation Flag of ADVPOP operation.
+        #[allow(dead_code)]
+        advpop => Operation::AdvPop,
+        /// Operation Flag of SDEPTH operation.
+        sdepth => Operation::SDepth,
+        /// Operation Flag of CLK operation.
+        clk => Operation::Clk,
+    );
 
     // ------ Degree 6 u32 operations  ------------------------------------------------------------
 
-    /// Operation Flag of U32ADD operation.
-    #[inline(always)]
-    pub fn u32add(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32add.op_code())].clone()
-    }
-
-    /// Operation Flag of U32SUB operation.
-    #[inline(always)]
-    pub fn u32sub(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32sub.op_code())].clone()
-    }
-
-    /// Operation Flag of U32MUL operation.
-    #[inline(always)]
-    pub fn u32mul(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32mul.op_code())].clone()
-    }
-
-    /// Operation Flag of U32DIV operation.
-    #[inline(always)]
-    pub fn u32div(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32div.op_code())].clone()
-    }
-
-    /// Operation Flag of U32SPLIT operation.
-    #[inline(always)]
-    pub fn u32split(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32split.op_code())].clone()
-    }
-
-    /// Operation Flag of U32ASSERT2 operation.
-    #[inline(always)]
-    pub fn u32assert2(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32assert2(miden_core::ZERO).op_code())]
-            .clone()
-    }
-
-    /// Operation Flag of U32ADD3 operation.
-    #[inline(always)]
-    pub fn u32add3(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32add3.op_code())].clone()
-    }
-
-    /// Operation Flag of U32MADD operation.
-    #[inline(always)]
-    pub fn u32madd(&self) -> E {
-        self.degree6_op_flags[get_op_index(Operation::U32madd.op_code())].clone()
-    }
+    op_flag_getters!(degree6_op_flags,
+        /// Operation Flag of U32ADD operation.
+        u32add => Operation::U32add,
+        /// Operation Flag of U32SUB operation.
+        u32sub => Operation::U32sub,
+        /// Operation Flag of U32MUL operation.
+        u32mul => Operation::U32mul,
+        /// Operation Flag of U32DIV operation.
+        u32div => Operation::U32div,
+        /// Operation Flag of U32SPLIT operation.
+        u32split => Operation::U32split,
+        /// Operation Flag of U32ASSERT2 operation.
+        u32assert2 => Operation::U32assert2(miden_core::ZERO),
+        /// Operation Flag of U32ADD3 operation.
+        u32add3 => Operation::U32add3,
+        /// Operation Flag of U32MADD operation.
+        u32madd => Operation::U32madd,
+    );
 
     // ------ Degree 5 operations  ----------------------------------------------------------------
 
-    /// Operation Flag of HPERM operation.
-    #[inline(always)]
-    pub fn hperm(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::HPerm.op_code())].clone()
-    }
-
-    /// Operation Flag of MPVERIFY operation.
-    #[inline(always)]
-    pub fn mpverify(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::MpVerify(miden_core::ZERO).op_code())].clone()
-    }
-
-    /// Operation Flag of SPLIT operation.
-    #[inline(always)]
-    pub fn split(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Split.op_code())].clone()
-    }
-
-    /// Operation Flag of LOOP operation.
-    #[inline(always)]
-    pub fn loop_op(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Loop.op_code())].clone()
-    }
-
-    /// Operation Flag of SPAN operation.
-    #[inline(always)]
-    pub fn span(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Span.op_code())].clone()
-    }
-
-    /// Operation Flag of JOIN operation.
-    #[inline(always)]
-    pub fn join(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Join.op_code())].clone()
-    }
+    op_flag_getters!(degree5_op_flags,
+        /// Operation Flag of HPERM operation.
+        hperm => Operation::HPerm,
+        /// Operation Flag of MPVERIFY operation.
+        mpverify => Operation::MpVerify(miden_core::ZERO),
+        /// Operation Flag of SPLIT operation.
+        split => Operation::Split,
+        /// Operation Flag of LOOP operation.
+        loop_op => Operation::Loop,
+        /// Operation Flag of SPAN operation.
+        span => Operation::Span,
+        /// Operation Flag of JOIN operation.
+        join => Operation::Join,
+        /// Operation Flag of PUSH operation.
+        push => Operation::Push(miden_core::ONE),
+        /// Operation Flag of DYN operation.
+        dyn_op => Operation::Dyn,
+        /// Operation Flag of DYNCALL operation.
+        dyncall => Operation::Dyncall,
+        /// Operation Flag of EVALCIRCUIT operation.
+        evalcircuit => Operation::EvalCircuit,
+        /// Operation Flag of LOG_PRECOMPILE operation.
+        log_precompile => Operation::LogPrecompile,
+        /// Operation Flag of HORNERBASE operation.
+        hornerbase => Operation::HornerBase,
+        /// Operation Flag of HORNEREXT operation.
+        hornerext => Operation::HornerExt,
+        /// Operation Flag of MSTREAM operation.
+        mstream => Operation::MStream,
+        /// Operation Flag of PIPE operation.
+        pipe => Operation::Pipe,
+    );
 
     // ------ Degree 4 operations  ----------------------------------------------------------------
 
-    /// Operation Flag of MRUPDATE operation.
-    #[inline(always)]
-    pub fn mrupdate(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::MrUpdate.op_code())].clone()
-    }
-
-    /// Operation Flag of PUSH operation.
-    #[inline(always)]
-    pub fn push(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Push(miden_core::ONE).op_code())].clone()
-    }
-
-    /// Operation Flag of CALL operation.
-    #[inline(always)]
-    pub fn call(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::Call.op_code())].clone()
-    }
-
-    /// Operation Flag of SYSCALL operation.
-    #[inline(always)]
-    pub fn syscall(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::SysCall.op_code())].clone()
-    }
-
-    /// Operation Flag of DYN operation.
-    #[inline(always)]
-    pub fn dyn_op(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Dyn.op_code())].clone()
-    }
-
-    /// Operation Flag of DYNCALL operation.
-    #[inline(always)]
-    pub fn dyncall(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Dyncall.op_code())].clone()
-    }
-
-    /// Operation Flag of END operation.
-    #[inline(always)]
-    pub fn end(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::End.op_code())].clone()
-    }
-
-    /// Operation Flag of REPEAT operation.
-    #[inline(always)]
-    pub fn repeat(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::Repeat.op_code())].clone()
-    }
-
-    /// Operation Flag of RESPAN operation.
-    #[inline(always)]
-    pub fn respan(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::Respan.op_code())].clone()
-    }
-
-    /// Operation Flag of HALT operation.
-    #[inline(always)]
-    pub fn halt(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::Halt.op_code())].clone()
-    }
-
-    /// Operation Flag of CRYPTOSTREAM operation.
-    #[inline(always)]
-    pub fn cryptostream(&self) -> E {
-        self.degree4_op_flags[get_op_index(Operation::CryptoStream.op_code())].clone()
-    }
-
-    /// Operation Flag of EVALCIRCUIT operation.
-    #[inline(always)]
-    pub fn evalcircuit(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::EvalCircuit.op_code())].clone()
-    }
-
-    /// Operation Flag of LOG_PRECOMPILE operation.
-    #[inline(always)]
-    pub fn log_precompile(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::LogPrecompile.op_code())].clone()
-    }
-
-    /// Operation Flag of HORNERBASE operation.
-    #[inline(always)]
-    pub fn hornerbase(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::HornerBase.op_code())].clone()
-    }
-
-    /// Operation Flag of HORNEREXT operation.
-    #[inline(always)]
-    pub fn hornerext(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::HornerExt.op_code())].clone()
-    }
-
-    /// Operation Flag of MSTREAM operation.
-    #[inline(always)]
-    pub fn mstream(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::MStream.op_code())].clone()
-    }
-
-    /// Operation Flag of PIPE operation.
-    #[inline(always)]
-    pub fn pipe(&self) -> E {
-        self.degree5_op_flags[get_op_index(Operation::Pipe.op_code())].clone()
-    }
+    op_flag_getters!(degree4_op_flags,
+        /// Operation Flag of MRUPDATE operation.
+        mrupdate => Operation::MrUpdate,
+        /// Operation Flag of CALL operation.
+        call => Operation::Call,
+        /// Operation Flag of SYSCALL operation.
+        syscall => Operation::SysCall,
+        /// Operation Flag of END operation.
+        end => Operation::End,
+        /// Operation Flag of REPEAT operation.
+        repeat => Operation::Repeat,
+        /// Operation Flag of RESPAN operation.
+        respan => Operation::Respan,
+        /// Operation Flag of HALT operation.
+        halt => Operation::Halt,
+        /// Operation Flag of CRYPTOSTREAM operation.
+        cryptostream => Operation::CryptoStream,
+    );
 
     // ------ Composite Flags ---------------------------------------------------------------------
 

@@ -11,20 +11,20 @@
 //!
 //! ## Context Transitions
 //!
-//! | Operation | ctx' | Description |
-//! |-----------|------|-------------|
-//! | CALL/DYNCALL | clk + 1 | Create new context |
-//! | SYSCALL | 0 | Return to kernel context |
-//! | END | (from block stack) | Restore previous context |
-//! | Others | ctx | Unchanged |
+//! | Operation           | ctx'              | Description               |
+//! |---------------------|-------------------|---------------------------|
+//! | CALL or DYNCALL     | clk + 1           | Create new context        |
+//! | SYSCALL             | 0                 | Return to kernel context  |
+//! | END                 | (from block stack)| Restore previous context  |
+//! | Other ops           | ctx               | Unchanged                 |
 //!
 //! ## Function Hash Transitions
 //!
-//! | Operation | fn_hash' | Description |
-//! |-----------|----------|-------------|
-//! | CALL/DYNCALL | decoder_h[0..4] | Load new procedure hash |
-//! | END | (from block stack) | Restore previous hash |
-//! | Others | fn_hash | Unchanged (including DYN, SYSCALL) |
+//! | Operation                          | fn_hash'           | Description                 |
+//! |------------------------------------|--------------------|-----------------------------|
+//! | CALL or DYNCALL                    | decoder_h[0..4]    | Load new procedure hash     |
+//! | END                                | (from block stack) | Restore previous hash       |
+//! | Other ops (incl. DYN, SYSCALL)     | fn_hash            | Unchanged                   |
 //!
 //! Note: END operation's restoration is handled by the block stack table (bus-based),
 //! not by these constraints. These constraints only handle the non-END cases.
