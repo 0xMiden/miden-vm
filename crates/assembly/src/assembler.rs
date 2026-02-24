@@ -211,7 +211,12 @@ impl Assembler {
         use miden_assembly_syntax::parser;
 
         let namespace = namespace.as_ref();
-        let modules = parser::read_modules_from_dir(dir, namespace, self.source_manager.clone())?;
+        let modules = parser::read_modules_from_dir(
+            dir,
+            namespace,
+            self.source_manager.clone(),
+            self.warnings_as_errors,
+        )?;
         self.linker.link_modules(modules)?;
         Ok(())
     }
@@ -402,7 +407,8 @@ impl Assembler {
         let namespace = namespace.as_ref();
 
         let source_manager = self.source_manager.clone();
-        let modules = parser::read_modules_from_dir(dir, namespace, source_manager)?;
+        let modules =
+            parser::read_modules_from_dir(dir, namespace, source_manager, self.warnings_as_errors)?;
         self.assemble_library(modules)
     }
 

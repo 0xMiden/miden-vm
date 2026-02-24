@@ -1,15 +1,10 @@
 # Changelog
+
 ## 0.21.2 (2026-02-24)
 
-#### Changes
-
+- Updated `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
 - Updated `sorted_array::find_half_key_value` to use little-endian ordering ([#2734](https://github.com/0xMiden/miden-vm/pull/2734)).
-
-## 0.21.2 (TBD)
-
-#### Changes
-
-- Update `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
+- Fixed `Assembler::warnings_as_errors` not being propagated in some methods ([#2737](https://github.com/0xMiden/miden-vm/pull/2737)).
 
 ## 0.21.1 (2026-02-17)
 
