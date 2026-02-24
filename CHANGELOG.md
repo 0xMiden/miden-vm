@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.21.2 (2026-02-24)
+
+#### Changes
+
+- Fix `Assembler::warnings_as_errors` not being propagated in some methods ([#2737](https://github.com/0xMiden/miden-vm/pull/2737)).
+
 ## 0.21.1 (2026-02-17)
 
 #### Changes
