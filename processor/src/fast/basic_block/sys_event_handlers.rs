@@ -223,11 +223,11 @@ fn insert_hperm_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemE
 ///
 /// ```text
 /// Inputs:
-///   Operand stack: [event_id, RIGHT_ROOT, LEFT_ROOT, ...]
-///   Merkle store: {RIGHT_ROOT, LEFT_ROOT}
+///   Operand stack: [event_id, LEFT_ROOT, RIGHT_ROOT, ...]
+///   Merkle store: {LEFT_ROOT, RIGHT_ROOT}
 ///
 /// Outputs:
-///   Merkle store: {RIGHT_ROOT, LEFT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
+///   Merkle store: {LEFT_ROOT, RIGHT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
 /// ```
 ///
 /// After the operation, both the original trees and the new tree remains in the advice
@@ -236,8 +236,8 @@ fn insert_hperm_into_adv_map(process: &mut ProcessorState) -> Result<(), SystemE
 /// It is not checked whether the provided roots exist as Merkle trees in the advice provider.
 fn merge_merkle_nodes(process: &mut ProcessorState) -> Result<(), SystemEventError> {
     // fetch the arguments from the stack
-    let lhs = process.get_stack_word(5);
-    let rhs = process.get_stack_word(1);
+    let lhs = process.get_stack_word(1);
+    let rhs = process.get_stack_word(5);
 
     // perform the merge
     process.advice_provider_mut().merge_roots(lhs, rhs)?;

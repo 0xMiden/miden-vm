@@ -27,12 +27,12 @@ pub enum SystemEvent {
     /// specified roots. The root of the new tree is defined as `Hash(LEFT_ROOT, RIGHT_ROOT)`.
     ///
     /// Inputs:
-    ///   Operand stack: [RIGHT_ROOT, LEFT_ROOT, ...]
-    ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT}
+    ///   Operand stack: [LEFT_ROOT, RIGHT_ROOT, ...]
+    ///   Merkle store: {LEFT_ROOT, RIGHT_ROOT}
     ///
     /// Outputs:
-    ///   Operand stack: [RIGHT_ROOT, LEFT_ROOT, ...]
-    ///   Merkle store: {RIGHT_ROOT, LEFT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
+    ///   Operand stack: [LEFT_ROOT, RIGHT_ROOT, ...]
+    ///   Merkle store: {LEFT_ROOT, RIGHT_ROOT, hash(LEFT_ROOT, RIGHT_ROOT)}
     ///
     /// After the operation, both the original trees and the new tree remains in the advice
     /// provider (i.e., the input trees are not removed).
@@ -238,25 +238,25 @@ pub enum SystemEvent {
     /// defined by the hash of these words.
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, ...]
+    ///   Operand stack: [A, B, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
-    ///   Operand stack: [B, A, ...]
+    ///   Operand stack: [A, B, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
-    /// Where KEY is computed as hash(A || B, domain=0)
+    /// Where KEY is computed as hash(A || B, domain=0).
     HdwordToMap,
 
     /// Reads two words from the operand stack and inserts them into the advice map under the key
     /// defined by the hash of these words (using `d` as the domain).
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, d, ...]
+    ///   Operand stack: [A, B, d, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
-    ///   Operand stack: [B, A, d, ...]
+    ///   Operand stack: [A, B, d, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
     /// Where KEY is computed as hash(A || B, d).
@@ -266,28 +266,27 @@ pub enum SystemEvent {
     /// defined by the hash of these words.
     ///
     /// Inputs:
-    ///   Operand stack: [D, C, B, A, ...]
+    ///   Operand stack: [A, B, C, D, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
-    ///   Operand stack: [D, C, B, A, ...]
-    ///   Advice map: {KEY: [A', B', C', D'])}
+    ///   Operand stack: [A, B, C, D, ...]
+    ///   Advice map: {KEY: [A, B, C, D]} (16 elements)
     ///
     /// Where:
-    /// - KEY is the hash computed as hash(hash(hash(A || B) || C) || D) with domain=0.
-    /// - A' (and other words with `'`) is the A word with the reversed element order: A = [a3, a2,
-    ///   a1, a0], A' = [a0, a1, a2, a3].
+    /// - KEY is computed as hash_elements([A, B, C, D]) using the sponge construction (sequential
+    ///   absorption; two rounds for four words).
     HqwordToMap,
 
     /// Reads three words from the operand stack and inserts the top two words into the advice map
     /// under the key defined by applying a Poseidon2 permutation to all three words.
     ///
     /// Inputs:
-    ///   Operand stack: [B, A, C, ...]
+    ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {...}
     ///
     /// Outputs:
-    ///   Operand stack: [B, A, C, ...]
+    ///   Operand stack: [A, B, C, ...]
     ///   Advice map: {KEY: [a0, a1, a2, a3, b0, b1, b2, b3]}
     ///
     /// Where KEY is computed by extracting the digest elements from hperm([C, A, B]). For example,

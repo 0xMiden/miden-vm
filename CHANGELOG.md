@@ -6,6 +6,12 @@
 - Updated `sorted_array::find_half_key_value` to use little-endian ordering ([#2734](https://github.com/0xMiden/miden-vm/pull/2734)).
 - Fixed `Assembler::warnings_as_errors` not being propagated in some methods ([#2737](https://github.com/0xMiden/miden-vm/pull/2737)).
 
+## 0.21.2 (2026-02-24)
+
+#### Changes
+
+- Fixed `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).
+
 ## 0.21.1 (2026-02-17)
 
 #### Changes

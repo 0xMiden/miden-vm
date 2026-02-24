@@ -1,9 +1,10 @@
 use miden_core::WORD_SIZE;
 use miden_processor::advice::AdviceStackBuilder;
 use miden_utils_testing::{
-    EMPTY_WORD, Felt, ONE, Word, ZERO,
+    EMPTY_WORD, Felt, ONE, TRUNCATE_STACK_PROC, Word, ZERO,
     crypto::{
-        MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, init_merkle_leaf, init_merkle_leaves,
+        MerkleError, MerkleStore, MerkleTree, Mmr, NodeIndex, Poseidon2, init_merkle_leaf,
+        init_merkle_leaves,
     },
     felt_slice_to_ints, hash_elements,
 };
@@ -583,6 +584,68 @@ fn test_mmr_two() {
     expected_memory.extend(digests_to_ints(accumulator.peaks()));
 
     build_test!(&source).expect_stack_and_memory(&[], mmr_ptr, &expected_memory);
+}
+
+#[test]
+fn test_mmr_add_then_mtree_get() {
+    let mmr_ptr = 1000;
+
+    let leaves_a = init_merkle_leaves(&[1, 2, 3, 4, 5, 6, 7, 8]);
+    let leaves_b = init_merkle_leaves(&[9, 10, 11, 12, 13, 14, 15, 16]);
+    let tree_a = MerkleTree::new(leaves_a).unwrap();
+    let tree_b = MerkleTree::new(leaves_b).unwrap();
+    let root_a = tree_a.root();
+    let root_b = tree_b.root();
+    let merged_root = Poseidon2::merge(&[root_a, root_b]);
+
+    let mut store = MerkleStore::default();
+    store.extend(tree_a.inner_nodes());
+    store.extend(tree_b.inner_nodes());
+
+    let root_a_vals = word_to_ints(&root_a);
+    let root_b_vals = word_to_ints(&root_b);
+
+    let source = format!(
+        "
+        use miden::core::collections::mmr
+
+        {TRUNCATE_STACK_PROC}
+
+        begin
+            push.{mmr_ptr}
+            push.{}.{}.{}.{}
+            exec.mmr::add
+
+            push.{mmr_ptr}
+            push.{}.{}.{}.{}
+            exec.mmr::add
+
+            push.{mmr_ptr}
+            add.4
+            mem_loadw_le
+
+            push.0
+            push.1
+            mtree_get
+
+            exec.truncate_stack
+        end
+        ",
+        root_a_vals[3],
+        root_a_vals[2],
+        root_a_vals[1],
+        root_a_vals[0],
+        root_b_vals[3],
+        root_b_vals[2],
+        root_b_vals[1],
+        root_b_vals[0],
+    );
+
+    let mut expect_stack = word_to_ints(&root_a);
+    expect_stack.extend(word_to_ints(&merged_root));
+
+    let test = build_test!(&source, &[], &[], store);
+    test.expect_stack(&expect_stack);
 }
 
 #[test]
