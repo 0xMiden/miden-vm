@@ -116,7 +116,7 @@ pub trait Tracer {
     /// [Tracer::start_clock_cycle] is called on the resolved node (i.e. *not* the external node).
     /// This method is called on the external node before it is resolved, and hence is guaranteed to
     /// be called before [Tracer::start_clock_cycle] for clock cycles involving an external node.
-    fn record_mast_forest_resolution(&mut self, node_id: MastNodeId, forest: &Arc<MastForest>);
+    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {}
 
     // IN-CYCLE METHODS
     // --------------------------------------------------------------------------------------------
@@ -126,9 +126,10 @@ pub trait Tracer {
     /// Called by: `HPERM`, `LOG_PRECOMPILE`.
     fn record_hasher_permute(
         &mut self,
-        input_state: [Felt; STATE_WIDTH],
-        output_state: [Felt; STATE_WIDTH],
-    );
+        _input_state: [Felt; STATE_WIDTH],
+        _output_state: [Felt; STATE_WIDTH],
+    ) {
+    }
 
     /// Records the result of a call to `Hasher::build_merkle_root()`.
     ///
@@ -138,11 +139,12 @@ pub trait Tracer {
     /// Called by: `MPVERIFY`.
     fn record_hasher_build_merkle_root(
         &mut self,
-        node: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        output_root: Word,
-    );
+        _node: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _output_root: Word,
+    ) {
+    }
 
     /// Records the result of a call to `Hasher::update_merkle_root()`.
     ///
@@ -152,69 +154,88 @@ pub trait Tracer {
     /// Called by: `MRUPDATE`.
     fn record_hasher_update_merkle_root(
         &mut self,
-        old_value: Word,
-        new_value: Word,
-        path: Option<&MerklePath>,
-        index: Felt,
-        old_root: Word,
-        new_root: Word,
-    );
+        _old_value: Word,
+        _new_value: Word,
+        _path: Option<&MerklePath>,
+        _index: Felt,
+        _old_root: Word,
+        _new_root: Word,
+    ) {
+    }
 
     /// Records the element read from memory at the given address.
     ///
     /// Called by: `MLOAD`.
     fn record_memory_read_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the word read from memory at the given address.
     ///
     /// Called by: `MLOADW`, `HORNER_EVAL_EXT`, `DYN`.
-    fn record_memory_read_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
+    fn record_memory_read_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the element written to memory at the given address.
     ///
     /// Called by: `MSTORE`, `CALL` (non-syscall, for FMP initialization).
     fn record_memory_write_element(
         &mut self,
-        element: Felt,
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _element: Felt,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records the word written to memory at the given address.
     ///
     /// Called by: `MSTOREW`.
-    fn record_memory_write_word(&mut self, word: Word, addr: Felt, ctx: ContextId, clk: RowIndex);
+    fn record_memory_write_word(
+        &mut self,
+        _word: Word,
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records two element reads at the given addresses.
     ///
     /// Called by: `HORNER_EVAL_BASE`.
     fn record_memory_read_element_pair(
         &mut self,
-        element_0: Felt,
-        addr_0: Felt,
-        element_1: Felt,
-        addr_1: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _element_0: Felt,
+        _addr_0: Felt,
+        _element_1: Felt,
+        _addr_1: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records two consecutive word reads (a "dword" read) starting at the given address.
     ///
     /// Called by: `MSTREAM`.
     fn record_memory_read_dword(
         &mut self,
-        words: [Word; 2],
-        addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _words: [Word; 2],
+        _addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records a `DYNCALL`'s memory operations: reading the callee hash from memory and writing
     /// the initial FMP value to the new context's memory.
@@ -222,12 +243,13 @@ pub trait Tracer {
     /// Called by: `DYNCALL`.
     fn record_dyncall_memory(
         &mut self,
-        callee_hash: Word,
-        read_addr: Felt,
-        read_ctx: ContextId,
-        fmp_ctx: ContextId,
-        clk: RowIndex,
-    );
+        _callee_hash: Word,
+        _read_addr: Felt,
+        _read_ctx: ContextId,
+        _fmp_ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records a `CRYPTO_STREAM` operation: reading 2 plaintext words from source memory and
     /// writing 2 ciphertext words to destination memory.
@@ -235,57 +257,58 @@ pub trait Tracer {
     /// Called by: `CRYPTO_STREAM`.
     fn record_crypto_stream(
         &mut self,
-        plaintext: [Word; 2],
-        src_addr: Felt,
-        ciphertext: [Word; 2],
-        dst_addr: Felt,
-        ctx: ContextId,
-        clk: RowIndex,
-    );
+        _plaintext: [Word; 2],
+        _src_addr: Felt,
+        _ciphertext: [Word; 2],
+        _dst_addr: Felt,
+        _ctx: ContextId,
+        _clk: RowIndex,
+    ) {
+    }
 
     /// Records a `PIPE` operation: popping a dword from the advice stack and writing it to two
     /// consecutive memory words.
     ///
     /// Called by: `PIPE`.
-    fn record_pipe(&mut self, words: [Word; 2], addr: Felt, ctx: ContextId, clk: RowIndex);
+    fn record_pipe(&mut self, _words: [Word; 2], _addr: Felt, _ctx: ContextId, _clk: RowIndex) {}
 
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack] operation.
     ///
     /// Called by: `ADVPOP`.
-    fn record_advice_pop_stack(&mut self, value: Felt);
+    fn record_advice_pop_stack(&mut self, _value: Felt) {}
 
     /// Records the value returned by a [crate::host::advice::AdviceProvider::pop_stack_word]
     /// operation.
     ///
     /// Called by: `ADVPOPW`.
-    fn record_advice_pop_stack_word(&mut self, word: Word);
+    fn record_advice_pop_stack_word(&mut self, _word: Word) {}
 
     /// Records the operands of a u32and operation.
     ///
     /// Called by: `U32AND`.
-    fn record_u32and(&mut self, a: Felt, b: Felt);
+    fn record_u32and(&mut self, _a: Felt, _b: Felt) {}
 
     /// Records the operands of a u32xor operation.
     ///
     /// Called by: `U32XOR`.
-    fn record_u32xor(&mut self, a: Felt, b: Felt);
+    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {}
 
     /// Records the high and low 32-bit limbs of the result of a u32 operation for the purposes of
     /// the range checker. This is expected to result in four 16-bit range checks.
     ///
     /// Called by: `U32SPLIT`, `U32ADD`, `U32ADD3`, `U32SUB`, `U32MUL`, `U32MADD`, `U32DIV`,
     /// `U32ASSERT2`.
-    fn record_u32_range_checks(&mut self, clk: RowIndex, u32_lo: Felt, u32_hi: Felt);
+    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {}
 
     /// Records the procedure hash of a syscall.
     ///
     /// Called by: `SYSCALL`.
-    fn record_kernel_proc_access(&mut self, proc_hash: Word);
+    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {}
 
     /// Records the evaluation of a circuit.
     ///
     /// Called by: `EVAL_CIRCUIT`.
-    fn record_circuit_evaluation(&mut self, circuit_evaluation: CircuitEvaluation);
+    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {}
 }
 
 // OPERATION HELPER REGISTERS

@@ -5,13 +5,9 @@ use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use core::cell::Cell;
 use core::{cmp::min, ops::ControlFlow};
 
-use miden_air::{
-    Felt,
-    trace::{RowIndex, chiplets::hasher::STATE_WIDTH},
-};
+use miden_air::{Felt, trace::RowIndex};
 use miden_core::{
     EMPTY_WORD, WORD_SIZE, Word, ZERO,
-    crypto::merkle::MerklePath,
     mast::{MastForest, MastNodeExt, MastNodeId},
     operations::Decorator,
     precompile::PrecompileTranscript,
@@ -29,10 +25,7 @@ use crate::{
         InternalBreakReason, execute_impl, finish_emit_op_execution,
         finish_load_mast_forest_from_dyn_start, finish_load_mast_forest_from_external,
     },
-    trace::{
-        chiplets::CircuitEvaluation,
-        execution_tracer::{ExecutionTracer, TraceGenerationContext},
-    },
+    trace::execution_tracer::{ExecutionTracer, TraceGenerationContext},
     tracer::{OperationHelperRegisters, Tracer},
 };
 
@@ -1025,177 +1018,6 @@ impl Tracer for NoopTracer {
         _continuation_stack: &ContinuationStack,
         _current_forest: &Arc<MastForest>,
     ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_mast_forest_resolution(&mut self, _node_id: MastNodeId, _forest: &Arc<MastForest>) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_permute(
-        &mut self,
-        _input_state: [Felt; STATE_WIDTH],
-        _output_state: [Felt; STATE_WIDTH],
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_build_merkle_root(
-        &mut self,
-        _node: Word,
-        _path: Option<&MerklePath>,
-        _index: Felt,
-        _output_root: Word,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_hasher_update_merkle_root(
-        &mut self,
-        _old_node: Word,
-        _new_node: Word,
-        _path: Option<&MerklePath>,
-        _index: Felt,
-        _old_root: Word,
-        _new_root: Word,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_element(
-        &mut self,
-        _element: Felt,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_word(
-        &mut self,
-        _word: Word,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_write_element(
-        &mut self,
-        _element: Felt,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_write_word(
-        &mut self,
-        _word: Word,
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_element_pair(
-        &mut self,
-        _element_0: Felt,
-        _addr_0: Felt,
-        _element_1: Felt,
-        _addr_1: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_memory_read_dword(
-        &mut self,
-        _words: [Word; 2],
-        _addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_dyncall_memory(
-        &mut self,
-        _callee_hash: Word,
-        _read_addr: Felt,
-        _read_ctx: ContextId,
-        _fmp_ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_crypto_stream(
-        &mut self,
-        _plaintext: [Word; 2],
-        _src_addr: Felt,
-        _ciphertext: [Word; 2],
-        _dst_addr: Felt,
-        _ctx: ContextId,
-        _clk: RowIndex,
-    ) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_pipe(&mut self, _words: [Word; 2], _addr: Felt, _ctx: ContextId, _clk: RowIndex) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_advice_pop_stack(&mut self, _value: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_advice_pop_stack_word(&mut self, _word: Word) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32and(&mut self, _a: Felt, _b: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32xor(&mut self, _a: Felt, _b: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_u32_range_checks(&mut self, _clk: RowIndex, _u32_lo: Felt, _u32_hi: Felt) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_kernel_proc_access(&mut self, _proc_hash: Word) {
-        // do nothing
-    }
-
-    #[inline(always)]
-    fn record_circuit_evaluation(&mut self, _circuit_evaluation: CircuitEvaluation) {
         // do nothing
     }
 
