@@ -397,6 +397,7 @@ impl Parse for &std::path::Path {
             .into_diagnostic()
             .wrap_err("source manager is unable to load file")?;
         let mut parser = Module::parser(options.kind);
+        parser.set_warnings_as_errors(options.warnings_as_errors);
         parser.parse(path, source_file, source_manager)
     }
 }
