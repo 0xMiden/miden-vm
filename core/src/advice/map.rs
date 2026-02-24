@@ -188,7 +188,6 @@ impl Deserializable for AdviceMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::field::PrimeCharacteristicRing;
 
     #[test]
     fn test_advice_map_serialization() {

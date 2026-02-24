@@ -1,4 +1,4 @@
-use crate::{Felt, field::PrimeField64};
+use crate::Felt;
 
 mod inputs;
 pub use inputs::{InputError, StackInputs};

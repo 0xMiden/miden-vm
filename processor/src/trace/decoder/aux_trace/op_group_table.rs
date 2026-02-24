@@ -3,12 +3,12 @@ use miden_air::trace::{
     decoder::{OP_BATCH_2_GROUPS, OP_BATCH_4_GROUPS, OP_BATCH_8_GROUPS},
 };
 use miden_core::{
-    field::{ExtensionField, PrimeCharacteristicRing},
+    field::ExtensionField,
     operations::{OPCODE_PUSH, OPCODE_RESPAN, OPCODE_SPAN},
 };
 
 use super::{AuxColumnBuilder, Felt, MainTrace, ONE};
-use crate::{PrimeField64, debug::BusDebugger};
+use crate::debug::BusDebugger;
 
 // OP GROUP TABLE COLUMN
 // ================================================================================================

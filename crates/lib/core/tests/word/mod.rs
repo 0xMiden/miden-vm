@@ -1,6 +1,6 @@
 use core::cmp::Ordering;
 
-use miden_core::{Felt, LexicographicWord, Word, field::PrimeField64};
+use miden_core::{Felt, LexicographicWord, Word};
 use miden_utils_testing::rand;
 use num::Integer;
 use rstest::rstest;

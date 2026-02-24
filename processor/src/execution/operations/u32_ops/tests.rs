@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt, ZERO,
-    field::PrimeCharacteristicRing,
     program::{MIN_STACK_DEPTH, StackInputs},
 };
 use proptest::prelude::*;

@@ -4,7 +4,7 @@ use miden_air::trace::{RowIndex, chiplets::hasher::STATE_WIDTH, decoder::NUM_USE
 use miden_core::{
     Felt, Word, ZERO,
     crypto::merkle::MerklePath,
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, QuadFelt},
     mast::{MastForest, MastNodeId},
 };
 

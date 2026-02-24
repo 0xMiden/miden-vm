@@ -1,6 +1,5 @@
 use alloc::string::String;
 
-use miden_core::field::PrimeCharacteristicRing;
 use rstest::fixture;
 
 use super::*;

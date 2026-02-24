@@ -2,7 +2,6 @@ use alloc::vec::Vec;
 
 use miden_core::{
     Felt,
-    field::PrimeCharacteristicRing,
     mast::{BasicBlockNodeBuilder, DecoratorId, MastForest, MastForestContributor},
     operations::{Decorator, Operation},
     program::StackInputs,

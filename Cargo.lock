@@ -1299,9 +1299,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto"
-version = "0.22.2"
+version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8072201571ec2a69f6ed786929b6e6d185418cdde20cb1b224f6deafe0ca2724"
+checksum = "3cfbecd3d91ece4489b78ca2ea67b31a7b635164285c1a828b7386d691c7ec72"
 dependencies = [
  "blake3",
  "cc",
@@ -1314,6 +1314,7 @@ dependencies = [
  "hkdf",
  "k256",
  "miden-crypto-derive",
+ "miden-field",
  "miden-serde-utils",
  "num",
  "num-complex",
@@ -1348,9 +1349,9 @@ dependencies = [
 
 [[package]]
 name = "miden-crypto-derive"
-version = "0.22.2"
+version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d245d64fcb3d146afefab0e825a67d3de3eb49fca43cc7e4d94c897d5415a8f8"
+checksum = "ab6757c8a32e2e42e95ee39ca21d1f362c099cf938f482f69ba518771b773222"
 dependencies = [
  "quote",
  "syn 2.0.114",
@@ -1369,6 +1370,23 @@ dependencies = [
  "paste",
  "serde",
  "serde_spanned",
+ "thiserror",
+]
+
+[[package]]
+name = "miden-field"
+version = "0.22.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "764dd20d71bf30c09981d6223963d3d633956e9dc252932540c089f94dee5981"
+dependencies = [
+ "miden-serde-utils",
+ "num-bigint",
+ "p3-challenger",
+ "p3-field",
+ "p3-goldilocks",
+ "paste",
+ "rand",
+ "serde",
  "thiserror",
 ]
 
@@ -1473,9 +1491,9 @@ dependencies = [
 
 [[package]]
 name = "miden-serde-utils"
-version = "0.22.2"
+version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fc82405e71b675c810673239ce891ad19ddbd59a99df629e177e8561408dba0"
+checksum = "1a8f83e29603783ff4effc90c3c56579cc979960ac2a647f05554dc27a7faf6a"
 dependencies = [
  "p3-field",
  "p3-goldilocks",

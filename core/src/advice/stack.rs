@@ -1,7 +1,7 @@
 use alloc::{collections::VecDeque, vec::Vec};
 
 use super::{AdviceInputs, AdviceMap};
-use crate::{Felt, Word, crypto::merkle::MerkleStore, field::PrimeField64};
+use crate::{Felt, Word, crypto::merkle::MerkleStore};
 
 // ADVICE STACK BUILDER
 // ================================================================================================

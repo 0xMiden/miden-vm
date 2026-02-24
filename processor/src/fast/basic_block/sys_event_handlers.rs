@@ -4,7 +4,7 @@ use miden_core::{
     Felt, WORD_SIZE, Word, ZERO,
     crypto::hash::Poseidon2,
     events::SystemEvent,
-    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, PrimeField64, QuadFelt},
+    field::{BasedVectorSpace, Field, PrimeCharacteristicRing, QuadFelt},
 };
 
 use crate::{MemoryError, ProcessorState, advice::AdviceError, errors::OperationError};

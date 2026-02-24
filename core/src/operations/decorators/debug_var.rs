@@ -1,7 +1,6 @@
 use alloc::{string::String, sync::Arc, vec::Vec};
 use core::{fmt, num::NonZeroU32};
 
-use miden_crypto::field::PrimeField64;
 use miden_debug_types::FileLineCol;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};

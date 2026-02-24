@@ -8,7 +8,6 @@ use miden_assembly_syntax::{
 };
 use miden_core::{
     Felt, WORD_SIZE, ZERO,
-    field::PrimeCharacteristicRing,
     mast::MastNodeId,
     operations::{Decorator, Operation},
 };

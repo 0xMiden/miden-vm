@@ -1,7 +1,6 @@
 use crate::{
     ExecutionError, Felt, ONE,
     errors::OperationError,
-    field::PrimeCharacteristicRing,
     mast::MastForest,
     processor::{Processor, StackInterface, SystemInterface},
     tracer::{OperationHelperRegisters, Tracer},

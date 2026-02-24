@@ -1,5 +1,3 @@
-use miden_core::field::PrimeCharacteristicRing;
-
 use super::*;
 
 #[test]

@@ -16,9 +16,8 @@ use super::{
     RangeChecker, TraceFragment,
 };
 use crate::{
-    ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, PrimeField64, WORD_SIZE, Word,
-    ZERO,
-    field::{Field, PrimeCharacteristicRing},
+    ContextId, EMPTY_WORD, Felt, MemoryAddress, MemoryError, ONE, WORD_SIZE, Word, ZERO,
+    field::Field,
 };
 
 mod segment;

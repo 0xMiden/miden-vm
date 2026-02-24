@@ -17,14 +17,14 @@ use miden_air::trace::{
 };
 use miden_core::{
     Felt, ONE, ZERO,
-    field::{ExtensionField, PrimeCharacteristicRing},
+    field::ExtensionField,
     operations::{OPCODE_CALL, OPCODE_JOIN, OPCODE_LOOP, OPCODE_SPLIT},
     utils::range,
 };
 
 use super::get_op_label;
 use crate::{
-    PrimeField64, Word,
+    Word,
     debug::{BusDebugger, BusMessage},
     trace::chiplets::aux_trace::build_value,
 };

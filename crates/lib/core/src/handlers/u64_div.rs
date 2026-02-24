@@ -9,7 +9,6 @@ use miden_processor::{
     ProcessorState,
     advice::AdviceMutation,
     event::{EventError, EventName},
-    field::PrimeField64,
 };
 
 use crate::handlers::u64_to_u32_elements;
