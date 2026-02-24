@@ -169,7 +169,7 @@ To make sure stack depth column $b_0$ is updated correctly, we need to impose th
 | --------------------------- | ---------------- | -------------------------------------------------------------------------------------------------------------------- |
 | $f_{shr}=1$                 | $b'_0 = b_0 + 1$ | When the stack is shifted to the right, stack depth should be incremented by $1$.                                    |
 | $f_{shl}=1$ <br /> $f_{ov}=1$ | $b'_0 = b_0 - 1$ | When the stack is shifted to the left and the overflow table is not empty, stack depth should be decremented by $1$. |
-| $f_{enter}=1$               | $b'_0 = 16$      | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the visible window.                                        |
+| $f_{enter}=1$               | $b'_0 = 16$      | On CALL/SYSCALL/DYNCALL entry, the stack depth resets to the accessible top 16 positions.                          |
 | otherwise                   | $b'_0 = b_0$     | In all other cases, stack depth should not change.                                                                   |
 
 For non-call rows (no CALL/SYSCALL/DYNCALL entry and no END-of-call), we can combine the shift
