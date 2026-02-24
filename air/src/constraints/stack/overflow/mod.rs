@@ -1,8 +1,8 @@
 //! Stack overflow constraints.
 //!
 //! This module contains constraints for the stack overflow table bookkeeping columns.
-//! The stack overflow table tracks items that have "overflowed" below the visible 16-element
-//! stack window.
+//! The stack overflow table tracks items that have "overflowed" below the accessible portion
+//! of the operand stack (the top 16 positions).
 //!
 //! ## Columns
 //!
