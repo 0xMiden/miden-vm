@@ -86,7 +86,8 @@ pub fn enforce_main<AB>(
     //                    + left_shift[i+1] * current[i+1]
     //                    + right_shift[i-1] * current[i-1]
     //
-    // Where flag_sum is the sum of applicable flags for that position.
+    // where flag_sum is the sum of applicable flags for that position.
+
     // Position 0: no right shift (new value pushed instead)
     // next[0] * flag_sum = no_shift[0] * current[0] + left_shift[1] * current[1]
     {
@@ -100,7 +101,7 @@ pub fn enforce_main<AB>(
         });
     }
 
-    // Positions 1-14: all three shift types possible
+    // Positions 1-14: all three shift types possible.
     for (i, &namespace) in STACK_GENERAL_NAMES.iter().enumerate().take(15).skip(1) {
         let flag_sum = op_flags.no_shift_at(i)
             + op_flags.left_shift_at(i + 1)
