@@ -31,7 +31,10 @@ use miden_crypto::stark::air::MidenAirBuilder;
 
 use crate::{
     MainTraceRow,
-    constraints::{op_flags::OpFlags, tagging::TaggingAirBuilderExt},
+    constraints::{
+        op_flags::OpFlags,
+        tagging::{TaggingAirBuilderExt, manifest::TAG_STACK_OVERFLOW_BASE},
+    },
     trace::{
         decoder::{IS_CALL_FLAG_COL_IDX, IS_SYSCALL_FLAG_COL_IDX},
         stack::{B0_COL_IDX, B1_COL_IDX},
@@ -41,23 +44,10 @@ use crate::{
 // CONSTANTS
 // ================================================================================================
 
-/// The number of overflow constraints.
-#[allow(dead_code)]
-pub const NUM_CONSTRAINTS: usize = 4;
-
-/// The degrees of the overflow constraints.
-#[allow(dead_code)]
-pub const CONSTRAINT_DEGREES: [usize; NUM_CONSTRAINTS] = [
-    7, // Stack depth transition constraint
-    3, // Overflow flag constraint
-    7, // Overflow index constraint (right shift)
-    8, // Last stack item constraint (left shift at depth 16)
-];
-
 /// Base tag ID for stack overflow constraints.
-const STACK_OVERFLOW_BASE_ID: usize = 32;
+const STACK_OVERFLOW_BASE_ID: usize = TAG_STACK_OVERFLOW_BASE;
 
-/// Tag namespaces for stack overflow constraints.
+/// Tag namespaces for stack overflow constraints (boundary + transition).
 const STACK_OVERFLOW_NAMES: [&str; 8] = [
     "stack.overflow.depth.first_row",
     "stack.overflow.depth.last_row",
