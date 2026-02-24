@@ -1,26 +1,13 @@
 # Changelog
 
-## 0.21.2 (2026-02-24)
-
-- Updated `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
-- Updated `sorted_array::find_half_key_value` to use little-endian ordering ([#2734](https://github.com/0xMiden/miden-vm/pull/2734)).
-- Fixed `Assembler::warnings_as_errors` not being propagated in some methods ([#2737](https://github.com/0xMiden/miden-vm/pull/2737)).
-
-## 0.21.2 (2026-02-24)
-
-#### Changes
-
-- Fixed `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).
-
-## 0.21.1 (2026-02-17)
-
-#### Changes
-
-- Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
-
-#### Enhancements
+## 0.21.1 (2026-02-24)
 
 - Added debug variable tracking for source-level variables via dedicated `DebugVarStorage` (CSR format) in `DebugInfo`, with `DebugVarInfo` describing variable name, type, location, and value location (stack, memory, local, constant, or expression). Also added `debug_types`, `debug_sources`, and `debug_functions` sections in MASP packages for storing type definitions, source file paths, and function metadata respectively, each with its own string table, to support source-level debugging (#[2471](https://github.com/0xMiden/miden-vm/pull/2471)).
+- Updated `miden-crypto` to v0.22.3 (with unified `Felt` type) ([#2649](https://github.com/0xMiden/miden-vm/pull/2649))
+- Re-exported `Continuation` from `miden-processor` to support the external debugger ([#2683](https://github.com/0xMiden/miden-vm/pull/2683)).
+- Fixed `mtree_merge` advice-store root ordering to match `hmerge` operand stack semantics ([#2729](https://github.com/0xMiden/miden-vm/pull/2729)).
+- Updated `sorted_array::find_half_key_value` to use little-endian ordering ([#2734](https://github.com/0xMiden/miden-vm/pull/2734)).
+- Fixed `Assembler::warnings_as_errors` not being propagated in some methods ([#2737](https://github.com/0xMiden/miden-vm/pull/2737)).
 
 ## 0.21.0 (2026-02-14)
 
